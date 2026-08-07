@@ -3,7 +3,7 @@
 每项只有在对应 Red/Green、相关回归、规格 Review 和质量 Review 均有新鲜证据后才能勾选。
 
 - [x] Task 1：开发与测试入口
-- [ ] Task 2：状态、C/R 与能力门禁
+- [x] Task 2：状态、C/R 与能力门禁
 - [ ] Task 3：受保护不变量与证据门禁
 - [ ] Task 4：Catalog 编译器
 - [ ] Task 5：最小充分 Skill 路由
