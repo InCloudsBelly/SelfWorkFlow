@@ -78,14 +78,15 @@ def _reject_json_constant(value: str) -> None:
 
 
 def _reject_nonfinite_json_numbers(value: Any) -> None:
-    if isinstance(value, float) and not math.isfinite(value):
-        raise _InvalidJsonNumberError
-    if isinstance(value, dict):
-        for item in value.values():
-            _reject_nonfinite_json_numbers(item)
-    elif isinstance(value, list):
-        for item in value:
-            _reject_nonfinite_json_numbers(item)
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, float) and not math.isfinite(current):
+            raise _InvalidJsonNumberError
+        if isinstance(current, dict):
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
 
 
 def _construct_unique_yaml_mapping(
@@ -168,11 +169,12 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
         UnicodeError,
         _DuplicateKeyError,
         _InvalidJsonNumberError,
+        RecursionError,
     ):
         raise ConfigError("schema-invalid") from None
     try:
         Draft202012Validator.check_schema(schema)
-    except SchemaError:
+    except (SchemaError, RecursionError):
         raise ConfigError("schema-invalid") from None
     try:
         document_text = Path(document_path).read_text(encoding="utf-8")
@@ -191,6 +193,8 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
         validation_error = next(validator.iter_errors(document), None)
     except Unresolvable:
         raise ConfigError("schema-reference-unavailable") from None
+    except RecursionError:
+        raise ConfigError("schema-invalid") from None
     if validation_error is not None:
         raise ConfigError("configuration-invalid") from None
     return _freeze(document)

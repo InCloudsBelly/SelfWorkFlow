@@ -853,6 +853,73 @@ class ConfigLoadingTests(unittest.TestCase):
                     self.assertNotIn(secret, rendered)
                     self.assertNotIn(token, rendered)
 
+    def test_deep_schema_json_recursion_is_redacted_as_schema_invalid(self):
+        import selfworkflow.config as config_module
+
+        secret = "TOP-SECRET-DEEP-SCHEMA"
+        draft = "https://json-schema.org/draft/2020-12/schema"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            document_path = temporary_root / "document.yaml"
+            schema_path = temporary_root / "schema.json"
+            document_path.write_text("{}\n", encoding="utf-8")
+
+            def assert_schema_invalid(label, schema_text):
+                with self.subTest(case=label):
+                    schema_path.write_text(schema_text, encoding="utf-8")
+                    try:
+                        config_module.load_config(document_path, schema_path)
+                    except Exception as error:
+                        caught_error = error
+                    else:
+                        self.fail("unsafe deep schema was accepted")
+
+                    self.assertIsInstance(caught_error, config_module.ConfigError)
+                    self.assertEqual(caught_error.code, "schema-invalid")
+                    self.assertEqual(str(caught_error), "schema-invalid")
+                    self.assertIsNone(caught_error.__cause__)
+                    self.assertIs(caught_error.__suppress_context__, True)
+                    rendered = "".join(traceback.format_exception(caught_error))
+                    self.assertNotIn(secret, rendered)
+
+            scan_depth = 998
+            finite_nested = "[" * scan_depth + "0" + "]" * scan_depth
+            schema_path.write_text(
+                f'{{"$schema":"{draft}","title":"{secret}",'
+                f'"x":{finite_nested}}}',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                config_module.load_config(document_path, schema_path),
+                {},
+            )
+
+            overflow_nested = "[" * scan_depth + "1e999" + "]" * scan_depth
+            assert_schema_invalid(
+                "iterative-nonfinite-scan",
+                f'{{"$schema":"{draft}","title":"{secret}",'
+                f'"x":{overflow_nested}}}',
+            )
+
+            decode_depth = 20000
+            decode_nested = "[" * decode_depth + "0" + "]" * decode_depth
+            assert_schema_invalid(
+                "json-decoder-recursion",
+                f'{{"$schema":"{draft}","title":"{secret}",'
+                f'"x":{decode_nested}}}',
+            )
+
+            check_depth = 200
+            recursively_nested_schema = (
+                '{"allOf":[' * check_depth
+                + f'{{"title":"{secret}"}}'
+                + "]}" * check_depth
+            )
+            assert_schema_invalid(
+                "schema-check-recursion",
+                recursively_nested_schema,
+            )
+
     def test_invalid_draft_schema_is_rejected_with_stable_error(self):
         import selfworkflow.config as config_module
 
