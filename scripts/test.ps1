@@ -18,8 +18,11 @@ $SourceRoot = Join-Path $RepositoryRoot "src"
 $HadPythonPath = Test-Path Env:PYTHONPATH
 $OriginalPythonPath = $env:PYTHONPATH
 $ChildExitCode = 0
+$LocationPushed = $false
 
 try {
+    Push-Location -LiteralPath $RepositoryRoot
+    $LocationPushed = $true
     $env:PYTHONPATH = $SourceRoot
     if ($Test) {
         & $PythonExecutable -m unittest $Test -v
@@ -36,6 +39,9 @@ finally {
     }
     else {
         Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+    }
+    if ($LocationPushed) {
+        Pop-Location
     }
 }
 

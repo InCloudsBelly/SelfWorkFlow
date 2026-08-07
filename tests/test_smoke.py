@@ -32,6 +32,7 @@ internal static class PythonProbe
         {
             Console.WriteLine("ARG=" + argument);
         }
+        Console.WriteLine("CWD=" + Environment.CurrentDirectory);
         Console.WriteLine("PYTHONPATH=" + (Environment.GetEnvironmentVariable("PYTHONPATH") ?? ""));
         return __EXIT_CODE__;
     }
@@ -305,6 +306,60 @@ class TestScriptTests(unittest.TestCase):
             ["-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"],
             result.stderr,
         )
+
+    def test_default_discovery_uses_repository_from_arbitrary_cwd(self):
+        parent_cwd = Path.cwd()
+        parent_pythonpath = os.environ.get("PYTHONPATH")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            repository_root = temporary_root / "repository"
+            scripts_root = repository_root / "scripts"
+            scripts_root.mkdir(parents=True)
+            shutil.copy2(
+                Path(__file__).resolve().parents[1] / "scripts" / "test.ps1",
+                scripts_root,
+            )
+            python_executable = repository_root / ".venv" / "Scripts" / "python.exe"
+            python_executable.parent.mkdir(parents=True)
+            _compile_python_probe(python_executable)
+            (repository_root / "src").mkdir()
+            (repository_root / "tests").mkdir()
+            outside_cwd = temporary_root / "outside"
+            outside_cwd.mkdir()
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = "parent-sentinel"
+
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(scripts_root / "test.ps1"),
+                ],
+                cwd=outside_cwd,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            child_cwd = next(
+                line.removeprefix("CWD=")
+                for line in result.stdout.splitlines()
+                if line.startswith("CWD=")
+            )
+            child_pythonpath = next(
+                line.removeprefix("PYTHONPATH=")
+                for line in result.stdout.splitlines()
+                if line.startswith("PYTHONPATH=")
+            )
+
+            self.assertTrue(os.path.samefile(child_cwd, repository_root))
+            self.assertTrue(os.path.samefile(child_pythonpath, repository_root / "src"))
+
+        self.assertEqual(Path.cwd(), parent_cwd)
+        self.assertEqual(os.environ.get("PYTHONPATH"), parent_pythonpath)
 
 
 class VerifyScriptTests(unittest.TestCase):
