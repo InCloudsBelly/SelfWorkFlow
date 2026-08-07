@@ -1,6 +1,7 @@
 """Load schema-validated SelfWorkFlow YAML configuration."""
 
 import json
+import math
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -26,6 +27,34 @@ def _freeze(value: Any) -> Any:
     return value
 
 
+def _require_json_data(value: Any, active_containers: set[int] | None = None) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return
+        raise ConfigError("document-data-invalid")
+    if not isinstance(value, (dict, list)):
+        raise ConfigError("document-data-invalid")
+
+    active = active_containers if active_containers is not None else set()
+    identity = id(value)
+    if identity in active:
+        raise ConfigError("document-data-invalid")
+    active.add(identity)
+    try:
+        if isinstance(value, dict):
+            if any(not isinstance(key, str) for key in value):
+                raise ConfigError("document-data-invalid")
+            for item in value.values():
+                _require_json_data(item, active)
+        else:
+            for item in value:
+                _require_json_data(item, active)
+    finally:
+        active.remove(identity)
+
+
 def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
     """Load YAML from explicit paths and validate it as Draft 2020-12 JSON Schema."""
 
@@ -49,6 +78,7 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
         document = yaml.safe_load(document_text)
     except yaml.YAMLError:
         raise ConfigError("document-invalid") from None
+    _require_json_data(document)
     validator = Draft202012Validator(schema)
     errors = sorted(
         validator.iter_errors(document),

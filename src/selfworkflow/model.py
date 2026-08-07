@@ -5,6 +5,51 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+class WorkflowInputError(ValueError):
+    """Stable domain input failure that never includes the rejected value."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+def _normalize_string_sequence(value: object, code: str) -> tuple[str, ...]:
+    if (
+        isinstance(value, (str, bytes, Mapping))
+        or not isinstance(value, Iterable)
+    ):
+        raise WorkflowInputError(code)
+    normalized = tuple(value)
+    if any(not isinstance(item, str) for item in normalized):
+        raise WorkflowInputError(code)
+    return normalized
+
+
+def _normalize_string_pairs(
+    value: object,
+    code: str,
+) -> tuple[tuple[str, str], ...]:
+    if isinstance(value, Mapping):
+        entries = value.items()
+    elif isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        raise WorkflowInputError(code)
+    else:
+        entries = value
+
+    normalized: list[tuple[str, str]] = []
+    for entry in entries:
+        if (
+            isinstance(entry, (str, bytes, Mapping))
+            or not isinstance(entry, Iterable)
+        ):
+            raise WorkflowInputError(code)
+        pair = tuple(entry)
+        if len(pair) != 2 or any(not isinstance(item, str) for item in pair):
+            raise WorkflowInputError(code)
+        normalized.append((pair[0], pair[1]))
+    return tuple(normalized)
+
+
 class Complexity(str, Enum):
     C0 = "C0"
     C1 = "C1"
@@ -17,6 +62,20 @@ class Risk(str, Enum):
     R1 = "R1"
     R2 = "R2"
     R3 = "R3"
+
+
+def _coerce_complexity(value: object) -> Complexity:
+    try:
+        return Complexity(value)
+    except (TypeError, ValueError):
+        raise WorkflowInputError("classification-input-invalid") from None
+
+
+def _coerce_risk(value: object) -> Risk:
+    try:
+        return Risk(value)
+    except (TypeError, ValueError):
+        raise WorkflowInputError("classification-input-invalid") from None
 
 
 class CapabilityState(str, Enum):
@@ -56,14 +115,32 @@ class CapabilityReport:
         states: Mapping[str, CapabilityState | str]
         | Iterable[tuple[str, CapabilityState | str]],
     ) -> None:
-        entries = states.items() if isinstance(states, Mapping) else states
+        if isinstance(states, Mapping):
+            entries = states.items()
+        elif isinstance(states, (str, bytes)) or not isinstance(states, Iterable):
+            raise WorkflowInputError("capability-report-invalid")
+        else:
+            entries = states
+
         normalized: dict[str, CapabilityState] = {}
-        for name, state in entries:
+        for entry in entries:
+            if (
+                isinstance(entry, (str, bytes, Mapping))
+                or not isinstance(entry, Iterable)
+            ):
+                raise WorkflowInputError("capability-report-invalid")
+            pair = tuple(entry)
+            if len(pair) != 2:
+                raise WorkflowInputError("capability-report-invalid")
+            name, state = pair
             if not isinstance(name, str) or not name:
-                raise ValueError("capability name must be a non-empty string")
+                raise WorkflowInputError("capability-report-invalid")
             if name in normalized:
-                raise ValueError(f"duplicate capability: {name}")
-            normalized[name] = CapabilityState(state)
+                raise WorkflowInputError("capability-report-invalid")
+            try:
+                normalized[name] = CapabilityState(state)
+            except (TypeError, ValueError):
+                raise WorkflowInputError("capability-report-invalid") from None
         object.__setattr__(self, "states", tuple(sorted(normalized.items())))
 
     def state_for(self, name: str) -> CapabilityState | None:
@@ -81,6 +158,25 @@ class PauseResult:
     status: ExecutionStatus = field(default=ExecutionStatus.PAUSED, init=False)
     code: str = field(default="required-capabilities-unavailable", init=False)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "missing_capabilities",
+            _normalize_string_sequence(
+                self.missing_capabilities,
+                "pause-result-invalid",
+            ),
+        )
+        for field_name in ("purposes", "reasons", "recommendations"):
+            object.__setattr__(
+                self,
+                field_name,
+                _normalize_string_pairs(
+                    getattr(self, field_name),
+                    "pause-result-invalid",
+                ),
+            )
+
 
 @dataclass(frozen=True)
 class TaskClassification:
@@ -91,11 +187,18 @@ class TaskClassification:
     suggest_grill_me: bool = field(init=False)
 
     def __post_init__(self) -> None:
-        complexity = Complexity(self.complexity)
-        risk = Risk(self.risk)
+        complexity = _coerce_complexity(self.complexity)
+        risk = _coerce_risk(self.risk)
         object.__setattr__(self, "complexity", complexity)
         object.__setattr__(self, "risk", risk)
-        object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(
+            self,
+            "reasons",
+            _normalize_string_sequence(
+                self.reasons,
+                "classification-input-invalid",
+            ),
+        )
         requires_full_design = (
             int(complexity.value[1]) >= 2 or int(risk.value[1]) >= 2
         )

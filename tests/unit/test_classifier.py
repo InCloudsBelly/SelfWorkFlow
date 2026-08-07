@@ -174,6 +174,93 @@ class ClassificationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             TaskClassification("C9", "R0")
 
+    def test_task_classification_copies_string_reasons_and_rejects_nested_values(self):
+        from selfworkflow.model import TaskClassification
+
+        source_reasons = ["explicit reason"]
+        classification = TaskClassification("C1", "R1", source_reasons)
+        source_reasons.append("changed")
+        self.assertEqual(classification.reasons, ("explicit reason",))
+
+        for invalid_reasons in (["valid", ["hidden-input"]], "hidden-input", [7]):
+            with self.subTest(invalid_reasons=invalid_reasons):
+                try:
+                    TaskClassification("C1", "R1", invalid_reasons)
+                except Exception as error:
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), "classification-input-invalid")
+                    self.assertNotIn("hidden-input", str(error))
+                else:
+                    self.fail("invalid classification reasons were accepted")
+
+    def test_ambiguity_rejects_non_boolean_values_with_fixed_error(self):
+        from selfworkflow.classifier import classify_task
+
+        for invalid_ambiguity in ("false", 0, None):
+            with self.subTest(invalid_ambiguity=invalid_ambiguity):
+                try:
+                    classify_task("C0", "R0", ambiguity=invalid_ambiguity)
+                except Exception as error:
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), "classification-input-invalid")
+                    self.assertNotIn("false", str(error).lower())
+                else:
+                    self.fail("non-boolean ambiguity was accepted")
+
+    def test_all_classification_enums_reject_invalid_values_without_echo(self):
+        from selfworkflow.classifier import classify_task
+        from selfworkflow.model import TaskClassification
+
+        hidden_input = "hidden-classification-input"
+        invalid_calls = (
+            lambda: classify_task(hidden_input, "R0"),
+            lambda: classify_task("C0", hidden_input),
+            lambda: classify_task(
+                "C0", "R0", global_minimum_complexity=hidden_input
+            ),
+            lambda: classify_task("C0", "R0", global_minimum_risk=hidden_input),
+            lambda: classify_task(
+                "C0", "R0", project_minimum_complexity=hidden_input
+            ),
+            lambda: classify_task("C0", "R0", project_minimum_risk=hidden_input),
+            lambda: classify_task("C0", "R0", user_complexity=hidden_input),
+            lambda: classify_task("C0", "R0", user_risk=hidden_input),
+            lambda: TaskClassification(hidden_input, "R0"),
+        )
+
+        for invalid_call in invalid_calls:
+            with self.subTest(invalid_call=invalid_call):
+                try:
+                    invalid_call()
+                except Exception as error:
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), "classification-input-invalid")
+                    self.assertNotIn(hidden_input, str(error))
+                else:
+                    self.fail("invalid classification enum was accepted")
+
+    def test_user_override_cannot_lower_result_above_global_minimum(self):
+        from selfworkflow.classifier import classify_task
+
+        classification = classify_task(
+            "C3",
+            "R3",
+            global_minimum_complexity="C1",
+            global_minimum_risk="R1",
+            user_complexity="C2",
+            user_risk="R2",
+        )
+
+        self.assertEqual(classification.complexity.value, "C3")
+        self.assertEqual(classification.risk.value, "R3")
+        self.assertEqual(
+            classification.reasons,
+            (
+                "user complexity C2 rejected downgrade from C3",
+                "user risk R2 rejected downgrade from R3",
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,77 @@ import unittest
 
 
 class CapabilityGateTests(unittest.TestCase):
+    def test_pause_result_copies_external_collections_to_nested_tuples(self):
+        from selfworkflow.model import PauseResult
+
+        missing = ["filesystem-write"]
+        purposes = {"filesystem-write": "persist workflow files"}
+        reasons = [["filesystem-write", "capability is unsupported"]]
+        recommendations = [
+            ["filesystem-write", "provide supported capability: filesystem-write"]
+        ]
+
+        pause = PauseResult(missing, purposes, reasons, recommendations)
+        missing.append("test-execution")
+        purposes["filesystem-write"] = "changed"
+        reasons[0][1] = "changed"
+        recommendations[0][1] = "changed"
+
+        self.assertEqual(pause.missing_capabilities, ("filesystem-write",))
+        self.assertEqual(
+            pause.purposes,
+            (("filesystem-write", "persist workflow files"),),
+        )
+        self.assertEqual(
+            pause.reasons,
+            (("filesystem-write", "capability is unsupported"),),
+        )
+        self.assertEqual(
+            pause.recommendations,
+            (
+                (
+                    "filesystem-write",
+                    "provide supported capability: filesystem-write",
+                ),
+            ),
+        )
+
+    def test_pause_result_rejects_invalid_nested_values_with_fixed_error(self):
+        from selfworkflow.model import PauseResult
+
+        invalid_arguments = (
+            (["filesystem-write", ["hidden-input"]], (), (), ()),
+            (
+                ["filesystem-write"],
+                [["filesystem-write", ["hidden-input"]]],
+                (),
+                (),
+            ),
+            (
+                ["filesystem-write"],
+                (),
+                [["filesystem-write"]],
+                (),
+            ),
+            (
+                ["filesystem-write"],
+                (),
+                (),
+                [["filesystem-write", 7]],
+            ),
+        )
+
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                try:
+                    PauseResult(*arguments)
+                except Exception as error:
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), "pause-result-invalid")
+                    self.assertNotIn("hidden-input", str(error))
+                else:
+                    self.fail("invalid nested pause value was accepted")
+
     def test_capability_report_accepts_only_three_states_and_is_stably_immutable(self):
         import selfworkflow.model as model
 
@@ -34,6 +105,31 @@ class CapabilityGateTests(unittest.TestCase):
             model.CapabilityReport({"filesystem-read": "degraded"})
         with self.assertRaises(FrozenInstanceError):
             report.states = ()
+
+    def test_capability_report_rejects_invalid_inputs_with_fixed_error(self):
+        from selfworkflow.model import CapabilityReport
+
+        invalid_states = (
+            {"filesystem-read": "hidden-state"},
+            {"": "supported"},
+            {7: "supported"},
+            (
+                ("filesystem-read", "supported"),
+                ("filesystem-read", "unsupported"),
+            ),
+        )
+
+        for states in invalid_states:
+            with self.subTest(states=states):
+                try:
+                    CapabilityReport(states)
+                except Exception as error:
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), "capability-report-invalid")
+                    self.assertNotIn("hidden-state", str(error))
+                    self.assertNotIn("filesystem-read", str(error))
+                else:
+                    self.fail("invalid capability report was accepted")
 
     def test_unsupported_required_capability_returns_structured_pause(self):
         import selfworkflow.classifier as classifier
@@ -175,6 +271,76 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             tuple(name for name, _ in pause.recommendations),
             pause.missing_capabilities,
+        )
+
+    def test_capability_gate_rejects_invalid_inputs_before_sorting(self):
+        from selfworkflow.classifier import check_capabilities
+        from selfworkflow.model import CapabilityReport
+
+        report = CapabilityReport({"filesystem-read": "unsupported"})
+        invalid_calls = (
+            lambda: check_capabilities(["filesystem-read", 7], report),
+            lambda: check_capabilities("filesystem-read", report),
+            lambda: check_capabilities(None, report),
+            lambda: check_capabilities(
+                ["filesystem-read"],
+                report,
+                purposes={"filesystem-read": 7},
+            ),
+            lambda: check_capabilities(
+                ["filesystem-read"],
+                report,
+                purposes={7: "hidden-purpose"},
+            ),
+            lambda: check_capabilities(
+                ["filesystem-read"],
+                report,
+                purposes=[("filesystem-read", "hidden-purpose")],
+            ),
+        )
+
+        for invalid_call in invalid_calls:
+            with self.subTest(call=invalid_call):
+                try:
+                    invalid_call()
+                except Exception as error:
+                    self.assertIsInstance(error, ValueError)
+                    self.assertEqual(str(error), "capability-gate-input-invalid")
+                    self.assertNotIn("hidden-purpose", str(error))
+                    self.assertNotIn("filesystem-read", str(error))
+                else:
+                    self.fail("invalid capability gate input was accepted")
+
+    def test_gap_recommendations_are_exact_actionable_and_capability_bound(self):
+        from selfworkflow.classifier import check_capabilities
+        from selfworkflow.model import CapabilityReport
+
+        pause = check_capabilities(
+            ("test-execution", "command-execution", "filesystem-write"),
+            CapabilityReport(
+                {
+                    "filesystem-write": "unsupported",
+                    "test-execution": "unverified",
+                }
+            ),
+        )
+
+        self.assertEqual(
+            pause.recommendations,
+            (
+                (
+                    "command-execution",
+                    "report and verify capability support: command-execution",
+                ),
+                (
+                    "filesystem-write",
+                    "provide supported capability: filesystem-write",
+                ),
+                (
+                    "test-execution",
+                    "manually verify support or provide capability: test-execution",
+                ),
+            ),
         )
 
 

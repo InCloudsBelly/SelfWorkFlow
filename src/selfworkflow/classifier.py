@@ -9,6 +9,9 @@ from selfworkflow.model import (
     PauseResult,
     Risk,
     TaskClassification,
+    WorkflowInputError,
+    _coerce_complexity,
+    _coerce_risk,
 )
 
 
@@ -39,12 +42,35 @@ def check_capabilities(
 ) -> PauseResult | None:
     """Pause unless every required capability is reported as supported."""
 
-    purpose_by_name = dict(purposes or {})
+    if (
+        isinstance(required_capabilities, (str, bytes, Mapping))
+        or not isinstance(required_capabilities, Iterable)
+        or not isinstance(report, CapabilityReport)
+    ):
+        raise WorkflowInputError("capability-gate-input-invalid")
+    required = tuple(required_capabilities)
+    if any(not isinstance(name, str) or not name for name in required):
+        raise WorkflowInputError("capability-gate-input-invalid")
+
+    if purposes is None:
+        purpose_by_name: dict[str, str] = {}
+    elif not isinstance(purposes, Mapping):
+        raise WorkflowInputError("capability-gate-input-invalid")
+    else:
+        purpose_by_name = dict(purposes)
+        if any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(purpose, str)
+            for name, purpose in purpose_by_name.items()
+        ):
+            raise WorkflowInputError("capability-gate-input-invalid")
+
     missing = tuple(
         sorted(
             {
                 name
-                for name in required_capabilities
+                for name in required
                 if report.state_for(name) is not CapabilityState.SUPPORTED
             }
         )
@@ -83,8 +109,10 @@ def classify_task(
 ) -> TaskClassification:
     """Return a classification for explicit C/R inputs without semantic inference."""
 
-    resolved_complexity = Complexity(complexity)
-    resolved_risk = Risk(risk)
+    if not isinstance(ambiguity, bool):
+        raise WorkflowInputError("classification-input-invalid")
+    resolved_complexity = _coerce_complexity(complexity)
+    resolved_risk = _coerce_risk(risk)
     reasons: list[str] = []
 
     if ambiguity:
@@ -110,11 +138,11 @@ def classify_task(
         else:
             reasons.append("ambiguity kept risk at R3 (maximum)")
 
-    minimum_complexity = Complexity(global_minimum_complexity)
-    minimum_risk = Risk(global_minimum_risk)
+    minimum_complexity = _coerce_complexity(global_minimum_complexity)
+    minimum_risk = _coerce_risk(global_minimum_risk)
 
     if project_minimum_complexity is not None:
-        project_complexity = Complexity(project_minimum_complexity)
+        project_complexity = _coerce_complexity(project_minimum_complexity)
         if project_complexity.value < minimum_complexity.value:
             reasons.append(
                 "project minimum complexity "
@@ -129,7 +157,7 @@ def classify_task(
             minimum_complexity = project_complexity
 
     if project_minimum_risk is not None:
-        project_risk = Risk(project_minimum_risk)
+        project_risk = _coerce_risk(project_minimum_risk)
         if project_risk.value < minimum_risk.value:
             reasons.append(
                 "project minimum risk "
@@ -157,7 +185,7 @@ def classify_task(
         resolved_risk = minimum_risk
 
     if user_complexity is not None:
-        requested_complexity = Complexity(user_complexity)
+        requested_complexity = _coerce_complexity(user_complexity)
         if requested_complexity.value < minimum_complexity.value:
             reasons.append(
                 "user complexity "
@@ -178,7 +206,7 @@ def classify_task(
             )
 
     if user_risk is not None:
-        requested_risk = Risk(user_risk)
+        requested_risk = _coerce_risk(user_risk)
         if requested_risk.value < minimum_risk.value:
             reasons.append(
                 f"user risk {requested_risk.value} rejected below minimum "

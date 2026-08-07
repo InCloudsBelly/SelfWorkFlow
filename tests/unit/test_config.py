@@ -7,6 +7,46 @@ import yaml
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_VENDOR_TOKENS = ("openai", "codex", "claude", "cursor", "opencode", "copilot")
+
+
+def _find_vendor_tokens(value):
+    found = set()
+
+    def visit(node):
+        if isinstance(node, dict):
+            for key, nested_value in node.items():
+                visit(key)
+                visit(nested_value)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                visit(item)
+        elif isinstance(node, str):
+            normalized = node.casefold()
+            found.update(token for token in _VENDOR_TOKENS if token in normalized)
+
+    visit(value)
+    return tuple(sorted(found))
+
+
+def _open_object_schema_paths(value):
+    open_paths = []
+
+    def visit(node, path):
+        if isinstance(node, dict):
+            if (
+                node.get("type") == "object"
+                and node.get("additionalProperties") is not False
+            ):
+                open_paths.append(path)
+            for key, nested_value in node.items():
+                visit(nested_value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for index, item in enumerate(node):
+                visit(item, f"{path}[{index}]")
+
+    visit(value, "$")
+    return tuple(open_paths)
 
 
 class ConfigLoadingTests(unittest.TestCase):
@@ -327,6 +367,195 @@ class ConfigLoadingTests(unittest.TestCase):
             first["capabilities"]["states"] = ()
         with self.assertRaises(AttributeError):
             first["phases"].append("unexpected")
+
+    def test_load_config_rejects_yaml_set_under_permissive_schema(self):
+        import selfworkflow.config as config_module
+
+        permissive_schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema"
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            document_path = temporary_root / "document.yaml"
+            schema_path = temporary_root / "schema.json"
+            document_path.write_text(
+                "values: !!set\n  ? first\n  ? second\n",
+                encoding="utf-8",
+            )
+            schema_path.write_text(json.dumps(permissive_schema), encoding="utf-8")
+
+            try:
+                config_module.load_config(document_path, schema_path)
+            except Exception as error:
+                self.assertIsInstance(error, config_module.ConfigError)
+                self.assertEqual(error.code, "document-data-invalid")
+                self.assertEqual(str(error), "document-data-invalid")
+            else:
+                self.fail("non-JSON YAML set was accepted")
+
+    def test_checked_in_yaml_keys_match_the_contract_exactly(self):
+        documents = {
+            name: yaml.safe_load(
+                (REPOSITORY_ROOT / "workflow" / f"{name}.yaml").read_text(
+                    encoding="utf-8"
+                )
+            )
+            for name in ("lifecycle", "policies", "evidence")
+        }
+        lifecycle = documents["lifecycle"]
+        policies = documents["policies"]
+        evidence = documents["evidence"]
+
+        self.assertEqual(
+            set(lifecycle),
+            {
+                "schemaVersion",
+                "phases",
+                "executionStatuses",
+                "verificationStatuses",
+                "capabilities",
+                "derivedVerification",
+            },
+        )
+        self.assertEqual(set(lifecycle["capabilities"]), {"states", "standardNames"})
+        self.assertEqual(set(lifecycle["derivedVerification"]), {"unverifiedFrom"})
+
+        self.assertEqual(
+            set(policies),
+            {
+                "schemaVersion",
+                "classification",
+                "globalMinimum",
+                "thresholds",
+                "upgrades",
+                "capabilityGate",
+            },
+        )
+        self.assertEqual(set(policies["classification"]), {"complexity", "risk"})
+        self.assertEqual(
+            set(policies["classification"]["complexity"]),
+            {"C0", "C1", "C2", "C3"},
+        )
+        self.assertEqual(
+            set(policies["classification"]["risk"]),
+            {"R0", "R1", "R2", "R3"},
+        )
+        self.assertEqual(set(policies["globalMinimum"]), {"complexity", "risk"})
+        self.assertEqual(
+            set(policies["thresholds"]),
+            {"requiresFullDesign", "suggestGrillMe"},
+        )
+        self.assertEqual(
+            set(policies["thresholds"]["requiresFullDesign"]),
+            {"anyDimensionAtLeast"},
+        )
+        self.assertEqual(
+            set(policies["thresholds"]["suggestGrillMe"]),
+            {"anyDimensionAtLeast", "combinations"},
+        )
+        self.assertEqual(
+            set(policies["thresholds"]["suggestGrillMe"]["combinations"][0]),
+            {"complexity", "risk"},
+        )
+        self.assertEqual(
+            set(policies["upgrades"]),
+            {"ambiguity", "projectMinimum", "user", "recordRejectedDowngrade"},
+        )
+        self.assertEqual(
+            set(policies["upgrades"]["ambiguity"]),
+            {"increment", "maximum"},
+        )
+        self.assertEqual(
+            set(policies["upgrades"]["projectMinimum"]),
+            {"mayIncreaseGlobalMinimum", "mayDecreaseGlobalMinimum"},
+        )
+        self.assertEqual(
+            set(policies["upgrades"]["user"]),
+            {"mayIncrease", "mayDecreaseBelowMinimum"},
+        )
+        self.assertEqual(
+            set(policies["capabilityGate"]),
+            {
+                "acceptedStates",
+                "pauseStates",
+                "missingReportHandling",
+                "ordering",
+                "pause",
+            },
+        )
+        self.assertEqual(set(policies["capabilityGate"]["pause"]), {"status", "code"})
+
+        self.assertEqual(
+            set(evidence),
+            {"schemaVersion", "requiredFields", "verification"},
+        )
+        self.assertEqual(
+            set(evidence["verification"]),
+            {"unverifiedFrom", "completionEligible"},
+        )
+
+    def test_workflow_documents_and_schemas_are_vendor_neutral_recursively(self):
+        scanner = globals().get("_find_vendor_tokens")
+        self.assertTrue(callable(scanner), "vendor token scanner is missing")
+
+        loaded_sources = []
+        for name in ("lifecycle", "policies", "evidence"):
+            loaded_sources.append(
+                yaml.safe_load(
+                    (REPOSITORY_ROOT / "workflow" / f"{name}.yaml").read_text(
+                        encoding="utf-8"
+                    )
+                )
+            )
+            loaded_sources.append(
+                json.loads(
+                    (REPOSITORY_ROOT / "schemas" / f"{name}.schema.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+            )
+
+        for source in loaded_sources:
+            self.assertEqual(scanner(source), ())
+
+        detected = scanner(
+            {
+                "OpenAIAdapter": {"provider": "CoPilot"},
+                "runtime": ["Claude", "Cursor", "OpenCode", "Codex"],
+            }
+        )
+        self.assertEqual(
+            detected,
+            ("claude", "codex", "copilot", "cursor", "openai", "opencode"),
+        )
+
+    def test_every_object_schema_node_rejects_additional_properties(self):
+        checker = globals().get("_open_object_schema_paths")
+        self.assertTrue(callable(checker), "object schema checker is missing")
+
+        for name in ("lifecycle", "policies", "evidence"):
+            schema = json.loads(
+                (REPOSITORY_ROOT / "schemas" / f"{name}.schema.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(checker(schema), ())
+
+        loosened_fixture = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "nested": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "properties": {},
+                }
+            },
+        }
+        self.assertEqual(
+            checker(loosened_fixture),
+            ("$.properties.nested",),
+        )
 
 
 if __name__ == "__main__":
