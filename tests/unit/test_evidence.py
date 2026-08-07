@@ -49,6 +49,64 @@ def _put_artifact(store, artifact):
     return artifact_hash
 
 
+def _trusted_artifact_store(records):
+    from selfworkflow.evidence import ArtifactCollector
+    from selfworkflow.model import CapabilityState
+
+    collector = ArtifactCollector()
+    for artifact in records.values():
+        attributes = artifact["attributes"]
+        if artifact["kind"] == "capability":
+            collector.record_capability(
+                name=attributes["name"],
+                state=CapabilityState(attributes["state"]),
+                policy_hash=attributes["policyHash"],
+                actor_id=artifact["actorId"],
+                context_id=artifact["contextId"],
+                recorded_at=artifact["recordedAt"],
+            )
+        elif artifact["kind"] == "review":
+            collector.record_attestation(
+                kind="review",
+                subject_id=artifact["subjectId"],
+                subject_hash=artifact["subjectHash"],
+                actor_id=artifact["actorId"],
+                context_id=artifact["contextId"],
+                recorded_at=artifact["recordedAt"],
+                provider=attributes["provider"],
+                receipt_id=attributes["receiptId"],
+                input_hash=attributes["inputHash"],
+                output_hash=attributes["outputHash"],
+                decision=attributes["decision"],
+                level=attributes["level"],
+                implementation_actor=attributes["implementationActor"],
+                implementation_context=attributes["implementationContext"],
+            )
+        elif artifact["kind"] == "verification":
+            collector.record_execution(
+                kind="verification",
+                status=artifact["status"],
+                subject_id=artifact["subjectId"],
+                subject_hash=artifact["subjectHash"],
+                actor_id=artifact["actorId"],
+                context_id=artifact["contextId"],
+                related_ids=tuple(artifact["relatedIds"]),
+                recorded_at=artifact["recordedAt"],
+                provider=attributes["provider"],
+                receipt_id=attributes["receiptId"],
+                input_hash=attributes["inputHash"],
+                output_hash=attributes["outputHash"],
+                check_type=attributes["checkType"],
+                command_type=attributes["commandType"],
+                exit_code=attributes["exitCode"],
+                verification_id=attributes["verificationId"],
+                valid_for_seconds=attributes["validForSeconds"],
+            )
+        else:
+            raise AssertionError("unexpected test artifact kind")
+    return collector.seal()
+
+
 def _replace_artifact(case, record, mutate):
     old_hash = record["artifactHash"]
     artifact = copy.deepcopy(case["artifacts"].pop(old_hash))
@@ -116,6 +174,28 @@ def _case(*, policy=None, review_level=None, stale=False):
         )
     evidence["capabilities"] = capabilities
 
+    criteria = [
+        {
+            "id": criterion_id,
+            "description": "Task tests pass.",
+            "applicability": "applicable",
+            "reason": "",
+            "verificationIds": list(governing_policy.required_verification_ids),
+        }
+        for criterion_id in governing_policy.required_criterion_ids
+    ]
+    evidence["acceptanceCriteria"] = criteria
+    completion_subject = canonical_content_hash(
+        {
+            "policyHash": governing_policy.policy_hash,
+            "baseManifestHash": evidence["changes"]["baseManifestHash"],
+            "finalManifestHash": evidence["changes"]["finalManifestHash"],
+            "derivedChanges": evidence["changes"]["items"],
+            "acceptanceGraph": criteria,
+            "resultContentHash": result_hash,
+        }
+    )
+
     level = review_level
     if level is None:
         highest = max(
@@ -127,12 +207,19 @@ def _case(*, policy=None, review_level=None, stale=False):
         "kind": "review",
         "status": "passed",
         "subjectId": "completion-review",
-        "subjectHash": result_hash,
+        "subjectHash": completion_subject,
         "actorId": "reviewer",
         "contextId": "review-task-3",
         "relatedIds": [],
         "recordedAt": "2026-08-08T08:00:00Z",
         "attributes": {
+            "provider": "test-review-provider",
+            "receiptId": "review-receipt-1",
+            "inputHash": completion_subject,
+            "outputHash": canonical_content_hash(
+                {"decision": "passed", "level": level}
+            ),
+            "decision": "passed",
             "level": level,
             "implementationActor": governing_policy.implementation_actor,
             "implementationContext": governing_policy.implementation_context,
@@ -146,20 +233,6 @@ def _case(*, policy=None, review_level=None, stale=False):
         "reason": "",
     }
 
-    criteria = []
-    for criterion_id in governing_policy.required_criterion_ids:
-        criteria.append(
-            {
-                "id": criterion_id,
-                "description": "Task tests pass.",
-                "applicability": "applicable",
-                "reason": "",
-                "verificationIds": list(
-                    governing_policy.required_verification_ids
-                ),
-            }
-        )
-    evidence["acceptanceCriteria"] = criteria
     verifications = []
     recorded_at = "2026-08-08T06:00:00Z" if stale else "2026-08-08T08:00:00Z"
     for verification_id in governing_policy.required_verification_ids:
@@ -167,12 +240,21 @@ def _case(*, policy=None, review_level=None, stale=False):
             "kind": "verification",
             "status": "passed",
             "subjectId": verification_id,
-            "subjectHash": result_hash,
+            "subjectHash": completion_subject,
             "actorId": "test-runner",
             "contextId": "test-task-3",
             "relatedIds": list(governing_policy.required_criterion_ids),
             "recordedAt": recorded_at,
             "attributes": {
+                "provider": "test-execution-provider",
+                "receiptId": f"execution-{verification_id}",
+                "inputHash": completion_subject,
+                "outputHash": canonical_content_hash(
+                    {"status": "passed", "verificationId": verification_id}
+                ),
+                "checkType": "unit-test",
+                "commandType": "python-module",
+                "exitCode": 0,
                 "verificationId": verification_id,
                 "validForSeconds": 3600,
             },
@@ -198,11 +280,39 @@ def _case(*, policy=None, review_level=None, stale=False):
     }
 
 
+def _rebind_completion_receipts(case):
+    from selfworkflow.evidence import canonical_content_hash
+
+    evidence = case["evidence"]
+    subject_hash = canonical_content_hash(
+        {
+            "policyHash": evidence["classification"]["policyHash"],
+            "baseManifestHash": evidence["changes"]["baseManifestHash"],
+            "finalManifestHash": evidence["changes"]["finalManifestHash"],
+            "derivedChanges": evidence["changes"]["items"],
+            "acceptanceGraph": evidence["acceptanceCriteria"],
+            "resultContentHash": evidence["changes"]["resultContentHash"],
+        }
+    )
+    records = (evidence["review"], *evidence["verification"])
+    for record in records:
+        if record["artifactHash"] is None:
+            continue
+        _replace_artifact(
+            case,
+            record,
+            lambda artifact: (
+                artifact.update({"subjectHash": subject_hash}),
+                artifact["attributes"].update({"inputHash": subject_hash}),
+            ),
+        )
+
+
 def _evaluate(case, **overrides):
     from selfworkflow.evidence import evaluate_completion
 
     arguments = {
-        "artifact_store": case["artifacts"],
+        "artifact_store": _trusted_artifact_store(case["artifacts"]),
         "base_manifest": case["base"],
         "final_manifest": case["final"],
         "now": NOW,
@@ -279,6 +389,74 @@ class CompletionPolicyTests(unittest.TestCase):
 
 
 class CompletionGateTests(unittest.TestCase):
+    def test_l1_fallback_requires_trusted_unavailable_prompted_authorization(self):
+        from selfworkflow.evidence import (
+            ReviewFallbackAuthorization,
+            WorkflowEvidenceError,
+        )
+        from selfworkflow.model import CapabilityState, Complexity, Risk
+
+        authorization = ReviewFallbackAuthorization(
+            capability_name="independent-review-context",
+            capability_state=CapabilityState.UNSUPPORTED,
+            user_prompted=True,
+            user_authorized=True,
+            authorization_id="user-authorization-1",
+        )
+        policy = _policy(
+            complexity=Complexity.C2,
+            risk=Risk.R2,
+            review_fallback=authorization,
+        )
+        self.assertEqual(
+            _evaluate(_case(policy=policy, review_level="L1")).code,
+            "completion-eligible",
+        )
+        self.assertEqual(
+            _evaluate(_case(policy=policy, review_level="L0")).code,
+            "review-level-insufficient",
+        )
+        level_three = _policy(
+            complexity=Complexity.C3,
+            risk=Risk.R3,
+            review_fallback=authorization,
+        )
+        self.assertEqual(
+            _evaluate(_case(policy=level_three, review_level="L1")).code,
+            "review-level-insufficient",
+        )
+        self.assertEqual(
+            _evaluate(
+                _case(
+                    policy=_policy(complexity=Complexity.C2, risk=Risk.R2),
+                    review_level="L1",
+                )
+            ).code,
+            "review-level-insufficient",
+        )
+
+        invalid = (
+            {"capability_state": CapabilityState.SUPPORTED},
+            {"capability_state": "unsupported"},
+            {"user_prompted": 1},
+            {"user_authorized": False},
+        )
+        values = {
+            "capability_name": "independent-review-context",
+            "capability_state": CapabilityState.UNSUPPORTED,
+            "user_prompted": True,
+            "user_authorized": True,
+            "authorization_id": "user-authorization-1",
+        }
+        for override in invalid:
+            with self.subTest(override=override):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    ReviewFallbackAuthorization(**(values | override))
+                self.assertEqual(
+                    caught.exception.code,
+                    "review-fallback-authorization-invalid",
+                )
+
     def test_fresh_fully_bound_modification_is_eligible(self):
         decision = _evaluate(_case())
         self.assertTrue(decision.eligible)
@@ -369,6 +547,123 @@ class CompletionGateTests(unittest.TestCase):
 
 
 class ArtifactAndManifestTests(unittest.TestCase):
+    def test_collector_receipts_require_exact_typed_audit_fields(self):
+        from selfworkflow.evidence import (
+            ArtifactCollector,
+            WorkflowEvidenceError,
+            canonical_content_hash,
+        )
+
+        class Text(str):
+            pass
+
+        subject = canonical_content_hash({"subject": "completion"})
+        common = {
+            "subject_id": "completion-review",
+            "subject_hash": subject,
+            "actor_id": "reviewer",
+            "context_id": "review-context",
+            "recorded_at": "2026-08-08T08:00:00Z",
+            "provider": "review-provider",
+            "receipt_id": "receipt-1",
+            "input_hash": subject,
+            "output_hash": canonical_content_hash({"decision": "passed"}),
+        }
+        attacks = (
+            lambda collector: collector.record_attestation(
+                kind="review",
+                decision=Text("passed"),
+                level="L2",
+                implementation_actor="implementer",
+                implementation_context="implementation-context",
+                **common,
+            ),
+            lambda collector: collector.record_execution(
+                kind="verification",
+                status="passed",
+                subject_id="unit-tests",
+                subject_hash=subject,
+                actor_id="runner",
+                context_id="verification-context",
+                related_ids=("criterion-tests",),
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="execution-provider",
+                receipt_id="receipt-2",
+                input_hash=subject,
+                output_hash=canonical_content_hash({"status": "passed"}),
+                check_type=Text("unit-test"),
+                command_type="python-module",
+                exit_code=0,
+                verification_id="unit-tests",
+                valid_for_seconds=3600,
+            ),
+            lambda collector: collector.record_attestation(
+                kind="owner-confirmation",
+                subject_id="protected-rules-change",
+                subject_hash=subject,
+                actor_id="owner",
+                context_id="owner-context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="owner-provider",
+                receipt_id="receipt-3",
+                input_hash=subject,
+                output_hash=canonical_content_hash({"decision": "authorized"}),
+                decision="authorized",
+                scope=Text("replace-protected-rules"),
+            ),
+        )
+        for attack in attacks:
+            with self.subTest(attack=attack):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    attack(ArtifactCollector())
+                self.assertEqual(caught.exception.code, "artifact-collector-invalid")
+
+    def test_completion_subject_blocks_manifest_and_acceptance_graph_replay(self):
+        from selfworkflow.evidence import canonical_content_hash
+
+        manifest_replay = _case()
+        manifest_replay["final"]["src/example.py"] = "replayed content\n"
+        final_hash = _file_hash("replayed content\n")
+        manifest_replay["evidence"]["changes"]["finalManifestHash"] = (
+            canonical_content_hash({"src/example.py": final_hash})
+        )
+        manifest_replay["evidence"]["changes"]["items"][0]["contentHash"] = final_hash
+
+        graph_replay = _case()
+        graph_replay["evidence"]["acceptanceCriteria"][0]["description"] = (
+            "A materially different acceptance requirement."
+        )
+
+        for label, case in (
+            ("manifest", manifest_replay),
+            ("acceptance-graph", graph_replay),
+        ):
+            with self.subTest(label=label):
+                decision = _evaluate(case)
+                self.assertFalse(decision.eligible)
+                self.assertEqual(decision.code, "artifact-binding-mismatch")
+
+    def test_public_gate_requires_collector_sealed_trusted_store(self):
+        from selfworkflow.evidence import TrustedArtifactStore, WorkflowEvidenceError
+
+        case = _case()
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            _evaluate(case, artifact_store=case["artifacts"])
+        self.assertEqual(caught.exception.code, "trusted-artifact-store-required")
+
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            TrustedArtifactStore()
+        self.assertEqual(
+            caught.exception.code,
+            "trusted-artifact-store-construction-denied",
+        )
+
+        manually_allocated = object.__new__(TrustedArtifactStore)
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            _evaluate(case, artifact_store=manually_allocated)
+        self.assertEqual(caught.exception.code, "trusted-artifact-store-required")
+        self.assertTrue(_evaluate(case).eligible)
+
     def test_every_reference_resolves_and_recomputes_without_zero_special_case(self):
         unresolved = _case()
         old = unresolved["evidence"]["capabilities"][0]["artifactHash"]
@@ -381,7 +676,7 @@ class ArtifactAndManifestTests(unittest.TestCase):
         mismatch = _case()
         reference = mismatch["evidence"]["review"]["artifactHash"]
         mismatch["artifacts"][reference]["actorId"] = "different-reviewer"
-        self.assertEqual(_evaluate(mismatch).code, "artifact-hash-mismatch")
+        self.assertEqual(_evaluate(mismatch).code, "artifact-unresolved")
 
     def test_manifest_derivation_rejects_nonexistent_or_fake_changes(self):
         for mutation in (
@@ -432,6 +727,7 @@ class ArtifactAndManifestTests(unittest.TestCase):
                 ],
             }
         )
+        _rebind_completion_receipts(case)
         self.assertTrue(_evaluate(case).eligible)
 
     def test_criterion_verification_links_are_bidirectional(self):
@@ -476,13 +772,15 @@ class ArtifactAndManifestTests(unittest.TestCase):
         self.assertTrue(_evaluate(optional).eligible)
 
     def test_duplicate_artifact_identities_and_hostile_stores_are_redacted(self):
+        from selfworkflow.evidence import WorkflowEvidenceError
+
         duplicate = _case()
         artifact = copy.deepcopy(next(iter(duplicate["artifacts"].values())))
         artifact["recordedAt"] = "2026-08-08T08:00:01Z"
         _put_artifact(duplicate["artifacts"], artifact)
-        self.assertEqual(_evaluate(duplicate).code, "artifact-identity-duplicate")
-
-        from selfworkflow.evidence import WorkflowEvidenceError
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            _evaluate(duplicate)
+        self.assertEqual(caught.exception.code, "artifact-collector-invalid")
 
         secret = "HOSTILE-STORE-SECRET"
 
@@ -493,7 +791,7 @@ class ArtifactAndManifestTests(unittest.TestCase):
         case = _case()
         with self.assertRaises(WorkflowEvidenceError) as caught:
             _evaluate(case, artifact_store=HostileStore(case["artifacts"]))
-        self.assertEqual(caught.exception.code, "artifact-store-invalid")
+        self.assertEqual(caught.exception.code, "trusted-artifact-store-required")
         self.assertIsNone(caught.exception.__cause__)
         self.assertTrue(caught.exception.__suppress_context__)
         self.assertNotIn(secret, "".join(traceback.format_exception(caught.exception)))
@@ -510,11 +808,13 @@ class VerificationTests(unittest.TestCase):
             case = _case()
             record = case["evidence"]["verification"][0]
             record.update({"status": status, "reason": "Verification did not pass."})
-            _replace_artifact(
-                case,
-                record,
-                lambda artifact, value=status: artifact.update({"status": value}),
-            )
+            def set_status(artifact, value=status):
+                artifact["status"] = value
+                artifact["attributes"]["exitCode"] = (
+                    1 if value == "failed" else None
+                )
+
+            _replace_artifact(case, record, set_status)
             with self.subTest(status=status):
                 self.assertEqual(_evaluate(case).code, code)
 
@@ -533,7 +833,12 @@ class VerificationTests(unittest.TestCase):
         _replace_artifact(
             verification_mismatch,
             verification_mismatch["evidence"]["verification"][0],
-            lambda artifact: artifact.update({"subjectHash": "sha256:" + "0" * 64}),
+            lambda artifact: (
+                artifact.update({"subjectHash": "sha256:" + "0" * 64}),
+                artifact["attributes"].update(
+                    {"inputHash": "sha256:" + "0" * 64}
+                ),
+            ),
         )
         self.assertEqual(
             _evaluate(verification_mismatch).code,
@@ -628,8 +933,12 @@ class VerificationTests(unittest.TestCase):
         _replace_artifact(
             case,
             verification,
-            lambda artifact: artifact.update({"status": "not-applicable"}),
+            lambda artifact: (
+                artifact.update({"status": "not-applicable"}),
+                artifact["attributes"].update({"exitCode": None}),
+            ),
         )
+        _rebind_completion_receipts(case)
         self.assertTrue(_evaluate(case).eligible)
 
         case["final"]["added.txt"] = "change"
@@ -637,6 +946,31 @@ class VerificationTests(unittest.TestCase):
 
 
 class InputHardeningTests(unittest.TestCase):
+    def test_output_types_and_unknown_error_codes_fail_closed(self):
+        from selfworkflow.evidence import (
+            CompletionDecision,
+            MergedRule,
+            MergedRules,
+            WorkflowEvidenceError,
+        )
+
+        constructors = (
+            lambda: CompletionDecision(False, "x", "x", "x", "x"),
+            lambda: MergedRule("x", "x", "x", "x", "x", "x", False),
+            lambda: MergedRules((), "1.0.0"),
+        )
+        for construct in constructors:
+            with self.subTest(construct=construct):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    construct()
+                self.assertEqual(caught.exception.code, "output-construction-denied")
+
+        secret = "UNKNOWN-SECRET-CODE"
+        error = WorkflowEvidenceError(secret)
+        self.assertEqual(error.code, "workflow-error-code-invalid")
+        self.assertEqual(error.message, "The workflow error code is invalid.")
+        self.assertNotIn(secret, str(error))
+
     def test_duplicate_json_keys_nan_and_hostile_inputs_are_fixed_and_redacted(self):
         from selfworkflow.evidence import (
             WorkflowEvidenceError,

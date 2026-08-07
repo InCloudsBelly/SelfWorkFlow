@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
 
-from .model import Complexity, Risk
+from .model import CapabilityState, Complexity, Risk
 
 
 _MAPPING_PROXY_TYPE = type(MappingProxyType({}))
@@ -18,6 +18,9 @@ _ERROR_MESSAGES = MappingProxyType(
     {
         "protected-rules-invalid": "The protected-rule document is invalid.",
         "protected-rule-layer-invalid": "A lower-priority rule layer is invalid.",
+        "protected-rule-layer-conflict": (
+            "Lower-priority rule layers contain a conflicting rule identity."
+        ),
         "protected-rule-override-denied": (
             "A lower-priority rule cannot replace a protected rule."
         ),
@@ -31,6 +34,18 @@ _ERROR_MESSAGES = MappingProxyType(
         "completion-policy-invalid": "The completion policy is invalid.",
         "artifact-store-invalid": "The evidence artifact store is invalid.",
         "manifest-invalid": "A completion file manifest is invalid.",
+        "workflow-error-code-invalid": "The workflow error code is invalid.",
+        "output-construction-denied": "Workflow output types use private factories.",
+        "review-fallback-authorization-invalid": (
+            "The trusted review fallback authorization is invalid."
+        ),
+        "trusted-artifact-store-required": (
+            "A collector-sealed trusted artifact store is required."
+        ),
+        "trusted-artifact-store-construction-denied": (
+            "Trusted artifact stores are created only by the collector."
+        ),
+        "artifact-collector-invalid": "The artifact collector input is invalid.",
     }
 )
 _DECISION_MESSAGES = MappingProxyType(
@@ -116,12 +131,16 @@ _VERIFICATION_FAILURE_CODES = MappingProxyType(
         "partial": "verification-partial",
     }
 )
+_OUTPUT_TOKEN = object()
+_TRUSTED_STORE_TOKEN = object()
 
 
 class WorkflowEvidenceError(ValueError):
     """Stable workflow failure that does not include rejected input values."""
 
     def __init__(self, code: str):
+        if type(code) is not str or code not in _ERROR_MESSAGES:
+            code = "workflow-error-code-invalid"
         self.code = code
         self.message = _ERROR_MESSAGES[code]
         super().__init__(self.message)
@@ -129,6 +148,33 @@ class WorkflowEvidenceError(ValueError):
 
 class _DuplicateJsonKeyError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ReviewFallbackAuthorization:
+    """Trusted explicit authorization for the L2-unavailable L1 path."""
+
+    capability_name: str
+    capability_state: CapabilityState
+    user_prompted: bool
+    user_authorized: bool
+    authorization_id: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.capability_name) is not str
+            or self.capability_name != "independent-review-context"
+            or type(self.capability_state) is not CapabilityState
+            or self.capability_state
+            not in {CapabilityState.UNSUPPORTED, CapabilityState.UNVERIFIED}
+            or type(self.user_prompted) is not bool
+            or self.user_prompted is not True
+            or type(self.user_authorized) is not bool
+            or self.user_authorized is not True
+            or type(self.authorization_id) is not str
+            or not self.authorization_id
+        ):
+            _fail("review-fallback-authorization-invalid")
 
 
 @dataclass(frozen=True, init=False)
@@ -143,6 +189,7 @@ class CompletionPolicy:
     required_verification_ids: tuple[str, ...]
     implementation_actor: str
     implementation_context: str
+    review_fallback: ReviewFallbackAuthorization | None
 
     def __init__(
         self,
@@ -155,6 +202,7 @@ class CompletionPolicy:
         required_verification_ids: tuple[str, ...],
         implementation_actor: str,
         implementation_context: str,
+        review_fallback: ReviewFallbackAuthorization | None = None,
     ) -> None:
         name_groups = (
             required_capabilities,
@@ -178,6 +226,10 @@ class CompletionPolicy:
             or type(implementation_context) is not str
             or not implementation_context
             or (
+                review_fallback is not None
+                and type(review_fallback) is not ReviewFallbackAuthorization
+            )
+            or (
                 task_kind == "modification"
                 and (complexity is Complexity.C0 or risk is Risk.R0)
             )
@@ -191,6 +243,7 @@ class CompletionPolicy:
         object.__setattr__(self, "required_verification_ids", required_verification_ids)
         object.__setattr__(self, "implementation_actor", implementation_actor)
         object.__setattr__(self, "implementation_context", implementation_context)
+        object.__setattr__(self, "review_fallback", review_fallback)
 
     @property
     def policy_hash(self) -> str:
@@ -204,6 +257,17 @@ class CompletionPolicy:
                 "requiredVerificationIds": self.required_verification_ids,
                 "implementationActor": self.implementation_actor,
                 "implementationContext": self.implementation_context,
+                "reviewFallback": (
+                    None
+                    if self.review_fallback is None
+                    else {
+                        "capabilityName": self.review_fallback.capability_name,
+                        "capabilityState": self.review_fallback.capability_state.value,
+                        "userPrompted": self.review_fallback.user_prompted,
+                        "userAuthorized": self.review_fallback.user_authorized,
+                        "authorizationId": self.review_fallback.authorization_id,
+                    }
+                ),
             }
         )
 
@@ -242,7 +306,15 @@ class OwnerChangeRequest:
             object.__setattr__(self, field, values[field])
 
 
-@dataclass(frozen=True)
+def _initialize_output(instance: object, values: dict[str, object], token: object) -> None:
+    fields = tuple(instance.__dataclass_fields__)
+    if token is not _OUTPUT_TOKEN or set(values) != set(fields):
+        _fail("output-construction-denied")
+    for field in fields:
+        object.__setattr__(instance, field, values[field])
+
+
+@dataclass(frozen=True, init=False)
 class CompletionDecision:
     """A frozen completion-gate decision with no rejected input values."""
 
@@ -252,8 +324,13 @@ class CompletionDecision:
     content_hash: str
     observed_at: str
 
+    def __init__(self, *args: object, _token: object = None, **values: object):
+        if args:
+            _fail("output-construction-denied")
+        _initialize_output(self, values, _token)
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, init=False)
 class MergedRule:
     """A deeply immutable rule in deterministic merge order."""
 
@@ -261,17 +338,28 @@ class MergedRule:
     strength: str
     operation: str
     statement: str
+    constraint: tuple[str, str, str, str]
     source_kind: str
     source_name: str
     protected: bool
 
+    def __init__(self, *args: object, _token: object = None, **values: object):
+        if args:
+            _fail("output-construction-denied")
+        _initialize_output(self, values, _token)
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, init=False)
 class MergedRules:
     """A frozen, deterministic merged rule collection."""
 
     rules: tuple[MergedRule, ...]
     policy_version: str
+
+    def __init__(self, *args: object, _token: object = None, **values: object):
+        if args:
+            _fail("output-construction-denied")
+        _initialize_output(self, values, _token)
 
     def rule_for(self, rule_id: str) -> MergedRule | None:
         if type(rule_id) is not str or not rule_id:
@@ -457,6 +545,7 @@ def _completion_decision(
     observed_at: datetime,
 ) -> CompletionDecision:
     return CompletionDecision(
+        _token=_OUTPUT_TOKEN,
         eligible=eligible,
         code=code,
         message=_DECISION_MESSAGES[code],
@@ -465,14 +554,214 @@ def _completion_decision(
     )
 
 
+@dataclass(frozen=True, init=False)
+class TrustedArtifactStore:
+    """Immutable resolver output produced only by ArtifactCollector.seal()."""
+
+    _records: MappingProxyType
+    _seal: object
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        _fail("trusted-artifact-store-construction-denied")
+
+
+def _new_trusted_store(records: dict[str, object]) -> TrustedArtifactStore:
+    store = object.__new__(TrustedArtifactStore)
+    object.__setattr__(store, "_records", MappingProxyType(dict(records)))
+    object.__setattr__(store, "_seal", _TRUSTED_STORE_TOKEN)
+    return store
+
+
+class ArtifactCollector:
+    """Explicit in-process trust boundary for externally verified receipts."""
+
+    __slots__ = ("_records", "_identities", "_sealed")
+
+    def __init__(self) -> None:
+        self._records: dict[str, object] = {}
+        self._identities: set[tuple[str, str]] = set()
+        self._sealed = False
+
+    def _record(self, artifact: dict[str, object]) -> str:
+        if self._sealed:
+            _fail("artifact-collector-invalid")
+        try:
+            parsed = _parse_artifact(artifact, "artifact-collector-invalid")
+            artifact_hash = canonical_content_hash(artifact)
+            frozen = _freeze_json(artifact)
+        except WorkflowEvidenceError:
+            _fail("artifact-collector-invalid")
+        identity = (parsed["kind"], parsed["subjectId"])
+        if identity in self._identities:
+            _fail("artifact-collector-invalid")
+        self._identities.add(identity)
+        self._records[artifact_hash] = frozen
+        return artifact_hash
+
+    def record_capability(
+        self,
+        *,
+        name: str,
+        state: CapabilityState,
+        policy_hash: str,
+        actor_id: str,
+        context_id: str,
+        recorded_at: str,
+    ) -> str:
+        if type(state) is not CapabilityState:
+            _fail("artifact-collector-invalid")
+        return self._record(
+            {
+                "kind": "capability",
+                "status": "passed",
+                "subjectId": name,
+                "subjectHash": policy_hash,
+                "actorId": actor_id,
+                "contextId": context_id,
+                "relatedIds": [],
+                "recordedAt": recorded_at,
+                "attributes": {
+                    "name": name,
+                    "state": state.value,
+                    "policyHash": policy_hash,
+                },
+            }
+        )
+
+    def record_attestation(
+        self,
+        *,
+        kind: str,
+        subject_id: str,
+        subject_hash: str,
+        actor_id: str,
+        context_id: str,
+        recorded_at: str,
+        provider: str,
+        receipt_id: str,
+        input_hash: str,
+        output_hash: str,
+        decision: str,
+        level: str = "",
+        implementation_actor: str = "",
+        implementation_context: str = "",
+        scope: str = "",
+    ) -> str:
+        common = {
+            "provider": provider,
+            "receiptId": receipt_id,
+            "inputHash": input_hash,
+            "outputHash": output_hash,
+            "decision": decision,
+        }
+        if kind in {"review", "owner-review"}:
+            attributes = common | {
+                "level": level,
+                "implementationActor": implementation_actor,
+                "implementationContext": implementation_context,
+            }
+        elif kind == "owner-confirmation":
+            attributes = common | {"scope": scope}
+        else:
+            _fail("artifact-collector-invalid")
+        return self._record(
+            {
+                "kind": kind,
+                "status": "passed",
+                "subjectId": subject_id,
+                "subjectHash": subject_hash,
+                "actorId": actor_id,
+                "contextId": context_id,
+                "relatedIds": [],
+                "recordedAt": recorded_at,
+                "attributes": attributes,
+            }
+        )
+
+    def record_execution(
+        self,
+        *,
+        kind: str,
+        status: str,
+        subject_id: str,
+        subject_hash: str,
+        actor_id: str,
+        context_id: str,
+        related_ids: tuple[str, ...],
+        recorded_at: str,
+        provider: str,
+        receipt_id: str,
+        input_hash: str,
+        output_hash: str,
+        check_type: str,
+        command_type: str,
+        exit_code: int | None,
+        verification_id: str = "",
+        valid_for_seconds: int = 0,
+        suite: str = "",
+    ) -> str:
+        common = {
+            "provider": provider,
+            "receiptId": receipt_id,
+            "inputHash": input_hash,
+            "outputHash": output_hash,
+            "checkType": check_type,
+            "commandType": command_type,
+            "exitCode": exit_code,
+        }
+        if kind == "verification":
+            attributes = common | {
+                "verificationId": verification_id,
+                "validForSeconds": valid_for_seconds,
+            }
+        elif kind == "behavioral-test":
+            attributes = common | {"suite": suite}
+        else:
+            _fail("artifact-collector-invalid")
+        return self._record(
+            {
+                "kind": kind,
+                "status": status,
+                "subjectId": subject_id,
+                "subjectHash": subject_hash,
+                "actorId": actor_id,
+                "contextId": context_id,
+                "relatedIds": list(related_ids),
+                "recordedAt": recorded_at,
+                "attributes": attributes,
+            }
+        )
+
+    def seal(self) -> TrustedArtifactStore:
+        if self._sealed:
+            _fail("artifact-collector-invalid")
+        self._sealed = True
+        return _new_trusted_store(self._records)
+
+
 _ARTIFACT_ATTRIBUTE_KEYS = MappingProxyType(
     {
         "capability": ("name", "state", "policyHash"),
-        "review": ("level", "implementationActor", "implementationContext"),
-        "verification": ("verificationId", "validForSeconds"),
-        "owner-confirmation": ("scope",),
-        "owner-review": ("level", "implementationActor", "implementationContext"),
-        "behavioral-test": ("suite",),
+        "review": (
+            "provider", "receiptId", "inputHash", "outputHash", "decision",
+            "level", "implementationActor", "implementationContext",
+        ),
+        "verification": (
+            "provider", "receiptId", "inputHash", "outputHash", "checkType",
+            "commandType", "exitCode", "verificationId", "validForSeconds",
+        ),
+        "owner-confirmation": (
+            "provider", "receiptId", "inputHash", "outputHash", "decision", "scope",
+        ),
+        "owner-review": (
+            "provider", "receiptId", "inputHash", "outputHash", "decision",
+            "level", "implementationActor", "implementationContext",
+        ),
+        "behavioral-test": (
+            "provider", "receiptId", "inputHash", "outputHash", "checkType",
+            "commandType", "exitCode", "suite",
+        ),
     }
 )
 _ARTIFACT_STATUSES = {"passed", "failed", "not-run", "partial", "not-applicable"}
@@ -530,6 +819,67 @@ def _parse_artifact(value: object, code: str) -> dict[str, object]:
     ):
         _fail(code)
     _parse_timestamp(record["recordedAt"], code)
+    if kind == "capability":
+        if (
+            any(type(item) is not str or not item for item in attributes.values())
+            or attributes["state"] not in {"supported", "unsupported", "unverified"}
+            or not _is_sha256(attributes["policyHash"])
+        ):
+            _fail(code)
+    else:
+        if (
+            any(
+                type(attributes[field]) is not str or not attributes[field]
+                for field in ("provider", "receiptId")
+            )
+            or not _is_sha256(attributes["inputHash"])
+            or not _is_sha256(attributes["outputHash"])
+            or attributes["inputHash"] != record["subjectHash"]
+        ):
+            _fail(code)
+    if kind in {"review", "owner-review"}:
+        if (
+            type(attributes["decision"]) is not str
+            or attributes["decision"] != "passed"
+            or type(attributes["level"]) is not str
+            or attributes["level"] not in {"L0", "L1", "L2", "L3"}
+            or any(
+                type(attributes[field]) is not str or not attributes[field]
+                for field in ("implementationActor", "implementationContext")
+            )
+        ):
+            _fail(code)
+    elif kind == "owner-confirmation":
+        if (
+            type(attributes["decision"]) is not str
+            or attributes["decision"] != "authorized"
+            or type(attributes["scope"]) is not str
+            or attributes["scope"] != "replace-protected-rules"
+        ):
+            _fail(code)
+    elif kind in {"verification", "behavioral-test"}:
+        exit_code = attributes["exitCode"]
+        if (
+            type(attributes["checkType"]) is not str
+            or attributes["checkType"]
+            not in {"unit-test", "integration-test", "static-analysis", "behavioral-test", "manual-check"}
+            or type(attributes["commandType"]) is not str
+            or attributes["commandType"]
+            not in {"python-module", "powershell-script", "native-command", "manual-procedure"}
+            or (
+                record["status"] == "passed"
+                and (type(exit_code) is not int or exit_code != 0)
+            )
+            or (
+                record["status"] == "failed"
+                and (type(exit_code) is not int or exit_code == 0)
+            )
+            or (
+                record["status"] in {"not-run", "partial", "not-applicable"}
+                and exit_code is not None
+            )
+        ):
+            _fail(code)
     if kind == "verification":
         if (
             type(attributes["verificationId"]) is not str
@@ -538,7 +888,9 @@ def _parse_artifact(value: object, code: str) -> dict[str, object]:
             or not 1 <= attributes["validForSeconds"] <= 86400
         ):
             _fail(code)
-    elif any(type(item) is not str or not item for item in attributes.values()):
+    elif kind == "behavioral-test" and (
+        type(attributes["suite"]) is not str or not attributes["suite"]
+    ):
         _fail(code)
     record["relatedIds"] = related
     record["attributes"] = attributes
@@ -548,7 +900,13 @@ def _parse_artifact(value: object, code: str) -> dict[str, object]:
 def _prepare_artifacts(
     store: object,
 ) -> tuple[dict[str, dict[str, object]], str | None]:
-    entries = _mapping_entries(store, "artifact-store-invalid")
+    if (
+        type(store) is not TrustedArtifactStore
+        or getattr(store, "_seal", None) is not _TRUSTED_STORE_TOKEN
+        or type(getattr(store, "_records", None)) is not _MAPPING_PROXY_TYPE
+    ):
+        _fail("trusted-artifact-store-required")
+    entries = _mapping_entries(store._records, "artifact-store-invalid")
     parsed: dict[str, dict[str, object]] = {}
     identities: set[tuple[object, object]] = set()
     for artifact_hash, value in entries:
@@ -602,6 +960,57 @@ def _derived_changes(
             {"path": path, "operation": operation, "contentHash": content_hash}
         )
     return tuple(changes)
+
+
+def _parse_acceptance_graph(
+    value: object, policy: CompletionPolicy
+) -> list[dict[str, object]]:
+    criteria = []
+    for item in _ordered_sequence(value, "evidence-invalid"):
+        criterion = _closed_mapping(
+            item,
+            ("id", "description", "applicability", "reason", "verificationIds"),
+            "evidence-invalid",
+        )
+        references = _ordered_sequence(criterion["verificationIds"], "evidence-invalid")
+        if (
+            type(criterion["id"]) is not str
+            or not criterion["id"]
+            or type(criterion["description"]) is not str
+            or not criterion["description"].strip()
+            or type(criterion["applicability"]) is not str
+            or criterion["applicability"] not in {"applicable", "not-applicable"}
+            or type(criterion["reason"]) is not str
+            or not references
+            or any(type(reference) is not str or not reference for reference in references)
+            or len(set(references)) != len(references)
+        ):
+            _fail("evidence-invalid")
+        criterion["verificationIds"] = references
+        criteria.append(criterion)
+    if tuple(item["id"] for item in criteria) != policy.required_criterion_ids:
+        return []
+    return criteria
+
+
+def _completion_subject_hash(
+    policy: CompletionPolicy,
+    content_hash: str,
+    base_hashes: dict[str, str],
+    final_hashes: dict[str, str],
+    changes: tuple[dict[str, str], ...],
+    criteria: list[dict[str, object]],
+) -> str:
+    return canonical_content_hash(
+        {
+            "policyHash": policy.policy_hash,
+            "baseManifestHash": canonical_content_hash(base_hashes),
+            "finalManifestHash": canonical_content_hash(final_hashes),
+            "derivedChanges": changes,
+            "acceptanceGraph": criteria,
+            "resultContentHash": content_hash,
+        }
+    )
 
 
 def evaluate_completion(
@@ -786,6 +1195,18 @@ def _evaluate_completion(
     ):
         return decision("changes-manifest-mismatch")
 
+    criteria = _parse_acceptance_graph(document["acceptanceCriteria"], policy)
+    if not criteria:
+        return decision("acceptance-criterion-unverified")
+    completion_subject = _completion_subject_hash(
+        policy,
+        content_hash,
+        base_hashes,
+        final_hashes,
+        derived_changes,
+        criteria,
+    )
+
     skipped_values = _ordered_sequence(document["skipped"], "evidence-invalid")
     for value in skipped_values:
         skipped = _closed_mapping(
@@ -848,62 +1269,37 @@ def _evaluate_completion(
         artifact = artifacts.get(review["artifactHash"])
         if artifact is None:
             return decision("artifact-unresolved")
-        expected_attributes = {
-            "level": review["level"],
-            "implementationActor": policy.implementation_actor,
-            "implementationContext": policy.implementation_context,
-        }
+        attributes = artifact["attributes"]
         if (
             artifact["kind"] != "review"
             or artifact["status"] != review["status"]
             or artifact["subjectId"] != review["id"]
-            or artifact["subjectHash"] != content_hash
+            or artifact["subjectHash"] != completion_subject
             or artifact["relatedIds"]
-            or artifact["attributes"] != expected_attributes
+            or attributes["decision"] != "passed"
+            or attributes["level"] != review["level"]
+            or attributes["implementationActor"] != policy.implementation_actor
+            or attributes["implementationContext"] != policy.implementation_context
         ):
             return decision("artifact-binding-mismatch")
         review_number = int(review["level"][1])
-        required_number = (
-            2
-            if max(int(policy.complexity.value[1]), int(policy.risk.value[1])) >= 2
-            else 0
+        governing_level = max(
+            int(policy.complexity.value[1]),
+            int(policy.risk.value[1]),
         )
-        if review_number < required_number:
+        required_number = 2 if governing_level >= 2 else 0
+        fallback_allowed = (
+            governing_level == 2
+            and review_number == 1
+            and policy.review_fallback is not None
+        )
+        if review_number < required_number and not fallback_allowed:
             return decision("review-level-insufficient")
         if review_number >= 2 and (
             artifact["actorId"] == policy.implementation_actor
             or artifact["contextId"] == policy.implementation_context
         ):
             return decision("review-independence-required")
-
-    criterion_values = _ordered_sequence(
-        document["acceptanceCriteria"], "evidence-invalid"
-    )
-    criteria = []
-    for value in criterion_values:
-        criterion = _closed_mapping(
-            value,
-            ("id", "description", "applicability", "reason", "verificationIds"),
-            "evidence-invalid",
-        )
-        references = _ordered_sequence(criterion["verificationIds"], "evidence-invalid")
-        if (
-            type(criterion["id"]) is not str
-            or not criterion["id"]
-            or type(criterion["description"]) is not str
-            or not criterion["description"].strip()
-            or type(criterion["applicability"]) is not str
-            or criterion["applicability"] not in {"applicable", "not-applicable"}
-            or type(criterion["reason"]) is not str
-            or not references
-            or any(type(item) is not str or not item for item in references)
-            or len(set(references)) != len(references)
-        ):
-            _fail("evidence-invalid")
-        criterion["verificationIds"] = references
-        criteria.append(criterion)
-    if tuple(item["id"] for item in criteria) != policy.required_criterion_ids:
-        return decision("acceptance-criterion-unverified")
 
     verification_values = _ordered_sequence(document["verification"], "evidence-invalid")
     verifications = []
@@ -948,18 +1344,16 @@ def _evaluate_completion(
         artifact = artifacts.get(verification["artifactHash"])
         if artifact is None:
             return decision("artifact-unresolved")
-        if artifact["subjectHash"] != content_hash:
+        if artifact["subjectHash"] != completion_subject:
             return decision("verification-content-hash-mismatch")
         if (
             artifact["kind"] != "verification"
             or artifact["status"] != verification["status"]
             or artifact["subjectId"] != verification["id"]
             or artifact["recordedAt"] != verification["verifiedAt"]
-            or artifact["attributes"]
-            != {
-                "verificationId": verification["id"],
-                "validForSeconds": verification["validForSeconds"],
-            }
+            or artifact["attributes"]["verificationId"] != verification["id"]
+            or artifact["attributes"]["validForSeconds"]
+            != verification["validForSeconds"]
         ):
             return decision("artifact-binding-mismatch")
         if artifact["relatedIds"] != reverse_links[verification["id"]]:
@@ -1048,10 +1442,12 @@ def _parse_rule(
     ):
         _fail(code)
     return MergedRule(
+        _token=_OUTPUT_TOKEN,
         id=rule_id,
         strength=strength,
         operation="protected",
         statement="",
+        constraint=("protected-invariant", rule_id, "enforce", strength),
         source_kind=source_kind,
         source_name=source_name,
         protected=protected,
@@ -1066,10 +1462,13 @@ def _parse_semver(value: object) -> tuple[int, int, int] | None:
     if type(value) is not str:
         return None
     match = re.fullmatch(
-        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
+        r"(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})",
         value,
     )
-    return tuple(map(int, match.groups())) if match is not None else None
+    try:
+        return tuple(map(int, match.groups())) if match is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_lower_operation(
@@ -1077,25 +1476,62 @@ def _parse_lower_operation(
 ) -> MergedRule:
     operation = _closed_mapping(
         value,
-        ("operation", "id", "statement"),
+        ("operation", "id", "constraint"),
         "protected-rule-layer-invalid",
     )
+    constraint = _closed_mapping(
+        operation["constraint"],
+        ("kind", "target", "mode", "value"),
+        "protected-rule-layer-invalid",
+    )
+    constraint_values = tuple(constraint[field] for field in ("kind", "target", "mode", "value"))
+    identifier = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
     if (
         type(operation["operation"]) is not str
         or operation["operation"] not in {"add-requirement", "advisory"}
         or type(operation["id"]) is not str
-        or not operation["id"]
-        or type(operation["statement"]) is not str
-        or not operation["statement"].strip()
+        or identifier.fullmatch(operation["id"]) is None
+        or any(type(item) is not str for item in constraint_values)
+        or identifier.fullmatch(constraint["target"]) is None
     ):
         _fail("protected-rule-layer-invalid")
+    valid_constraint = (
+        operation["operation"] == "add-requirement"
+        and (
+            (
+                constraint["kind"] == "capability-state"
+                and constraint["mode"] == "equals"
+                and constraint["value"] == "supported"
+            )
+            or (
+                constraint["kind"] == "verification-status"
+                and constraint["mode"] == "equals"
+                and constraint["value"] == "passed"
+            )
+            or (
+                constraint["kind"] == "review-level"
+                and constraint["mode"] == "at-least"
+                and constraint["value"] in {"L0", "L1", "L2", "L3"}
+            )
+        )
+    ) or (
+        operation["operation"] == "advisory"
+        and constraint["kind"] == "workflow-action"
+        and constraint["target"] in {"review", "verification", "documentation"}
+        and constraint["mode"] == "recommend"
+        and constraint["value"] in {"perform", "record"}
+    )
+    if not valid_constraint:
+        _fail("protected-rule-layer-invalid")
     return MergedRule(
+        _token=_OUTPUT_TOKEN,
         id=operation["id"],
         strength=(
             "enforced" if operation["operation"] == "add-requirement" else "agent-policy"
         ),
         operation=operation["operation"],
-        statement=operation["statement"],
+        statement="",
+        constraint=constraint_values,
         source_kind=source_kind,
         source_name=source_name,
         protected=False,
@@ -1113,6 +1549,14 @@ def _validate_owner_change(
         _fail(code)
     base_hash = canonical_content_hash(document["rules"])
     proposed_hash = canonical_content_hash(selected_rules)
+    proposal_hash = canonical_content_hash(
+        {
+            "baseRulesHash": base_hash,
+            "proposedRulesHash": proposed_hash,
+            "previousVersion": request.previous_version,
+            "newVersion": request.new_version,
+        }
+    )
     previous = _parse_semver(request.previous_version)
     new = _parse_semver(request.new_version)
     if (
@@ -1147,29 +1591,30 @@ def _validate_owner_change(
         confirmation["kind"] != "owner-confirmation"
         or confirmation["status"] != "passed"
         or confirmation["subjectId"] != "protected-rules-change"
-        or confirmation["subjectHash"] != proposed_hash
+        or confirmation["subjectHash"] != proposal_hash
         or confirmation["actorId"] != request.owner_actor
         or confirmation["relatedIds"]
-        or confirmation["attributes"] != {"scope": "replace-protected-rules"}
+        or confirmation["attributes"]["decision"] != "authorized"
+        or confirmation["attributes"]["scope"] != "replace-protected-rules"
         or review["kind"] != "owner-review"
         or review["status"] != "passed"
         or review["subjectId"] != "protected-rules-change"
-        or review["subjectHash"] != proposed_hash
+        or review["subjectHash"] != proposal_hash
         or review["relatedIds"]
         or review["actorId"] == request.implementation_actor
         or review["contextId"] == request.implementation_context
-        or review["attributes"]
-        != {
-            "level": "L2",
-            "implementationActor": request.implementation_actor,
-            "implementationContext": request.implementation_context,
-        }
+        or review["attributes"]["decision"] != "passed"
+        or review["attributes"]["level"] != "L2"
+        or review["attributes"]["implementationActor"]
+        != request.implementation_actor
+        or review["attributes"]["implementationContext"]
+        != request.implementation_context
         or tests["kind"] != "behavioral-test"
         or tests["status"] != "passed"
         or tests["subjectId"] != "protected-rules-change"
-        or tests["subjectHash"] != proposed_hash
+        or tests["subjectHash"] != proposal_hash
         or tests["relatedIds"]
-        or tests["attributes"] != {"suite": "protected-rules"}
+        or tests["attributes"]["suite"] != "protected-rules"
     ):
         _fail(code)
     return request.new_version
@@ -1217,6 +1662,7 @@ def merge_protected_rules(
             "schemaVersion",
             "policyVersion",
             "mergeOrder",
+            "ordinaryLayerContractVersion",
             "ownerModificationGate",
             "rules",
         ),
@@ -1225,6 +1671,8 @@ def merge_protected_rules(
     if (
         type(document["schemaVersion"]) is not int
         or document["schemaVersion"] != 1
+        or type(document["ordinaryLayerContractVersion"]) is not int
+        or document["ordinaryLayerContractVersion"] != 1
         or _parse_semver(document["policyVersion"]) is None
     ):
         _fail("protected-rules-invalid")
@@ -1266,13 +1714,15 @@ def merge_protected_rules(
     for layer_value in layer_values:
         layer = _closed_mapping(
             layer_value,
-            ("kind", "name", "operations"),
+            ("contractVersion", "kind", "name", "operations"),
             "protected-rule-layer-invalid",
         )
         kind = layer["kind"]
         name = layer["name"]
         if (
-            type(kind) is not str
+            type(layer["contractVersion"]) is not int
+            or layer["contractVersion"] != document["ordinaryLayerContractVersion"]
+            or type(kind) is not str
             or kind not in _LAYER_ORDER
             or type(name) is not str
             or not name
@@ -1293,17 +1743,20 @@ def merge_protected_rules(
                 "protected-rule-layer-invalid",
             )
         )
-        if len({rule.id for rule in parsed_rules}) != len(parsed_rules):
-            _fail("protected-rule-layer-invalid")
         if any(rule.id in protected_ids for rule in parsed_rules):
             _fail("protected-rule-override-denied")
         parsed_layers.append((_LAYER_ORDER[kind], name, parsed_rules))
 
     merged = {rule.id: rule for rule in protected}
+    ordinary_ids: set[str] = set()
     for _, _, rules in sorted(parsed_layers, key=lambda item: (item[0], item[1])):
         for rule in sorted(rules, key=lambda item: item.id):
+            if rule.id in ordinary_ids:
+                _fail("protected-rule-layer-conflict")
+            ordinary_ids.add(rule.id)
             merged[rule.id] = rule
     return MergedRules(
-        tuple(merged[rule_id] for rule_id in sorted(merged)),
-        policy_version,
+        _token=_OUTPUT_TOKEN,
+        rules=tuple(merged[rule_id] for rule_id in sorted(merged)),
+        policy_version=policy_version,
     )

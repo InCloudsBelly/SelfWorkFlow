@@ -8,6 +8,7 @@
     "schemaVersion",
     "policyVersion",
     "mergeOrder",
+    "ordinaryLayerContractVersion",
     "ownerModificationGate",
     "rules"
   ],
@@ -15,7 +16,7 @@
     "schemaVersion": {"const": 1},
     "policyVersion": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$"
     },
     "mergeOrder": {
       "type": "array",
@@ -29,6 +30,7 @@
       "minItems": 4,
       "maxItems": 4
     },
+    "ordinaryLayerContractVersion": {"const": 1},
     "ownerModificationGate": {
       "type": "object",
       "additionalProperties": false,

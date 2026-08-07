@@ -5,6 +5,7 @@ mergeOrder:
   - skill
   - project
   - overlay
+ordinaryLayerContractVersion: 1
 ownerModificationGate:
   versionChange: semver-major
   confirmationArtifactKind: owner-confirmation

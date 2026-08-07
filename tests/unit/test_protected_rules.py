@@ -51,6 +51,54 @@ def _put(store, artifact):
     return artifact_hash
 
 
+def _trusted_owner_store(records):
+    from selfworkflow.evidence import ArtifactCollector
+
+    collector = ArtifactCollector()
+    for artifact in records.values():
+        attributes = artifact["attributes"]
+        if artifact["kind"] in {"owner-confirmation", "owner-review"}:
+            collector.record_attestation(
+                kind=artifact["kind"],
+                subject_id=artifact["subjectId"],
+                subject_hash=artifact["subjectHash"],
+                actor_id=artifact["actorId"],
+                context_id=artifact["contextId"],
+                recorded_at=artifact["recordedAt"],
+                provider=attributes["provider"],
+                receipt_id=attributes["receiptId"],
+                input_hash=attributes["inputHash"],
+                output_hash=attributes["outputHash"],
+                decision=attributes["decision"],
+                level=attributes.get("level", ""),
+                implementation_actor=attributes.get("implementationActor", ""),
+                implementation_context=attributes.get("implementationContext", ""),
+                scope=attributes.get("scope", ""),
+            )
+        elif artifact["kind"] == "behavioral-test":
+            collector.record_execution(
+                kind="behavioral-test",
+                status=artifact["status"],
+                subject_id=artifact["subjectId"],
+                subject_hash=artifact["subjectHash"],
+                actor_id=artifact["actorId"],
+                context_id=artifact["contextId"],
+                related_ids=tuple(artifact["relatedIds"]),
+                recorded_at=artifact["recordedAt"],
+                provider=attributes["provider"],
+                receipt_id=attributes["receiptId"],
+                input_hash=attributes["inputHash"],
+                output_hash=attributes["outputHash"],
+                check_type=attributes["checkType"],
+                command_type=attributes["commandType"],
+                exit_code=attributes["exitCode"],
+                suite=attributes["suite"],
+            )
+        else:
+            raise AssertionError("unexpected owner artifact kind")
+    return collector.seal()
+
+
 def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
     from selfworkflow.evidence import OwnerChangeRequest, canonical_content_hash
 
@@ -58,28 +106,50 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
     proposed = copy.deepcopy(protected["rules"] if proposed_rules is None else proposed_rules)
     base_hash = canonical_content_hash(protected["rules"])
     proposed_hash = canonical_content_hash(proposed)
+    proposal_hash = canonical_content_hash(
+        {
+            "baseRulesHash": base_hash,
+            "proposedRulesHash": proposed_hash,
+            "previousVersion": protected["policyVersion"],
+            "newVersion": new_version,
+        }
+    )
     store = {}
     confirmation = {
         "kind": "owner-confirmation",
         "status": "passed",
         "subjectId": "protected-rules-change",
-        "subjectHash": proposed_hash,
+        "subjectHash": proposal_hash,
         "actorId": "repository-owner",
         "contextId": "owner-change-task",
         "relatedIds": [],
         "recordedAt": "2026-08-08T08:00:00Z",
-        "attributes": {"scope": "replace-protected-rules"},
+        "attributes": {
+            "provider": "owner-confirmation-provider",
+            "receiptId": "owner-confirmation-1",
+            "inputHash": proposal_hash,
+            "outputHash": canonical_content_hash({"decision": "authorized"}),
+            "decision": "authorized",
+            "scope": "replace-protected-rules",
+        },
     }
     review = {
         "kind": "owner-review",
         "status": "passed",
         "subjectId": "protected-rules-change",
-        "subjectHash": proposed_hash,
+        "subjectHash": proposal_hash,
         "actorId": "independent-reviewer",
         "contextId": "independent-review-task",
         "relatedIds": [],
         "recordedAt": "2026-08-08T08:00:00Z",
         "attributes": {
+            "provider": "owner-review-provider",
+            "receiptId": "owner-review-1",
+            "inputHash": proposal_hash,
+            "outputHash": canonical_content_hash(
+                {"decision": "passed", "level": "L2"}
+            ),
+            "decision": "passed",
             "level": "L2",
             "implementationActor": "implementer",
             "implementationContext": "task-3",
@@ -89,12 +159,21 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
         "kind": "behavioral-test",
         "status": "passed",
         "subjectId": "protected-rules-change",
-        "subjectHash": proposed_hash,
+        "subjectHash": proposal_hash,
         "actorId": "test-runner",
         "contextId": "behavioral-test-run",
         "relatedIds": [],
         "recordedAt": "2026-08-08T08:00:00Z",
-        "attributes": {"suite": "protected-rules"},
+        "attributes": {
+            "provider": "behavioral-test-provider",
+            "receiptId": "behavioral-test-1",
+            "inputHash": proposal_hash,
+            "outputHash": canonical_content_hash({"status": "passed"}),
+            "checkType": "behavioral-test",
+            "commandType": "powershell-script",
+            "exitCode": 0,
+            "suite": "protected-rules",
+        },
     }
     request = OwnerChangeRequest(
         base_rules_hash=base_hash,
@@ -112,6 +191,50 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
 
 
 class ProtectedRulesTests(unittest.TestCase):
+    def test_cross_layer_duplicate_constraint_ids_are_rejected_not_downgraded(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
+
+        protected = _protected_document()
+        layers = [
+            {
+                "contractVersion": 1,
+                "kind": "skill",
+                "name": "strong-review",
+                "operations": [
+                    {
+                        "operation": "add-requirement",
+                        "id": "review-floor",
+                        "constraint": {
+                            "kind": "review-level",
+                            "target": "completion-review",
+                            "mode": "at-least",
+                            "value": "L2",
+                        },
+                    }
+                ],
+            },
+            {
+                "contractVersion": 1,
+                "kind": "overlay",
+                "name": "weak-review",
+                "operations": [
+                    {
+                        "operation": "add-requirement",
+                        "id": "review-floor",
+                        "constraint": {
+                            "kind": "review-level",
+                            "target": "completion-review",
+                            "mode": "at-least",
+                            "value": "L0",
+                        },
+                    }
+                ],
+            },
+        ]
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(protected, layers)
+        self.assertEqual(caught.exception.code, "protected-rule-layer-conflict")
+
     def test_checked_in_contract_is_closed_and_exact(self):
         protected = _protected_document()
         schema = json.loads(
@@ -123,6 +246,7 @@ class ProtectedRulesTests(unittest.TestCase):
         Draft202012Validator(schema).validate(protected)
         self.assertEqual(_open_object_schema_paths(schema), [])
         self.assertEqual(protected["policyVersion"], "1.0.0")
+        self.assertEqual(protected["ordinaryLayerContractVersion"], 1)
         self.assertEqual(
             protected["ownerModificationGate"],
             {
@@ -151,24 +275,36 @@ class ProtectedRulesTests(unittest.TestCase):
         misleading_id = "allow-silent-degradation"
         layers = [
             {
+                "contractVersion": 1,
                 "kind": "skill",
                 "name": "negative-looking-skill",
                 "operations": [
                     {
                         "operation": "advisory",
                         "id": misleading_id,
-                        "statement": "The identifier grants no protected authority.",
+                        "constraint": {
+                            "kind": "workflow-action",
+                            "target": "documentation",
+                            "mode": "recommend",
+                            "value": "record",
+                        },
                     }
                 ],
             },
             {
+                "contractVersion": 1,
                 "kind": "project",
                 "name": "project-requirements",
                 "operations": [
                     {
                         "operation": "add-requirement",
                         "id": "project-tests",
-                        "statement": "Run project tests.",
+                        "constraint": {
+                            "kind": "verification-status",
+                            "target": "project-tests",
+                            "mode": "equals",
+                            "value": "passed",
+                        },
                     }
                 ],
             },
@@ -176,6 +312,11 @@ class ProtectedRulesTests(unittest.TestCase):
         merged = merge_protected_rules(protected, layers)
         negative = merged.rule_for(misleading_id)
         self.assertEqual(negative.operation, "advisory")
+        self.assertEqual(
+            negative.constraint,
+            ("workflow-action", "documentation", "recommend", "record"),
+        )
+        self.assertEqual(negative.statement, "")
         self.assertFalse(negative.protected)
         self.assertEqual(
             merge_protected_rules(protected, list(reversed(layers))),
@@ -188,6 +329,18 @@ class ProtectedRulesTests(unittest.TestCase):
             invalid = copy.deepcopy(layers[:1])
             invalid[0]["operations"][0]["operation"] = operation
             with self.subTest(operation=operation):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    merge_protected_rules(protected, invalid)
+                self.assertEqual(caught.exception.code, "protected-rule-layer-invalid")
+
+        for mutation in (
+            lambda item: item.update({"statement": "free text has no authority"}),
+            lambda item: item["constraint"].update({"kind": "disable-gate"}),
+            lambda item: item["constraint"].update({"value": "skip"}),
+        ):
+            invalid = copy.deepcopy(layers[:1])
+            mutation(invalid[0]["operations"][0])
+            with self.subTest(invalid=invalid[0]["operations"][0]):
                 with self.assertRaises(WorkflowEvidenceError) as caught:
                     merge_protected_rules(protected, invalid)
                 self.assertEqual(caught.exception.code, "protected-rule-layer-invalid")
@@ -224,17 +377,70 @@ class ProtectedRulesTests(unittest.TestCase):
             caught.exception.code,
             "protected-rule-owner-authorization-required",
         )
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(
+                protected,
+                owner_rules=[],
+                owner_change=request,
+                artifact_store=store,
+            )
+        self.assertEqual(
+            caught.exception.code,
+            "protected-rule-owner-authorization-required",
+        )
 
         merged = merge_protected_rules(
             protected,
             owner_rules=[],
             owner_change=request,
-            artifact_store=store,
+            artifact_store=_trusted_owner_store(store),
         )
         self.assertEqual(merged.rules, ())
         self.assertEqual(merged.policy_version, "2.0.0")
         with self.assertRaises(FrozenInstanceError):
             request.new_version = "3.0.0"
+
+    def test_owner_receipts_bind_the_full_versioned_proposal(self):
+        from selfworkflow.evidence import (
+            OwnerChangeRequest,
+            WorkflowEvidenceError,
+            merge_protected_rules,
+        )
+
+        protected, proposed, request, records = _owner_case([])
+        self.assertEqual(
+            merge_protected_rules(
+                protected,
+                owner_rules=proposed,
+                owner_change=request,
+                artifact_store=_trusted_owner_store(records),
+            ).policy_version,
+            "2.0.0",
+        )
+
+        replayed_document = copy.deepcopy(protected)
+        replayed_document["policyVersion"] = "5.0.0"
+        values = {
+            field: getattr(request, field)
+            for field in request.__dataclass_fields__
+        }
+        replayed_request = OwnerChangeRequest(
+            **(
+                values
+                | {"previous_version": "5.0.0", "new_version": "6.0.0"}
+            )
+        )
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(
+                replayed_document,
+                owner_rules=proposed,
+                owner_change=replayed_request,
+                artifact_store=_trusted_owner_store(records),
+            )
+        self.assertEqual(
+            caught.exception.code,
+            "protected-rule-owner-authorization-required",
+        )
 
     def test_owner_gate_recomputes_hashes_and_rejects_zero_or_nonmajor_claims(self):
         from selfworkflow.evidence import (
@@ -274,12 +480,31 @@ class ProtectedRulesTests(unittest.TestCase):
                         protected,
                         owner_rules=proposed,
                         owner_change=request,
-                        artifact_store=store,
+                        artifact_store=_trusted_owner_store(store),
                     )
                 self.assertEqual(
                     caught.exception.code,
                     "protected-rule-owner-authorization-required",
                 )
+
+    def test_oversized_semver_components_fail_with_fixed_redacted_errors(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
+
+        oversized = "9" * 5000 + ".0.0"
+        protected = _protected_document()
+        protected["policyVersion"] = oversized
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(protected)
+        self.assertEqual(caught.exception.code, "protected-rules-invalid")
+        self.assertEqual(caught.exception.message, "The protected-rule document is invalid.")
+        self.assertNotIn(oversized, str(caught.exception))
+
+        schema = json.loads(
+            (REPOSITORY_ROOT / "schemas/protected-rules.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertFalse(Draft202012Validator(schema).is_valid(protected))
 
     def test_owner_artifacts_are_recomputed_bound_passed_and_independent(self):
         from selfworkflow.evidence import (
@@ -294,9 +519,17 @@ class ProtectedRulesTests(unittest.TestCase):
             lambda artifact: artifact.update({"actorId": "implementer"}),
             lambda artifact: artifact.update({"contextId": "task-3"}),
         )
-        for mutate in (
-            lambda artifact: artifact.update({"actorId": "not-the-owner"}),
-            lambda artifact: artifact["attributes"].update({"scope": "all-files"}),
+        for mutate, expected_code in (
+            (
+                lambda artifact: artifact.update({"actorId": "not-the-owner"}),
+                "protected-rule-owner-authorization-required",
+            ),
+            (
+                lambda artifact: artifact["attributes"].update(
+                    {"scope": "all-files"}
+                ),
+                "artifact-collector-invalid",
+            ),
         ):
             protected, proposed, request, store = _owner_case([])
             old_hash = request.confirmation_artifact_hash
@@ -315,14 +548,14 @@ class ProtectedRulesTests(unittest.TestCase):
                     protected,
                     owner_rules=proposed,
                     owner_change=request,
-                    artifact_store=store,
+                    artifact_store=_trusted_owner_store(store),
                 )
             self.assertEqual(
                 caught.exception.code,
-                "protected-rule-owner-authorization-required",
+                expected_code,
             )
 
-        for mutate in mutations:
+        for mutation_index, mutate in enumerate(mutations):
             protected, proposed, request, store = _owner_case([])
             review_hash = request.review_artifact_hash
             review = copy.deepcopy(store.pop(review_hash))
@@ -341,17 +574,22 @@ class ProtectedRulesTests(unittest.TestCase):
                         protected,
                         owner_rules=proposed,
                         owner_change=request,
-                        artifact_store=store,
+                        artifact_store=_trusted_owner_store(store),
                     )
                 self.assertEqual(
                     caught.exception.code,
-                    "protected-rule-owner-authorization-required",
+                    (
+                        "artifact-collector-invalid"
+                        if mutation_index == 1
+                        else "protected-rule-owner-authorization-required"
+                    ),
                 )
 
         protected, proposed, request, store = _owner_case([])
         behavioral_hash = request.behavioral_test_artifact_hash
         behavioral = copy.deepcopy(store.pop(behavioral_hash))
         behavioral["status"] = "failed"
+        behavioral["attributes"]["exitCode"] = 1
         new_hash = _put(store, behavioral)
         values = {
             field: getattr(request, field)
@@ -365,7 +603,7 @@ class ProtectedRulesTests(unittest.TestCase):
                 protected,
                 owner_rules=proposed,
                 owner_change=request,
-                artifact_store=store,
+                artifact_store=_trusted_owner_store(store),
             )
         self.assertEqual(
             caught.exception.code,

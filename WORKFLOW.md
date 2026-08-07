@@ -36,15 +36,21 @@ standard names and pause contract are defined by
 
 Protected rules have priority over ordinary skill rules, project rules, and the
 personal overlay, in that order. Lower-priority layers have only the typed
-`add-requirement` and `advisory` operations. They cannot replace a protected
-rule or alter the fixed protected evaluators. Their merge result is
-deterministic and deeply immutable.
+`add-requirement` and `advisory` operations under ordinary-layer contract
+version 1. Each operation contains a closed `kind`/`target`/`mode`/`value`
+constraint from a finite vocabulary; arbitrary prose has no rule authority.
+Duplicate ordinary IDs are rejected across layers. New operations or values
+require a contract, schema, version, and test change. Ordinary layers cannot
+replace a protected rule or alter the fixed protected evaluators. Their merge
+result is deterministic and deeply immutable.
 
 Repository-owner changes to protected rules require all four gates together:
-an explicit confirmation artifact bound to the proposed rules hash, an actual
-SemVer major increase, an independently produced Review artifact, and a passed
-behavioral-test artifact. Every referenced artifact is resolved and its
-canonical hash is recomputed. The exact invariants and gate shape are in
+an explicit confirmation attestation, an actual SemVer major increase, an
+independent Review attestation, and a passed behavioral-test execution receipt.
+All three receipts bind the canonical proposal hash over the base and proposed
+rule hashes plus both policy versions. Every referenced artifact is resolved
+from a collector-sealed store and its canonical hash is recomputed. The exact
+invariants and gate shape are in
 [the protected-rule source](workflow/protected-rules.yaml), its
 [closed schema](schemas/protected-rules.schema.json), and
 [the tested implementation](src/selfworkflow/evidence.py).
@@ -64,25 +70,45 @@ evidence. It fixes task kind, C/R classification, the ordered required
 capability list, required criterion and verification IDs, and implementation
 identity. Evidence cannot declare its own governing policy. C1/R1 requires at
 least L0 Review; any C/R level 2 or 3 requires at least L2, with reviewer and
-context independent from implementation.
+context independent from implementation. Only level 2 may fall back to L1,
+and only when the trusted policy carries a typed authorization recording that
+independent Review capability is unsupported or unverified, the user was
+prompted, and the user explicitly authorized the fallback. Level 3 cannot use
+this path. Evidence cannot self-report or silently trigger the exception.
 
 A modifying task records exactly `classification`, `capabilities`,
 `selectedSkills`, `acceptanceCriteria`, `changes`, `review`, `verification`,
 `skipped`, and `residualRisks`. Structured change, Review, and verification
 records cannot be replaced by empty collections or prose claims. Capability,
-Review, and verification references resolve through a separate canonical-hash
-artifact store. Every acceptance criterion and verification artifact links in
-both directions. Every skipped or not-applicable item has a non-empty reason;
-required policy items cannot be skipped.
+Review, and verification references resolve only through a collector-sealed,
+deeply immutable artifact store. Review attestations record provider, receipt,
+input and output hashes, decision, level, and identities. Verification
+execution receipts additionally record finite check and command types, exit
+code, timestamps, and criterion links. Every acceptance criterion and
+verification artifact links in both directions. Every skipped or
+not-applicable item has a non-empty reason; required policy items cannot be
+skipped.
 
 Base and final file manifests are hashed and compared to derive the exact
 added, modified, and deleted paths; declared changes must match that derivation
-in both directions. Completion requires `passed` verification bound to the
-canonical hash of the current result and observed within its declared validity
-window. `failed`,
+in both directions. The completion subject hash binds the trusted policy hash,
+both manifest hashes, derived changes, the complete criterion/verification
+graph (including descriptions, applicability, reasons, and links), and the
+result-content hash. Review and verification receipts must bind that subject.
+Completion requires `passed` verification observed within its declared
+validity window. `failed`,
 `not-run`, `partial`, stale, future-dated, clock-rollback, and hash-mismatched
 evidence cannot complete. `not-applicable` is eligible only for a pure
 `read-only` task with no change items.
+
+These checks provide deterministic structural, hash, time, manifest, and
+policy validation. `ArtifactCollector` is an explicit trusted collection
+boundary that preserves audit fields; it is not a defense against malicious
+code in the same process and does not independently prove that an external
+provider executed a command. Provider trust and receipt acquisition are
+deployment responsibilities. Separately, `agent-policy` rules depend on agent
+adherence and have unit-tested structure, not technical or behavioral
+enforcement.
 
 The stable field list and status policy remain in
 [the evidence source](workflow/evidence.yaml). The concrete immutable JSON
