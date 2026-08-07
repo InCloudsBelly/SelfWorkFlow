@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/bootstrap-tool-manifest.schema.json",
+  "title": "SelfWorkFlow Bootstrap Tool Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "bootstrapRoot",
+    "package",
+    "packageTreeHash",
+    "daclSddl",
+    "cliVersion",
+    "planHash"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "bootstrapRoot": {
+      "type": "string",
+      "pattern": "^[A-Za-z]:\\\\"
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "integrity"
+      ],
+      "properties": {
+        "name": {
+          "const": "@openai/codex"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "integrity": {
+          "type": "string",
+          "pattern": "^sha(256|384|512)-[A-Za-z0-9+/_=-]+$"
+        }
+      }
+    },
+    "packageTreeHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "daclSddl": {
+      "type": "string",
+      "pattern": "^D:P"
+    },
+    "cliVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "planHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
