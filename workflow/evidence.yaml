@@ -1,0 +1,18 @@
+schemaVersion: 1
+requiredFields:
+  - classification
+  - capabilities
+  - selectedSkills
+  - acceptanceCriteria
+  - changes
+  - review
+  - verification
+  - skipped
+  - residualRisks
+verification:
+  unverifiedFrom:
+    - not-run
+    - partial
+  completionEligible:
+    - passed
+    - not-applicable

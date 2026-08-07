@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/policies.schema.json",
+  "title": "SelfWorkFlow policy configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "classification",
+    "globalMinimum",
+    "thresholds",
+    "upgrades",
+    "capabilityGate"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complexity", "risk"],
+      "properties": {
+        "complexity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["C0", "C1", "C2", "C3"],
+          "properties": {
+            "C0": {"const": "Pure question answering or read-only lookup."},
+            "C1": {"const": "Explicit small or mechanical change."},
+            "C2": {"const": "Multi-file feature, local refactor, or design choice."},
+            "C3": {"const": "Architecture, migration, cross-system change, or substantial unknowns."}
+          }
+        },
+        "risk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["R0", "R1", "R2", "R3"],
+          "properties": {
+            "R0": {"const": "No state change."},
+            "R1": {"const": "Easily reversible local change."},
+            "R2": {"const": "Public interface, persistent data, compatibility, performance, or security boundary."},
+            "R3": {"const": "Irreversible action, production release, credentials, or major data risk."}
+          }
+        }
+      }
+    },
+    "globalMinimum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complexity", "risk"],
+      "properties": {
+        "complexity": {"const": "C0"},
+        "risk": {"const": "R0"}
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiresFullDesign", "suggestGrillMe"],
+      "properties": {
+        "requiresFullDesign": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["anyDimensionAtLeast"],
+          "properties": {
+            "anyDimensionAtLeast": {"const": 2}
+          }
+        },
+        "suggestGrillMe": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["anyDimensionAtLeast", "combinations"],
+          "properties": {
+            "anyDimensionAtLeast": {"const": 3},
+            "combinations": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["complexity", "risk"],
+                  "properties": {
+                    "complexity": {"const": "C2"},
+                    "risk": {"const": "R2"}
+                  }
+                }
+              ],
+              "items": false,
+              "minItems": 1
+            }
+          }
+        }
+      }
+    },
+    "upgrades": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ambiguity",
+        "projectMinimum",
+        "user",
+        "recordRejectedDowngrade"
+      ],
+      "properties": {
+        "ambiguity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["increment", "maximum"],
+          "properties": {
+            "increment": {"const": 1},
+            "maximum": {"const": 3}
+          }
+        },
+        "projectMinimum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mayIncreaseGlobalMinimum",
+            "mayDecreaseGlobalMinimum"
+          ],
+          "properties": {
+            "mayIncreaseGlobalMinimum": {"const": true},
+            "mayDecreaseGlobalMinimum": {"const": false}
+          }
+        },
+        "user": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mayIncrease", "mayDecreaseBelowMinimum"],
+          "properties": {
+            "mayIncrease": {"const": true},
+            "mayDecreaseBelowMinimum": {"const": false}
+          }
+        },
+        "recordRejectedDowngrade": {"const": true}
+      }
+    },
+    "capabilityGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acceptedStates",
+        "pauseStates",
+        "missingReportHandling",
+        "ordering",
+        "pause"
+      ],
+      "properties": {
+        "acceptedStates": {
+          "type": "array",
+          "prefixItems": [{"const": "supported"}],
+          "items": false,
+          "minItems": 1
+        },
+        "pauseStates": {
+          "type": "array",
+          "prefixItems": [
+            {"const": "unsupported"},
+            {"const": "unverified"}
+          ],
+          "items": false,
+          "minItems": 2
+        },
+        "missingReportHandling": {"const": "pause"},
+        "ordering": {"const": "lexical"},
+        "pause": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "code"],
+          "properties": {
+            "status": {"const": "paused"},
+            "code": {"const": "required-capabilities-unavailable"}
+          }
+        }
+      }
+    }
+  }
+}
