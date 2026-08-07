@@ -8,7 +8,7 @@ param(
     [ValidateSet("@openai/codex")]
     [string]$PackageName = "@openai/codex",
     [string]$PackageVersion = "latest",
-    [string]$ConfirmedPlanHash,
+    [string]$ConfirmPlanHash,
     [string]$IcaclsCommand = "icacls.exe"
 )
 
@@ -202,8 +202,8 @@ if ($ReparsePointAncestor) {
     )
     exit 43
 }
-if ($Mode -eq "Apply" -and -not $ConfirmedPlanHash) {
-    [Console]::Error.WriteLine("SelfWorkFlow: ConfirmedPlanHash is required for Apply mode.")
+if ($Mode -eq "Apply" -and -not $ConfirmPlanHash) {
+    [Console]::Error.WriteLine("SelfWorkFlow: ConfirmPlanHash is required for Apply mode.")
     exit 45
 }
 
@@ -240,12 +240,12 @@ if ($Mode -eq "Discover") {
 }
 
 if (-not [System.String]::Equals(
-    $ConfirmedPlanHash,
+    $ConfirmPlanHash,
     $PlanHash,
     [System.StringComparison]::OrdinalIgnoreCase
 )) {
     [Console]::Error.WriteLine(
-        "SelfWorkFlow: ConfirmedPlanHash does not match the regenerated plan hash."
+        "SelfWorkFlow: ConfirmPlanHash does not match the regenerated plan hash."
     )
     exit 46
 }
@@ -266,14 +266,21 @@ if ($TargetIsUnsafe) {
     exit 44
 }
 
-[System.IO.Directory]::CreateDirectory($CanonicalBootstrapRoot) | Out-Null
-Set-StrictBootstrapAcl -Path $CanonicalBootstrapRoot
-$IcaclsOutput = & $IcaclsCommand $CanonicalBootstrapRoot 2>&1
-if ($LASTEXITCODE -ne 0 -or -not $IcaclsOutput) {
-    [Console]::Error.WriteLine("SelfWorkFlow: icacls verification failed.")
+try {
+    [System.IO.Directory]::CreateDirectory($CanonicalBootstrapRoot) | Out-Null
+    Set-StrictBootstrapAcl -Path $CanonicalBootstrapRoot
+    $IcaclsOutput = & $IcaclsCommand $CanonicalBootstrapRoot 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not $IcaclsOutput) {
+        throw "icacls verification failed."
+    }
+    $VerifiedSddl = Get-VerifiedBootstrapSddl -Path $CanonicalBootstrapRoot
+}
+catch {
+    [Console]::Error.WriteLine(
+        "SelfWorkFlow: ACL security verification failed: $($_.Exception.Message)"
+    )
     exit 48
 }
-$VerifiedSddl = Get-VerifiedBootstrapSddl -Path $CanonicalBootstrapRoot
 
 $InstallSpec = "$PackageName@$($Metadata.version)"
 $InstallOutput = & $NpmCommand install `
@@ -335,7 +342,15 @@ if ($LASTEXITCODE -ne 0) {
 $CliVersion = ($CliVersionOutput -join [Environment]::NewLine).Trim()
 
 $PackageTreeHash = Get-PackageTreeHash -PackageRoot $InstalledPackageRoot
-$FinalSddl = Get-VerifiedBootstrapSddl -Path $CanonicalBootstrapRoot
+try {
+    $FinalSddl = Get-VerifiedBootstrapSddl -Path $CanonicalBootstrapRoot
+}
+catch {
+    [Console]::Error.WriteLine(
+        "SelfWorkFlow: ACL security verification failed: $($_.Exception.Message)"
+    )
+    exit 48
+}
 $Manifest = [ordered]@{
     schemaVersion = 1
     bootstrapRoot = $CanonicalBootstrapRoot

@@ -273,7 +273,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -303,7 +303,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -312,7 +312,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 44)
         self.assertIn("does not satisfy safe recovery conditions", result.stderr)
 
-    def test_apply_requires_confirmed_plan_hash(self):
+    def test_apply_requires_confirm_plan_hash(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             local_app_data = Path(temporary_directory) / "LocalAppData"
             result = _run_bootstrap(
@@ -329,16 +329,16 @@ class BootstrapCodexCliTests(unittest.TestCase):
             self.assertFalse(bootstrap_root.exists())
 
         self.assertEqual(result.returncode, 45)
-        self.assertIn("ConfirmedPlanHash is required", result.stderr)
+        self.assertIn("ConfirmPlanHash is required", result.stderr)
 
-    def test_apply_rejects_wrong_confirmed_plan_hash(self):
+    def test_apply_rejects_wrong_confirm_plan_hash(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             local_app_data = Path(temporary_directory) / "LocalAppData"
             result = _run_bootstrap(
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 "0" * 64,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -349,7 +349,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
 
             self.assertFalse(bootstrap_root.exists())
 
-        self.assertEqual(result.returncode, 46)
+        self.assertEqual(result.returncode, 46, result.stderr)
         self.assertIn("does not match the regenerated plan hash", result.stderr)
 
     def test_apply_rejects_metadata_drift_since_discovery(self):
@@ -373,7 +373,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                         local_app_data,
                         "-Mode",
                         "Apply",
-                        "-ConfirmedPlanHash",
+                        "-ConfirmPlanHash",
                         plan_hash,
                         "-NpmCommand",
                         str(FAKE_NPM),
@@ -403,7 +403,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan["planHash"],
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -449,7 +449,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -462,6 +462,51 @@ class BootstrapCodexCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 48)
         self.assertIn("icacls verification failed", result.stderr)
+
+    def test_apply_fails_closed_when_acl_reread_detects_inheritance(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            local_app_data = temporary_root / "LocalAppData"
+            corrupting_icacls = temporary_root / "corrupt-acl.ps1"
+            corrupting_icacls.write_text(
+                """param([string]$Path)
+$ErrorActionPreference = "Stop"
+$Acl = Get-Acl -LiteralPath $Path
+$Acl.SetAccessRuleProtection($false, $true)
+Set-Acl -LiteralPath $Path -AclObject $Acl
+Write-Output $Path
+exit 0
+""",
+                encoding="utf-8",
+            )
+            install_marker = temporary_root / "npm-install-called"
+            discover = _run_bootstrap(
+                local_app_data,
+                "-Mode",
+                "Discover",
+                "-NpmCommand",
+                str(FAKE_NPM),
+            )
+            plan_hash = json.loads(discover.stdout)["planHash"]
+
+            result = _run_bootstrap(
+                local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmPlanHash",
+                plan_hash,
+                "-NpmCommand",
+                str(FAKE_NPM),
+                "-IcaclsCommand",
+                str(corrupting_icacls),
+                environment={"FAKE_NPM_INSTALL_MARKER": str(install_marker)},
+            )
+
+            self.assertFalse(install_marker.exists())
+
+        self.assertEqual(result.returncode, 48, result.stderr)
+        self.assertIn("ACL security verification failed", result.stderr)
+        self.assertIn("DACL inheritance is not protected", result.stderr)
 
     def test_apply_stops_when_npm_install_fails(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -481,7 +526,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -512,7 +557,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -538,7 +583,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -564,7 +609,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -590,7 +635,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -616,7 +661,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan_hash,
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -641,7 +686,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan["planHash"],
                 "-NpmCommand",
                 str(FAKE_NPM),
@@ -692,7 +737,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 local_app_data,
                 "-Mode",
                 "Apply",
-                "-ConfirmedPlanHash",
+                "-ConfirmPlanHash",
                 plan["planHash"],
                 "-NpmCommand",
                 str(FAKE_NPM),
