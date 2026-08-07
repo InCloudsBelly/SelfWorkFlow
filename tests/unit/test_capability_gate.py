@@ -24,8 +24,150 @@ def _assert_redacted_workflow_error(
 
 
 class CapabilityGateTests(unittest.TestCase):
+    def test_one_time_alternative_has_non_overrideable_typed_policy(self):
+        import selfworkflow.model as model
+
+        self.assertTrue(
+            hasattr(model, "OneTimeAlternative")
+            and hasattr(model, "OneTimeAlternativeAction"),
+            "typed one-time alternative policy is not implemented",
+        )
+        alternative = model.OneTimeAlternative(
+            "filesystem-write",
+            model.OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+        )
+
+        self.assertEqual(alternative.capability, "filesystem-write")
+        self.assertIs(
+            alternative.action,
+            model.OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+        )
+        self.assertIs(alternative.requires_explicit_user_authorization, True)
+        self.assertIs(alternative.allows_automatic_downgrade, False)
+        for field_name, forged_value in (
+            ("requires_explicit_user_authorization", False),
+            ("allows_automatic_downgrade", True),
+        ):
+            with self.subTest(field=field_name, operation="construct"):
+                with self.assertRaises(TypeError):
+                    model.OneTimeAlternative(
+                        "filesystem-write",
+                        model.OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+                        **{field_name: forged_value},
+                    )
+            with self.subTest(field=field_name, operation="mutate"):
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(alternative, field_name, forged_value)
+
+    def test_one_time_alternative_rejects_arbitrary_actions(self):
+        from selfworkflow.model import OneTimeAlternative
+
+        for action in ("manual-alternative", "automatic downgrade is fine"):
+            with self.subTest(action=action):
+                _assert_redacted_workflow_error(
+                    self,
+                    lambda: OneTimeAlternative("filesystem-write", action),
+                    "one-time-alternative-invalid",
+                    "automatic downgrade",
+                )
+
+    def test_one_time_alternative_requires_nonempty_exact_capability_name(self):
+        from selfworkflow.model import OneTimeAlternative, OneTimeAlternativeAction
+
+        class HostileString(str):
+            pass
+
+        for capability in ("", 7, HostileString("TOP-SECRET-CAPABILITY")):
+            with self.subTest(capability_type=type(capability).__name__):
+                _assert_redacted_workflow_error(
+                    self,
+                    lambda: OneTimeAlternative(
+                        capability,
+                        OneTimeAlternativeAction.MANUAL_VERIFY,
+                    ),
+                    "one-time-alternative-invalid",
+                    "TOP-SECRET-CAPABILITY",
+                )
+
+    def test_one_time_alternative_derives_instruction_from_typed_action(self):
+        from selfworkflow.model import OneTimeAlternative, OneTimeAlternativeAction
+
+        expected = {
+            OneTimeAlternativeAction.MANUAL_ALTERNATIVE: (
+                "request explicit user authorization for a one-time manual "
+                "alternative: filesystem-write"
+            ),
+            OneTimeAlternativeAction.MANUAL_VERIFY: (
+                "request explicit user authorization to manually verify "
+                "capability support: filesystem-write"
+            ),
+            OneTimeAlternativeAction.MANUAL_REPORT_AND_VERIFY: (
+                "request explicit user authorization to manually report and verify "
+                "capability support: filesystem-write"
+            ),
+        }
+
+        for action, instruction in expected.items():
+            with self.subTest(action=action.value):
+                alternative = OneTimeAlternative("filesystem-write", action)
+                self.assertEqual(
+                    getattr(alternative, "instruction", None),
+                    instruction,
+                )
+
+    def test_model_centralizes_both_non_waivable_capability_boundaries(self):
+        import selfworkflow.model as model
+
+        self.assertTrue(
+            hasattr(model, "ONE_TIME_ALTERNATIVE_AUTHORIZATION_BOUNDARY")
+            and hasattr(model, "MANDATORY_CAPABILITY_BOUNDARIES"),
+            "mandatory capability boundaries are not centralized",
+        )
+        self.assertEqual(
+            model.MANDATORY_CAPABILITY_BOUNDARIES,
+            (
+                "one-time alternatives require explicit user authorization",
+                "required capability cannot be treated as supported without evidence",
+            ),
+        )
+
+    def test_pause_result_requires_both_mandatory_capability_boundaries(self):
+        from selfworkflow.model import (
+            MANDATORY_CAPABILITY_BOUNDARIES,
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
+            PauseResult,
+        )
+
+        for omitted in MANDATORY_CAPABILITY_BOUNDARIES:
+            with self.subTest(omitted=omitted):
+                with self.assertRaises(ValueError) as raised:
+                    PauseResult(
+                        ("filesystem-write",),
+                        (("filesystem-write", "persist workflow files"),),
+                        (("filesystem-write", "capability is unsupported"),),
+                        (("filesystem-write", "provide the capability"),),
+                        (
+                            OneTimeAlternative(
+                                "filesystem-write",
+                                OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+                            ),
+                        ),
+                        tuple(
+                            boundary
+                            for boundary in MANDATORY_CAPABILITY_BOUNDARIES
+                            if boundary != omitted
+                        ),
+                    )
+                self.assertEqual(str(raised.exception), "pause-result-invalid")
+
     def test_pause_result_rejects_noncanonical_complete_contract(self):
-        from selfworkflow.model import PauseResult
+        from selfworkflow.model import (
+            MANDATORY_CAPABILITY_BOUNDARIES,
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
+            PauseResult,
+        )
 
         missing = ("filesystem-read", "test-execution")
         valid = {
@@ -43,14 +185,21 @@ class CapabilityGateTests(unittest.TestCase):
                 ("test-execution", "verify the capability"),
             ),
             "one_time_alternatives": (
-                ("filesystem-read", "request explicit manual authorization"),
-                ("test-execution", "request explicit verification authorization"),
+                OneTimeAlternative(
+                    "filesystem-read",
+                    OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+                ),
+                OneTimeAlternative(
+                    "test-execution",
+                    OneTimeAlternativeAction.MANUAL_VERIFY,
+                ),
             ),
-            "non_waivable_boundaries": (
-                "one-time alternatives require explicit user authorization",
-                "required capability cannot be treated as supported without evidence",
-            ),
+            "non_waivable_boundaries": MANDATORY_CAPABILITY_BOUNDARIES,
         }
+        self.assertEqual(
+            PauseResult(**valid).one_time_alternatives,
+            valid["one_time_alternatives"],
+        )
 
         invalid_cases = [
             (
@@ -70,7 +219,7 @@ class CapabilityGateTests(unittest.TestCase):
                     "purposes": (("", "purpose"),),
                     "reasons": (("", "reason"),),
                     "recommendations": (("", "recommendation"),),
-                    "one_time_alternatives": (("", "alternative"),),
+                    "one_time_alternatives": (),
                 },
             ),
             (
@@ -94,7 +243,6 @@ class CapabilityGateTests(unittest.TestCase):
             "purposes",
             "reasons",
             "recommendations",
-            "one_time_alternatives",
         ):
             pairs = valid[field_name]
             invalid_cases.extend(
@@ -118,6 +266,35 @@ class CapabilityGateTests(unittest.TestCase):
                     ),
                 )
             )
+        alternatives = valid["one_time_alternatives"]
+        invalid_cases.extend(
+            (
+                (
+                    "one_time_alternatives missing capability",
+                    {"one_time_alternatives": alternatives[:-1]},
+                ),
+                (
+                    "one_time_alternatives extra capability",
+                    {
+                        "one_time_alternatives": alternatives
+                        + (
+                            OneTimeAlternative(
+                                "user-confirmation",
+                                OneTimeAlternativeAction.MANUAL_VERIFY,
+                            ),
+                        )
+                    },
+                ),
+                (
+                    "one_time_alternatives duplicate capability",
+                    {"one_time_alternatives": alternatives + (alternatives[0],)},
+                ),
+                (
+                    "one_time_alternatives unsorted",
+                    {"one_time_alternatives": tuple(reversed(alternatives))},
+                ),
+            )
+        )
         invalid_cases.extend(
             (
                 ("empty boundaries", {"non_waivable_boundaries": ()}),
@@ -143,7 +320,7 @@ class CapabilityGateTests(unittest.TestCase):
                     "missing evidence boundary",
                     {
                         "non_waivable_boundaries": (
-                            "one-time alternatives require explicit user authorization",
+                            MANDATORY_CAPABILITY_BOUNDARIES[0],
                         )
                     },
                 ),
@@ -347,6 +524,9 @@ class CapabilityGateTests(unittest.TestCase):
         from selfworkflow.classifier import check_capabilities
         from selfworkflow.model import (
             CapabilityReport,
+            MANDATORY_CAPABILITY_BOUNDARIES,
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
             PauseResult,
             TaskClassification,
         )
@@ -398,6 +578,25 @@ class CapabilityGateTests(unittest.TestCase):
                         unordered_type(
                             [("filesystem-read", "hidden-recommendation")]
                         ),
+                    ),
+                ),
+                (
+                    "pause one-time alternatives",
+                    "pause-result-invalid",
+                    lambda: PauseResult(
+                        ("filesystem-read",),
+                        (("filesystem-read", "read task inputs"),),
+                        (("filesystem-read", "capability is unsupported"),),
+                        (("filesystem-read", "provide the capability"),),
+                        unordered_type(
+                            [
+                                OneTimeAlternative(
+                                    "filesystem-read",
+                                    OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+                                )
+                            ]
+                        ),
+                        MANDATORY_CAPABILITY_BOUNDARIES,
                     ),
                 ),
                 (
@@ -625,7 +824,12 @@ class CapabilityGateTests(unittest.TestCase):
                 )
 
     def test_pause_pair_mappings_are_normalized_in_lexical_key_order(self):
-        from selfworkflow.model import PauseResult
+        from selfworkflow.model import (
+            MANDATORY_CAPABILITY_BOUNDARIES,
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
+            PauseResult,
+        )
 
         descending = {
             "test-execution": "second",
@@ -640,19 +844,25 @@ class CapabilityGateTests(unittest.TestCase):
             ("test-execution", "second"),
         )
         missing = ("filesystem-read", "test-execution")
-        boundaries = (
-            "one-time alternatives require explicit user authorization",
-            "required capability cannot be treated as supported without evidence",
+        alternatives = (
+            OneTimeAlternative(
+                "filesystem-read",
+                OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+            ),
+            OneTimeAlternative(
+                "test-execution",
+                OneTimeAlternativeAction.MANUAL_VERIFY,
+            ),
         )
 
-        for field_index in (1, 2, 3, 4):
+        for field_index in (1, 2, 3):
             descending_arguments = [
                 missing,
                 ascending,
                 ascending,
                 ascending,
-                ascending,
-                boundaries,
+                alternatives,
+                MANDATORY_CAPABILITY_BOUNDARIES,
             ]
             ascending_arguments = list(descending_arguments)
             descending_arguments[field_index] = descending
@@ -665,7 +875,6 @@ class CapabilityGateTests(unittest.TestCase):
                     "purposes",
                     "reasons",
                     "recommendations",
-                    "one_time_alternatives",
                 )[
                     field_index - 1
                 ]
@@ -827,7 +1036,11 @@ class CapabilityGateTests(unittest.TestCase):
                 self.assertEqual(str(raised.exception), "CONTROL-FLOW")
 
     def test_pause_result_copies_external_collections_to_nested_tuples(self):
-        from selfworkflow.model import PauseResult
+        from selfworkflow.model import (
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
+            PauseResult,
+        )
 
         missing = ["filesystem-write"]
         purposes = {"filesystem-write": "persist workflow files"}
@@ -835,12 +1048,12 @@ class CapabilityGateTests(unittest.TestCase):
         recommendations = [
             ["filesystem-write", "provide supported capability: filesystem-write"]
         ]
-        one_time_alternatives = {
-            "filesystem-write": (
-                "request explicit user authorization for a one-time manual "
-                "alternative: filesystem-write"
+        one_time_alternatives = [
+            OneTimeAlternative(
+                "filesystem-write",
+                OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
             )
-        }
+        ]
         non_waivable_boundaries = [
             "one-time alternatives require explicit user authorization",
             "required capability cannot be treated as supported without evidence",
@@ -858,7 +1071,12 @@ class CapabilityGateTests(unittest.TestCase):
         purposes["filesystem-write"] = "changed"
         reasons[0][1] = "changed"
         recommendations[0][1] = "changed"
-        one_time_alternatives["filesystem-write"] = "changed"
+        one_time_alternatives.append(
+            OneTimeAlternative(
+                "test-execution",
+                OneTimeAlternativeAction.MANUAL_VERIFY,
+            )
+        )
         non_waivable_boundaries.append("changed")
 
         self.assertEqual(pause.missing_capabilities, ("filesystem-write",))
@@ -882,12 +1100,16 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             pause.one_time_alternatives,
             (
-                (
+                OneTimeAlternative(
                     "filesystem-write",
-                    "request explicit user authorization for a one-time manual "
-                    "alternative: filesystem-write",
+                    OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
                 ),
             ),
+        )
+        self.assertEqual(
+            pause.one_time_alternatives[0].instruction,
+            "request explicit user authorization for a one-time manual "
+            "alternative: filesystem-write",
         )
         self.assertEqual(
             pause.non_waivable_boundaries,
@@ -895,6 +1117,26 @@ class CapabilityGateTests(unittest.TestCase):
                 "one-time alternatives require explicit user authorization",
                 "required capability cannot be treated as supported without evidence",
             ),
+        )
+
+    def test_pause_result_rejects_untyped_one_time_alternatives(self):
+        from selfworkflow.model import PauseResult
+
+        _assert_redacted_workflow_error(
+            self,
+            lambda: PauseResult(
+                ("filesystem-write",),
+                (("filesystem-write", "persist workflow files"),),
+                (("filesystem-write", "capability is unsupported"),),
+                (("filesystem-write", "provide the capability"),),
+                (("filesystem-write", "automatic downgrade is fine"),),
+                (
+                    "one-time alternatives require explicit user authorization",
+                    "required capability cannot be treated as supported without evidence",
+                ),
+            ),
+            "pause-result-invalid",
+            "automatic downgrade",
         )
 
     def test_pause_result_rejects_invalid_nested_values_with_fixed_error(self):
@@ -1025,27 +1267,75 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             pause.one_time_alternatives,
             (
-                (
+                model.OneTimeAlternative(
                     "filesystem-write",
-                    "request explicit user authorization for a one-time manual "
-                    "alternative: filesystem-write",
+                    model.OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
                 ),
             ),
         )
         self.assertEqual(
+            pause.one_time_alternatives[0].instruction,
+            "request explicit user authorization for a one-time manual "
+            "alternative: filesystem-write",
+        )
+        self.assertIs(
+            pause.one_time_alternatives[0].requires_explicit_user_authorization,
+            True,
+        )
+        self.assertIs(
+            pause.one_time_alternatives[0].allows_automatic_downgrade,
+            False,
+        )
+        self.assertEqual(
             pause.non_waivable_boundaries,
+            model.MANDATORY_CAPABILITY_BOUNDARIES,
+        )
+        generated_cases = (
             (
-                "one-time alternatives require explicit user authorization",
-                "required capability cannot be treated as supported without evidence",
+                model.CapabilityReport({"filesystem-write": "unsupported"}),
+                model.OneTimeAlternativeAction.MANUAL_ALTERNATIVE,
+                "request explicit user authorization for a one-time manual "
+                "alternative: filesystem-write",
+            ),
+            (
+                model.CapabilityReport({"filesystem-write": "unverified"}),
+                model.OneTimeAlternativeAction.MANUAL_VERIFY,
+                "request explicit user authorization to manually verify "
+                "capability support: filesystem-write",
+            ),
+            (
+                model.CapabilityReport({}),
+                model.OneTimeAlternativeAction.MANUAL_REPORT_AND_VERIFY,
+                "request explicit user authorization to manually report and verify "
+                "capability support: filesystem-write",
             ),
         )
+        for gap_report, expected_action, expected_instruction in generated_cases:
+            with self.subTest(action=expected_action.value):
+                generated = classifier.check_capabilities(
+                    ["filesystem-write"],
+                    gap_report,
+                )
+                alternative = generated.one_time_alternatives[0]
+                self.assertIs(alternative.action, expected_action)
+                self.assertEqual(alternative.instruction, expected_instruction)
+                self.assertIs(
+                    alternative.requires_explicit_user_authorization,
+                    True,
+                )
+                self.assertIs(alternative.allows_automatic_downgrade, False)
         self.assertTrue(pause.recommendations)
         with self.assertRaises(FrozenInstanceError):
             pause.status = model.ExecutionStatus.ACTIVE
 
     def test_only_supported_required_capability_passes_the_gate(self):
         from selfworkflow.classifier import check_capabilities
-        from selfworkflow.model import CapabilityReport
+        from selfworkflow.model import (
+            CapabilityReport,
+            MANDATORY_CAPABILITY_BOUNDARIES,
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
+        )
 
         unverified_pause = check_capabilities(
             ["test-execution"],
@@ -1061,19 +1351,20 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             unverified_pause.one_time_alternatives,
             (
-                (
+                OneTimeAlternative(
                     "test-execution",
-                    "request explicit user authorization to manually verify "
-                    "capability support: test-execution",
+                    OneTimeAlternativeAction.MANUAL_VERIFY,
                 ),
             ),
         )
         self.assertEqual(
+            unverified_pause.one_time_alternatives[0].instruction,
+            "request explicit user authorization to manually verify "
+            "capability support: test-execution",
+        )
+        self.assertEqual(
             unverified_pause.non_waivable_boundaries,
-            (
-                "one-time alternatives require explicit user authorization",
-                "required capability cannot be treated as supported without evidence",
-            ),
+            MANDATORY_CAPABILITY_BOUNDARIES,
         )
         self.assertIn("manually verify", unverified_pause.recommendations[0][1])
 
@@ -1085,7 +1376,12 @@ class CapabilityGateTests(unittest.TestCase):
 
     def test_unreported_required_capability_pauses_instead_of_degrading(self):
         from selfworkflow.classifier import check_capabilities
-        from selfworkflow.model import CapabilityReport
+        from selfworkflow.model import (
+            CapabilityReport,
+            MANDATORY_CAPABILITY_BOUNDARIES,
+            OneTimeAlternative,
+            OneTimeAlternativeAction,
+        )
 
         pause = check_capabilities(
             ["filesystem-write"],
@@ -1105,19 +1401,20 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             pause.one_time_alternatives,
             (
-                (
+                OneTimeAlternative(
                     "filesystem-write",
-                    "request explicit user authorization to manually report and "
-                    "verify capability support: filesystem-write",
+                    OneTimeAlternativeAction.MANUAL_REPORT_AND_VERIFY,
                 ),
             ),
         )
         self.assertEqual(
+            pause.one_time_alternatives[0].instruction,
+            "request explicit user authorization to manually report and verify "
+            "capability support: filesystem-write",
+        )
+        self.assertEqual(
             pause.non_waivable_boundaries,
-            (
-                "one-time alternatives require explicit user authorization",
-                "required capability cannot be treated as supported without evidence",
-            ),
+            MANDATORY_CAPABILITY_BOUNDARIES,
         )
         self.assertIn("report and verify", pause.recommendations[0][1])
 

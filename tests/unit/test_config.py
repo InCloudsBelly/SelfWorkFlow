@@ -634,6 +634,36 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "configuration-invalid")
         self.assertEqual(str(raised.exception), "configuration-invalid")
 
+    def test_heterogeneous_validation_errors_return_redacted_fixed_error(self):
+        import selfworkflow.config as config_module
+
+        secret = "TOP-SECRET-CONTROL"
+        schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "allOf": [False, {"required": [secret]}],
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            document_path = temporary_root / "document.yaml"
+            schema_path = temporary_root / "schema.json"
+            document_path.write_text("{}\n", encoding="utf-8")
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+
+            try:
+                config_module.load_config(document_path, schema_path)
+            except Exception as error:
+                caught_error = error
+            else:
+                self.fail("invalid configuration was accepted")
+
+        self.assertIsInstance(caught_error, config_module.ConfigError)
+        self.assertEqual(caught_error.code, "configuration-invalid")
+        self.assertEqual(str(caught_error), "configuration-invalid")
+        self.assertIsNone(caught_error.__cause__)
+        self.assertIs(caught_error.__suppress_context__, True)
+        rendered = "".join(traceback.format_exception(caught_error))
+        self.assertNotIn(secret, rendered)
+
     def test_rejects_missing_required_properties_with_stable_error(self):
         import selfworkflow.config as config_module
 
@@ -763,6 +793,65 @@ class ConfigLoadingTests(unittest.TestCase):
                 self.assertNotIn("do-not-leak", str(error))
             else:
                 self.fail("malformed schema was accepted")
+
+    def test_schema_json_rejects_nonfinite_numbers_before_validation(self):
+        import selfworkflow.config as config_module
+
+        secret = "TOP-SECRET-NUMERIC-SCHEMA"
+        draft = "https://json-schema.org/draft/2020-12/schema"
+        cases = tuple(
+            (f"root-{label}", token, "null\n")
+            for label, token in (
+                ("nan", "NaN"),
+                ("infinity", "Infinity"),
+                ("negative-infinity", "-Infinity"),
+                ("overflow", "1e999"),
+            )
+        ) + tuple(
+            (f"nested-{label}", token, "score: 1\n")
+            for label, token in (
+                ("nan", "NaN"),
+                ("infinity", "Infinity"),
+                ("negative-infinity", "-Infinity"),
+                ("overflow", "1e999"),
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            document_path = temporary_root / "document.yaml"
+            schema_path = temporary_root / "schema.json"
+            for label, token, document_text in cases:
+                with self.subTest(case=label):
+                    if label.startswith("root-"):
+                        schema_text = (
+                            f'{{"$schema":"{draft}","title":"{secret}",'
+                            f'"const":{token}}}'
+                        )
+                    else:
+                        schema_text = (
+                            f'{{"$schema":"{draft}","title":"{secret}",'
+                            '"type":"object","properties":{"score":'
+                            f'{{"type":"number","maximum":{token}}}}}}}'
+                        )
+                    document_path.write_text(document_text, encoding="utf-8")
+                    schema_path.write_text(schema_text, encoding="utf-8")
+
+                    try:
+                        config_module.load_config(document_path, schema_path)
+                    except Exception as error:
+                        caught_error = error
+                    else:
+                        self.fail("non-finite schema number was accepted")
+
+                    self.assertIsInstance(caught_error, config_module.ConfigError)
+                    self.assertEqual(caught_error.code, "schema-invalid")
+                    self.assertEqual(str(caught_error), "schema-invalid")
+                    self.assertIsNone(caught_error.__cause__)
+                    self.assertIs(caught_error.__suppress_context__, True)
+                    rendered = "".join(traceback.format_exception(caught_error))
+                    self.assertNotIn(secret, rendered)
+                    self.assertNotIn(token, rendered)
 
     def test_invalid_draft_schema_is_rejected_with_stable_error(self):
         import selfworkflow.config as config_module

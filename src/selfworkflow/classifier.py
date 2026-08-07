@@ -6,6 +6,9 @@ from selfworkflow.model import (
     CapabilityReport,
     CapabilityState,
     Complexity,
+    MANDATORY_CAPABILITY_BOUNDARIES,
+    OneTimeAlternative,
+    OneTimeAlternativeAction,
     PauseResult,
     Risk,
     TaskClassification,
@@ -14,12 +17,6 @@ from selfworkflow.model import (
     _coerce_risk,
     _normalize_string_pairs,
     _normalize_string_sequence,
-)
-
-
-_NON_WAIVABLE_CAPABILITY_BOUNDARIES = (
-    "one-time alternatives require explicit user authorization",
-    "required capability cannot be treated as supported without evidence",
 )
 
 
@@ -45,21 +42,14 @@ def _capability_gap_recommendation(
 def _capability_one_time_alternative(
     name: str,
     state: CapabilityState | None,
-) -> str:
+) -> OneTimeAlternative:
     if state is CapabilityState.UNSUPPORTED:
-        return (
-            "request explicit user authorization for a one-time manual "
-            f"alternative: {name}"
-        )
-    if state is CapabilityState.UNVERIFIED:
-        return (
-            "request explicit user authorization to manually verify "
-            f"capability support: {name}"
-        )
-    return (
-        "request explicit user authorization to manually report and verify "
-        f"capability support: {name}"
-    )
+        action = OneTimeAlternativeAction.MANUAL_ALTERNATIVE
+    elif state is CapabilityState.UNVERIFIED:
+        action = OneTimeAlternativeAction.MANUAL_VERIFY
+    else:
+        action = OneTimeAlternativeAction.MANUAL_REPORT_AND_VERIFY
+    return OneTimeAlternative(name, action)
 
 
 def check_capabilities(
@@ -105,12 +95,9 @@ def check_capabilities(
         return None
 
     one_time_alternatives = tuple(
-        (
+        _capability_one_time_alternative(
             name,
-            _capability_one_time_alternative(
-                name,
-                report.state_for(name),
-            ),
+            report.state_for(name),
         )
         for name in missing
     )
@@ -130,7 +117,7 @@ def check_capabilities(
             for name in missing
         ),
         one_time_alternatives=one_time_alternatives,
-        non_waivable_boundaries=_NON_WAIVABLE_CAPABILITY_BOUNDARIES,
+        non_waivable_boundaries=MANDATORY_CAPABILITY_BOUNDARIES,
     )
 
 

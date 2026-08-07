@@ -29,6 +29,10 @@ class _DuplicateKeyError(ValueError):
     pass
 
 
+class _InvalidJsonNumberError(ValueError):
+    pass
+
+
 class _YamlResourceError(yaml.YAMLError):
     pass
 
@@ -67,6 +71,21 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise _DuplicateKeyError
         result[key] = value
     return result
+
+
+def _reject_json_constant(value: str) -> None:
+    raise _InvalidJsonNumberError
+
+
+def _reject_nonfinite_json_numbers(value: Any) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise _InvalidJsonNumberError
+    if isinstance(value, dict):
+        for item in value.values():
+            _reject_nonfinite_json_numbers(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_nonfinite_json_numbers(item)
 
 
 def _construct_unique_yaml_mapping(
@@ -141,8 +160,15 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
         schema = json.loads(
             schema_text,
             object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
         )
-    except (json.JSONDecodeError, UnicodeError, _DuplicateKeyError):
+        _reject_nonfinite_json_numbers(schema)
+    except (
+        json.JSONDecodeError,
+        UnicodeError,
+        _DuplicateKeyError,
+        _InvalidJsonNumberError,
+    ):
         raise ConfigError("schema-invalid") from None
     try:
         Draft202012Validator.check_schema(schema)
@@ -162,15 +188,9 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
             schema,
             registry=Registry(retrieve=_deny_reference_retrieval),
         )
-        errors = sorted(
-            validator.iter_errors(document),
-            key=lambda error: (
-                tuple(str(item) for item in error.absolute_path),
-                error.validator,
-            ),
-        )
+        validation_error = next(validator.iter_errors(document), None)
     except Unresolvable:
         raise ConfigError("schema-reference-unavailable") from None
-    if errors:
-        raise ConfigError("configuration-invalid")
+    if validation_error is not None:
+        raise ConfigError("configuration-invalid") from None
     return _freeze(document)

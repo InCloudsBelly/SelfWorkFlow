@@ -127,8 +127,56 @@ class VerificationStatus(str, Enum):
         return self in {VerificationStatus.NOT_RUN, VerificationStatus.PARTIAL}
 
 
+class OneTimeAlternativeAction(str, Enum):
+    MANUAL_ALTERNATIVE = "manual-alternative"
+    MANUAL_VERIFY = "manual-verify"
+    MANUAL_REPORT_AND_VERIFY = "manual-report-and-verify"
+
+
+@dataclass(frozen=True)
+class OneTimeAlternative:
+    capability: str
+    action: OneTimeAlternativeAction
+    requires_explicit_user_authorization: bool = field(default=True, init=False)
+    allows_automatic_downgrade: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.capability) is not str
+            or not self.capability
+            or type(self.action) is not OneTimeAlternativeAction
+        ):
+            raise WorkflowInputError("one-time-alternative-invalid") from None
+
+    @property
+    def instruction(self) -> str:
+        if self.action is OneTimeAlternativeAction.MANUAL_ALTERNATIVE:
+            prefix = (
+                "request explicit user authorization for a one-time manual "
+                "alternative"
+            )
+        elif self.action is OneTimeAlternativeAction.MANUAL_VERIFY:
+            prefix = (
+                "request explicit user authorization to manually verify "
+                "capability support"
+            )
+        else:
+            prefix = (
+                "request explicit user authorization to manually report and verify "
+                "capability support"
+            )
+        return f"{prefix}: {self.capability}"
+
+
+ONE_TIME_ALTERNATIVE_AUTHORIZATION_BOUNDARY = (
+    "one-time alternatives require explicit user authorization"
+)
 REQUIRED_CAPABILITY_EVIDENCE_BOUNDARY = (
     "required capability cannot be treated as supported without evidence"
+)
+MANDATORY_CAPABILITY_BOUNDARIES = (
+    ONE_TIME_ALTERNATIVE_AUTHORIZATION_BOUNDARY,
+    REQUIRED_CAPABILITY_EVIDENCE_BOUNDARY,
 )
 
 
@@ -184,7 +232,7 @@ class PauseResult:
     purposes: tuple[tuple[str, str], ...]
     reasons: tuple[tuple[str, str], ...]
     recommendations: tuple[tuple[str, str], ...]
-    one_time_alternatives: tuple[tuple[str, str], ...] = ()
+    one_time_alternatives: tuple[OneTimeAlternative, ...] = ()
     non_waivable_boundaries: tuple[str, ...] = ()
     status: ExecutionStatus = field(default=ExecutionStatus.PAUSED, init=False)
     code: str = field(default="required-capabilities-unavailable", init=False)
@@ -202,7 +250,6 @@ class PauseResult:
             "purposes",
             "reasons",
             "recommendations",
-            "one_time_alternatives",
         ):
             object.__setattr__(
                 self,
@@ -212,6 +259,14 @@ class PauseResult:
                     "pause-result-invalid",
                 ),
             )
+        object.__setattr__(
+            self,
+            "one_time_alternatives",
+            _materialize_ordered(
+                self.one_time_alternatives,
+                "pause-result-invalid",
+            ),
+        )
         object.__setattr__(
             self,
             "non_waivable_boundaries",
@@ -232,7 +287,6 @@ class PauseResult:
             "purposes",
             "reasons",
             "recommendations",
-            "one_time_alternatives",
         ):
             pairs = getattr(self, field_name)
             if (
@@ -240,13 +294,24 @@ class PauseResult:
                 or any(not value for _, value in pairs)
             ):
                 raise WorkflowInputError("pause-result-invalid")
+        alternatives = self.one_time_alternatives
+        if any(
+            type(alternative) is not OneTimeAlternative
+            for alternative in alternatives
+        ):
+            raise WorkflowInputError("pause-result-invalid") from None
+        if tuple(alternative.capability for alternative in alternatives) != missing:
+            raise WorkflowInputError("pause-result-invalid")
         boundaries = self.non_waivable_boundaries
         if (
             not boundaries
             or any(not boundary for boundary in boundaries)
             or len(set(boundaries)) != len(boundaries)
             or boundaries != tuple(sorted(boundaries))
-            or REQUIRED_CAPABILITY_EVIDENCE_BOUNDARY not in boundaries
+            or any(
+                mandatory not in boundaries
+                for mandatory in MANDATORY_CAPABILITY_BOUNDARIES
+            )
         ):
             raise WorkflowInputError("pause-result-invalid")
 
