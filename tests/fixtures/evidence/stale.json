@@ -2,13 +2,14 @@
   "classification": {
     "taskKind": "modification",
     "complexity": "C1",
-    "risk": "R1"
+    "risk": "R1",
+    "policyHash": "sha256:f639cbfe3aa2c17798743f83e8237e873871a174687f713f673cf3b17fb09f3a"
   },
   "capabilities": [
     {
       "name": "filesystem-write",
       "state": "supported",
-      "evidenceHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      "artifactHash": "sha256:677b183310cbd7f466611176aacbe4f8bd59169810a769ebf264df9c5c09af02"
     }
   ],
   "selectedSkills": [
@@ -28,26 +29,28 @@
   "changes": {
     "taskKind": "modification",
     "resultContentHash": "sha256:0721e8ed5ea90b709800b5134b3f7cfa28f749f11af24aa0516972e2c6eab7a5",
+    "baseManifestHash": "sha256:bb00cda5ed3af26a445aabcdcbeba222d17420e7bcaf448e68bbf6ffeabdc8f5",
+    "finalManifestHash": "sha256:3f24e3ca0bb31e64ad26a4fdf072817db4a77cd983a6a75d7c9bd209b5cf9dc0",
     "items": [
       {
         "path": "src/example.py",
         "operation": "modified",
-        "contentHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        "contentHash": "sha256:1c3ef9a7c817b4642bcb3cb1456fbce92a6f992df2e1d6ad9d8a2dfb4fdf42f6"
       }
     ]
   },
   "review": {
+    "id": "completion-review",
     "status": "passed",
-    "level": "L2",
-    "evidenceHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "level": "L0",
+    "artifactHash": "sha256:8f79921a44c33d699a84d69cf75bd200f882c02b956e69ad4635b6fbb411bb0a",
     "reason": ""
   },
   "verification": [
     {
       "id": "unit-tests",
       "status": "passed",
-      "contentHash": "sha256:0721e8ed5ea90b709800b5134b3f7cfa28f749f11af24aa0516972e2c6eab7a5",
-      "evidenceHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "artifactHash": "sha256:b20aed3bf9d12e9ccf883b878fa760f48454e84521f101610424a110704f8b1b",
       "verifiedAt": "2026-08-08T06:00:00Z",
       "validForSeconds": 3600,
       "reason": ""

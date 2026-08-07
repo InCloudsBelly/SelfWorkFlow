@@ -1,18 +1,15 @@
 schemaVersion: 1
+policyVersion: 1.0.0
 mergeOrder:
   - protected
   - skill
   - project
   - overlay
 ownerModificationGate:
-  destructiveChangeConfirmed: true
-  versionBump: major
-  independentReview:
-    status: passed
-    requiresEvidenceHash: true
-  behavioralTests:
-    status: passed
-    requiresEvidenceHash: true
+  versionChange: semver-major
+  confirmationArtifactKind: owner-confirmation
+  reviewArtifactKind: owner-review
+  behavioralTestArtifactKind: behavioral-test
 rules:
   - id: truthful-capability-review-verification
     strength: agent-policy

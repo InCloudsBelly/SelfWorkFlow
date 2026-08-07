@@ -6,12 +6,17 @@
   "additionalProperties": false,
   "required": [
     "schemaVersion",
+    "policyVersion",
     "mergeOrder",
     "ownerModificationGate",
     "rules"
   ],
   "properties": {
     "schemaVersion": {"const": 1},
+    "policyVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
     "mergeOrder": {
       "type": "array",
       "prefixItems": [
@@ -28,32 +33,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "destructiveChangeConfirmed",
-        "versionBump",
-        "independentReview",
-        "behavioralTests"
+        "versionChange",
+        "confirmationArtifactKind",
+        "reviewArtifactKind",
+        "behavioralTestArtifactKind"
       ],
       "properties": {
-        "destructiveChangeConfirmed": {"const": true},
-        "versionBump": {"const": "major"},
-        "independentReview": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "requiresEvidenceHash"],
-          "properties": {
-            "status": {"const": "passed"},
-            "requiresEvidenceHash": {"const": true}
-          }
-        },
-        "behavioralTests": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["status", "requiresEvidenceHash"],
-          "properties": {
-            "status": {"const": "passed"},
-            "requiresEvidenceHash": {"const": true}
-          }
-        }
+        "versionChange": {"const": "semver-major"},
+        "confirmationArtifactKind": {"const": "owner-confirmation"},
+        "reviewArtifactKind": {"const": "owner-review"},
+        "behavioralTestArtifactKind": {"const": "behavioral-test"}
       }
     },
     "rules": {

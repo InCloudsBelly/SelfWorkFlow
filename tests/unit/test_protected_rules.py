@@ -1,6 +1,6 @@
-import json
-import importlib.util
+import copy
 from dataclasses import FrozenInstanceError
+import json
 from pathlib import Path
 import re
 import traceback
@@ -13,46 +13,127 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _protected_document():
+    return yaml.safe_load(
+        (REPOSITORY_ROOT / "workflow/protected-rules.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
 def _open_object_schema_paths(value):
-    open_paths = []
+    paths = []
 
     def visit(node, path):
         if isinstance(node, dict):
             if node.get("type") == "object":
-                required = node.get("required")
-                properties = node.get("properties")
-                if (
-                    node.get("additionalProperties") is not False
-                    or not isinstance(required, list)
-                    or not isinstance(properties, dict)
-                    or len(required) != len(set(required))
-                    or set(required) != set(properties)
+                properties = node.get("properties", {})
+                required = node.get("required", [])
+                if node.get("additionalProperties") is not False or set(required) != set(
+                    properties
                 ):
-                    open_paths.append(path)
-            for key, nested in node.items():
-                visit(nested, f"{path}.{key}")
+                    paths.append(path)
+            for key, item in node.items():
+                visit(item, f"{path}/{key}")
         elif isinstance(node, list):
-            for index, nested in enumerate(node):
-                visit(nested, f"{path}[{index}]")
+            for index, item in enumerate(node):
+                visit(item, f"{path}/{index}")
 
     visit(value, "$")
-    return tuple(open_paths)
+    return paths
+
+
+def _put(store, artifact):
+    from selfworkflow.evidence import canonical_content_hash
+
+    artifact_hash = canonical_content_hash(artifact)
+    store[artifact_hash] = artifact
+    return artifact_hash
+
+
+def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
+    from selfworkflow.evidence import OwnerChangeRequest, canonical_content_hash
+
+    protected = _protected_document()
+    proposed = copy.deepcopy(protected["rules"] if proposed_rules is None else proposed_rules)
+    base_hash = canonical_content_hash(protected["rules"])
+    proposed_hash = canonical_content_hash(proposed)
+    store = {}
+    confirmation = {
+        "kind": "owner-confirmation",
+        "status": "passed",
+        "subjectId": "protected-rules-change",
+        "subjectHash": proposed_hash,
+        "actorId": "repository-owner",
+        "contextId": "owner-change-task",
+        "relatedIds": [],
+        "recordedAt": "2026-08-08T08:00:00Z",
+        "attributes": {"scope": "replace-protected-rules"},
+    }
+    review = {
+        "kind": "owner-review",
+        "status": "passed",
+        "subjectId": "protected-rules-change",
+        "subjectHash": proposed_hash,
+        "actorId": "independent-reviewer",
+        "contextId": "independent-review-task",
+        "relatedIds": [],
+        "recordedAt": "2026-08-08T08:00:00Z",
+        "attributes": {
+            "level": "L2",
+            "implementationActor": "implementer",
+            "implementationContext": "task-3",
+        },
+    }
+    tests = {
+        "kind": "behavioral-test",
+        "status": "passed",
+        "subjectId": "protected-rules-change",
+        "subjectHash": proposed_hash,
+        "actorId": "test-runner",
+        "contextId": "behavioral-test-run",
+        "relatedIds": [],
+        "recordedAt": "2026-08-08T08:00:00Z",
+        "attributes": {"suite": "protected-rules"},
+    }
+    request = OwnerChangeRequest(
+        base_rules_hash=base_hash,
+        proposed_rules_hash=proposed_hash,
+        previous_version=protected["policyVersion"],
+        new_version=new_version,
+        owner_actor="repository-owner",
+        implementation_actor="implementer",
+        implementation_context="task-3",
+        confirmation_artifact_hash=_put(store, confirmation),
+        review_artifact_hash=_put(store, review),
+        behavioral_test_artifact_hash=_put(store, tests),
+    )
+    return protected, proposed, request, store
 
 
 class ProtectedRulesTests(unittest.TestCase):
-    def test_checked_in_contract_contains_the_closed_protected_invariants(self):
-        document_path = REPOSITORY_ROOT / "workflow" / "protected-rules.yaml"
-        schema_path = REPOSITORY_ROOT / "schemas" / "protected-rules.schema.json"
-        self.assertTrue(document_path.is_file(), "protected rules are missing")
-        self.assertTrue(schema_path.is_file(), "protected rules schema is missing")
-        document = yaml.safe_load(document_path.read_text(encoding="utf-8"))
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-
+    def test_checked_in_contract_is_closed_and_exact(self):
+        protected = _protected_document()
+        schema = json.loads(
+            (REPOSITORY_ROOT / "schemas/protected-rules.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
         Draft202012Validator.check_schema(schema)
-        Draft202012Validator(schema).validate(document)
-        self.assertEqual(_open_object_schema_paths(schema), ())
+        Draft202012Validator(schema).validate(protected)
+        self.assertEqual(_open_object_schema_paths(schema), [])
+        self.assertEqual(protected["policyVersion"], "1.0.0")
         self.assertEqual(
-            tuple(rule["id"] for rule in document["rules"]),
+            protected["ownerModificationGate"],
+            {
+                "versionChange": "semver-major",
+                "confirmationArtifactKind": "owner-confirmation",
+                "reviewArtifactKind": "owner-review",
+                "behavioralTestArtifactKind": "behavioral-test",
+            },
+        )
+        self.assertEqual(
+            tuple(rule["id"] for rule in protected["rules"]),
             (
                 "truthful-capability-review-verification",
                 "no-silent-degradation",
@@ -62,261 +143,258 @@ class ProtectedRulesTests(unittest.TestCase):
                 "require-fresh-verification-before-completion",
             ),
         )
-        self.assertEqual(
-            tuple(rule["strength"] for rule in document["rules"]),
-            (
-                "agent-policy",
-                "agent-policy",
-                "agent-policy",
-                "agent-policy",
-                "agent-policy",
-                "enforced",
-            ),
-        )
-        self.assertEqual(
-            document["mergeOrder"],
-            ["protected", "skill", "project", "overlay"],
-        )
-        self.assertEqual(
-            document["ownerModificationGate"],
-            {
-                "destructiveChangeConfirmed": True,
-                "versionBump": "major",
-                "independentReview": {
-                    "status": "passed",
-                    "requiresEvidenceHash": True,
-                },
-                "behavioralTests": {
-                    "status": "passed",
-                    "requiresEvidenceHash": True,
-                },
-            },
-        )
 
-    def test_lower_priority_layers_cannot_replace_a_protected_rule(self):
-        module_spec = importlib.util.find_spec("selfworkflow.evidence")
-        self.assertIsNotNone(module_spec, "protected rule merge is missing")
-        from selfworkflow.evidence import WorkflowEvidenceError
-        from selfworkflow.evidence import merge_protected_rules
+    def test_lower_layers_have_only_monotonic_typed_operations(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
 
-        protected = yaml.safe_load(
-            (REPOSITORY_ROOT / "workflow" / "protected-rules.yaml").read_text(
-                encoding="utf-8"
-            )
-        )
-        secret = "hostile-sensitive-layer-value"
-        errors = []
-        for kind in ("skill", "project", "overlay"):
-            with self.subTest(kind=kind):
-                layer = {
-                    "kind": kind,
-                    "name": secret,
-                    "rules": [
-                        {
-                            "id": "no-silent-degradation",
-                            "strength": "agent-policy",
-                        }
-                    ],
-                }
-                with self.assertRaises(WorkflowEvidenceError) as caught:
-                    merge_protected_rules(protected, [layer])
-                errors.append(caught.exception)
-
-        self.assertEqual(
-            [error.code for error in errors],
-            ["protected-rule-override-denied"] * 3,
-        )
-        self.assertEqual(
-            {error.message for error in errors},
-            {"A lower-priority rule cannot replace a protected rule."},
-        )
-        self.assertTrue(all(secret not in str(error) for error in errors))
-
-    def test_rule_merge_is_deterministic_and_deeply_immutable(self):
-        from selfworkflow.evidence import merge_protected_rules
-
-        protected = yaml.safe_load(
-            (REPOSITORY_ROOT / "workflow" / "protected-rules.yaml").read_text(
-                encoding="utf-8"
-            )
-        )
+        protected = _protected_document()
+        misleading_id = "allow-silent-degradation"
         layers = [
             {
-                "kind": "overlay",
-                "name": "personal",
-                "rules": [
-                    {"id": "extension-shared", "strength": "enforced"},
-                ],
-            },
-            {
                 "kind": "skill",
-                "name": "general",
-                "rules": [
-                    {"id": "extension-shared", "strength": "agent-policy"},
-                    {"id": "extension-skill", "strength": "agent-policy"},
+                "name": "negative-looking-skill",
+                "operations": [
+                    {
+                        "operation": "advisory",
+                        "id": misleading_id,
+                        "statement": "The identifier grants no protected authority.",
+                    }
                 ],
             },
             {
                 "kind": "project",
-                "name": "repository",
-                "rules": [
-                    {"id": "extension-project", "strength": "enforced"},
+                "name": "project-requirements",
+                "operations": [
+                    {
+                        "operation": "add-requirement",
+                        "id": "project-tests",
+                        "statement": "Run project tests.",
+                    }
                 ],
             },
         ]
-
-        first = merge_protected_rules(protected, layers)
-        second = merge_protected_rules(protected, list(reversed(layers)))
-
-        self.assertEqual(first, second)
+        merged = merge_protected_rules(protected, layers)
+        negative = merged.rule_for(misleading_id)
+        self.assertEqual(negative.operation, "advisory")
+        self.assertFalse(negative.protected)
         self.assertEqual(
-            tuple(rule.id for rule in first.rules),
-            tuple(sorted(rule.id for rule in first.rules)),
-        )
-        shared = first.rule_for("extension-shared")
-        self.assertIsNotNone(shared)
-        self.assertEqual(
-            (shared.strength, shared.source_kind, shared.source_name),
-            ("enforced", "overlay", "personal"),
+            merge_protected_rules(protected, list(reversed(layers))),
+            merged,
         )
         with self.assertRaises(FrozenInstanceError):
-            shared.strength = "agent-policy"
-        with self.assertRaises(TypeError):
-            first.rules[0] = shared
+            negative.operation = "disable"
 
-    def test_owner_changes_require_the_complete_exact_breaking_change_gate(self):
-        from selfworkflow.evidence import WorkflowEvidenceError
-        from selfworkflow.evidence import merge_protected_rules
+        for operation in ("disable", "replace", True):
+            invalid = copy.deepcopy(layers[:1])
+            invalid[0]["operations"][0]["operation"] = operation
+            with self.subTest(operation=operation):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    merge_protected_rules(protected, invalid)
+                self.assertEqual(caught.exception.code, "protected-rule-layer-invalid")
 
-        protected = yaml.safe_load(
-            (REPOSITORY_ROOT / "workflow" / "protected-rules.yaml").read_text(
-                encoding="utf-8"
-            )
+        override = copy.deepcopy(layers[:1])
+        override[0]["operations"][0]["id"] = protected["rules"][0]["id"]
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(protected, override)
+        self.assertEqual(caught.exception.code, "protected-rule-override-denied")
+
+        # A negative-looking ordinary ID cannot alter the fixed completion evaluator.
+        from tests.unit.test_evidence import _case, _evaluate, _replace_artifact
+
+        case = _case()
+        capability = case["evidence"]["capabilities"][0]
+        capability["state"] = "unsupported"
+        _replace_artifact(
+            case,
+            capability,
+            lambda artifact: artifact["attributes"].update(
+                {"state": "unsupported"}
+            ),
         )
-        owner_rules = [dict(rule) for rule in protected["rules"]]
-        owner_rules[0]["strength"] = "enforced"
-        authorization = {
-            "destructiveChangeConfirmed": True,
-            "versionBump": "major",
-            "independentReview": {
-                "status": "passed",
-                "evidenceHash": "sha256:" + "a" * 64,
-            },
-            "behavioralTests": {
-                "status": "passed",
-                "evidenceHash": "sha256:" + "b" * 64,
-            },
+        self.assertEqual(_evaluate(case).code, "required-capability-unsupported")
+
+    def test_owner_delete_all_requires_real_hash_version_and_artifact_gates(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
+
+        protected, proposed, request, store = _owner_case([])
+        self.assertEqual(proposed, [])
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(protected, owner_rules=[])
+        self.assertEqual(
+            caught.exception.code,
+            "protected-rule-owner-authorization-required",
+        )
+
+        merged = merge_protected_rules(
+            protected,
+            owner_rules=[],
+            owner_change=request,
+            artifact_store=store,
+        )
+        self.assertEqual(merged.rules, ())
+        self.assertEqual(merged.policy_version, "2.0.0")
+        with self.assertRaises(FrozenInstanceError):
+            request.new_version = "3.0.0"
+
+    def test_owner_gate_recomputes_hashes_and_rejects_zero_or_nonmajor_claims(self):
+        from selfworkflow.evidence import (
+            OwnerChangeRequest,
+            WorkflowEvidenceError,
+            merge_protected_rules,
+        )
+
+        protected, proposed, valid, store = _owner_case([])
+        values = {
+            field: getattr(valid, field)
+            for field in valid.__dataclass_fields__
         }
-
-        invalid_authorizations = [
-            {key: value for key, value in authorization.items() if key != missing}
-            for missing in authorization
-        ]
-        invalid_authorizations.append(
-            {**authorization, "destructiveChangeConfirmed": 1}
-        )
-
-        class TruthyString(str):
+        class Text(str):
             pass
 
-        invalid_authorizations.append(
-            {**authorization, "versionBump": TruthyString("major")}
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            OwnerChangeRequest(**(values | {"owner_actor": Text("owner")}))
+        self.assertEqual(
+            caught.exception.code,
+            "protected-rule-owner-authorization-required",
         )
-        invalid_authorizations.append(
-            {
-                **authorization,
-                "independentReview": {
-                    **authorization["independentReview"],
-                    "status": TruthyString("passed"),
-                },
-            }
+        attacks = (
+            {"base_rules_hash": "sha256:" + "0" * 64},
+            {"proposed_rules_hash": "sha256:" + "0" * 64},
+            {"new_version": "1.9.0"},
+            {"new_version": "major"},
+            {"confirmation_artifact_hash": "sha256:" + "0" * 64},
+            {"review_artifact_hash": "sha256:" + "0" * 64},
+            {"behavioral_test_artifact_hash": "sha256:" + "0" * 64},
         )
-        invalid_authorizations.append(
-            {
-                **authorization,
-                "behavioralTests": {
-                    **authorization["behavioralTests"],
-                    "evidenceHash": TruthyString("sha256:" + "b" * 64),
-                },
-            }
-        )
-
-        for invalid in invalid_authorizations:
-            with self.subTest(invalid=tuple(invalid)):
+        for override in attacks:
+            request = OwnerChangeRequest(**(values | override))
+            with self.subTest(field=tuple(override)):
                 with self.assertRaises(WorkflowEvidenceError) as caught:
                     merge_protected_rules(
                         protected,
-                        owner_rules=owner_rules,
-                        owner_authorization=invalid,
+                        owner_rules=proposed,
+                        owner_change=request,
+                        artifact_store=store,
                     )
                 self.assertEqual(
                     caught.exception.code,
                     "protected-rule-owner-authorization-required",
                 )
+
+    def test_owner_artifacts_are_recomputed_bound_passed_and_independent(self):
+        from selfworkflow.evidence import (
+            OwnerChangeRequest,
+            WorkflowEvidenceError,
+            merge_protected_rules,
+        )
+
+        mutations = (
+            lambda artifact: artifact.update({"status": "failed"}),
+            lambda artifact: artifact.update({"subjectHash": "sha256:" + "0" * 64}),
+            lambda artifact: artifact.update({"actorId": "implementer"}),
+            lambda artifact: artifact.update({"contextId": "task-3"}),
+        )
+        for mutate in (
+            lambda artifact: artifact.update({"actorId": "not-the-owner"}),
+            lambda artifact: artifact["attributes"].update({"scope": "all-files"}),
+        ):
+            protected, proposed, request, store = _owner_case([])
+            old_hash = request.confirmation_artifact_hash
+            artifact = copy.deepcopy(store.pop(old_hash))
+            mutate(artifact)
+            new_hash = _put(store, artifact)
+            values = {
+                field: getattr(request, field)
+                for field in request.__dataclass_fields__
+            }
+            request = OwnerChangeRequest(
+                **(values | {"confirmation_artifact_hash": new_hash})
+            )
+            with self.assertRaises(WorkflowEvidenceError) as caught:
+                merge_protected_rules(
+                    protected,
+                    owner_rules=proposed,
+                    owner_change=request,
+                    artifact_store=store,
+                )
+            self.assertEqual(
+                caught.exception.code,
+                "protected-rule-owner-authorization-required",
+            )
+
+        for mutate in mutations:
+            protected, proposed, request, store = _owner_case([])
+            review_hash = request.review_artifact_hash
+            review = copy.deepcopy(store.pop(review_hash))
+            mutate(review)
+            new_hash = _put(store, review)
+            values = {
+                field: getattr(request, field)
+                for field in request.__dataclass_fields__
+            }
+            request = OwnerChangeRequest(
+                **(values | {"review_artifact_hash": new_hash})
+            )
+            with self.subTest(review=review):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    merge_protected_rules(
+                        protected,
+                        owner_rules=proposed,
+                        owner_change=request,
+                        artifact_store=store,
+                    )
                 self.assertEqual(
-                    caught.exception.message,
-                    "A protected-rule change requires the complete breaking-change gate.",
+                    caught.exception.code,
+                    "protected-rule-owner-authorization-required",
                 )
 
-        merged = merge_protected_rules(
-            protected,
-            owner_rules=owner_rules,
-            owner_authorization=authorization,
+        protected, proposed, request, store = _owner_case([])
+        behavioral_hash = request.behavioral_test_artifact_hash
+        behavioral = copy.deepcopy(store.pop(behavioral_hash))
+        behavioral["status"] = "failed"
+        new_hash = _put(store, behavioral)
+        values = {
+            field: getattr(request, field)
+            for field in request.__dataclass_fields__
+        }
+        request = OwnerChangeRequest(
+            **(values | {"behavioral_test_artifact_hash": new_hash})
         )
-        changed = merged.rule_for("truthful-capability-review-verification")
-        self.assertIsNotNone(changed)
-        self.assertEqual(changed.strength, "enforced")
-        self.assertEqual(changed.source_name, "repository-owner")
-        self.assertTrue(changed.protected)
-
-    def test_hostile_and_unordered_rule_inputs_fail_with_redacted_errors(self):
-        from selfworkflow.evidence import WorkflowEvidenceError
-        from selfworkflow.evidence import merge_protected_rules
-
-        protected = yaml.safe_load(
-            (REPOSITORY_ROOT / "workflow" / "protected-rules.yaml").read_text(
-                encoding="utf-8"
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(
+                protected,
+                owner_rules=proposed,
+                owner_change=request,
+                artifact_store=store,
             )
+        self.assertEqual(
+            caught.exception.code,
+            "protected-rule-owner-authorization-required",
         )
+
+    def test_hostile_rule_and_owner_inputs_are_redacted(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
+
         secret = "TOP-SECRET-HOSTILE-RULE-INPUT"
 
         class HostileMapping(dict):
             def items(self):
                 raise RuntimeError(secret)
 
-        cases = []
-        hostile_gate = dict(protected)
-        hostile_gate["ownerModificationGate"] = HostileMapping()
-        cases.append(hostile_gate)
-        unordered_order = dict(protected)
-        unordered_order["mergeOrder"] = {
-            "protected",
-            "skill",
-            "project",
-            "overlay",
-        }
-        cases.append(unordered_order)
+        protected = _protected_document()
+        hostile = dict(protected)
+        hostile["ownerModificationGate"] = HostileMapping()
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            merge_protected_rules(hostile)
+        self.assertEqual(caught.exception.code, "protected-rules-invalid")
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertTrue(caught.exception.__suppress_context__)
+        self.assertNotIn(secret, "".join(traceback.format_exception(caught.exception)))
 
-        for invalid in cases:
-            with self.subTest(case=type(invalid["mergeOrder"]).__name__):
-                with self.assertRaises(WorkflowEvidenceError) as caught:
-                    merge_protected_rules(invalid)
-                error = caught.exception
-                self.assertEqual(error.code, "protected-rules-invalid")
-                self.assertEqual(error.message, "The protected-rule document is invalid.")
-                self.assertIsNone(error.__cause__)
-                self.assertTrue(error.__suppress_context__)
-                self.assertNotIn(secret, str(error))
-                self.assertNotIn(secret, "".join(traceback.format_exception(error)))
-
-    def test_workflow_document_describes_only_the_implemented_core(self):
-        document_path = REPOSITORY_ROOT / "WORKFLOW.md"
-        self.assertTrue(document_path.is_file(), "WORKFLOW.md is missing")
-        text = document_path.read_text(encoding="utf-8")
+    def test_workflow_document_states_the_current_enforcement_boundary(self):
+        text = (REPOSITORY_ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         headings = tuple(
-            line.strip()
-            for line in text.splitlines()
-            if line.startswith("## ")
+            line.strip() for line in text.splitlines() if line.startswith("## ")
         )
         self.assertEqual(
             headings,
@@ -329,24 +407,61 @@ class ProtectedRulesTests(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "agent-policy rules are behavior-tested policies, not technical enforcement",
+            "agent-policy depends on agent adherence and has unit-tested structure",
             text,
         )
-        self.assertIn("passed", text)
-        self.assertIn("not-applicable", text)
-        self.assertIn("read-only", text)
-
+        self.assertIn("not technical or behavioral enforcement", text)
+        self.assertNotIn("behavior-tested policies", text)
         forbidden = re.compile(
             r"\b(catalog|router|installer|mcp|openai|anthropic|codex|claude)\b",
             flags=re.IGNORECASE,
         )
         self.assertIsNone(forbidden.search(text))
-        links = re.findall(r"\[[^]]+\]\(([^)]+)\)", text)
-        self.assertTrue(links)
-        for target in links:
-            with self.subTest(target=target):
-                self.assertFalse(target.startswith(("http://", "https://")))
-                self.assertTrue((REPOSITORY_ROOT / target).is_file())
+        for target in re.findall(r"\[[^]]+\]\(([^)]+)\)", text):
+            self.assertTrue((REPOSITORY_ROOT / target).is_file(), target)
+
+
+def _test_ids(suite):
+    result = []
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            result.extend(_test_ids(test))
+        else:
+            result.append(test.id())
+    return result
+
+
+class AggregateTestEntryTests(unittest.TestCase):
+    def test_registry_exactly_matches_unit_modules(self):
+        import tests.unit as unit_package
+
+        expected = tuple(
+            f"tests.unit.{path.stem}"
+            for path in sorted((REPOSITORY_ROOT / "tests/unit").glob("test_*.py"))
+        )
+        self.assertEqual(unit_package.UNIT_TEST_MODULES, expected)
+
+    def test_explicit_modules_aggregate_and_discovery_are_equal_and_unique(self):
+        import tests.unit as unit_package
+
+        loader = unittest.TestLoader()
+        explicit = unittest.TestSuite(
+            loader.loadTestsFromName(name) for name in unit_package.UNIT_TEST_MODULES
+        )
+        aggregate = unit_package.load_tests(loader, unittest.TestSuite(), None)
+        discovery = loader.discover(
+            str(REPOSITORY_ROOT / "tests"),
+            pattern="test*.py",
+            top_level_dir=str(REPOSITORY_ROOT),
+        )
+        explicit_ids = _test_ids(explicit)
+        aggregate_ids = _test_ids(aggregate)
+        discovery_unit_ids = [
+            test_id for test_id in _test_ids(discovery) if ".unit." in test_id
+        ]
+        self.assertEqual(len(explicit_ids), len(set(explicit_ids)))
+        self.assertEqual(aggregate_ids, explicit_ids)
+        self.assertEqual(discovery_unit_ids, explicit_ids)
 
 
 if __name__ == "__main__":
