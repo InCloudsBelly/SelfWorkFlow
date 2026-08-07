@@ -664,6 +664,51 @@ class ConfigLoadingTests(unittest.TestCase):
         rendered = "".join(traceback.format_exception(caught_error))
         self.assertNotIn(secret, rendered)
 
+    def test_validation_recursion_returns_redacted_schema_invalid(self):
+        import selfworkflow.config as config_module
+
+        secret = "TOP-SECRET-VALIDATION-RECURSION"
+
+        class RecursiveValidator:
+            @classmethod
+            def check_schema(cls, schema):
+                return None
+
+            def __init__(self, schema, **kwargs):
+                pass
+
+            def iter_errors(self, document):
+                raise RecursionError(secret)
+                yield None
+
+        schema = {"$schema": "https://json-schema.org/draft/2020-12/schema"}
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            document_path = temporary_root / "document.yaml"
+            schema_path = temporary_root / "schema.json"
+            document_path.write_text("{}\n", encoding="utf-8")
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+
+            with mock.patch.object(
+                config_module,
+                "Draft202012Validator",
+                RecursiveValidator,
+            ):
+                try:
+                    config_module.load_config(document_path, schema_path)
+                except Exception as error:
+                    caught_error = error
+                else:
+                    self.fail("validation recursion was accepted")
+
+        self.assertIsInstance(caught_error, config_module.ConfigError)
+        self.assertEqual(caught_error.code, "schema-invalid")
+        self.assertEqual(str(caught_error), "schema-invalid")
+        self.assertIsNone(caught_error.__cause__)
+        self.assertIs(caught_error.__suppress_context__, True)
+        rendered = "".join(traceback.format_exception(caught_error))
+        self.assertNotIn(secret, rendered)
+
     def test_rejects_missing_required_properties_with_stable_error(self):
         import selfworkflow.config as config_module
 
