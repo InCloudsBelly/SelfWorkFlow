@@ -16,12 +16,13 @@
     "package",
     "packageTreeHash",
     "daclSddl",
-    "cliVersion",
+    "expectedCliVersion",
+    "cliVersionVerification",
     "planHash"
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "bootstrapRoot": {
       "type": "string",
@@ -59,8 +60,11 @@
         "pattern": "\\([^)]*;;;(?:WD|S-1-1-0)\\)"
       }
     },
-    "cliVersion": {
+    "expectedCliVersion": {
       "$ref": "#/$defs/canonicalSemVer"
+    },
+    "cliVersionVerification": {
+      "const": "not-run"
     },
     "planHash": {
       "type": "string",

@@ -12,7 +12,7 @@ git commit -m "docs: add SelfWorkFlow v1 implementation plan"
 ## Task 1
 
 ```powershell
-git add -- '.gitignore' 'pyproject.toml' 'requirements-dev.lock.txt' 'src/selfworkflow/__init__.py' 'src/selfworkflow/cli.py' 'tests/__init__.py' 'tests/test_smoke.py' 'tests/test_bootstrap_cli.py' 'tests/fixtures/bootstrap/fake-npm.cmd' 'scripts/test.ps1' 'scripts/verify.ps1' 'scripts/bootstrap-codex-cli.ps1' 'schemas/bootstrap-tool-manifest.schema.json' 'README.md'
+git add -- '.gitignore' 'pyproject.toml' 'requirements-dev.lock.txt' 'src/selfworkflow/__init__.py' 'src/selfworkflow/cli.py' 'tests/__init__.py' 'tests/test_smoke.py' 'tests/test_bootstrap_cli.py' 'tests/fixtures/bootstrap/fake-npm-cli.js' 'scripts/test.ps1' 'scripts/verify.ps1' 'scripts/bootstrap-codex-cli.ps1' 'scripts/lib/bootstrap-execution.ps1' 'scripts/lib/bootstrap-manifest.ps1' 'schemas/bootstrap-tool-manifest.schema.json' 'README.md' 'docs/design/2026-08-07-selfworkflow-design.md' 'docs/superpowers/plans/2026-08-07-selfworkflow-v1.md' 'docs/superpowers/plans/2026-08-07-selfworkflow-v1-native-acceptance.md' 'docs/superpowers/plans/2026-08-07-selfworkflow-v1-staging.md'
 ```
 
 ## Task 2

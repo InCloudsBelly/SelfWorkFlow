@@ -66,7 +66,7 @@
 - 新建：`tests/test_smoke.py`
 - 新建：`scripts/test.ps1`
 - 新建：`scripts/verify.ps1`
-- 新建：`scripts/bootstrap-codex-cli.ps1`、`schemas/bootstrap-tool-manifest.schema.json`、`tests/test_bootstrap_cli.py`、`tests/fixtures/bootstrap/fake-npm.cmd`
+- 新建：`scripts/bootstrap-codex-cli.ps1`、`scripts/lib/bootstrap-execution.ps1`、`scripts/lib/bootstrap-manifest.ps1`、`schemas/bootstrap-tool-manifest.schema.json`、`tests/test_bootstrap_cli.py`、`tests/fixtures/bootstrap/fake-npm-cli.js`
 - 新建：`README.md`
 - 修改：`.gitignore`
 
@@ -92,7 +92,29 @@ python -m unittest tests.test_smoke -v
 - `scripts/verify.ps1 -Suite <unit|conformance|installer|behavioral|automated|native|all>` 是最终统一入口；Task 1 先实现 unit 包装，后续任务只通过测试扩展 suite。`automated` 排除交互式 native 验收；需要 OAuth/Desktop 时输出结构化 `requires-user-action` 并以专用非零退出码结束，禁止静默跳过；
 - 锁定 PyYAML 与 jsonschema 的精确版本，README 写明 `python -m venv .venv` 和 `.venv\Scripts\python.exe -m pip install -r requirements-dev.lock.txt -e .`；
 - `.gitignore` 加入 `.venv/`、`__pycache__/`、`*.pyc`、`build/`、测试原始输出和本机运行证据目录。
-- 另按原子 TDD 实现 bootstrap 脚本：只读 discovery 与 apply 分离；apply 在任何写入前验证确认值、绝对受控根及无 reparse ancestor，DACL/SDDL 任一步失败立即停止；fake npm 测试覆盖版本/integrity、非零退出、漂移和生成 `bootstrap-tool-manifest.json`。
+- 另按原子 TDD 实现 bootstrap 脚本。Discover 只接受位于预存
+  `%LOCALAPPDATA%\SelfWorkFlow\bootstrap\toolchains` anchor 下的
+  `ToolchainRoot`，验证完整目录链及 deterministic inventory 后，通过绝对
+  `node.exe` 和绝对 `npm-cli.js` 执行一次隔离 metadata view，并输出
+  `planSchemaVersion: 2` 完整计划。
+- Apply 强制同时要求绝对 `ConfirmedPlanPath` 和 `ConfirmPlanHash`；先锁定
+  计划文件，精确校验 shape、规范化 plan hash、内嵌 hash、参数 hash、
+  静态 argv/env/cwd 及 node/npm/tree identity。任何 Add-Type、目录创建、
+  ACL 修改或外部进程必须位于该门禁之后。旧 hash-only Apply、旧 plan v1、
+  `NpmCommand` 和 `IcaclsCommand` 均 fail closed，不保留兼容别名。
+- Apply 不重复 metadata view，只使用 confirmed version/integrity，并通过
+  `ProcessStartInfo` 在固定 cwd、清空后精确白名单环境中执行 install。
+  toolchain 与 install target/cache/trusted cwd 不得重叠；路径、owner、
+  reparse、DACL 或 inventory 无法证明安全时拒绝。外部 `icacls` 完全移除，
+  ACL 由 .NET 设置后从文件系统独立回读。
+- Manifest 升级为 `schemaVersion: 2`，使用 `expectedCliVersion` 与
+  `cliVersionVerification: "not-run"`，删除 `cliVersion`。Task 1 不执行新安装
+  的 Codex Agent；真实启动与模型调用保留给 native acceptance。
+- 测试使用系统真实 `node.exe` 和仓库 `fake-npm-cli.js`，在临时
+  `%LOCALAPPDATA%` 中创建并保护 class-level toolchain。按全局原子 TDD 规则
+  分别覆盖 confirmed-plan 前置门禁、旧接口拒绝、node/npm/tree 漂移、
+  Apply 无 view、固定 cwd/环境、权限/reparse/owner/DACL、manifest v2 精确
+  shape、不执行 fake Codex marker，以及无网络/无真实 npm/Codex。
 
 **步骤 3A：创建可复现环境**
 

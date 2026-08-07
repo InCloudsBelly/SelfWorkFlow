@@ -6,13 +6,18 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SCRIPT = REPOSITORY_ROOT / "scripts" / "bootstrap-codex-cli.ps1"
 MANIFEST_LIBRARY = REPOSITORY_ROOT / "scripts" / "lib" / "bootstrap-manifest.ps1"
-FAKE_NPM = REPOSITORY_ROOT / "tests" / "fixtures" / "bootstrap" / "fake-npm.cmd"
+EXECUTION_LIBRARY = REPOSITORY_ROOT / "scripts" / "lib" / "bootstrap-execution.ps1"
+FAKE_NPM_CLI = (
+    REPOSITORY_ROOT / "tests" / "fixtures" / "bootstrap" / "fake-npm-cli.js"
+)
 MANIFEST_SCHEMA = REPOSITORY_ROOT / "schemas" / "bootstrap-tool-manifest.schema.json"
 
 
@@ -42,42 +47,6 @@ def _run_bootstrap(
     )
 
 
-def _discover_plan(local_app_data, *, npm_command=FAKE_NPM, environment=None, arguments=()):
-    result = _run_bootstrap(
-        local_app_data,
-        "-Mode",
-        "Discover",
-        "-NpmCommand",
-        str(npm_command),
-        *arguments,
-        environment=environment,
-    )
-    if result.returncode != 0:
-        raise AssertionError(result.stderr + result.stdout)
-    return result, json.loads(result.stdout)
-
-
-def _apply_plan(
-    local_app_data,
-    plan,
-    *,
-    npm_command=FAKE_NPM,
-    environment=None,
-    arguments=(),
-):
-    return _run_bootstrap(
-        local_app_data,
-        "-Mode",
-        "Apply",
-        "-ConfirmPlanHash",
-        plan["planHash"],
-        "-NpmCommand",
-        str(npm_command),
-        *arguments,
-        environment=environment,
-    )
-
-
 def _validate_manifest_candidate(
     local_app_data, plan, manifest, *, expected_sddl=None
 ):
@@ -90,6 +59,8 @@ def _validate_manifest_candidate(
     environment.update(
         {
             "SELFWORKFLOW_MANIFEST_LIBRARY": str(MANIFEST_LIBRARY),
+            "SELFWORKFLOW_EXECUTION_LIBRARY": str(EXECUTION_LIBRARY),
+            "SELFWORKFLOW_BOOTSTRAP_SCRIPT": str(BOOTSTRAP_SCRIPT),
             "SELFWORKFLOW_PLAN_PATH": str(plan_path),
             "SELFWORKFLOW_MANIFEST_PATH": str(manifest_path),
             "SELFWORKFLOW_ALLOWED_BOUNDARY": str(
@@ -106,6 +77,24 @@ def _validate_manifest_candidate(
     )
     command = r"""
 try {
+    $Tokens = $null
+    $Errors = $null
+    $Ast = [Management.Automation.Language.Parser]::ParseFile(
+        $env:SELFWORKFLOW_BOOTSTRAP_SCRIPT, [ref]$Tokens, [ref]$Errors
+    )
+    $Needed = @(
+        "Assert-SelfWorkflowExactProperties", "Assert-SelfWorkflowPlanV2Shape",
+        "ConvertTo-SelfWorkflowCanonicalValue", "ConvertTo-SelfWorkflowCanonicalJson",
+        "Get-SelfWorkflowSha256Text", "Get-SelfWorkflowPlanHash"
+    )
+    foreach ($Definition in @($Ast.FindAll({
+        param($Node)
+        $Node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $Node.Name -in $Needed
+    }, $true))) {
+        . ([scriptblock]::Create($Definition.Extent.Text))
+    }
+    . $env:SELFWORKFLOW_EXECUTION_LIBRARY
     . $env:SELFWORKFLOW_MANIFEST_LIBRARY
     $Plan = Get-Content -Raw -LiteralPath $env:SELFWORKFLOW_PLAN_PATH | ConvertFrom-Json
     $Manifest = Get-Content -Raw -LiteralPath $env:SELFWORKFLOW_MANIFEST_PATH | ConvertFrom-Json
@@ -138,6 +127,7 @@ $Rules = @($Acl.GetAccessRules($true, $true, [System.Security.Principal.Security
 [ordered]@{
     protected = $Acl.AreAccessRulesProtected
     currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    owner = $Acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
     sddl = $Acl.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::Access)
     rules = @($Rules | ForEach-Object {
         [ordered]@{
@@ -163,37 +153,34 @@ $Rules = @($Acl.GetAccessRules($true, $true, [System.Security.Principal.Security
     return json.loads(result.stdout)
 
 
-def _compute_package_tree_hash(package_root):
-    digest = hashlib.sha256()
-    files = sorted(
-        (path for path in package_root.rglob("*") if path.is_file()),
-        key=lambda path: path.relative_to(package_root).as_posix(),
-    )
-    for path in files:
-        relative_path = path.relative_to(package_root).as_posix().encode("utf-8")
-        digest.update(relative_path)
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return f"sha256:{digest.hexdigest()}"
-
-
-def _compute_plan_hash(plan):
-    plan_data = {
-        key: plan[key]
-        for key in (
-            "schemaVersion",
-            "bootstrapRoot",
-            "package",
-            "execution",
-            "security",
-            "sideEffects",
-        )
-    }
+def _compute_v2_plan_hash(plan):
+    plan_data = {key: value for key, value in plan.items() if key != "planHash"}
     serialized = json.dumps(
-        plan_data, ensure_ascii=False, separators=(",", ":")
+        plan_data,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(serialized).hexdigest()
+
+
+def _compute_package_tree_hash(root):
+    inventory = []
+    paths = [root, *sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix())]
+    for path in paths:
+        inventory.append(
+            {
+                "path": "." if path == root else path.relative_to(root).as_posix(),
+                "type": "directory" if path.is_dir() else "file",
+                "sha256": (
+                    None
+                    if path.is_dir()
+                    else "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+                ),
+            }
+        )
+    canonical = json.dumps(inventory, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _snapshot_tree(root):
@@ -212,40 +199,61 @@ def _snapshot_tree(root):
     return snapshot
 
 
-def _write_reparse_swapping_npm(path):
-    fake_npm_path = str(FAKE_NPM).replace("%", "%%")
-    path.write_text(
-        f"""@echo off
-if /I not "%~1"=="view" goto delegate
-if defined FAKE_NPM_CREATE_JUNCTION (
-  mklink /J "%FAKE_NPM_SWAP_ROOT%" "%FAKE_NPM_SWAP_TARGET%" >nul 2>&1
-  if errorlevel 1 goto create-failed
-)
-if defined FAKE_NPM_REPLACE_DIRECTORY (
-  move "%FAKE_NPM_SWAP_ROOT%" "%FAKE_NPM_SWAP_BACKUP%" >nul 2>&1
-  if exist "%FAKE_NPM_SWAP_ROOT%" goto replace-failed
-  if not exist "%FAKE_NPM_SWAP_BACKUP%" goto replace-failed
-  mklink /J "%FAKE_NPM_SWAP_ROOT%" "%FAKE_NPM_SWAP_TARGET%" >nul 2>&1
-  if errorlevel 1 goto junction-failed
-)
-:delegate
-call "{fake_npm_path}" %*
-exit /b %errorlevel%
-:create-failed
-exit /b 73
-:replace-failed
-exit /b 74
-:junction-failed
-exit /b 75
-""".replace("\n", "\r\n"),
-        encoding="utf-8",
+def _set_protected_current_user_acl(root):
+    environment = os.environ.copy()
+    environment["SELFWORKFLOW_ACL_ROOT"] = str(root)
+    command = r"""
+$ErrorActionPreference = "Stop"
+$Root = [IO.Path]::GetFullPath($env:SELFWORKFLOW_ACL_ROOT)
+$CurrentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$SystemSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-18")
+$Items = @((Get-Item -LiteralPath $Root)) + @(Get-ChildItem -LiteralPath $Root -Force -Recurse)
+foreach ($Item in @($Items | Sort-Object { $_.FullName.Length } -Descending)) {
+    if ($Item.PSIsContainer) {
+        $Security = [Security.AccessControl.DirectorySecurity]::new()
+        $Inheritance = (
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+            [Security.AccessControl.InheritanceFlags]::ObjectInherit
+        )
+    } else {
+        $Security = [Security.AccessControl.FileSecurity]::new()
+        $Inheritance = [Security.AccessControl.InheritanceFlags]::None
+    }
+    $Security.SetOwner($CurrentSid)
+    $Security.SetAccessRuleProtection($true, $false)
+    foreach ($Sid in @($CurrentSid, $SystemSid)) {
+        [void]$Security.AddAccessRule(
+            [Security.AccessControl.FileSystemAccessRule]::new(
+                $Sid,
+                [Security.AccessControl.FileSystemRights]::FullControl,
+                $Inheritance,
+                [Security.AccessControl.PropagationFlags]::None,
+                [Security.AccessControl.AccessControlType]::Allow
+            )
+        )
+    }
+    if ($Item.PSIsContainer) {
+        [IO.Directory]::SetAccessControl($Item.FullName, $Security)
+    } else {
+        [IO.File]::SetAccessControl($Item.FullName, $Security)
+    }
+}
+"""
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", command],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
 
 
 def _remove_junction_if_present(path):
-    if not path.exists():
+    if not os.path.lexists(path):
         return
-    attributes = path.stat().st_file_attributes
+    attributes = path.lstat().st_file_attributes
     if attributes & 0x400:
         result = subprocess.run(
             ["cmd.exe", "/d", "/c", "rmdir", str(path)],
@@ -257,46 +265,2120 @@ def _remove_junction_if_present(path):
             raise AssertionError(result.stderr)
 
 
-def _write_reparse_swapping_icacls(path):
-    path.write_text(
-        """@echo off
-move "%~1" "%FAKE_ICACLS_BACKUP%" >nul 2>&1
-if exist "%~1" goto replace-failed
-if not exist "%FAKE_ICACLS_BACKUP%" goto replace-failed
-mklink /J "%~1" "%FAKE_ICACLS_TARGET%" >nul 2>&1
-if errorlevel 1 goto junction-failed
-echo %~1
-exit /b 0
-:replace-failed
-exit /b 74
-:junction-failed
-exit /b 75
-""".replace("\n", "\r\n"),
-        encoding="utf-8",
-    )
+def _run_with_rename_probes(
+    command,
+    environment,
+    barrier,
+    release,
+    probes,
+    *,
+    stop_marker=None,
+    child_barrier_stage=None,
+):
+    target_process = probe_process = None
+    try:
+        target_process = subprocess.Popen(
+            command,
+            cwd=REPOSITORY_ROOT,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        probe_environment = os.environ.copy()
+        probe_environment.update(
+            {
+                "SELFWORKFLOW_TARGET_PID": str(target_process.pid),
+                "SELFWORKFLOW_LOCK_BARRIER": str(barrier),
+                "SELFWORKFLOW_LOCK_RELEASE": str(release),
+                "SELFWORKFLOW_PROBE_COUNT": str(len(probes)),
+                "SELFWORKFLOW_STOP_MARKER": str(stop_marker or ""),
+                "SELFWORKFLOW_CHILD_BARRIER_STAGE": str(child_barrier_stage or ""),
+            }
+        )
+        for index, probe in enumerate(probes):
+            for field in ("target", "backup", "attempt", "success", "junction", "log"):
+                probe_environment[f"SELFWORKFLOW_{field.upper()}_{index}"] = str(
+                    probe.get(field, "")
+                )
+        probe_command = r"""
+$ErrorActionPreference = "SilentlyContinue"
+$TargetProcess = [Diagnostics.Process]::GetProcessById([int]$env:SELFWORKFLOW_TARGET_PID)
+function Test-TargetRunning { return -not $TargetProcess.HasExited }
+function Get-ProbeValue($Name, $Index) {
+    return [Environment]::GetEnvironmentVariable("SELFWORKFLOW_${Name}_$Index")
+}
+while (-not [IO.File]::Exists($env:SELFWORKFLOW_LOCK_BARRIER)) {
+    if (-not (Test-TargetRunning)) { exit 71 }
+    Start-Sleep -Milliseconds 1
+}
+$ChildProcess = $null
+$BarrierState = $null
+if ($env:SELFWORKFLOW_CHILD_BARRIER_STAGE) {
+    try {
+        $BarrierState = Get-Content -LiteralPath $env:SELFWORKFLOW_LOCK_BARRIER -Raw | ConvertFrom-Json
+        if ($BarrierState.stage -cne $env:SELFWORKFLOW_CHILD_BARRIER_STAGE) { exit 72 }
+        $ChildProcess = [Diagnostics.Process]::GetProcessById([int]$BarrierState.pid)
+    } catch { exit 72 }
+}
+function Test-ProbeWindowOpen {
+    if ($null -ne $ChildProcess) {
+        return (-not [IO.File]::Exists($env:SELFWORKFLOW_LOCK_RELEASE)) -and (-not $ChildProcess.HasExited)
+    }
+    return Test-TargetRunning
+}
+function Write-ProbeLog($Path, $Index, $Outcome) {
+    if (-not $Path) { return }
+    [pscustomobject]@{
+        timestampUtc = [DateTime]::UtcNow.ToString("o")
+        index = $Index
+        stage = if ($null -ne $BarrierState) { $BarrierState.stage } else { "parent" }
+        childPid = if ($null -ne $BarrierState) { [int]$BarrierState.pid } else { $null }
+        releaseExists = [IO.File]::Exists($env:SELFWORKFLOW_LOCK_RELEASE)
+        childRunning = if ($null -ne $ChildProcess) { -not $ChildProcess.HasExited } else { $null }
+        outcome = $Outcome
+    } | ConvertTo-Json -Compress | Add-Content -LiteralPath $Path
+}
+$Released = $false
+while (Test-ProbeWindowOpen) {
+    if ($env:SELFWORKFLOW_STOP_MARKER -and [IO.File]::Exists($env:SELFWORKFLOW_STOP_MARKER)) { break }
+    for ($Index = 0; $Index -lt [int]$env:SELFWORKFLOW_PROBE_COUNT; $Index++) {
+        $Target = Get-ProbeValue "TARGET" $Index
+        $Backup = Get-ProbeValue "BACKUP" $Index
+        $Attempt = Get-ProbeValue "ATTEMPT" $Index
+        $Success = Get-ProbeValue "SUCCESS" $Index
+        $Junction = Get-ProbeValue "JUNCTION" $Index
+        $Log = Get-ProbeValue "LOG" $Index
+        [IO.File]::WriteAllText($Attempt, "attempted")
+        try {
+            [IO.Directory]::Move($Target, $Backup)
+            if ($Junction) {
+                & cmd.exe /d /c mklink /J $Target $Junction *> $null
+                if ($LASTEXITCODE -ne 0) { throw "junction failed" }
+            } else {
+                [IO.Directory]::Move($Backup, $Target)
+            }
+            if (Test-ProbeWindowOpen) {
+                [IO.File]::WriteAllText($Success, "renamed")
+                Write-ProbeLog $Log $Index "renamed"
+            } else {
+                Write-ProbeLog $Log $Index "renamed-after-window"
+            }
+        } catch {
+            Write-ProbeLog $Log $Index "locked"
+            if ([IO.Directory]::Exists($Backup) -and -not [IO.Directory]::Exists($Target)) {
+                [IO.Directory]::Move($Backup, $Target)
+            }
+        }
+    }
+    if (-not $Released -and $env:SELFWORKFLOW_LOCK_RELEASE) {
+        [IO.File]::WriteAllText($env:SELFWORKFLOW_LOCK_RELEASE, "release")
+        $Released = $true
+    }
+    Start-Sleep -Milliseconds 1
+}
+"""
+        probe_process = subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-Command", probe_command],
+            env=probe_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout, stderr = target_process.communicate(timeout=60)
+        probe_stdout, probe_stderr = probe_process.communicate(timeout=10)
+        return (
+            subprocess.CompletedProcess(
+                target_process.args, target_process.returncode, stdout, stderr
+            ),
+            subprocess.CompletedProcess(
+                probe_process.args,
+                probe_process.returncode,
+                probe_stdout,
+                probe_stderr,
+            ),
+        )
+    finally:
+        Path(release).write_text("release", encoding="utf-8")
+        for process in (target_process, probe_process):
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
 
 
-def _write_self_mutating_npm(path):
-    fake_npm_path = str(FAKE_NPM).replace("%", "%%")
-    path.write_text(
-        f"""@echo off
-setlocal EnableDelayedExpansion
-if /I "%~1"=="view" if defined FAKE_NPM_MUTATE_SELF (
-  for %%A in ("%~f0") do set "SIZE_BEFORE=%%~zA"
-  >> "%~f0" echo rem executable identity drift
-  for %%A in ("%~f0") do set "SIZE_AFTER=%%~zA"
-  if "!SIZE_BEFORE!"=="!SIZE_AFTER!" goto mutation-blocked
-)
-call "{fake_npm_path}" %*
-exit /b %errorlevel%
-:mutation-blocked
-exit /b 76
-""".replace("\n", "\r\n"),
-        encoding="utf-8",
-    )
+class BootstrapConfirmedPlanTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        node_path = shutil.which("node.exe")
+        if not node_path:
+            raise AssertionError("node.exe is required for bootstrap fixture tests")
+        cls._temporary_directory = tempfile.TemporaryDirectory()
+        cls.temporary_root = Path(cls._temporary_directory.name)
+        cls.local_app_data = cls.temporary_root / "LocalAppData"
+        cls.toolchain_anchor = (
+            cls.local_app_data / "SelfWorkFlow" / "bootstrap" / "toolchains"
+        )
+        cls.toolchain_root = cls.toolchain_anchor / "fake-node"
+        cls.npm_cli = cls.toolchain_root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+        cls.npm_cli.parent.mkdir(parents=True)
+        shutil.copy2(node_path, cls.toolchain_root / "node.exe")
+        shutil.copy2(FAKE_NPM_CLI, cls.npm_cli)
+        _set_protected_current_user_acl(cls.local_app_data)
 
+    @classmethod
+    def tearDownClass(cls):
+        cls._temporary_directory.cleanup()
+
+    def tearDown(self):
+        default_root = self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+        if default_root.is_dir() and not any(default_root.iterdir()):
+            default_root.rmdir()
+
+    def _discover_v2(self, *arguments):
+        result = _run_bootstrap(
+            self.local_app_data,
+            "-Mode",
+            "Discover",
+            "-ToolchainRoot",
+            str(self.toolchain_root),
+            *arguments,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def _write_plan(self, plan, name="confirmed-plan.json"):
+        plan_path = self.temporary_root / name
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        return plan_path
+
+    def _assert_final_apply(self, plan, result):
+        from jsonschema import Draft202012Validator
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        response = json.loads(result.stdout)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
+        Draft202012Validator(schema).validate(manifest)
+        semantic = _validate_manifest_candidate(self.local_app_data, plan, manifest)
+        self.assertEqual(semantic.returncode, 0, semantic.stderr)
+        self.assertEqual(response, {"manifestPath": str(manifest_path), "manifest": manifest})
+        self.assertEqual(manifest["cliVersionVerification"], "not-run")
+
+        invocation_log = Path(plan["sideEffects"]["cachePath"]) / "fake-npm-invocations.jsonl"
+        invocations = [
+            json.loads(line)
+            for line in invocation_log.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertEqual([entry["command"] for entry in invocations], ["install"])
+        self.assertFalse(list(bootstrap_root.rglob("*.executed")))
+
+        acl = _read_directory_acl(bootstrap_root)
+        self.assertTrue(acl["protected"])
+        self.assertEqual(
+            {rule["sid"] for rule in acl["rules"]},
+            {acl["currentSid"], "S-1-5-18"},
+        )
+        self.assertEqual(len(acl["rules"]), 2)
+        return {"manifest": manifest, "invocations": invocations, "acl": acl}
+
+    def _apply_install_control(self, control, name):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        control_path.write_text(json.dumps(control), encoding="utf-8")
+        _set_protected_current_user_acl(self.local_app_data)
+        bootstrap_root = None
+        try:
+            plan = self._discover_v2()
+            plan_path = self._write_plan(plan, f"{name}-plan.json")
+            bootstrap_root = Path(plan["bootstrapRoot"])
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            return result, {
+                "codexMarkers": list(bootstrap_root.rglob("*.executed")),
+                "formalManifestExists": Path(
+                    plan["sideEffects"]["manifestPath"]
+                ).exists(),
+                "temporaryManifests": list(bootstrap_root.glob("*.tmp")),
+            }
+        finally:
+            control_path.unlink(missing_ok=True)
+            if bootstrap_root and bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+    def _apply_with_acl_corruptor(self, mode, name, bootstrap_root=None):
+        bootstrap_root = bootstrap_root or (
+            self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+        )
+        plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+        plan_path = self._write_plan(plan, f"{name}-plan.json")
+        marker = self.temporary_root / f"{name}-acl-changed"
+        stop = self.temporary_root / f"{name}-stop"
+        backup_root = Path(str(bootstrap_root) + "-moved")
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "SELFWORKFLOW_ACL_TARGET": str(bootstrap_root),
+                "SELFWORKFLOW_ACL_MODE": mode,
+                "SELFWORKFLOW_ACL_MARKER": str(marker),
+                "SELFWORKFLOW_ACL_STOP": str(stop),
+                "SELFWORKFLOW_ACL_BACKUP": str(backup_root),
+            }
+        )
+        command = r"""
+$ErrorActionPreference = "SilentlyContinue"
+$Target = $env:SELFWORKFLOW_ACL_TARGET
+while (-not (Test-Path -LiteralPath $Target) -and -not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) { Start-Sleep -Milliseconds 1 }
+while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
+    $Acl = Get-Acl -LiteralPath $Target
+    if ($env:SELFWORKFLOW_ACL_MODE -in @("reread", "rename")) {
+        $Rules = @($Acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        if (-not $Acl.AreAccessRulesProtected -or $Rules.Count -ne 2) { continue }
+    }
+    if ($env:SELFWORKFLOW_ACL_MODE -eq "rename") {
+        [IO.Directory]::Move($Target, $env:SELFWORKFLOW_ACL_BACKUP)
+        [IO.File]::WriteAllText($env:SELFWORKFLOW_ACL_MARKER, "changed")
+        break
+    }
+    if ($env:SELFWORKFLOW_ACL_MODE -eq "inheritance") {
+        $Acl.SetAccessRuleProtection($false, $true)
+    } else {
+        $Sid = if ($env:SELFWORKFLOW_ACL_MODE -eq "everyone") { "S-1-1-0" } else { "S-1-5-32-545" }
+        $Rights = if ($env:SELFWORKFLOW_ACL_MODE -eq "everyone") { "FullControl" } else { "ReadAndExecute" }
+        $Rule = [Security.AccessControl.FileSystemAccessRule]::new(
+            [Security.Principal.SecurityIdentifier]::new($Sid), $Rights,
+            "ContainerInherit, ObjectInherit", "None", "Allow")
+        [void]$Acl.AddAccessRule($Rule)
+    }
+    Set-Acl -LiteralPath $Target -AclObject $Acl
+    [IO.File]::WriteAllText($env:SELFWORKFLOW_ACL_MARKER, "changed")
+}
+"""
+        corruptor = subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-Command", command],
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            changed = marker.exists()
+            manifest_exists = Path(plan["sideEffects"]["manifestPath"]).exists()
+        finally:
+            stop.write_text("stop", encoding="utf-8")
+            corruptor.wait(timeout=10)
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+            if backup_root.exists():
+                shutil.rmtree(backup_root)
+            marker.unlink(missing_ok=True)
+            stop.unlink(missing_ok=True)
+        return result, changed, manifest_exists
+
+    def _assert_removed_parameter_fails_without_side_effects(self, parameter, mode):
+        secret = f"{parameter}-super-secret"
+        bootstrap_root = (
+            self.local_app_data
+            / "SelfWorkFlow"
+            / "bootstrap"
+            / f"removed-{parameter.lower()}"
+        )
+        node_marker = self.temporary_root / f"removed-{parameter.lower()}-node-marker"
+        before = _snapshot_tree(self.local_app_data)
+        result = _run_bootstrap(
+            self.local_app_data,
+            "-Mode",
+            mode,
+            f"-{parameter}",
+            secret,
+            "-BootstrapRoot",
+            str(bootstrap_root),
+        )
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, combined)
+        self.assertIn("NamedParameterNotFound", combined)
+        self.assertIn(parameter, combined)
+        self.assertNotIn(secret, combined)
+        self.assertFalse(node_marker.exists())
+        self.assertFalse(bootstrap_root.exists())
+        self.assertFalse((bootstrap_root / "npm-cache").exists())
+        self.assertFalse((bootstrap_root / "bootstrap-tool-manifest.json").exists())
+        self.assertEqual(_snapshot_tree(self.local_app_data), before)
+
+    def test_npm_command_parameter_is_removed_without_side_effects(self):
+        self._assert_removed_parameter_fails_without_side_effects("NpmCommand", "Discover")
+
+    def test_icacls_command_parameter_is_removed_without_side_effects(self):
+        self._assert_removed_parameter_fails_without_side_effects("IcaclsCommand", "Apply")
+
+    def test_discover_rejects_non_codex_package_before_metadata_or_side_effects(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        metadata_marker = self.temporary_root / "non-codex-metadata.marker"
+        bootstrap_root = (
+            self.local_app_data
+            / "SelfWorkFlow"
+            / "bootstrap"
+            / "codex-cli"
+            / "non-codex"
+        )
+        control_path.write_text(
+            json.dumps({"metadataMarker": str(metadata_marker)}), encoding="utf-8"
+        )
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+                "-BootstrapRoot",
+                str(bootstrap_root),
+                "-PackageName",
+                "left-pad",
+            )
+        finally:
+            control_path.unlink(missing_ok=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ValidateSet", result.stderr)
+        self.assertIn("@openai/codex", result.stderr)
+        self.assertFalse(metadata_marker.exists())
+        self.assertFalse(bootstrap_root.exists())
+        self.assertFalse((bootstrap_root / "npm-cache").exists())
+        self.assertFalse((bootstrap_root / "bootstrap-tool-manifest.json").exists())
+
+    def test_discover_rejects_toolchain_outside_anchor(self):
+        outside_toolchain = self.temporary_root / "outside-toolchain"
+        result = _run_bootstrap(
+            self.local_app_data,
+            "-Mode",
+            "Discover",
+            "-ToolchainRoot",
+            str(outside_toolchain),
+        )
+
+        self.assertEqual(result.returncode, 59, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: toolchain security verification failed.",
+        )
+
+    def test_discover_emits_complete_plan_v2_from_toolchain(self):
+        secret = "batch1-plan-super-secret"
+        environment = {
+            "NODE_OPTIONS": secret,
+            "NPM_TOKEN": secret,
+            "HTTPS_PROXY": f"https://{secret}.invalid/",
+        }
+        result = _run_bootstrap(
+            self.local_app_data,
+            "-Mode",
+            "Discover",
+            "-ToolchainRoot",
+            str(self.toolchain_root),
+            environment=environment,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        bootstrap_root = plan["bootstrapRoot"]
+        registry = "https://registry.npmjs.org/"
+        trusted_cwd = str(Path(os.environ["SystemRoot"]) / "System32")
+        node_path = plan["execution"]["node"]["path"]
+        npm_cli_path = plan["execution"]["npmCli"]["path"]
+        metadata_arguments = [
+            npm_cli_path, "view", "@openai/codex@latest", "version",
+            "dist.integrity", "--json", "--registry", registry,
+            "--userconfig", "NUL", "--globalconfig", "NUL", "--cache", "NUL",
+            "--ignore-scripts", "--no-audit", "--no-fund",
+        ]
+        install_cache = str(Path(bootstrap_root) / "npm-cache")
+        install_arguments = [
+            npm_cli_path, "install", "--prefix", bootstrap_root,
+            "--package-lock=true", "--save-exact", "--registry", registry,
+            "--userconfig", "NUL", "--globalconfig", "NUL", "--cache",
+            install_cache, "--ignore-scripts", "--no-audit", "--no-fund",
+            "@openai/codex@1.2.3",
+        ]
+
+        self.assertEqual(
+            set(plan),
+            {
+                "planSchemaVersion", "bootstrapRoot", "package", "execution",
+                "security", "sideEffects", "unverified", "planHash",
+            },
+        )
+        self.assertEqual(plan["planSchemaVersion"], 2)
+        self.assertTrue(
+            os.path.samefile(Path(bootstrap_root).parents[2], self.local_app_data)
+        )
+        self.assertEqual(
+            plan["package"],
+            {
+                "name": "@openai/codex",
+                "requestedVersion": "latest",
+                "version": "1.2.3",
+                "integrity": "sha512-U2VsZldvcmtGbG93RmFrZUludGVncml0eQ==",
+            },
+        )
+        execution = plan["execution"]
+        self.assertEqual(
+            set(execution),
+            {
+                "registry", "trustedCwd", "node", "npmCli", "toolchain",
+                "metadataArguments", "installArguments", "metadataEnvironment",
+                "installEnvironment",
+            },
+        )
+        self.assertEqual(execution["registry"], registry)
+        self.assertEqual(execution["trustedCwd"], trusted_cwd)
+        for field, path in (
+            ("node", self.toolchain_root / "node.exe"),
+            ("npmCli", self.npm_cli),
+        ):
+            self.assertTrue(os.path.samefile(execution[field]["path"], path))
+            self.assertEqual(
+                execution[field]["sha256"],
+                f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}",
+            )
+        self.assertTrue(
+            os.path.samefile(execution["toolchain"]["root"], self.toolchain_root)
+        )
+        inventory_json = json.dumps(
+            execution["toolchain"]["inventory"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.assertEqual(
+            execution["toolchain"]["treeHash"],
+            f"sha256:{hashlib.sha256(inventory_json.encode('utf-8')).hexdigest()}",
+        )
+        self.assertEqual(execution["metadataArguments"], metadata_arguments)
+        self.assertEqual(execution["installArguments"], install_arguments)
+        common_environment = {
+            "SystemRoot": os.environ["SystemRoot"],
+            "WINDIR": os.environ["WINDIR"],
+            "TEMP": os.environ["TEMP"],
+            "TMP": os.environ["TMP"],
+            "NPM_CONFIG_REGISTRY": registry,
+            "NPM_CONFIG_USERCONFIG": "NUL",
+            "NPM_CONFIG_GLOBALCONFIG": "NUL",
+            "NPM_CONFIG_IGNORE_SCRIPTS": "true",
+            "NPM_CONFIG_AUDIT": "false",
+            "NPM_CONFIG_FUND": "false",
+            "NPM_CONFIG_UPDATE_NOTIFIER": "false",
+        }
+        self.assertEqual(
+            execution["metadataEnvironment"],
+            {**common_environment, "NPM_CONFIG_CACHE": "NUL"},
+        )
+        self.assertEqual(
+            execution["installEnvironment"],
+            {**common_environment, "NPM_CONFIG_CACHE": install_cache},
+        )
+        acl = _read_directory_acl(self.local_app_data)
+        self.assertTrue(
+            os.path.samefile(plan["security"]["toolchainAnchor"], self.toolchain_anchor)
+        )
+        self.assertEqual(
+            plan["security"],
+            {
+                "toolchainAnchor": plan["security"]["toolchainAnchor"],
+                "expectedBootstrapDacl": {
+                    "protected": True,
+                    "principals": [acl["currentSid"], "S-1-5-18"],
+                    "rights": "FullControl",
+                },
+            },
+        )
+        self.assertEqual(
+            plan["sideEffects"],
+            {
+                "bootstrapRoot": bootstrap_root,
+                "cachePath": install_cache,
+                "manifestPath": str(Path(bootstrap_root) / "bootstrap-tool-manifest.json"),
+                "uninstallBoundary": bootstrap_root,
+            },
+        )
+        self.assertEqual(
+            plan["unverified"],
+            [
+                "same-SID, SYSTEM, or OS-privileged mutation after final verification",
+                "real npm, network, and Codex execution",
+            ],
+        )
+        self.assertEqual(plan["planHash"], _compute_v2_plan_hash(plan))
+        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_discover_metadata_uses_bound_cwd_and_environment_without_secrets(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        metadata_log = self.temporary_root / "discover-metadata-invocation.json"
+        control_path.write_text(
+            json.dumps({"metadataLog": str(metadata_log)}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        secret = "discover-child-super-secret"
+        hostile_environment = {
+            "NODE_OPTIONS": "--require=must-not-run",
+            "NODE_PATH": secret,
+            "NODE_EXTRA_CA_CERTS": secret,
+            "NPM_CONFIG_REGISTRY": f"https://{secret}.invalid/",
+            "NPM_CONFIG_USERCONFIG": secret,
+            "NPM_CONFIG_GLOBALCONFIG": secret,
+            "HTTP_PROXY": f"http://{secret}.invalid/",
+            "HTTPS_PROXY": f"http://{secret}.invalid/",
+            "ALL_PROXY": f"http://{secret}.invalid/",
+            "NO_PROXY": secret,
+            "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+            "NPM_TOKEN": secret,
+            "NODE_AUTH_TOKEN": secret,
+            "USERPROFILE": str(self.temporary_root / "hostile-profile"),
+        }
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+                environment=hostile_environment,
+            )
+            plan = json.loads(result.stdout)
+            invocation = json.loads(metadata_log.read_text(encoding="utf-8"))
+        finally:
+            control_path.unlink(missing_ok=True)
+            metadata_log.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocation["command"], "view")
+        self.assertEqual(invocation["args"], plan["execution"]["metadataArguments"][1:])
+        self.assertEqual(invocation["cwd"].casefold(), plan["execution"]["trustedCwd"].casefold())
+        self.assertEqual(
+            {key.upper(): value for key, value in invocation["environment"].items()},
+            {
+                key.upper(): value
+                for key, value in plan["execution"]["metadataEnvironment"].items()
+            },
+        )
+        persisted = result.stdout + result.stderr + json.dumps(invocation, sort_keys=True)
+        self.assertNotIn(secret, persisted)
+        self.assertFalse(Path(plan["sideEffects"]["cachePath"]).exists())
+        self.assertFalse(Path(plan["sideEffects"]["manifestPath"]).exists())
+
+    def test_discover_rejects_registry_userinfo_without_disclosure_or_side_effects(self):
+        secret = "registry-userinfo-super-secret"
+        bootstrap_root = (
+            self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+        )
+        before = _snapshot_tree(self.local_app_data)
+        result = _run_bootstrap(
+            self.local_app_data,
+            "-Mode",
+            "Discover",
+            "-ToolchainRoot",
+            str(self.toolchain_root),
+            "-Registry",
+            f"https://user:{secret}@registry.npmjs.org/",
+        )
+
+        persisted = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 59, persisted)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: toolchain security verification failed.",
+        )
+        self.assertNotIn(secret, persisted)
+        self.assertFalse(bootstrap_root.exists())
+        self.assertEqual(_snapshot_tree(self.local_app_data), before)
+
+    def test_discover_preserves_existing_bootstrap_root_snapshot(self):
+        bootstrap_root = (
+            self.local_app_data
+            / "SelfWorkFlow"
+            / "bootstrap"
+            / "codex-cli"
+        )
+        bootstrap_root.mkdir(parents=True)
+        marker = bootstrap_root / "existing-marker.txt"
+        marker.write_text("must remain unchanged", encoding="utf-8")
+        _set_protected_current_user_acl(self.local_app_data)
+        before = _snapshot_tree(bootstrap_root)
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+                "-BootstrapRoot",
+                str(bootstrap_root),
+            )
+            after = _snapshot_tree(bootstrap_root)
+        finally:
+            shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(after, before)
+
+    def test_discover_metadata_failures_are_stable_and_redacted(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        secret = "metadata-super-secret"
+        cases = (
+            ("malformed", {"metadataRaw": "{" + secret}, 47,
+             "SelfWorkFlow: npm metadata response is invalid."),
+            ("array", {"metadataRaw": json.dumps([secret])}, 47,
+             "SelfWorkFlow: npm metadata response is invalid."),
+            ("missing", {"metadataRaw": json.dumps({"version": "1.2.3", "extra": secret})}, 47,
+             "SelfWorkFlow: npm metadata response is invalid."),
+            ("wrong-type", {"metadataRaw": json.dumps({"version": 123, "dist.integrity": secret})}, 47,
+             "SelfWorkFlow: npm metadata response is invalid."),
+            ("exit", {"metadataExitCode": 41, "stderr": secret}, 40,
+             "SelfWorkFlow: npm metadata query failed with exit code 41."),
+        )
+        for name, control, expected_code, expected_error in cases:
+            with self.subTest(name=name):
+                control_path.write_text(json.dumps(control), encoding="utf-8")
+                _set_protected_current_user_acl(self.local_app_data)
+                try:
+                    result = _run_bootstrap(
+                        self.local_app_data,
+                        "-Mode",
+                        "Discover",
+                        "-ToolchainRoot",
+                        str(self.toolchain_root),
+                    )
+                finally:
+                    control_path.unlink(missing_ok=True)
+
+                combined = result.stdout + result.stderr
+                self.assertEqual(result.returncode, expected_code, combined)
+                self.assertEqual(result.stderr.strip(), expected_error)
+                self.assertNotIn(secret, combined)
+                bootstrap_root = (
+                    self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+                )
+                self.assertFalse(bootstrap_root.exists())
+
+    def test_discover_rejects_numeric_prerelease_leading_zero(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        control_path.write_text(
+            json.dumps({"metadataVersion": "1.2.3-01"}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+            )
+        finally:
+            control_path.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 47, result.stdout + result.stderr)
+        self.assertEqual(
+            result.stderr.strip(), "SelfWorkFlow: npm metadata response is invalid."
+        )
+
+    def test_canonical_prerelease_build_survives_discover_apply_and_manifest(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        version = "1.2.3-alpha.1+build.01"
+        control_path.write_text(
+            json.dumps({"metadataVersion": version}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        bootstrap_root = None
+        try:
+            plan = self._discover_v2()
+            plan_path = self._write_plan(plan, "canonical-semver-plan.json")
+            bootstrap_root = Path(plan["bootstrapRoot"])
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            manifest = self._assert_final_apply(plan, result)["manifest"]
+        finally:
+            control_path.unlink(missing_ok=True)
+            if bootstrap_root and bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(plan["package"]["version"], version)
+        self.assertEqual(manifest["package"]["version"], version)
+        self.assertEqual(manifest["expectedCliVersion"], version)
+
+    def test_manifest_semantics_rejects_internally_consistent_illegal_semver(self):
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "semantic-semver-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        try:
+            apply_result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            manifest = self._assert_final_apply(plan, apply_result)["manifest"]
+            invalid_version = "1.2.3-01"
+            invalid_plan = json.loads(json.dumps(plan))
+            invalid_plan["package"]["version"] = invalid_version
+            invalid_plan["execution"]["installArguments"][-1] = (
+                f"@openai/codex@{invalid_version}"
+            )
+            invalid_plan["planHash"] = _compute_v2_plan_hash(invalid_plan)
+            candidate = json.loads(json.dumps(manifest))
+            candidate["package"]["version"] = invalid_version
+            candidate["expectedCliVersion"] = invalid_version
+            candidate["planHash"] = invalid_plan["planHash"]
+            semantic = _validate_manifest_candidate(
+                self.local_app_data,
+                invalid_plan,
+                candidate,
+                expected_sddl=manifest["daclSddl"],
+            )
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(semantic.returncode, 58, semantic.stdout + semantic.stderr)
+        self.assertEqual(
+            semantic.stderr.strip(),
+            "SelfWorkFlow: manifest semantic validation failed.",
+        )
+
+    def test_discover_rejects_bootstrap_root_outside_boundary_before_metadata(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        metadata_log = self.temporary_root / "outside-root-metadata.json"
+        outside_root = self.temporary_root / "outside-bootstrap-boundary"
+        control_path.write_text(
+            json.dumps({"metadataLog": str(metadata_log)}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+                "-BootstrapRoot",
+                str(outside_root),
+            )
+            metadata_started = metadata_log.exists()
+        finally:
+            control_path.unlink(missing_ok=True)
+            metadata_log.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 43, result.stdout + result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: bootstrap path security verification failed.",
+        )
+        self.assertFalse(metadata_started)
+        self.assertFalse(outside_root.exists())
+
+    def test_discover_rejects_reparse_in_toolchain_anchor_chain(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            local_app_data = temporary_root / "LocalAppData"
+            local_app_data.mkdir()
+            junction_target = temporary_root / "junction-target"
+            toolchain_root = junction_target / "bootstrap" / "toolchains" / "fake-node"
+            npm_cli = toolchain_root / "node_modules" / "npm" / "bin" / "npm-cli.js"
+            npm_cli.parent.mkdir(parents=True)
+            shutil.copy2(self.toolchain_root / "node.exe", toolchain_root / "node.exe")
+            shutil.copy2(FAKE_NPM_CLI, npm_cli)
+            _set_protected_current_user_acl(local_app_data)
+            _set_protected_current_user_acl(junction_target)
+            junction = local_app_data / "SelfWorkFlow"
+            link = subprocess.run(
+                ["cmd.exe", "/d", "/c", "mklink", "/J", str(junction), str(junction_target)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(link.returncode, 0, link.stderr + link.stdout)
+            try:
+                result = _run_bootstrap(
+                    local_app_data,
+                    "-Mode",
+                    "Discover",
+                    "-ToolchainRoot",
+                    str(local_app_data / "SelfWorkFlow" / "bootstrap" / "toolchains" / "fake-node"),
+                )
+            finally:
+                _remove_junction_if_present(junction)
+
+        self.assertEqual(result.returncode, 59, result.stdout + result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: toolchain security verification failed.",
+        )
+
+    def test_discover_holds_toolchain_and_ancestor_locks_through_metadata_child(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        barrier = self.temporary_root / "metadata-lock-barrier"
+        release = self.temporary_root / "metadata-lock-release"
+        probes = [
+            {
+                "target": self.toolchain_root,
+                "backup": Path(str(self.toolchain_root) + "-probe"),
+                "attempt": self.temporary_root / "toolchain-rename-attempt",
+                "success": self.temporary_root / "toolchain-rename-success",
+                "log": self.temporary_root / "toolchain-rename.jsonl",
+            },
+            {
+                "target": self.toolchain_anchor.parent,
+                "backup": Path(str(self.toolchain_anchor.parent) + "-probe"),
+                "attempt": self.temporary_root / "toolchain-ancestor-rename-attempt",
+                "success": self.temporary_root / "toolchain-ancestor-rename-success",
+                "log": self.temporary_root / "toolchain-ancestor-rename.jsonl",
+            },
+        ]
+        control_path.write_text(
+            json.dumps(
+                {"metadataBarrier": str(barrier), "metadataRelease": str(release)}
+            ),
+            encoding="utf-8",
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        environment = os.environ.copy()
+        environment["LOCALAPPDATA"] = str(self.local_app_data)
+        try:
+            result, probe_result = _run_with_rename_probes(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(BOOTSTRAP_SCRIPT),
+                    "-Mode",
+                    "Discover",
+                    "-ToolchainRoot",
+                    str(self.toolchain_root),
+                ],
+                environment,
+                barrier,
+                release,
+                probes,
+                child_barrier_stage="metadata",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                probe_result.returncode, 0, probe_result.stdout + probe_result.stderr
+            )
+            json.loads(result.stdout)
+            barrier_state = json.loads(barrier.read_text(encoding="utf-8"))
+            self.assertEqual(barrier_state["stage"], "metadata")
+            self.assertIsInstance(barrier_state["pid"], int)
+            for probe in probes:
+                self.assertTrue(probe["attempt"].exists())
+                self.assertFalse(probe["success"].exists())
+                events = [
+                    json.loads(line)
+                    for line in probe["log"].read_text(encoding="utf-8").splitlines()
+                ]
+                self.assertTrue(events)
+                self.assertEqual({event["stage"] for event in events}, {"metadata"})
+                self.assertEqual(
+                    {event["childPid"] for event in events}, {barrier_state["pid"]}
+                )
+                self.assertTrue(all(event["childRunning"] for event in events))
+                self.assertTrue(all(not event["releaseExists"] for event in events))
+                after_exit = Path(str(probe["target"]) + "-after-exit")
+                probe["target"].rename(after_exit)
+                after_exit.rename(probe["target"])
+        finally:
+            control_path.unlink(missing_ok=True)
+            for path in (barrier, release):
+                path.unlink(missing_ok=True)
+            for probe in probes:
+                probe["attempt"].unlink(missing_ok=True)
+                probe["success"].unlink(missing_ok=True)
+                probe["log"].unlink(missing_ok=True)
+                if probe["backup"].exists() and not probe["target"].exists():
+                    probe["backup"].rename(probe["target"])
+
+    def test_discover_locks_npm_entry_through_metadata_child(self):
+        original_entry = self.npm_cli.read_bytes()
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+                "-PackageVersion",
+                "mutate-entry",
+            )
+            entry_after = self.npm_cli.read_bytes()
+        finally:
+            self.npm_cli.write_bytes(original_entry)
+
+        self.assertEqual(result.returncode, 40, result.stderr)
+        self.assertEqual(entry_after, original_entry)
+        self.assertIn("npm metadata query failed with exit code 76", result.stderr)
+
+    def test_metadata_and_install_children_cannot_modify_locked_node(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        node_path = self.toolchain_root / "node.exe"
+        original_node = node_path.read_bytes()
+        for stage, control_field, expected_code, expected_error in (
+            ("metadata", "mutateNodeOnMetadata", 40, "npm metadata query failed with exit code 76"),
+            ("install", "mutateNodeOnInstall", 49, "npm install failed with exit code 76"),
+        ):
+            with self.subTest(stage=stage):
+                control_path.write_text(
+                    json.dumps({control_field: True}), encoding="utf-8"
+                )
+                _set_protected_current_user_acl(self.local_app_data)
+                bootstrap_root = None
+                try:
+                    if stage == "metadata":
+                        result = _run_bootstrap(
+                            self.local_app_data,
+                            "-Mode",
+                            "Discover",
+                            "-ToolchainRoot",
+                            str(self.toolchain_root),
+                        )
+                    else:
+                        plan = self._discover_v2()
+                        plan_path = self._write_plan(plan, "node-install-lock-plan.json")
+                        bootstrap_root = Path(plan["bootstrapRoot"])
+                        result = _run_bootstrap(
+                            self.local_app_data,
+                            "-Mode",
+                            "Apply",
+                            "-ConfirmedPlanPath",
+                            str(plan_path),
+                            "-ConfirmPlanHash",
+                            plan["planHash"],
+                        )
+                    node_after = node_path.read_bytes()
+                finally:
+                    node_path.write_bytes(original_node)
+                    control_path.unlink(missing_ok=True)
+                    if bootstrap_root and bootstrap_root.exists():
+                        shutil.rmtree(bootstrap_root)
+
+                self.assertEqual(result.returncode, expected_code, result.stderr)
+                self.assertEqual(node_after, original_node)
+                self.assertIn(expected_error, result.stderr)
+                if bootstrap_root:
+                    self.assertFalse(
+                        (bootstrap_root / "bootstrap-tool-manifest.json").exists()
+                    )
+
+    def test_apply_plan_v2_six_state_gate_has_no_prevalidation_side_effects(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        cases = (
+            ("missing-path", 45),
+            ("missing-hash", 45),
+            ("wrong-parameter-hash", 60),
+            ("stale-content-hash", 60),
+            ("rehashed-semantic-drift", 60),
+            ("success", 0),
+        )
+        for name, expected_code in cases:
+            with self.subTest(name=name):
+                metadata_marker = self.temporary_root / f"{name}-metadata.marker"
+                install_marker = self.temporary_root / f"{name}-install.marker"
+                control_path.write_text(
+                    json.dumps(
+                        {
+                            "metadataMarker": str(metadata_marker),
+                            "installMarker": str(install_marker),
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                _set_protected_current_user_acl(self.local_app_data)
+                bootstrap_root = None
+                try:
+                    plan = self._discover_v2()
+                    bootstrap_root = Path(plan["bootstrapRoot"])
+                    self.assertTrue(metadata_marker.exists(), "Discover must run metadata")
+                    metadata_marker.unlink()
+
+                    candidate = json.loads(json.dumps(plan))
+                    confirmed_hash = plan["planHash"]
+                    if name == "stale-content-hash":
+                        candidate["package"]["version"] = "9.9.9"
+                    elif name == "rehashed-semantic-drift":
+                        candidate["execution"]["installArguments"].append("--unsafe-drift")
+                        candidate["planHash"] = _compute_v2_plan_hash(candidate)
+                        confirmed_hash = candidate["planHash"]
+                    plan_path = self._write_plan(candidate, f"{name}-plan.json")
+                    arguments = ["-Mode", "Apply"]
+                    if name != "missing-path":
+                        arguments += ["-ConfirmedPlanPath", str(plan_path)]
+                    if name != "missing-hash":
+                        arguments += [
+                            "-ConfirmPlanHash",
+                            "0" * 64 if name == "wrong-parameter-hash" else confirmed_hash,
+                        ]
+                    result = _run_bootstrap(self.local_app_data, *arguments)
+
+                    self.assertEqual(result.returncode, expected_code, result.stderr)
+                    self.assertFalse(metadata_marker.exists(), "Apply must never run view")
+                    if name == "success":
+                        self.assertTrue(install_marker.exists())
+                        self._assert_final_apply(plan, result)
+                    else:
+                        self.assertFalse(install_marker.exists())
+                        self.assertFalse(bootstrap_root.exists())
+                        self.assertFalse(Path(plan["sideEffects"]["cachePath"]).exists())
+                        self.assertFalse(Path(plan["sideEffects"]["manifestPath"]).exists())
+                finally:
+                    control_path.unlink(missing_ok=True)
+                    metadata_marker.unlink(missing_ok=True)
+                    install_marker.unlink(missing_ok=True)
+                    if bootstrap_root and bootstrap_root.exists():
+                        shutil.rmtree(bootstrap_root)
+
+    def test_apply_rejects_relative_confirmed_plan_before_external_process(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        metadata_marker = self.temporary_root / "relative-plan-metadata.marker"
+        install_marker = self.temporary_root / "relative-plan-install.marker"
+        control_path.write_text(
+            json.dumps(
+                {
+                    "metadataMarker": str(metadata_marker),
+                    "installMarker": str(install_marker),
+                }
+            ),
+            encoding="utf-8",
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        try:
+            plan = self._discover_v2()
+            metadata_marker.unlink()
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                "relative-plan.json",
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+        finally:
+            control_path.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 60, result.stderr)
+        self.assertFalse(metadata_marker.exists())
+        self.assertFalse(install_marker.exists())
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: confirmed plan validation failed.",
+        )
+
+    def test_apply_rejects_wrong_typed_plan_with_recomputed_hash(self):
+        plan = self._discover_v2()
+        plan["execution"]["metadataArguments"] = "not-an-array"
+        plan["planHash"] = _compute_v2_plan_hash(plan)
+        plan_path = self._write_plan(plan, "wrong-type-plan.json")
+
+        result = _run_bootstrap(
+            self.local_app_data,
+            "-Mode",
+            "Apply",
+            "-ConfirmedPlanPath",
+            str(plan_path),
+            "-ConfirmPlanHash",
+            plan["planHash"],
+        )
+
+        self.assertEqual(result.returncode, 60, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: confirmed plan validation failed.",
+        )
+
+    def test_apply_rejects_node_or_npm_identity_drift_without_side_effects(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        for identity, target in (
+            ("node", self.toolchain_root / "node.exe"),
+            ("npm", self.npm_cli),
+        ):
+            with self.subTest(identity=identity):
+                metadata_marker = self.temporary_root / f"{identity}-drift-metadata.marker"
+                install_marker = self.temporary_root / f"{identity}-drift-install.marker"
+                control_path.write_text(
+                    json.dumps(
+                        {
+                            "metadataMarker": str(metadata_marker),
+                            "installMarker": str(install_marker),
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                _set_protected_current_user_acl(self.local_app_data)
+                original = target.read_bytes()
+                try:
+                    plan = self._discover_v2()
+                    plan_path = self._write_plan(plan, f"{identity}-drift-plan.json")
+                    metadata_marker.unlink()
+                    target.write_bytes(original + b"identity-drift")
+                    result = _run_bootstrap(
+                        self.local_app_data,
+                        "-Mode",
+                        "Apply",
+                        "-ConfirmedPlanPath",
+                        str(plan_path),
+                        "-ConfirmPlanHash",
+                        plan["planHash"],
+                    )
+                    metadata_called = metadata_marker.exists()
+                    install_called = install_marker.exists()
+                finally:
+                    target.write_bytes(original)
+                    control_path.unlink(missing_ok=True)
+                    metadata_marker.unlink(missing_ok=True)
+                    install_marker.unlink(missing_ok=True)
+
+                self.assertEqual(result.returncode, 59, result.stderr)
+                self.assertFalse(metadata_called, "Apply must never run view")
+                self.assertFalse(install_called)
+                self.assertFalse(Path(plan["bootstrapRoot"]).exists())
+                self.assertFalse(Path(plan["sideEffects"]["cachePath"]).exists())
+                self.assertFalse(Path(plan["sideEffects"]["manifestPath"]).exists())
+                self.assertEqual(
+                    result.stderr.strip(),
+                    "SelfWorkFlow: toolchain security verification failed.",
+                )
+
+    def test_apply_enforces_bootstrap_root_states_before_install(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        allowed_root = (
+            self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+        )
+        cases = (
+            ("file", 44, False),
+            ("nonempty", 44, False),
+            ("empty", 0, True),
+            ("missing", 0, True),
+        )
+        for state, expected_code, expect_install in cases:
+            with self.subTest(state=state):
+                bootstrap_root = allowed_root / f"root-state-{state}"
+                install_marker = self.temporary_root / f"root-state-{state}.install"
+                control_path.write_text(
+                    json.dumps({"installMarker": str(install_marker)}),
+                    encoding="utf-8",
+                )
+                _set_protected_current_user_acl(self.local_app_data)
+                try:
+                    plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+                    plan_path = self._write_plan(plan, f"root-state-{state}-plan.json")
+                    if state == "file":
+                        bootstrap_root.parent.mkdir(parents=True, exist_ok=True)
+                        bootstrap_root.write_text("sentinel", encoding="utf-8")
+                    elif state in {"nonempty", "empty"}:
+                        bootstrap_root.mkdir(parents=True)
+                        if state == "nonempty":
+                            (bootstrap_root / "sentinel.txt").write_text(
+                                "sentinel", encoding="utf-8"
+                            )
+
+                    result = _run_bootstrap(
+                        self.local_app_data,
+                        "-Mode",
+                        "Apply",
+                        "-ConfirmedPlanPath",
+                        str(plan_path),
+                        "-ConfirmPlanHash",
+                        plan["planHash"],
+                    )
+
+                    self.assertEqual(result.returncode, expected_code, result.stderr)
+                    self.assertEqual(install_marker.exists(), expect_install)
+                    if expect_install:
+                        self._assert_final_apply(plan, result)
+                    elif state == "file":
+                        self.assertTrue(bootstrap_root.is_file())
+                        self.assertEqual(
+                            bootstrap_root.read_text(encoding="utf-8"), "sentinel"
+                        )
+                    else:
+                        self.assertEqual(
+                            [path.name for path in bootstrap_root.iterdir()],
+                            ["sentinel.txt"],
+                        )
+                finally:
+                    control_path.unlink(missing_ok=True)
+                    install_marker.unlink(missing_ok=True)
+                    if bootstrap_root.is_dir():
+                        shutil.rmtree(bootstrap_root)
+                    elif bootstrap_root.exists():
+                        bootstrap_root.unlink()
+
+    def test_apply_runs_only_install_with_bound_cwd_and_environment(self):
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "install-only-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        invocation_log = Path(plan["sideEffects"]["cachePath"]) / "fake-npm-invocations.jsonl"
+        secret = "super-secret-parent-value"
+        injected_environment = {
+            "NODE_OPTIONS": "--require=must-not-run",
+            "NODE_PATH": secret,
+            "NODE_EXTRA_CA_CERTS": secret,
+            "NPM_CONFIG_REGISTRY": "https://attacker.invalid/",
+            "NPM_CONFIG_USERCONFIG": secret,
+            "HTTP_PROXY": f"http://{secret}@attacker.invalid/",
+            "HTTPS_PROXY": f"http://{secret}@attacker.invalid/",
+            "ALL_PROXY": f"http://{secret}@attacker.invalid/",
+            "NO_PROXY": secret,
+            "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+            "NPM_TOKEN": secret,
+            "NODE_AUTH_TOKEN": secret,
+            "USERPROFILE": str(self.temporary_root / "hostile-profile"),
+        }
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+                environment=injected_environment,
+            )
+            inspection = self._assert_final_apply(plan, result)
+            invocations = inspection["invocations"]
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual([entry["command"] for entry in invocations], ["install"])
+        self.assertEqual(invocations[0]["cwd"], plan["execution"]["trustedCwd"])
+        self.assertEqual(
+            {key.upper(): value for key, value in invocations[0]["environment"].items()},
+            {key.upper(): value for key, value in plan["execution"]["installEnvironment"].items()},
+        )
+        serialized_invocation = json.dumps(invocations, sort_keys=True)
+        self.assertNotIn(secret, serialized_invocation)
+
+    def test_apply_redacts_install_failure_output(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        secret = "install-super-secret"
+        control_path.write_text(
+            json.dumps({"installExitCode": 77, "stderr": secret}),
+            encoding="utf-8",
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        bootstrap_root = None
+        try:
+            plan = self._discover_v2()
+            plan_path = self._write_plan(plan, "install-failure-plan.json")
+            bootstrap_root = Path(plan["bootstrapRoot"])
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+        finally:
+            control_path.unlink(missing_ok=True)
+            if bootstrap_root and bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 49)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: npm install failed with exit code 77.",
+        )
+        self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_apply_holds_npm_entry_lock_until_install_child_exits(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        control_path.write_text(
+            json.dumps({"mutateEntryOnInstall": True}),
+            encoding="utf-8",
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        original_entry = self.npm_cli.read_bytes()
+        bootstrap_root = None
+        try:
+            plan = self._discover_v2()
+            plan_path = self._write_plan(plan, "install-lock-plan.json")
+            bootstrap_root = Path(plan["bootstrapRoot"])
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            entry_after = self.npm_cli.read_bytes()
+        finally:
+            self.npm_cli.write_bytes(original_entry)
+            control_path.unlink(missing_ok=True)
+            if bootstrap_root and bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 49, result.stderr)
+        self.assertEqual(entry_after, original_entry)
+        self.assertIn("npm install failed with exit code 76", result.stderr)
+
+    def test_apply_rejects_invalid_install_artifacts_without_publication(self):
+        integrity = "sha512-U2VsZldvcmtGbG93RmFrZUludGVncml0eQ=="
+        valid_entry = {"name": "@openai/codex", "version": "1.2.3", "integrity": integrity}
+        def lock(name="@openai/codex", version="1.2.3"):
+            return json.dumps(
+                {
+                    "lockfileVersion": 3,
+                    "packages": {
+                        "node_modules/@openai/codex": {
+                            "name": name,
+                            "version": version,
+                            "integrity": integrity,
+                        }
+                    },
+                }
+            )
+
+        secrets = {
+            "malformed-package": "package-json-super-secret",
+            "malformed-lock": "package-lock-super-secret",
+            "integrity": "integrity-super-secret",
+        }
+        cases = (
+            ("missing-package", {"omitPackageJson": True}, None),
+            ("missing-lock", {"omitPackageLock": True}, None),
+            ("malformed-package", {"packageJsonRaw": "{" + secrets["malformed-package"]}, secrets["malformed-package"]),
+            ("malformed-lock", {"packageLockRaw": "{" + secrets["malformed-lock"]}, secrets["malformed-lock"]),
+            ("package-missing-version", {"packageJsonRaw": json.dumps({"name": "@openai/codex"})}, None),
+            ("package-version-type", {"packageJsonRaw": json.dumps({"name": "@openai/codex", "version": 123})}, None),
+            ("lock-missing-entry", {"packageLockRaw": json.dumps({"lockfileVersion": 3, "packages": {}})}, None),
+            ("lock-packages-type", {"packageLockRaw": json.dumps({"lockfileVersion": 3, "packages": []})}, None),
+            ("lock-version-type", {"packageLockRaw": json.dumps({"lockfileVersion": "3", "packages": {"node_modules/@openai/codex": valid_entry}})}, None),
+            ("lock-entry-type", {"packageLockRaw": json.dumps({"lockfileVersion": 3, "packages": {"node_modules/@openai/codex": {**valid_entry, "version": 123}}})}, None),
+            ("package-name-drift", {"packageJsonRaw": json.dumps({"name": "other", "version": "1.2.3"})}, None),
+            ("package-version-drift", {"packageJsonRaw": json.dumps({"name": "@openai/codex", "version": "9.9.9"})}, None),
+            ("lock-name-drift", {"packageLockRaw": lock(name="other")}, None),
+            ("lock-version-drift", {"packageLockRaw": lock(version="9.9.9")}, None),
+            ("integrity-drift", {"packageLockRaw": lock().replace(integrity, "sha512-" + secrets["integrity"])}, secrets["integrity"]),
+            ("tree-reparse", {"createPackageReparse": True}, None),
+        )
+        for name, control, secret in cases:
+            with self.subTest(name=name):
+                result, observation = self._apply_install_control(control, name)
+                self.assertEqual(result.returncode, 50, result.stderr)
+                self.assertEqual(
+                    result.stderr.strip(),
+                    "SelfWorkFlow: installed package verification failed.",
+                )
+                self.assertFalse(observation["codexMarkers"])
+                self.assertFalse(observation["formalManifestExists"])
+                self.assertFalse(observation["temporaryManifests"])
+                if secret:
+                    self.assertNotIn(secret, result.stdout + result.stderr)
+
+    def test_apply_rejects_package_tree_drift_during_verification(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        control_path.write_text(json.dumps({"createTreeDriftFixture": True}), encoding="utf-8")
+        _set_protected_current_user_acl(self.local_app_data)
+        bootstrap_root = None
+        stop = threading.Event()
+
+        def mutate_tree():
+            deadline = time.monotonic() + 10
+            while not target.exists() and time.monotonic() < deadline:
+                time.sleep(0.001)
+            time.sleep(0.15)
+            if not stop.is_set():
+                with target.open("ab") as stream:
+                    stream.write(b"-after")
+
+        try:
+            plan = self._discover_v2()
+            plan_path = self._write_plan(plan, "package-tree-drift-plan.json")
+            bootstrap_root = Path(plan["bootstrapRoot"])
+            target = bootstrap_root / "node_modules" / "@openai" / "codex" / "zzz-drift.bin"
+            worker = threading.Thread(target=mutate_tree)
+            worker.start()
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            codex_markers = list(bootstrap_root.rglob("*.executed"))
+            manifest_exists = Path(plan["sideEffects"]["manifestPath"]).exists()
+            temporary_manifests = list(bootstrap_root.glob("*.tmp"))
+        finally:
+            stop.set()
+            if "worker" in locals():
+                worker.join(timeout=10)
+            control_path.unlink(missing_ok=True)
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 50, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: installed package verification failed.",
+        )
+        self.assertFalse(codex_markers)
+        self.assertFalse(manifest_exists)
+        self.assertFalse(temporary_manifests)
+
+    def test_apply_sets_and_rereads_exact_protected_bootstrap_acl(self):
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "bootstrap-acl-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            acl = self._assert_final_apply(plan, result)["acl"]
+            manifest_exists = Path(plan["sideEffects"]["manifestPath"]).exists()
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertTrue(acl["protected"])
+        self.assertEqual({rule["sid"] for rule in acl["rules"]}, {acl["currentSid"], "S-1-5-18"})
+        self.assertEqual(len(acl["rules"]), 2)
+        for rule in acl["rules"]:
+            self.assertFalse(rule["inherited"])
+            self.assertEqual(rule["type"], "Allow")
+            self.assertEqual(rule["rights"], "FullControl")
+            self.assertEqual(rule["inheritance"], "ContainerInherit, ObjectInherit")
+            self.assertEqual(rule["propagation"], "None")
+        self.assertTrue(manifest_exists)
+
+    def test_apply_rejects_inherited_acl_written_by_concurrent_helper(self):
+        result, changed, manifest_exists = self._apply_with_acl_corruptor(
+            "inheritance", "inherited-acl"
+        )
+
+        self.assertTrue(changed, "concurrent helper must change the filesystem ACL")
+        self.assertEqual(result.returncode, 48, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(), "SelfWorkFlow: ACL security verification failed."
+        )
+        self.assertFalse(manifest_exists)
+
+    def test_apply_rejects_everyone_acl_written_by_concurrent_helper(self):
+        result, changed, manifest_exists = self._apply_with_acl_corruptor(
+            "everyone", "everyone-acl"
+        )
+
+        self.assertTrue(changed, "concurrent helper must change the filesystem ACL")
+        self.assertEqual(result.returncode, 48, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(), "SelfWorkFlow: ACL security verification failed."
+        )
+        self.assertFalse(manifest_exists)
+
+    def test_apply_rejects_extra_acl_written_by_concurrent_helper(self):
+        result, changed, manifest_exists = self._apply_with_acl_corruptor(
+            "extra", "extra-acl"
+        )
+
+        self.assertTrue(changed, "concurrent helper must change the filesystem ACL")
+        self.assertEqual(result.returncode, 48, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(), "SelfWorkFlow: ACL security verification failed."
+        )
+        self.assertFalse(manifest_exists)
+
+    def test_apply_rejects_acl_drift_after_strict_state_is_observed(self):
+        result, changed, manifest_exists = self._apply_with_acl_corruptor(
+            "reread", "acl-reread-drift"
+        )
+
+        self.assertTrue(changed, "helper must observe strict ACL before changing it")
+        self.assertEqual(result.returncode, 48, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(), "SelfWorkFlow: ACL security verification failed."
+        )
+        self.assertFalse(manifest_exists)
+
+    def test_apply_holds_root_and_ancestor_locks_until_process_exit(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        ancestor = self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+        bootstrap_root = ancestor / "root-lock-lifecycle"
+        barrier = self.temporary_root / "root-lock-barrier"
+        release = self.temporary_root / "root-lock-release"
+        probes = [
+            {
+                "target": bootstrap_root,
+                "backup": Path(str(bootstrap_root) + "-probe"),
+                "attempt": self.temporary_root / "root-lock-attempt",
+                "success": self.temporary_root / "root-lock-success",
+            },
+            {
+                "target": ancestor,
+                "backup": Path(str(ancestor) + "-probe"),
+                "attempt": self.temporary_root / "ancestor-lock-attempt",
+                "success": self.temporary_root / "ancestor-lock-success",
+            },
+        ]
+        control_path.write_text(
+            json.dumps(
+                {"installBarrier": str(barrier), "installRelease": str(release)}
+            ),
+            encoding="utf-8",
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        try:
+            plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+            plan_path = self._write_plan(plan, "root-lock-lifecycle-plan.json")
+            environment = os.environ.copy()
+            environment["LOCALAPPDATA"] = str(self.local_app_data)
+            result, probe_result = _run_with_rename_probes(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(BOOTSTRAP_SCRIPT),
+                    "-Mode",
+                    "Apply",
+                    "-ConfirmedPlanPath",
+                    str(plan_path),
+                    "-ConfirmPlanHash",
+                    plan["planHash"],
+                ],
+                environment,
+                barrier,
+                release,
+                probes,
+            )
+            self.assertEqual(
+                probe_result.returncode, 0, probe_result.stdout + probe_result.stderr
+            )
+            for probe in probes:
+                self.assertTrue(probe["attempt"].exists())
+                self.assertFalse(probe["success"].exists())
+            self._assert_final_apply(plan, result)
+            for target in (bootstrap_root, ancestor):
+                backup = Path(str(target) + "-after-exit")
+                target.rename(backup)
+                backup.rename(target)
+        finally:
+            control_path.unlink(missing_ok=True)
+            for path in (barrier, release):
+                path.unlink(missing_ok=True)
+            for probe in probes:
+                probe["attempt"].unlink(missing_ok=True)
+                probe["success"].unlink(missing_ok=True)
+                if probe["backup"].exists() and not probe["target"].exists():
+                    probe["backup"].rename(probe["target"])
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+    def test_apply_ancestor_junction_race_is_locked_or_fails_closed_before_install(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        ancestor = self.local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
+        bootstrap_root = ancestor / "ancestor-junction-race"
+        ancestor.mkdir(parents=True, exist_ok=True)
+        escape_target = self.temporary_root / "ancestor-junction-escape"
+        escape_target.mkdir()
+        barrier = self.temporary_root / "ancestor-junction-start"
+        release = self.temporary_root / "ancestor-junction-release"
+        install_marker = self.temporary_root / "ancestor-junction-install.marker"
+        probe = {
+            "target": ancestor,
+            "backup": Path(str(ancestor) + "-probe"),
+            "attempt": self.temporary_root / "ancestor-junction-attempt",
+            "success": self.temporary_root / "ancestor-junction-success",
+            "junction": escape_target,
+        }
+        control_path.write_text(
+            json.dumps({"installMarker": str(install_marker)}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        barrier.write_text("start", encoding="utf-8")
+        try:
+            plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+            plan_path = self._write_plan(plan, "ancestor-junction-race-plan.json")
+            environment = os.environ.copy()
+            environment["LOCALAPPDATA"] = str(self.local_app_data)
+            result, probe_result = _run_with_rename_probes(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(BOOTSTRAP_SCRIPT),
+                    "-Mode",
+                    "Apply",
+                    "-ConfirmedPlanPath",
+                    str(plan_path),
+                    "-ConfirmPlanHash",
+                    plan["planHash"],
+                ],
+                environment,
+                barrier,
+                release,
+                [probe],
+                stop_marker=install_marker,
+            )
+            replacement_succeeded = probe["backup"].exists()
+            install_started = install_marker.exists()
+            manifest_exists = Path(plan["sideEffects"]["manifestPath"]).exists()
+            self.assertEqual(
+                probe_result.returncode, 0, probe_result.stdout + probe_result.stderr
+            )
+            self.assertTrue(probe["attempt"].exists())
+            if replacement_succeeded:
+                self.assertIn(result.returncode, (43, 59), result.stderr)
+                self.assertFalse(install_started)
+                self.assertFalse(manifest_exists)
+                self.assertEqual(list(escape_target.rglob("*")), [])
+            else:
+                self.assertFalse(probe["success"].exists())
+                self.assertTrue(install_started)
+                self._assert_final_apply(plan, result)
+        finally:
+            control_path.unlink(missing_ok=True)
+            for path in (
+                barrier,
+                release,
+                install_marker,
+                probe["attempt"],
+                probe["success"],
+            ):
+                path.unlink(missing_ok=True)
+            _remove_junction_if_present(ancestor)
+            if probe["backup"].exists() and not ancestor.exists():
+                probe["backup"].rename(ancestor)
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+            if escape_target.exists():
+                shutil.rmtree(escape_target)
+
+    def test_apply_publishes_schema_valid_semantic_manifest_v2(self):
+        from jsonschema import Draft202012Validator
+
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "manifest-success-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        secret = "manifest-oracle-super-secret-token"
+        raw_output = "manifest-oracle-raw-output"
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+                environment={
+                    "NPM_TOKEN": secret,
+                    "SELFWORKFLOW_RAW_OUTPUT": raw_output,
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            response = json.loads(result.stdout)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
+            Draft202012Validator(schema).validate(manifest)
+            independent_tree_hash = _compute_package_tree_hash(
+                bootstrap_root / "node_modules" / "@openai" / "codex"
+            )
+            independent_acl = _read_directory_acl(bootstrap_root)
+            codex_markers = list(bootstrap_root.rglob("*.executed"))
+            temporary_manifests = list(bootstrap_root.glob("*.tmp"))
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(response, {"manifestPath": str(manifest_path), "manifest": manifest})
+        self.assertEqual(manifest["schemaVersion"], 2)
+        self.assertEqual(manifest["bootstrapRoot"], plan["bootstrapRoot"])
+        self.assertEqual(manifest["package"], {
+            "name": plan["package"]["name"],
+            "version": plan["package"]["version"],
+            "integrity": plan["package"]["integrity"],
+        })
+        self.assertEqual(manifest["expectedCliVersion"], plan["package"]["version"])
+        self.assertEqual(manifest["cliVersionVerification"], "not-run")
+        self.assertEqual(manifest["packageTreeHash"], independent_tree_hash)
+        self.assertEqual(manifest["daclSddl"], independent_acl["sddl"])
+        self.assertEqual(manifest["planHash"], _compute_v2_plan_hash(plan))
+        self.assertEqual(manifest["planHash"], plan["planHash"])
+        self.assertTrue(independent_acl["protected"])
+        self.assertIn(
+            independent_acl["owner"],
+            {independent_acl["currentSid"], "S-1-5-18"},
+        )
+        self.assertEqual(
+            {rule["sid"] for rule in independent_acl["rules"]},
+            {independent_acl["currentSid"], "S-1-5-18"},
+        )
+        self.assertEqual(len(independent_acl["rules"]), 2)
+        for rule in independent_acl["rules"]:
+            self.assertFalse(rule["inherited"])
+            self.assertEqual(rule["type"], "Allow")
+            self.assertEqual(rule["rights"], "FullControl")
+        serialized = (
+            json.dumps(manifest, sort_keys=True) + result.stdout + result.stderr
+        ).lower()
+        self.assertNotIn("cliVersion", manifest)
+        self.assertNotIn("credential", serialized)
+        self.assertNotIn("stdout", serialized)
+        self.assertNotIn("stderr", serialized)
+        self.assertNotIn(secret, serialized)
+        self.assertNotIn(raw_output, serialized)
+        self.assertFalse(codex_markers)
+        self.assertFalse(temporary_manifests)
+
+    def test_published_manifest_passes_production_semantic_validation(self):
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "manifest-semantic-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            semantic = _validate_manifest_candidate(self.local_app_data, plan, manifest)
+            self.assertEqual(semantic.returncode, 0, semantic.stderr)
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+    def test_manifest_semantics_rejects_string_schema_version(self):
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "manifest-schema-type-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["schemaVersion"] = "2"
+            semantic = _validate_manifest_candidate(self.local_app_data, plan, manifest)
+            self.assertEqual(semantic.returncode, 58, semantic.stderr)
+            self.assertEqual(
+                semantic.stderr.strip(),
+                "SelfWorkFlow: manifest semantic validation failed.",
+            )
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+    def test_manifest_semantics_rejects_shape_and_binding_drift(self):
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "manifest-drift-plan.json")
+        bootstrap_root = Path(plan["bootstrapRoot"])
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            expected_version_secret = "expected-version-super-secret"
+            mutations = {
+                "missing-top-field": lambda value: value.pop("expectedCliVersion"),
+                "extra-top-field": lambda value: value.update(extra="rejected"),
+                "extra-package-field": lambda value: value["package"].update(extra="rejected"),
+                "schema-version": lambda value: value.update(schemaVersion=1),
+                "package-version": lambda value: value["package"].update(version="1.2.4"),
+                "tree-hash": lambda value: value.update(packageTreeHash=f"sha256:{'1' * 64}"),
+                "plan-hash": lambda value: value.update(planHash="1" * 64),
+                "dacl": lambda value: value.update(daclSddl="D:P(A;OICI;FA;;;WD)"),
+                "root-noncanonical": lambda value: value.update(bootstrapRoot=r"C:\..\Windows"),
+                "root-outside-boundary": lambda value: value.update(
+                    bootstrapRoot=str(self.temporary_root / "outside-manifest-root")
+                ),
+                "root-confirmed-plan-drift": lambda value: value.update(
+                    bootstrapRoot=str(Path(plan["bootstrapRoot"]) / "inside-drift")
+                ),
+                "expected-version": lambda value: value.update(
+                    expectedCliVersion=f"1.2.3+{expected_version_secret}"
+                ),
+            }
+            for name, mutate in mutations.items():
+                with self.subTest(name=name):
+                    candidate = json.loads(json.dumps(manifest))
+                    mutate(candidate)
+                    semantic = _validate_manifest_candidate(
+                        self.local_app_data, plan, candidate
+                    )
+                    self.assertEqual(semantic.returncode, 58, semantic.stderr)
+                    self.assertEqual(
+                        semantic.stderr.strip(),
+                        "SelfWorkFlow: manifest semantic validation failed.",
+                    )
+                    self.assertNotIn(
+                        expected_version_secret, semantic.stdout + semantic.stderr
+                    )
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+    def test_nonempty_manifest_path_is_rejected_without_sensitive_content(self):
+        secret = "super-secret-manifest-token"
+        bootstrap_root = (
+            self.local_app_data
+            / "SelfWorkFlow"
+            / "bootstrap"
+            / "codex-cli"
+            / "atomic-failure"
+        )
+        plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+        plan_path = self._write_plan(plan, "manifest-atomic-failure-plan.json")
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        manifest_path.mkdir(parents=True)
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+                environment={"SELFWORKFLOW_SECRET_TOKEN": secret},
+            )
+            written_text = "".join(
+                path.read_text(encoding="utf-8", errors="ignore")
+                for path in bootstrap_root.rglob("*")
+                if path.is_file()
+            )
+            codex_markers = list(bootstrap_root.rglob("*.executed"))
+            temporary_manifests = list(bootstrap_root.glob("*.tmp"))
+            formal_manifest_is_file = manifest_path.is_file()
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 44, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: existing BootstrapRoot does not satisfy safe recovery conditions; only an empty directory is accepted.",
+        )
+        self.assertFalse(formal_manifest_is_file)
+        self.assertFalse(temporary_manifests)
+        self.assertNotIn(secret, result.stdout + result.stderr + written_text)
+        self.assertFalse(codex_markers)
+
+    def test_nonempty_root_rejection_preserves_existing_manifest(self):
+        bootstrap_root = (
+            self.local_app_data
+            / "SelfWorkFlow"
+            / "bootstrap"
+            / "codex-cli"
+            / "existing-manifest"
+        )
+        plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+        plan_path = self._write_plan(plan, "existing-manifest-plan.json")
+        manifest_path = Path(plan["sideEffects"]["manifestPath"])
+        manifest_path.parent.mkdir(parents=True)
+        sentinel = "existing-manifest-must-survive"
+        manifest_path.write_text(sentinel, encoding="utf-8")
+        try:
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            preserved = manifest_path.read_text(encoding="utf-8")
+            temporary_manifests = list(bootstrap_root.glob("*.tmp"))
+        finally:
+            if bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 44, result.stderr)
+        self.assertEqual(preserved, sentinel)
+        self.assertFalse(temporary_manifests)
 
 class BootstrapCodexCliTests(unittest.TestCase):
+    def test_manifest_atomic_publish_cleans_published_file_after_postcheck_failure(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            manifest_path = root / "bootstrap-tool-manifest.json"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "SELFWORKFLOW_MANIFEST_LIBRARY": str(MANIFEST_LIBRARY),
+                    "SELFWORKFLOW_MANIFEST_TARGET": str(manifest_path),
+                    "SELFWORKFLOW_MANIFEST_ROOT": str(root),
+                }
+            )
+            command = r"""
+. $env:SELFWORKFLOW_MANIFEST_LIBRARY
+$script:ValidationCalls = 0
+$script:ObservedMovedFile = $false
+function Assert-SelfWorkflowBootstrapManifest {
+    param($Manifest, $Plan, $AllowedBoundary, $PackageRoot, $ExpectedSddl)
+    $script:ValidationCalls++
+    if ($script:ValidationCalls -eq 2) {
+        $script:ObservedMovedFile = [IO.File]::Exists($env:SELFWORKFLOW_MANIFEST_TARGET)
+        throw "deterministic post-move validation failure"
+    }
+}
+$Failed = $false
+try {
+    [void](Publish-SelfWorkflowManifestAtomic `
+        -Manifest ([pscustomobject]@{ schemaVersion = 2 }) `
+        -ManifestPath $env:SELFWORKFLOW_MANIFEST_TARGET `
+        -Plan ([pscustomobject]@{}) `
+        -AllowedBoundary $env:SELFWORKFLOW_MANIFEST_ROOT `
+        -PackageRoot $env:SELFWORKFLOW_MANIFEST_ROOT `
+        -ExpectedSddl "ignored")
+} catch {
+    $Failed = $true
+}
+[ordered]@{
+    failed = $Failed
+    validationCalls = $script:ValidationCalls
+    observedMovedFile = $script:ObservedMovedFile
+    formalExists = [IO.File]::Exists($env:SELFWORKFLOW_MANIFEST_TARGET)
+    temporaryCount = @(Get-ChildItem -LiteralPath $env:SELFWORKFLOW_MANIFEST_ROOT -Filter "*.tmp").Count
+} | ConvertTo-Json -Compress
+"""
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", command],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observation = json.loads(result.stdout)
+        self.assertTrue(observation["failed"])
+        self.assertEqual(observation["validationCalls"], 2)
+        self.assertTrue(observation["observedMovedFile"])
+        self.assertFalse(observation["formalExists"])
+        self.assertEqual(observation["temporaryCount"], 0)
+
+    def test_manifest_atomic_publish_cleans_temp_after_move_conflict(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            manifest_path = root / "bootstrap-tool-manifest.json"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "SELFWORKFLOW_MANIFEST_LIBRARY": str(MANIFEST_LIBRARY),
+                    "SELFWORKFLOW_MANIFEST_TARGET": str(manifest_path),
+                    "SELFWORKFLOW_MANIFEST_ROOT": str(root),
+                }
+            )
+            command = r"""
+. $env:SELFWORKFLOW_MANIFEST_LIBRARY
+$script:ValidationCalls = 0
+function Assert-SelfWorkflowBootstrapManifest {
+    param($Manifest, $Plan, $AllowedBoundary, $PackageRoot, $ExpectedSddl)
+    $script:ValidationCalls++
+    if ($script:ValidationCalls -eq 1) {
+        [IO.Directory]::CreateDirectory($env:SELFWORKFLOW_MANIFEST_TARGET) | Out-Null
+    }
+}
+$Failed = $false
+try {
+    [void](Publish-SelfWorkflowManifestAtomic `
+        -Manifest ([pscustomobject]@{ schemaVersion = 2 }) `
+        -ManifestPath $env:SELFWORKFLOW_MANIFEST_TARGET `
+        -Plan ([pscustomobject]@{}) `
+        -AllowedBoundary $env:SELFWORKFLOW_MANIFEST_ROOT `
+        -PackageRoot $env:SELFWORKFLOW_MANIFEST_ROOT `
+        -ExpectedSddl "ignored")
+} catch { $Failed = $true }
+[ordered]@{
+    failed = $Failed
+    validationCalls = $script:ValidationCalls
+    conflictDirectoryExists = [IO.Directory]::Exists($env:SELFWORKFLOW_MANIFEST_TARGET)
+    formalFileExists = [IO.File]::Exists($env:SELFWORKFLOW_MANIFEST_TARGET)
+    temporaryCount = @(Get-ChildItem -LiteralPath $env:SELFWORKFLOW_MANIFEST_ROOT -Filter "*.tmp").Count
+} | ConvertTo-Json -Compress
+"""
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", command],
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        observation = json.loads(result.stdout)
+        self.assertTrue(observation["failed"])
+        self.assertEqual(observation["validationCalls"], 1)
+        self.assertTrue(observation["conflictDirectoryExists"])
+        self.assertFalse(observation["formalFileExists"])
+        self.assertEqual(observation["temporaryCount"], 0)
+
     def test_manifest_schema_requires_strict_security_bindings(self):
         self.assertTrue(MANIFEST_SCHEMA.is_file(), "manifest schema must exist")
         schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
@@ -311,7 +2393,8 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 "package",
                 "packageTreeHash",
                 "daclSddl",
-                "cliVersion",
+                "expectedCliVersion",
+                "cliVersionVerification",
                 "planHash",
             },
         )
@@ -326,7 +2409,7 @@ class BootstrapCodexCliTests(unittest.TestCase):
 
         schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
         manifest = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "bootstrapRoot": r"C:\Users\Example\AppData\Local\SelfWorkFlow\bootstrap\codex-cli",
             "package": {
                 "name": "@openai/codex",
@@ -335,21 +2418,24 @@ class BootstrapCodexCliTests(unittest.TestCase):
             },
             "packageTreeHash": f"sha256:{'0' * 64}",
             "daclSddl": "D:P(A;OICI;FA;;;S-1-5-18)",
-            "cliVersion": "1.2.3",
+            "expectedCliVersion": "1.2.3",
+            "cliVersionVerification": "not-run",
             "planHash": "0" * 64,
         }
         validator = Draft202012Validator(schema)
         for field, unsafe_value in (
+            ("schemaVersion", 1),
             ("bootstrapRoot", r"C:\..\Windows"),
             ("daclSddl", "D:P(A;;FA;;;WD)"),
-            ("cliVersion", "1.2.3 extra-sensitive-text"),
+            ("expectedCliVersion", "1.2.3 extra-sensitive-text"),
+            ("cliVersionVerification", "run"),
         ):
             with self.subTest(field=field):
                 unsafe_manifest = json.loads(json.dumps(manifest))
                 unsafe_manifest[field] = unsafe_value
                 self.assertTrue(list(validator.iter_errors(unsafe_manifest)))
 
-        for field_path in (("package", "version"), ("cliVersion",)):
+        for field_path in (("package", "version"), ("expectedCliVersion",)):
             with self.subTest(field_path=field_path, value="1.2.3-01"):
                 unsafe_manifest = json.loads(json.dumps(manifest))
                 target = unsafe_manifest
@@ -360,8 +2446,12 @@ class BootstrapCodexCliTests(unittest.TestCase):
 
         legal_manifest = json.loads(json.dumps(manifest))
         legal_manifest["package"]["version"] = "1.2.3-alpha.1+build.01"
-        legal_manifest["cliVersion"] = "1.2.3-alpha.1+build.01"
+        legal_manifest["expectedCliVersion"] = "1.2.3-alpha.1+build.01"
         self.assertFalse(list(validator.iter_errors(legal_manifest)))
+
+        extra_manifest = json.loads(json.dumps(manifest))
+        extra_manifest["unexpected"] = "rejected"
+        self.assertTrue(list(validator.iter_errors(extra_manifest)))
 
     def test_manifest_schema_semver_pattern_matches_production_rule(self):
         schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
@@ -387,1370 +2477,57 @@ class BootstrapCodexCliTests(unittest.TestCase):
             result.stdout.strip(),
         )
 
-    def test_discover_returns_version_and_integrity_plan(self):
-        self.assertTrue(BOOTSTRAP_SCRIPT.is_file(), "bootstrap script must exist")
-
+    def test_manifest_atomic_publish_validates_before_temp_or_move(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
+            root = Path(temporary_directory)
+            manifest_path = root / "bootstrap-tool-manifest.json"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "SELFWORKFLOW_MANIFEST_LIBRARY": str(MANIFEST_LIBRARY),
+                    "SELFWORKFLOW_MANIFEST_TARGET": str(manifest_path),
+                    "SELFWORKFLOW_MANIFEST_ROOT": str(root),
+                }
             )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        plan = json.loads(result.stdout)
-        self.assertEqual(plan["mode"], "Discover")
-        self.assertEqual(plan["package"]["name"], "@openai/codex")
-        self.assertEqual(plan["package"]["version"], "1.2.3")
-        self.assertEqual(
-            plan["package"]["integrity"],
-            "sha512-U2VsZldvcmtGbG93RmFrZUludGVncml0eQ==",
-        )
-        self.assertRegex(plan["planHash"], re.compile(r"^[0-9a-f]{64}$"))
-
-    def test_discover_plan_binds_complete_execution_and_security_semantics(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan = json.loads(result.stdout)
-            current_sid = _read_directory_acl(local_app_data)["currentSid"]
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("execution", plan)
-        self.assertIn("security", plan)
-        self.assertIn("sideEffects", plan)
-        npm_identity = plan["execution"]["npm"]
-        self.assertEqual(Path(npm_identity["path"]), FAKE_NPM.resolve())
-        self.assertEqual(
-            npm_identity["sha256"],
-            f"sha256:{hashlib.sha256(FAKE_NPM.read_bytes()).hexdigest()}",
-        )
-        self.assertEqual(npm_identity["registry"], "https://registry.npmjs.org/")
-        self.assertEqual(
-            plan["execution"]["metadataArguments"],
-            [
-                "view",
-                "@openai/codex@latest",
-                "version",
-                "dist.integrity",
-                "--json",
-                "--registry",
-                "https://registry.npmjs.org/",
-            ],
-        )
-        self.assertEqual(
-            plan["execution"]["installArguments"],
-            [
-                "install",
-                "--prefix",
-                plan["bootstrapRoot"],
-                "--ignore-scripts",
-                "--no-audit",
-                "--no-fund",
-                "--package-lock=true",
-                "--save-exact",
-                "--registry",
-                "https://registry.npmjs.org/",
-                "@openai/codex@1.2.3",
-            ],
-        )
-        self.assertEqual(
-            plan["execution"]["environment"],
-            {
-                "npmConfig": "cleared",
-                "authentication": "cleared",
-                "userConfig": "NUL",
-                "globalConfig": "NUL",
-            },
-        )
-        self.assertEqual(
-            plan["security"]["dacl"],
-            {
-                "protected": True,
-                "principals": [current_sid, "S-1-5-18"],
-                "rights": "FullControl",
-                "inheritance": ["ContainerInherit", "ObjectInherit"],
-            },
-        )
-        self.assertEqual(plan["security"]["path"]["status"], "constrained")
-        self.assertEqual(
-            plan["security"]["path"]["verified"],
-            [
-                "existing ancestors locked against delete and rename",
-                "path identities and reparse attributes rechecked before side effects",
-            ],
-        )
-        self.assertEqual(
-            plan["security"]["path"]["unverified"],
-            [
-                "atomic create-and-open of new directory components against a same-SID attacker",
-                "same-SID mutation of unlocked ACL or package files after final verification",
-            ],
-        )
-        self.assertEqual(
-            plan["sideEffects"],
-            {
-                "bootstrapRoot": plan["bootstrapRoot"],
-                "manifestPath": str(
-                    Path(plan["bootstrapRoot"]) / "bootstrap-tool-manifest.json"
-                ),
-                "uninstallBoundary": plan["bootstrapRoot"],
-            },
-        )
-        serialized_plan = json.dumps(plan, sort_keys=True).lower()
-        for forbidden_word in ("password", "credential", "token", "_auth", "npmrc"):
-            self.assertNotIn(forbidden_word, serialized_plan)
-
-    def test_npm_execution_isolates_user_configuration_and_authentication(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            argument_log = temporary_root / "npm-arguments.log"
-            environment_log = temporary_root / "npm-environment.log"
-            hostile_environment = {
-                "FAKE_NPM_ARGUMENT_LOG": str(argument_log),
-                "FAKE_NPM_ENVIRONMENT_LOG": str(environment_log),
-                "NPM_CONFIG_REGISTRY": "https://attacker:registry-secret@evil.invalid/",
-                "NPM_CONFIG_USERCONFIG": str(temporary_root / "secret-user.npmrc"),
-                "NPM_CONFIG_GLOBALCONFIG": str(
-                    temporary_root / "secret-global.npmrc"
-                ),
-                "NPM_CONFIG_ATTACKER": "attacker-config-secret",
-                "NPM_TOKEN": "npm-token-secret",
-                "NODE_AUTH_TOKEN": "node-token-secret",
-            }
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-                environment=hostile_environment,
-            )
-            plan = json.loads(discover.stdout)
-            apply_result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan["planHash"],
-                "-NpmCommand",
-                str(FAKE_NPM),
-                environment=hostile_environment,
-            )
-            manifest_path = Path(plan["sideEffects"]["manifestPath"])
-            persisted_text = plan.copy()
-            persisted_text["manifest"] = json.loads(
-                manifest_path.read_text(encoding="utf-8")
-            )
-            environment_lines = environment_log.read_text(
-                encoding="utf-8"
-            ).splitlines()
-            argument_lines = argument_log.read_text(encoding="utf-8").splitlines()
-
-        self.assertEqual(discover.returncode, 0, discover.stderr)
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        self.assertEqual(
-            [line for line in environment_lines if line.startswith("COMMAND=")],
-            ["COMMAND=view", "COMMAND=view", "COMMAND=install"],
-        )
-        for line in environment_lines:
-            if line.startswith("NPM_CONFIG_REGISTRY="):
-                self.assertEqual(
-                    line, "NPM_CONFIG_REGISTRY=https://registry.npmjs.org/"
-                )
-            elif line.startswith("NPM_CONFIG_USERCONFIG="):
-                self.assertEqual(line, "NPM_CONFIG_USERCONFIG=NUL")
-            elif line.startswith("NPM_CONFIG_GLOBALCONFIG="):
-                self.assertEqual(line, "NPM_CONFIG_GLOBALCONFIG=NUL")
-            elif line.startswith("NPM_CONFIG_ATTACKER="):
-                self.assertEqual(line, "NPM_CONFIG_ATTACKER=")
-            elif line.startswith("NPM_TOKEN="):
-                self.assertEqual(line, "NPM_TOKEN=")
-            elif line.startswith("NODE_AUTH_TOKEN="):
-                self.assertEqual(line, "NODE_AUTH_TOKEN=")
-        self.assertIn("--registry https://registry.npmjs.org/", argument_lines[0])
-        self.assertIn("--registry https://registry.npmjs.org/", argument_lines[-1])
-        combined_output = discover.stderr + apply_result.stderr
-        persisted_json = json.dumps(persisted_text, sort_keys=True)
-        for sensitive_value in (
-            "registry-secret",
-            "secret-user.npmrc",
-            "secret-global.npmrc",
-            "attacker-config-secret",
-            "npm-token-secret",
-            "node-token-secret",
-        ):
-            self.assertNotIn(sensitive_value, combined_output)
-            self.assertNotIn(sensitive_value, persisted_json)
-
-    def test_discover_rejects_non_codex_package_name(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            result = _run_bootstrap(
-                Path(temporary_directory) / "LocalAppData",
-                "-Mode",
-                "Discover",
-                "-PackageName",
-                "left-pad",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ValidateSet", result.stderr)
-        self.assertIn("@openai/codex", result.stderr)
-
-    def test_discover_rejects_registry_userinfo_without_echoing_credentials(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            sensitive_registry = "https://registry-user:super-secret@registry.example/"
-            result = _run_bootstrap(
-                Path(temporary_directory) / "LocalAppData",
-                "-Mode",
-                "Discover",
-                "-Registry",
-                sensitive_registry,
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-
-        combined_output = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 41, combined_output)
-        self.assertEqual(
-            result.stderr.strip(), "SelfWorkFlow: registry configuration is invalid."
-        )
-        self.assertNotIn(sensitive_registry, combined_output)
-        self.assertNotIn("registry-user", combined_output)
-        self.assertNotIn("super-secret", combined_output)
-
-    def test_discover_does_not_mutate_local_file_tree(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            bootstrap_root = (
-                local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
-            )
-            bootstrap_root.mkdir(parents=True)
-            marker = bootstrap_root / "existing-marker.txt"
-            marker.write_text("must remain unchanged", encoding="utf-8")
-            before = _snapshot_tree(local_app_data)
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            after = _snapshot_tree(local_app_data)
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(after, before)
-
-    def test_discover_stops_on_npm_metadata_failure(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            result = _run_bootstrap(
-                Path(temporary_directory) / "LocalAppData",
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-                environment={"FAKE_NPM_FAIL_COMMAND": "view"},
-            )
-
-        self.assertEqual(result.returncode, 40)
-        self.assertIn("npm metadata query failed with exit code 41", result.stderr)
-
-    def test_discover_rejects_missing_npm_command_with_stable_redacted_error(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            sensitive_command = (
-                Path(temporary_directory) / "missing-npm-super-secret.cmd"
-            )
-            result = _run_bootstrap(
-                Path(temporary_directory) / "LocalAppData",
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(sensitive_command),
-            )
-
-        combined_output = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 39, combined_output)
-        self.assertEqual(
-            result.stderr.strip(), "SelfWorkFlow: npm command validation failed."
-        )
-        self.assertNotIn(str(sensitive_command), combined_output)
-        self.assertNotIn("super-secret", combined_output)
-
-    def test_discover_rejects_invalid_metadata_payload_with_stable_redacted_error(self):
-        for metadata_case in ("malformed", "array", "missing-field", "wrong-type"):
-            with self.subTest(metadata_case=metadata_case):
-                with tempfile.TemporaryDirectory() as temporary_directory:
-                    result = _run_bootstrap(
-                        Path(temporary_directory) / "LocalAppData",
-                        "-Mode",
-                        "Discover",
-                        "-NpmCommand",
-                        str(FAKE_NPM),
-                        environment={"FAKE_NPM_METADATA_CASE": metadata_case},
-                    )
-
-                combined_output = result.stdout + result.stderr
-                self.assertEqual(result.returncode, 47, combined_output)
-                self.assertEqual(
-                    result.stderr.strip(),
-                    "SelfWorkFlow: npm metadata response is invalid.",
-                )
-                self.assertNotIn("metadata-super-secret", combined_output)
-
-    def test_discover_and_apply_reject_numeric_prerelease_leading_zero(self):
-        invalid_version = "1.2.3-01"
-
-        with self.subTest(mode="Discover"):
-            with tempfile.TemporaryDirectory() as temporary_directory:
-                result = _run_bootstrap(
-                    Path(temporary_directory) / "LocalAppData",
-                    "-Mode",
-                    "Discover",
-                    "-NpmCommand",
-                    str(FAKE_NPM),
-                    environment={"FAKE_NPM_VERSION": invalid_version},
-                )
-
-            self.assertEqual(result.returncode, 47, result.stderr + result.stdout)
-            self.assertEqual(
-                result.stderr.strip(),
-                "SelfWorkFlow: npm metadata response is invalid.",
-            )
-
-        with self.subTest(mode="Apply"):
-            with tempfile.TemporaryDirectory() as temporary_directory:
-                temporary_root = Path(temporary_directory)
-                local_app_data = temporary_root / "LocalAppData"
-                install_marker = temporary_root / "npm-install-called"
-                _, plan = _discover_plan(local_app_data)
-                result = _apply_plan(
-                    local_app_data,
-                    plan,
-                    environment={
-                        "FAKE_NPM_VERSION": invalid_version,
-                        "FAKE_NPM_INSTALL_MARKER": str(install_marker),
-                    },
-                )
-
-                self.assertFalse(install_marker.exists())
-
-            self.assertEqual(result.returncode, 47, result.stderr + result.stdout)
-            self.assertEqual(
-                result.stderr.strip(),
-                "SelfWorkFlow: npm metadata response is invalid.",
-            )
-
-    def test_discover_and_apply_accept_canonical_prerelease_and_build(self):
-        version = "1.2.3-alpha.1+build.01"
-        environment = {"FAKE_NPM_VERSION": version}
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            discover, plan = _discover_plan(
-                local_app_data,
-                environment=environment,
-            )
-            apply_result = _apply_plan(
-                local_app_data,
-                plan,
-                environment=environment,
-            )
-            manifest = json.loads(
-                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
-            )
-
-        self.assertEqual(discover.returncode, 0, discover.stderr)
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        self.assertEqual(plan["package"]["version"], version)
-        self.assertEqual(manifest["package"]["version"], version)
-        self.assertEqual(manifest["cliVersion"], version)
-
-    def test_discover_rejects_bootstrap_root_outside_allowed_boundary(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            outside_root = temporary_root / "escape"
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-BootstrapRoot",
-                str(outside_root),
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-
-        self.assertEqual(result.returncode, 42)
-        self.assertIn("outside the allowed bootstrap boundary", result.stderr)
-
-    def test_discover_rejects_reparse_point_ancestor(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            local_app_data.mkdir()
-            junction_target = temporary_root / "junction-target"
-            junction_target.mkdir()
-            junction = local_app_data / "SelfWorkFlow"
-            junction_result = subprocess.run(
-                f'cmd.exe /d /c mklink /J "{junction}" "{junction_target}"',
+            command = r"""
+. $env:SELFWORKFLOW_MANIFEST_LIBRARY
+$script:ValidationCalls = 0
+function Assert-SelfWorkflowBootstrapManifest {
+    param($Manifest, $Plan, $AllowedBoundary, $PackageRoot, $ExpectedSddl)
+    $script:ValidationCalls++
+    throw "deterministic pre-write validation failure"
+}
+$Failed = $false
+try {
+    [void](Publish-SelfWorkflowManifestAtomic `
+        -Manifest ([pscustomobject]@{ schemaVersion = 2 }) `
+        -ManifestPath $env:SELFWORKFLOW_MANIFEST_TARGET `
+        -Plan ([pscustomobject]@{}) `
+        -AllowedBoundary $env:SELFWORKFLOW_MANIFEST_ROOT `
+        -PackageRoot $env:SELFWORKFLOW_MANIFEST_ROOT `
+        -ExpectedSddl "ignored")
+} catch { $Failed = $true }
+[ordered]@{
+    failed = $Failed
+    validationCalls = $script:ValidationCalls
+    formalExists = [IO.File]::Exists($env:SELFWORKFLOW_MANIFEST_TARGET)
+    temporaryCount = @(Get-ChildItem -LiteralPath $env:SELFWORKFLOW_MANIFEST_ROOT -Filter "*.tmp").Count
+} | ConvertTo-Json -Compress
+"""
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", command],
+                env=environment,
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            if junction_result.returncode != 0:
-                self.skipTest(f"cannot create test junction: {junction_result.stderr}")
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-
-            junction.rmdir()
-
-        self.assertEqual(result.returncode, 43)
-        self.assertIn("reparse point ancestor", result.stderr)
-
-    def test_apply_rechecks_reparse_ancestor_after_metadata_before_install(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            local_app_data.mkdir()
-            junction = local_app_data / "SelfWorkFlow"
-            junction_target = temporary_root / "junction-target"
-            junction_target.mkdir()
-            swapping_npm = temporary_root / "swap-npm.cmd"
-            _write_reparse_swapping_npm(swapping_npm)
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(swapping_npm),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(swapping_npm),
-                environment={
-                    "FAKE_NPM_CREATE_JUNCTION": "1",
-                    "FAKE_NPM_SWAP_ROOT": str(junction),
-                    "FAKE_NPM_SWAP_TARGET": str(junction_target),
-                    "FAKE_NPM_INSTALL_MARKER": str(install_marker),
-                },
-            )
-
-            install_was_called = install_marker.exists()
-            junction_target_entries = list(junction_target.rglob("*"))
-            _remove_junction_if_present(junction)
-
-            self.assertFalse(install_was_called)
-            self.assertEqual(junction_target_entries, [])
-
-        self.assertEqual(result.returncode, 43, result.stderr)
-        self.assertIn("bootstrap path security verification failed", result.stderr)
-
-    def test_apply_locks_existing_ancestor_against_metadata_replacement(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            protected_ancestor = local_app_data / "SelfWorkFlow"
-            protected_ancestor.mkdir(parents=True)
-            backup_ancestor = local_app_data / "SelfWorkFlow-backup"
-            junction_target = temporary_root / "junction-target"
-            junction_target.mkdir()
-            swapping_npm = temporary_root / "swap-npm.cmd"
-            _write_reparse_swapping_npm(swapping_npm)
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(swapping_npm),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(swapping_npm),
-                environment={
-                    "FAKE_NPM_REPLACE_DIRECTORY": "1",
-                    "FAKE_NPM_SWAP_ROOT": str(protected_ancestor),
-                    "FAKE_NPM_SWAP_BACKUP": str(backup_ancestor),
-                    "FAKE_NPM_SWAP_TARGET": str(junction_target),
-                    "FAKE_NPM_INSTALL_MARKER": str(install_marker),
-                },
-            )
-
-            replacement_succeeded = backup_ancestor.exists()
-            install_was_called = install_marker.exists()
-            _remove_junction_if_present(protected_ancestor)
-            if backup_ancestor.exists() and not protected_ancestor.exists():
-                backup_ancestor.rename(protected_ancestor)
-
-            self.assertFalse(replacement_succeeded)
-            self.assertFalse(install_was_called)
-
-        self.assertEqual(result.returncode, 40, result.stderr + result.stdout)
-        self.assertIn("npm metadata query failed", result.stderr)
-
-    def test_apply_rejects_nonempty_existing_target(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-            bootstrap_root = (
-                local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
-            )
-            bootstrap_root.mkdir(parents=True)
-            (bootstrap_root / "untrusted.txt").write_text("data", encoding="utf-8")
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-
-        self.assertEqual(result.returncode, 44)
-        self.assertIn("does not satisfy safe recovery conditions", result.stderr)
-
-    def test_apply_rejects_existing_file_target(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-            bootstrap_root = (
-                local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
-            )
-            bootstrap_root.parent.mkdir(parents=True)
-            bootstrap_root.write_text("not-a-directory", encoding="utf-8")
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-
-        self.assertEqual(result.returncode, 44)
-        self.assertIn("does not satisfy safe recovery conditions", result.stderr)
-
-    def test_apply_requires_confirm_plan_hash(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            bootstrap_root = (
-                local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
-            )
-
-            self.assertFalse(bootstrap_root.exists())
-
-        self.assertEqual(result.returncode, 45)
-        self.assertIn("ConfirmPlanHash is required", result.stderr)
-
-    def test_apply_rejects_wrong_confirm_plan_hash(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                "0" * 64,
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            bootstrap_root = (
-                local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
-            )
-
-            self.assertFalse(bootstrap_root.exists())
-
-        self.assertEqual(result.returncode, 46, result.stderr)
-        self.assertIn("does not match the regenerated plan hash", result.stderr)
-
-    def test_apply_rejects_metadata_drift_since_discovery(self):
-        drift_cases = (
-            {"FAKE_NPM_VERSION": "1.2.4"},
-            {"FAKE_NPM_INTEGRITY": "sha512-RHJpZnRlZA=="},
-        )
-        for drift_environment in drift_cases:
-            with self.subTest(drift=drift_environment):
-                with tempfile.TemporaryDirectory() as temporary_directory:
-                    local_app_data = Path(temporary_directory) / "LocalAppData"
-                    discover = _run_bootstrap(
-                        local_app_data,
-                        "-Mode",
-                        "Discover",
-                        "-NpmCommand",
-                        str(FAKE_NPM),
-                    )
-                    plan_hash = json.loads(discover.stdout)["planHash"]
-                    result = _run_bootstrap(
-                        local_app_data,
-                        "-Mode",
-                        "Apply",
-                        "-ConfirmPlanHash",
-                        plan_hash,
-                        "-NpmCommand",
-                        str(FAKE_NPM),
-                        environment=drift_environment,
-                    )
-                    bootstrap_root = (
-                        local_app_data / "SelfWorkFlow" / "bootstrap" / "codex-cli"
-                    )
-
-                    self.assertFalse(bootstrap_root.exists())
-
-                self.assertEqual(result.returncode, 46)
-                self.assertIn("does not match the regenerated plan hash", result.stderr)
-
-    def test_apply_rejects_npm_command_content_drift_since_discovery(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            mutable_npm = temporary_root / "mutable-npm.cmd"
-            mutable_npm.write_bytes(FAKE_NPM.read_bytes())
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(mutable_npm),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-            with mutable_npm.open("ab") as npm_file:
-                npm_file.write(b"\r\nrem executable identity drift\r\n")
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(mutable_npm),
-                environment={"FAKE_NPM_INSTALL_MARKER": str(install_marker)},
-            )
-
-            self.assertFalse(install_marker.exists())
-
-        self.assertEqual(result.returncode, 46, result.stderr)
-        self.assertIn("does not match the regenerated plan hash", result.stderr)
-
-    def test_apply_locks_npm_command_identity_through_install(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            mutating_npm = temporary_root / "mutating-npm.cmd"
-            _write_self_mutating_npm(mutating_npm)
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(mutating_npm),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-            identity_before_apply = hashlib.sha256(mutating_npm.read_bytes()).hexdigest()
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(mutating_npm),
-                environment={
-                    "FAKE_NPM_MUTATE_SELF": "1",
-                    "FAKE_NPM_INSTALL_MARKER": str(install_marker),
-                },
-            )
-            identity_after_apply = hashlib.sha256(mutating_npm.read_bytes()).hexdigest()
-
-            self.assertFalse(install_marker.exists())
-
-        self.assertEqual(identity_after_apply, identity_before_apply)
-        self.assertEqual(result.returncode, 40, result.stderr)
-        self.assertIn("npm metadata query failed", result.stderr)
-
-    def test_apply_creates_root_with_protected_current_user_and_system_dacl(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan = json.loads(discover.stdout)
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan["planHash"],
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            bootstrap_root = Path(plan["bootstrapRoot"])
-
-            self.assertTrue(bootstrap_root.is_dir())
-            acl = _read_directory_acl(bootstrap_root)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(acl["protected"])
-        self.assertIn("D:P", acl["sddl"])
-        self.assertEqual(
-            {rule["sid"] for rule in acl["rules"]},
-            {acl["currentSid"], "S-1-5-18"},
-        )
-        self.assertEqual(len(acl["rules"]), 2)
-        for rule in acl["rules"]:
-            self.assertFalse(rule["inherited"])
-            self.assertEqual(rule["type"], "Allow")
-            self.assertEqual(rule["rights"], "FullControl")
-            self.assertIn("ContainerInherit", rule["inheritance"])
-            self.assertIn("ObjectInherit", rule["inheritance"])
-            self.assertEqual(rule["propagation"], "None")
-
-    def test_apply_stops_when_icacls_verification_fails(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            failing_icacls = temporary_root / "fail-icacls.cmd"
-            failing_icacls.write_bytes(b"@echo off\r\nexit /b 9\r\n")
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(FAKE_NPM),
-                "-IcaclsCommand",
-                str(failing_icacls),
-                environment={"FAKE_NPM_INSTALL_MARKER": str(install_marker)},
-            )
-
-            self.assertFalse(install_marker.exists())
-
-        self.assertEqual(result.returncode, 48)
-        self.assertEqual(
-            result.stderr.strip(),
-            "SelfWorkFlow: ACL security verification failed.",
-        )
-
-    def test_apply_redacts_missing_sensitive_icacls_path(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            sensitive_name = "super-secret"
-            missing_icacls = temporary_root / f"{sensitive_name}-icacls.cmd"
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(FAKE_NPM),
-                "-IcaclsCommand",
-                str(missing_icacls),
-                environment={"FAKE_NPM_INSTALL_MARKER": str(install_marker)},
-            )
-            manifest_path = (
-                Path(json.loads(discover.stdout)["bootstrapRoot"])
-                / "bootstrap-tool-manifest.json"
-            )
-            persisted_bytes = b"".join(
-                path.read_bytes()
-                for path in temporary_root.rglob("*")
-                if path.is_file()
-            )
-
-            self.assertFalse(install_marker.exists())
-            self.assertFalse(manifest_path.exists())
-
-        self.assertEqual(result.returncode, 48)
-        self.assertEqual(
-            result.stderr.strip(),
-            "SelfWorkFlow: ACL security verification failed.",
-        )
-        self.assertNotIn(sensitive_name, result.stdout)
-        self.assertNotIn(sensitive_name, result.stderr)
-        self.assertNotIn(sensitive_name.encode("utf-8"), persisted_bytes)
-
-    def test_apply_fails_closed_when_acl_reread_detects_inheritance(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            corrupting_icacls = temporary_root / "corrupt-acl.ps1"
-            corrupting_icacls.write_text(
-                """param([string]$Path)
-$ErrorActionPreference = "Stop"
-$Acl = Get-Acl -LiteralPath $Path
-$Acl.SetAccessRuleProtection($false, $true)
-Set-Acl -LiteralPath $Path -AclObject $Acl
-Write-Output $Path
-exit 0
-""",
-                encoding="utf-8",
-            )
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan_hash = json.loads(discover.stdout)["planHash"]
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan_hash,
-                "-NpmCommand",
-                str(FAKE_NPM),
-                "-IcaclsCommand",
-                str(corrupting_icacls),
-                environment={"FAKE_NPM_INSTALL_MARKER": str(install_marker)},
-            )
-
-            self.assertFalse(install_marker.exists())
-
-        self.assertEqual(result.returncode, 48, result.stderr)
-        self.assertEqual(
-            result.stderr.strip(),
-            "SelfWorkFlow: ACL security verification failed.",
-        )
-
-    def test_apply_locks_new_bootstrap_root_before_icacls_command(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            swapping_icacls = temporary_root / "swap-icacls.cmd"
-            _write_reparse_swapping_icacls(swapping_icacls)
-            backup_root = temporary_root / "bootstrap-root-backup"
-            junction_target = temporary_root / "junction-target"
-            junction_target.mkdir()
-            install_marker = temporary_root / "npm-install-called"
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-            )
-            plan = json.loads(discover.stdout)
-            bootstrap_root = Path(plan["bootstrapRoot"])
-
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan["planHash"],
-                "-NpmCommand",
-                str(FAKE_NPM),
-                "-IcaclsCommand",
-                str(swapping_icacls),
-                environment={
-                    "FAKE_ICACLS_BACKUP": str(backup_root),
-                    "FAKE_ICACLS_TARGET": str(junction_target),
-                    "FAKE_NPM_INSTALL_MARKER": str(install_marker),
-                },
-            )
-
-            replacement_succeeded = backup_root.exists()
-            install_was_called = install_marker.exists()
-            _remove_junction_if_present(bootstrap_root)
-            if backup_root.exists() and not bootstrap_root.exists():
-                backup_root.rename(bootstrap_root)
-
-            self.assertFalse(replacement_succeeded)
-            self.assertFalse(install_was_called)
-
-        self.assertEqual(result.returncode, 48, result.stderr)
-        self.assertIn("ACL security verification failed", result.stderr)
-
-    def test_apply_stops_when_npm_install_fails(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            install_marker = temporary_root / "npm-install-called"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(
-                local_app_data,
-                plan,
-                environment={
-                    "FAKE_NPM_FAIL_COMMAND": "install",
-                    "FAKE_NPM_INSTALL_MARKER": str(install_marker),
-                },
-            )
-
-            self.assertTrue(install_marker.is_file())
-
-        self.assertEqual(result.returncode, 49)
-        self.assertIn("npm install failed with exit code 42", result.stderr)
-
-    def test_apply_rejects_missing_installed_package_metadata(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(
-                local_app_data,
-                plan,
-                environment={"FAKE_NPM_SKIP_ARTIFACTS": "1"},
-            )
-
-        self.assertEqual(result.returncode, 50)
-        self.assertIn("installed package metadata is missing", result.stderr)
-
-    def test_apply_rejects_invalid_installed_json_with_stable_redacted_error(self):
-        cases = (
-            ("FAKE_NPM_PACKAGE_CASE", "malformed", 56, "package-super-secret"),
-            ("FAKE_NPM_PACKAGE_CASE", "wrong-type", 56, None),
-            ("FAKE_NPM_LOCK_CASE", "malformed", 57, "lock-super-secret"),
-            ("FAKE_NPM_LOCK_CASE", "missing-entry", 57, None),
-            ("FAKE_NPM_LOCK_CASE", "wrong-type", 57, None),
-        )
-        for variable, value, expected_code, sensitive_text in cases:
-            with self.subTest(variable=variable, value=value):
-                with tempfile.TemporaryDirectory() as temporary_directory:
-                    local_app_data = Path(temporary_directory) / "LocalAppData"
-                    _, plan = _discover_plan(local_app_data)
-                    result = _apply_plan(
-                        local_app_data,
-                        plan,
-                        environment={variable: value},
-                    )
-                    manifest_path = Path(plan["sideEffects"]["manifestPath"])
-
-                    self.assertFalse(manifest_path.exists())
-
-                combined_output = result.stdout + result.stderr
-                self.assertEqual(result.returncode, expected_code, combined_output)
-                expected_message = (
-                    "SelfWorkFlow: installed package metadata is invalid."
-                    if expected_code == 56
-                    else "SelfWorkFlow: package-lock metadata is invalid."
-                )
-                self.assertEqual(result.stderr.strip(), expected_message)
-                if sensitive_text:
-                    self.assertNotIn(sensitive_text, combined_output)
-
-    def test_apply_rejects_installed_version_mismatch(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(
-                local_app_data,
-                plan,
-                environment={"FAKE_NPM_INSTALLED_VERSION": "9.9.9"},
-            )
-
-        self.assertEqual(result.returncode, 51)
-        self.assertIn("installed package version does not match", result.stderr)
-
-    def test_apply_rejects_installed_integrity_mismatch(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(
-                local_app_data,
-                plan,
-                environment={"FAKE_NPM_INSTALLED_INTEGRITY": "sha512-drifted"},
-            )
-
-        self.assertEqual(result.returncode, 52)
-        self.assertIn("installed package integrity does not match", result.stderr)
-
-    def test_apply_rejects_missing_codex_cli_shim(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(
-                local_app_data,
-                plan,
-                environment={"FAKE_NPM_SKIP_CLI": "1"},
-            )
-
-        self.assertEqual(result.returncode, 53)
-        self.assertIn("installed Codex CLI shim is missing", result.stderr)
-
-    def test_apply_stops_when_codex_cli_version_command_fails(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(
-                local_app_data,
-                plan,
-                environment={"FAKE_NPM_CLI_EXIT_CODE": "7"},
-            )
-
-        self.assertEqual(result.returncode, 54)
-        self.assertIn("Codex CLI version command failed with exit code 7", result.stderr)
-
-    def test_apply_rejects_noncanonical_codex_cli_version_output(self):
-        cases = (
-            ({"FAKE_NPM_CLI_EMPTY": "1"}, None),
-            ({"FAKE_NPM_CLI_SECOND_LINE": "stdout-sensitive-extra"}, "stdout-sensitive-extra"),
-            ({"FAKE_NPM_CLI_STDERR": "stderr-sensitive-extra"}, "stderr-sensitive-extra"),
-            ({"FAKE_NPM_CLI_VERSION_OUTPUT": "codex-cli version 1.2.3"}, None),
-            ({"FAKE_NPM_CLI_VERSION_OUTPUT": "codex-cli 1.2.3-01"}, None),
-            ({"FAKE_NPM_CLI_VERSION_OUTPUT": "codex-cli 9.9.9"}, None),
-        )
-        for cli_environment, sensitive_text in cases:
-            with self.subTest(environment=cli_environment):
-                with tempfile.TemporaryDirectory() as temporary_directory:
-                    local_app_data = Path(temporary_directory) / "LocalAppData"
-                    _, plan = _discover_plan(local_app_data)
-                    result = _apply_plan(
-                        local_app_data,
-                        plan,
-                        environment=cli_environment,
-                    )
-                    manifest_path = Path(plan["sideEffects"]["manifestPath"])
-
-                    self.assertFalse(manifest_path.exists())
-
-                combined_output = result.stdout + result.stderr
-                self.assertEqual(result.returncode, 55, combined_output)
-                self.assertEqual(
-                    result.stderr.strip(),
-                    "SelfWorkFlow: Codex CLI version verification failed.",
-                )
-                if sensitive_text:
-                    self.assertNotIn(sensitive_text, combined_output)
-
-    def test_manifest_semantics_rejects_noncanonical_or_outside_root(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            apply_result = _apply_plan(local_app_data, plan)
-            manifest_path = Path(plan["sideEffects"]["manifestPath"])
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-            valid_result = _validate_manifest_candidate(
-                local_app_data, plan, manifest
-            )
-            invalid_results = []
-            for unsafe_root in (
-                r"C:\..\Windows",
-                str(temporary_root / "outside-bootstrap-boundary"),
-                str(Path(plan["bootstrapRoot"]) / "inside-boundary-drift"),
-            ):
-                candidate = json.loads(json.dumps(manifest))
-                candidate["bootstrapRoot"] = unsafe_root
-                invalid_results.append(
-                    _validate_manifest_candidate(local_app_data, plan, candidate)
-                )
-
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        self.assertEqual(valid_result.returncode, 0, valid_result.stderr)
-        for result in invalid_results:
-            self.assertEqual(result.returncode, 58, result.stderr)
-            self.assertEqual(
-                result.stderr.strip(),
-                "SelfWorkFlow: manifest semantic validation failed.",
-            )
-
-    def test_manifest_semantics_rejects_everyone_dacl(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            apply_result = _apply_plan(local_app_data, plan)
-            manifest = json.loads(
-                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
-            )
-            candidate = json.loads(json.dumps(manifest))
-            candidate["daclSddl"] = "D:P(A;;FA;;;WD)"
-            result = _validate_manifest_candidate(
-                local_app_data,
-                plan,
-                candidate,
-                expected_sddl=manifest["daclSddl"],
-            )
-
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        self.assertEqual(result.returncode, 58, result.stderr)
-        self.assertEqual(
-            result.stderr.strip(),
-            "SelfWorkFlow: manifest semantic validation failed.",
-        )
-
-    def test_manifest_semantics_rejects_version_drift(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            apply_result = _apply_plan(local_app_data, plan)
-            manifest = json.loads(
-                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
-            )
-            invalid_results = []
-            for field_path, unsafe_value in (
-                (("cliVersion",), "1.2.3 extra-sensitive-text"),
-                (("package", "version"), "9.9.9"),
-            ):
-                candidate = json.loads(json.dumps(manifest))
-                target = candidate
-                for field in field_path[:-1]:
-                    target = target[field]
-                target[field_path[-1]] = unsafe_value
-                invalid_results.append(
-                    _validate_manifest_candidate(
-                        local_app_data,
-                        plan,
-                        candidate,
-                        expected_sddl=manifest["daclSddl"],
-                    )
-                )
-
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        for result in invalid_results:
-            self.assertEqual(result.returncode, 58, result.stderr)
-            self.assertNotIn("extra-sensitive-text", result.stderr)
-
-    def test_manifest_semantics_rejects_numeric_prerelease_leading_zero(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            apply_result = _apply_plan(local_app_data, plan)
-            manifest = json.loads(
-                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
-            )
-            invalid_plan = json.loads(json.dumps(plan))
-            invalid_plan["package"]["version"] = "1.2.3-01"
-            invalid_plan["execution"]["installArguments"][-1] = (
-                "@openai/codex@1.2.3-01"
-            )
-            invalid_plan["planHash"] = _compute_plan_hash(invalid_plan)
-            candidate = json.loads(json.dumps(manifest))
-            candidate["package"]["version"] = "1.2.3-01"
-            candidate["cliVersion"] = "1.2.3-01"
-            candidate["planHash"] = invalid_plan["planHash"]
-            result = _validate_manifest_candidate(
-                local_app_data,
-                invalid_plan,
-                candidate,
-                expected_sddl=manifest["daclSddl"],
-            )
-
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        self.assertEqual(result.returncode, 58, result.stderr)
-        self.assertEqual(
-            result.stderr.strip(),
-            "SelfWorkFlow: manifest semantic validation failed.",
-        )
-
-    def test_manifest_semantics_rejects_hash_drift(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            apply_result = _apply_plan(local_app_data, plan)
-            manifest = json.loads(
-                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
-            )
-            invalid_results = []
-            for field in ("packageTreeHash", "planHash"):
-                candidate = json.loads(json.dumps(manifest))
-                candidate[field] = (
-                    "sha256:" + "f" * 64 if field == "packageTreeHash" else "f" * 64
-                )
-                invalid_results.append(
-                    _validate_manifest_candidate(
-                        local_app_data,
-                        plan,
-                        candidate,
-                        expected_sddl=manifest["daclSddl"],
-                    )
-                )
-
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        for result in invalid_results:
-            self.assertEqual(result.returncode, 58, result.stderr)
-            self.assertEqual(
-                result.stderr.strip(),
-                "SelfWorkFlow: manifest semantic validation failed.",
-            )
-
-    def test_apply_validates_manifest_before_write(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary_root = Path(temporary_directory)
-            local_app_data = temporary_root / "LocalAppData"
-            copied_script = temporary_root / "scripts" / BOOTSTRAP_SCRIPT.name
-            copied_library = copied_script.parent / "lib" / MANIFEST_LIBRARY.name
-            copied_library.parent.mkdir(parents=True)
-            shutil.copy2(BOOTSTRAP_SCRIPT, copied_script)
-            copied_library.write_text(
-                MANIFEST_LIBRARY.read_text(encoding="utf-8")
-                + "\nfunction Assert-SelfWorkflowBootstrapManifest {\n"
-                + "    throw 'forced semantic validation failure'\n"
-                + "}\n",
-                encoding="utf-8",
-            )
-            discover = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Discover",
-                "-NpmCommand",
-                str(FAKE_NPM),
-                script=copied_script,
-            )
-            plan = json.loads(discover.stdout)
-            result = _run_bootstrap(
-                local_app_data,
-                "-Mode",
-                "Apply",
-                "-ConfirmPlanHash",
-                plan["planHash"],
-                "-NpmCommand",
-                str(FAKE_NPM),
-                script=copied_script,
-            )
-            manifest_path = Path(plan["sideEffects"]["manifestPath"])
-
-            self.assertFalse(manifest_path.exists())
-
-        self.assertEqual(discover.returncode, 0, discover.stderr)
-        self.assertEqual(result.returncode, 58, result.stderr)
-        self.assertEqual(
-            result.stderr.strip(),
-            "SelfWorkFlow: manifest semantic validation failed.",
-        )
-
-    def test_apply_writes_bound_credential_free_manifest(self):
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            result = _apply_plan(local_app_data, plan)
-            bootstrap_root = Path(plan["bootstrapRoot"])
-            manifest_path = bootstrap_root / "bootstrap-tool-manifest.json"
-
-            self.assertTrue(
-                manifest_path.is_file(), result.stderr + result.stdout
-            )
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            acl = _read_directory_acl(bootstrap_root)
-            expected_tree_hash = _compute_package_tree_hash(
-                bootstrap_root / "node_modules" / "@openai" / "codex"
-            )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(manifest["schemaVersion"], 1)
-        self.assertEqual(manifest["bootstrapRoot"], plan["bootstrapRoot"])
-        self.assertEqual(
-            manifest["package"],
-            {
-                "name": "@openai/codex",
-                "version": "1.2.3",
-                "integrity": "sha512-U2VsZldvcmtGbG93RmFrZUludGVncml0eQ==",
-            },
-        )
-        self.assertEqual(manifest["packageTreeHash"], expected_tree_hash)
-        self.assertEqual(manifest["daclSddl"], acl["sddl"])
-        self.assertEqual(manifest["cliVersion"], "1.2.3")
-        self.assertEqual(manifest["planHash"], plan["planHash"])
-        serialized_manifest = json.dumps(manifest, sort_keys=True).lower()
-        for forbidden_word in ("password", "credential", "token", "_auth", "npmrc"):
-            self.assertNotIn(forbidden_word, serialized_manifest)
-
-    def test_generated_manifest_conforms_to_json_schema(self):
-        from jsonschema import Draft202012Validator
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            local_app_data = Path(temporary_directory) / "LocalAppData"
-            _, plan = _discover_plan(local_app_data)
-            apply_result = _apply_plan(local_app_data, plan)
-            manifest_path = Path(plan["bootstrapRoot"]) / "bootstrap-tool-manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
-
-        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
-        Draft202012Validator.check_schema(schema)
-        Draft202012Validator(schema).validate(manifest)
-
+        observation = json.loads(result.stdout)
+        self.assertTrue(observation["failed"])
+        self.assertEqual(observation["validationCalls"], 1)
+        self.assertFalse(observation["formalExists"])
+        self.assertEqual(observation["temporaryCount"], 0)
 
 if __name__ == "__main__":
     unittest.main()

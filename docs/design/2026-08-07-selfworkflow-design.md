@@ -409,6 +409,50 @@ Apply：
 - 不修改受管标记外内容；
 - 不删除未知文件或已有 Skill。
 
+### 12.1 Task 1 Codex CLI 安全自举
+
+Task 1 的 Windows-only bootstrap 使用完整、可保存和审阅的 Discover plan，
+而不是只把 hash 当作授权内容：
+
+```text
+Discover
+-> 验证受保护 portable Node/npm toolchain
+-> 执行一次隔离的 metadata view
+-> 输出 planSchemaVersion 2 完整计划和 planHash
+-> 用户保存并确认计划
+-> Apply 锁定并读取 confirmed plan
+-> 精确校验 shape、三方 hash、静态 argv/env/cwd 与全部 identity
+-> 创建 bootstrap root、写入精确 DACL
+-> 只执行 confirmed install
+-> 回读 package/lock/ACL 并写 manifest v2
+```
+
+Apply 强制同时接收绝对 `ConfirmedPlanPath` 和 `ConfirmPlanHash`。在计划
+校验及 toolchain identity 复核完成前，不编译 Win32 helper、不创建目录、
+不修改 ACL，也不启动外部进程。旧 hash-only Apply 和旧 plan v1 均
+fail closed；Apply 不重复 metadata view。
+
+toolchain 只能位于
+`%LOCALAPPDATA%\SelfWorkFlow\bootstrap\toolchains` 的预存 anchor 下。
+从 `%LOCALAPPDATA%` 到 toolchain 的目录链以及 deterministic tree inventory
+必须无 reparse/escape，owner 和 DACL 不得把写入、删除或改权限能力授予
+当前 SID、SYSTEM 之外的主体。计划绑定 `node.exe`、`npm-cli.js`、完整
+inventory/tree hash、固定 cwd、精确环境白名单、显式 npm 配置、目标和
+卸载边界。Apply 使用绝对 `node.exe` 通过 `ProcessStartInfo` 直接运行绝对
+`npm-cli.js`，清空继承环境后只加入计划允许项；不通过 `npm.cmd`、PATH、
+项目 `.npmrc` 或外部 `icacls`。
+
+toolchain 与安装包树共用 canonical snapshot：按 path 排序完整
+`path/type/sha256` inventory，canonical JSON 后计算 SHA-256；snapshot 在接受
+结果前拒绝 reparse、越界路径和读取期间的文件漂移。
+
+bootstrap manifest 使用 `schemaVersion: 2`，记录 `expectedCliVersion` 和
+`cliVersionVerification: "not-run"`。Task 1 不执行新安装的 Codex Agent；
+真实 CLI 启动、登录和模型调用仅由原生验收执行。即使持有目录、计划、
+node 和 npm 入口句柄，当前 SID、SYSTEM 或 OS 特权主体对未逐文件锁定的
+toolchain/安装树进行最终复核后的原地修改仍必须报告为 `unverified`，
+不能宣称绝对同 SID 隔离。
+
 Verify 检查 manifest、hash、非托管内容、幂等、Codex 发现、Superpowers 和真实行为。
 
 事务记录 source version、apply plan hash、托管文件、前后 hash、备份、步骤和完成状态。恢复只处理该事务实际修改的文件；安装后文件再次变化时停止并询问。

@@ -19,19 +19,20 @@ codex login status
 
 ### A2. 使用可追溯官方 CLI
 
-若 A1 已找到 `--version`、`login status` 均成功的现有官方 CLI，记录路径、版本和文件 hash 后直接使用，不安装。若缺失或 WindowsApps 入口不可执行，在 Task 10 尚不存在时允许使用 Task 1 已经 fake-npm TDD 验证的独立 bootstrap。先执行只读 discovery；它在内存中查询 npm metadata、规范化目标并检查所有已存在 ancestor 非 reparse，不创建目录：
+若 A1 已找到 `--version`、`login status` 均成功的现有官方 CLI，记录路径、版本和文件 hash 后直接使用，不安装。若缺失或 WindowsApps 入口不可执行，在 Task 10 尚不存在时允许使用 Task 1 已经 fake-npm TDD 验证的独立 bootstrap。先准备位于 `%LOCALAPPDATA%\SelfWorkFlow\bootstrap\toolchains` 预存受保护 anchor 下的 portable Node/npm toolchain，再执行 Discover。Discover 完整验证 toolchain 后只执行一次 metadata view，不创建或修改 Codex install target：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-codex-cli.ps1 -Mode Discover -BootstrapRoot "$env:LOCALAPPDATA\SelfWorkFlow\bootstrap\codex-cli"
+$planJson = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-codex-cli.ps1 -Mode Discover -BootstrapRoot "$env:LOCALAPPDATA\SelfWorkFlow\bootstrap\codex-cli" -ToolchainRoot <approved-toolchain-root>
+[IO.File]::WriteAllText(<confirmed-plan-path>, $planJson, [Text.UTF8Encoding]::new($false))
 ```
 
-Discovery 输出包含 npm 来源、精确 version/integrity、规范化目标、private DACL、预计副作用、卸载边界和 plan hash。用户明确确认该 hash 后才执行：
+Discovery 输出 `planSchemaVersion: 2` 完整计划，包含 node/npm entry 与完整 toolchain inventory/hash、精确 version/integrity、固定 argv/env/cwd、规范化目标、private DACL、预计副作用、卸载边界和 plan hash。用户审阅保存的完整计划并明确确认其 hash 后才执行：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-codex-cli.ps1 -Mode Apply -BootstrapRoot "$env:LOCALAPPDATA\SelfWorkFlow\bootstrap\codex-cli" -ConfirmPlanHash <actual-discovery-hash>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-codex-cli.ps1 -Mode Apply -ConfirmedPlanPath <absolute-confirmed-plan-path> -ConfirmPlanHash <actual-discovery-hash>
 ```
 
-Apply 必须重新 discovery 并比对 hash，创建空目录，应用 current-user SID + SYSTEM 的 protected DACL，检查 `icacls` 退出码并在 npm 写入前回读精确 SDDL；任一步失败立即停止。成功后写 `bootstrap-tool-manifest.json`（符合 `schemas/bootstrap-tool-manifest.schema.json`），绑定路径、version、integrity、package tree hash、SDDL 和 `codex --version`。Task 10 只接管该 manifest；字段、hash、路径或 SDDL 漂移即拒绝，不重复安装。登录或账号变化仍需另行授权；不得复制、打印或提交 `auth.json`。
+Apply 在任何外部进程和写入前锁定计划，精确校验 shape、三方 hash、静态执行语义及全部 toolchain identity；它不重复 metadata view。随后创建空目录，用 .NET 应用并独立回读 current-user SID + SYSTEM 的 protected DACL，再以绝对 node/npm entry、固定 cwd 和精确环境白名单执行 install。成功后写 `bootstrap-tool-manifest.json`（符合 `schemas/bootstrap-tool-manifest.schema.json`），绑定路径、version、integrity、package tree hash、SDDL、`expectedCliVersion` 和 `cliVersionVerification: "not-run"`。Task 1 bootstrap 不执行 Codex；本节 A3 的真实启动才产生 CLI 行为证据。Task 10 只接管合法 manifest；字段、hash、路径或 SDDL 漂移即拒绝，不重复安装。登录或账号变化仍需另行授权；不得复制、打印或提交 `auth.json`。
 
 ### A3. 临时安装态测试
 
