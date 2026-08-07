@@ -1,5 +1,26 @@
 from dataclasses import FrozenInstanceError
+import traceback
 import unittest
+
+
+def _assert_redacted_workflow_error(
+    test_case,
+    call,
+    expected_code,
+    *sensitive_fragments,
+):
+    try:
+        call()
+    except Exception as error:
+        test_case.assertIsInstance(error, ValueError)
+        test_case.assertEqual(str(error), expected_code)
+        test_case.assertIsNone(error.__cause__)
+        test_case.assertIs(error.__suppress_context__, True)
+        formatted = "".join(traceback.format_exception(error))
+        for fragment in sensitive_fragments:
+            test_case.assertNotIn(fragment, formatted)
+    else:
+        test_case.fail("materialization failure was accepted")
 
 
 class CapabilityGateTests(unittest.TestCase):
@@ -173,15 +194,12 @@ class CapabilityGateTests(unittest.TestCase):
 
             for boundary, expected_code, call in cases:
                 with self.subTest(phase=phase, boundary=boundary):
-                    try:
-                        call()
-                    except Exception as error:
-                        self.assertIsInstance(error, ValueError)
-                        self.assertEqual(str(error), expected_code)
-                        self.assertIsNone(error.__cause__)
-                        self.assertNotIn("TOP-SECRET", str(error))
-                    else:
-                        self.fail("exploding iterable was accepted")
+                    _assert_redacted_workflow_error(
+                        self,
+                        call,
+                        expected_code,
+                        "TOP-SECRET",
+                    )
 
     def test_pause_result_redacts_iteration_failures_for_all_four_collections(self):
         from selfworkflow.model import PauseResult
@@ -220,15 +238,12 @@ class CapabilityGateTests(unittest.TestCase):
 
         for index, call in enumerate(cases):
             with self.subTest(field_index=index):
-                try:
-                    call()
-                except Exception as error:
-                    self.assertIsInstance(error, ValueError)
-                    self.assertEqual(str(error), "pause-result-invalid")
-                    self.assertIsNone(error.__cause__)
-                    self.assertNotIn("TOP-SECRET", str(error))
-                else:
-                    self.fail("exploding pause collection was accepted")
+                _assert_redacted_workflow_error(
+                    self,
+                    call,
+                    "pause-result-invalid",
+                    "TOP-SECRET",
+                )
 
     def test_pair_materialization_failures_are_redacted(self):
         from selfworkflow.model import CapabilityReport, PauseResult
@@ -263,15 +278,12 @@ class CapabilityGateTests(unittest.TestCase):
 
         for boundary, expected_code, call in cases:
             with self.subTest(boundary=boundary):
-                try:
-                    call()
-                except Exception as error:
-                    self.assertIsInstance(error, ValueError)
-                    self.assertEqual(str(error), expected_code)
-                    self.assertIsNone(error.__cause__)
-                    self.assertNotIn("TOP-SECRET", str(error))
-                else:
-                    self.fail("exploding pair was accepted")
+                _assert_redacted_workflow_error(
+                    self,
+                    call,
+                    expected_code,
+                    "TOP-SECRET",
+                )
 
     def test_pause_pair_mappings_are_normalized_in_lexical_key_order(self):
         from selfworkflow.model import PauseResult
@@ -357,15 +369,64 @@ class CapabilityGateTests(unittest.TestCase):
 
         for boundary, expected_code, call in cases:
             with self.subTest(boundary=boundary):
-                try:
-                    call()
-                except Exception as error:
-                    self.assertIsInstance(error, ValueError)
-                    self.assertEqual(str(error), expected_code)
-                    self.assertIsNone(error.__cause__)
-                    self.assertNotIn("TOP-SECRET", str(error))
-                else:
-                    self.fail("exploding mapping was accepted")
+                _assert_redacted_workflow_error(
+                    self,
+                    call,
+                    expected_code,
+                    "TOP-SECRET",
+                )
+
+    def test_mapping_items_call_failures_are_redacted(self):
+        from collections.abc import Mapping
+
+        from selfworkflow.classifier import check_capabilities
+        from selfworkflow.model import CapabilityReport, PauseResult
+
+        class ExplodingItemsCallMapping(Mapping):
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+            def __iter__(self):
+                return iter(())
+
+            def __len__(self):
+                return 0
+
+            def items(self):
+                raise ValueError("TOP-SECRET-MAPPING-CALL")
+
+        cases = (
+            (
+                "pause pairs",
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), ExplodingItemsCallMapping(), (), ()
+                ),
+            ),
+            (
+                "capability report entries",
+                "capability-report-invalid",
+                lambda: CapabilityReport(ExplodingItemsCallMapping()),
+            ),
+            (
+                "capability gate purposes",
+                "capability-gate-input-invalid",
+                lambda: check_capabilities(
+                    [],
+                    CapabilityReport({}),
+                    purposes=ExplodingItemsCallMapping(),
+                ),
+            ),
+        )
+
+        for boundary, expected_code, call in cases:
+            with self.subTest(boundary=boundary):
+                _assert_redacted_workflow_error(
+                    self,
+                    call,
+                    expected_code,
+                    "TOP-SECRET-MAPPING-CALL",
+                )
 
     def test_materialization_does_not_catch_base_exceptions(self):
         from selfworkflow.classifier import check_capabilities
