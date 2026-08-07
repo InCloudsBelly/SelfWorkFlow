@@ -1981,11 +1981,15 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
         import ctypes
 
         control_path = self.npm_cli.parent / "fake-npm-control.json"
+        child_barrier = self.temporary_root / "tree-window-install-complete.json"
+        child_release = self.temporary_root / "tree-window-install-release"
         control_path.write_text(
             json.dumps(
                 {
                     "createTreeWindowFixture": True,
-                    "packagePaddingBytes": 64 * 1024 * 1024,
+                    "packageLockPaddingBytes": 64 * 1024 * 1024,
+                    "installCompleteBarrier": str(child_barrier),
+                    "installCompleteRelease": str(child_release),
                 }
             ),
             encoding="utf-8",
@@ -2012,11 +2016,21 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
             close_handle.argtypes = [ctypes.c_void_p]
             invalid_handle = ctypes.c_void_p(-1).value
             deadline = time.monotonic() + 10
+            while not child_barrier.exists() and time.monotonic() < deadline:
+                time.sleep(0.001)
+            if not child_barrier.exists():
+                worker_errors.append("install-complete child barrier was not observed")
+                return
+            barrier_state = json.loads(child_barrier.read_text(encoding="utf-8"))
+            child_release.write_text("release", encoding="utf-8")
+            if barrier_state.get("stage") != "install-complete":
+                worker_errors.append("unexpected install-complete child barrier stage")
+                return
             while time.monotonic() < deadline:
-                if not package_json.exists() or not target.exists():
+                if not package_lock.exists() or not target.exists():
                     time.sleep(0.001)
                     continue
-                handle = create_file(str(package_json), 0x40000000, 0, None, 3, 0x80, None)
+                handle = create_file(str(package_lock), 0x40000000, 0, None, 3, 0x80, None)
                 if handle == invalid_handle:
                     error = ctypes.get_last_error()
                     if error in {32, 33}:
@@ -2028,14 +2042,14 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
                     return
                 close_handle(handle)
                 time.sleep(0.001)
-            worker_errors.append("verification read lock was not observed")
+            worker_errors.append("package-lock verification read lock was not observed")
 
         try:
             plan = self._discover_v2()
             plan_path = self._write_plan(plan, "package-tree-drift-plan.json")
             bootstrap_root = Path(plan["bootstrapRoot"])
             package_root = bootstrap_root / "node_modules" / "@openai" / "codex"
-            package_json = package_root / "package.json"
+            package_lock = bootstrap_root / "package-lock.json"
             target = package_root / "zzz-drift.bin"
             worker = threading.Thread(target=mutate_tree)
             worker.start()
@@ -2055,6 +2069,9 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
             if "worker" in locals():
                 worker.join(timeout=10)
             control_path.unlink(missing_ok=True)
+            child_release.write_text("release", encoding="utf-8")
+            child_barrier.unlink(missing_ok=True)
+            child_release.unlink(missing_ok=True)
             if bootstrap_root.exists():
                 shutil.rmtree(bootstrap_root)
 

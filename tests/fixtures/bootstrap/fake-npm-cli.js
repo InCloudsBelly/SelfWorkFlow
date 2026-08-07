@@ -142,9 +142,6 @@ if (command === "install") {
   const packageRoot = path.join(prefix, "node_modules", "@openai", "codex");
   fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
   const packageMetadata = { name: "@openai/codex", version };
-  if (control.packagePaddingBytes) {
-    packageMetadata.padding = "x".repeat(Number(control.packagePaddingBytes));
-  }
   if (!control.omitPackageJson) {
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
@@ -172,24 +169,33 @@ if (command === "install") {
   if (control.createTreeDriftFixture || control.createTreeWindowFixture) {
     fs.writeFileSync(path.join(packageRoot, "zzz-drift.bin"), "before", "utf8");
   }
+  const packageLockMetadata = {
+    lockfileVersion: 3,
+    packages: {
+      "node_modules/@openai/codex": {
+        name: "@openai/codex",
+        version,
+        integrity: "sha512-U2VsZldvcmtGbG93RmFrZUludGVncml0eQ==",
+      },
+    },
+  };
+  if (control.packageLockPaddingBytes) {
+    packageLockMetadata.padding = "x".repeat(Number(control.packageLockPaddingBytes));
+  }
   if (!control.omitPackageLock) {
     fs.writeFileSync(
       path.join(prefix, "package-lock.json"),
       control.packageLockRaw === undefined
-        ? JSON.stringify({
-            lockfileVersion: 3,
-            packages: {
-              "node_modules/@openai/codex": {
-                name: "@openai/codex",
-                version,
-                integrity: "sha512-U2VsZldvcmtGbG93RmFrZUludGVncml0eQ==",
-              },
-            },
-          })
+        ? JSON.stringify(packageLockMetadata)
         : String(control.packageLockRaw),
       "utf8",
     );
   }
+  waitAtBarrier(
+    control.installCompleteBarrier,
+    control.installCompleteRelease,
+    "install-complete",
+  );
   process.exit(0);
 }
 
