@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -34,11 +35,21 @@ def _open_object_schema_paths(value):
 
     def visit(node, path):
         if isinstance(node, dict):
-            if (
-                node.get("type") == "object"
-                and node.get("additionalProperties") is not False
-            ):
-                open_paths.append(path)
+            if node.get("type") == "object":
+                required = node.get("required")
+                properties = node.get("properties")
+                required_is_exact = (
+                    isinstance(required, list)
+                    and all(isinstance(name, str) for name in required)
+                    and len(required) == len(set(required))
+                    and isinstance(properties, dict)
+                    and set(required) == set(properties)
+                )
+                if (
+                    node.get("additionalProperties") is not False
+                    or not required_is_exact
+                ):
+                    open_paths.append(path)
             for key, nested_value in node.items():
                 visit(nested_value, f"{path}.{key}")
         elif isinstance(node, list):
@@ -544,10 +555,12 @@ class ConfigLoadingTests(unittest.TestCase):
         loosened_fixture = {
             "type": "object",
             "additionalProperties": False,
+            "required": ["nested"],
             "properties": {
                 "nested": {
                     "type": "object",
                     "additionalProperties": True,
+                    "required": [],
                     "properties": {},
                 }
             },
@@ -556,6 +569,35 @@ class ConfigLoadingTests(unittest.TestCase):
             checker(loosened_fixture),
             ("$.properties.nested",),
         )
+
+    def test_object_schema_required_and_properties_contract_is_closed(self):
+        checker = _open_object_schema_paths
+        lifecycle_schema = json.loads(
+            (REPOSITORY_ROOT / "schemas" / "lifecycle.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        capabilities_path = "$.properties.capabilities"
+
+        def capabilities(schema):
+            return schema["properties"]["capabilities"]
+
+        mutations = (
+            lambda schema: capabilities(schema)["required"].remove("states"),
+            lambda schema: capabilities(schema)["properties"].update(
+                {"extensionData": {"type": "string"}}
+            ),
+            lambda schema: capabilities(schema)["required"].append("states"),
+            lambda schema: capabilities(schema)["required"].append(7),
+            lambda schema: capabilities(schema).__setitem__("required", "states"),
+            lambda schema: capabilities(schema).__setitem__("properties", []),
+        )
+
+        for mutate in mutations:
+            schema = copy.deepcopy(lifecycle_schema)
+            mutate(schema)
+            with self.subTest(mutation=mutate):
+                self.assertEqual(checker(schema), (capabilities_path,))
 
 
 if __name__ == "__main__":

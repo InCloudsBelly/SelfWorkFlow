@@ -12,6 +12,8 @@ from selfworkflow.model import (
     WorkflowInputError,
     _coerce_complexity,
     _coerce_risk,
+    _normalize_string_pairs,
+    _normalize_string_sequence,
 )
 
 
@@ -42,14 +44,13 @@ def check_capabilities(
 ) -> PauseResult | None:
     """Pause unless every required capability is reported as supported."""
 
-    if (
-        isinstance(required_capabilities, (str, bytes, Mapping))
-        or not isinstance(required_capabilities, Iterable)
-        or not isinstance(report, CapabilityReport)
-    ):
+    if not isinstance(report, CapabilityReport):
         raise WorkflowInputError("capability-gate-input-invalid")
-    required = tuple(required_capabilities)
-    if any(not isinstance(name, str) or not name for name in required):
+    required = _normalize_string_sequence(
+        required_capabilities,
+        "capability-gate-input-invalid",
+    )
+    if any(not name for name in required):
         raise WorkflowInputError("capability-gate-input-invalid")
 
     if purposes is None:
@@ -57,14 +58,13 @@ def check_capabilities(
     elif not isinstance(purposes, Mapping):
         raise WorkflowInputError("capability-gate-input-invalid")
     else:
-        purpose_by_name = dict(purposes)
-        if any(
-            not isinstance(name, str)
-            or not name
-            or not isinstance(purpose, str)
-            for name, purpose in purpose_by_name.items()
-        ):
+        normalized_purposes = _normalize_string_pairs(
+            purposes,
+            "capability-gate-input-invalid",
+        )
+        if any(not name for name, _ in normalized_purposes):
             raise WorkflowInputError("capability-gate-input-invalid")
+        purpose_by_name = dict(normalized_purposes)
 
     missing = tuple(
         sorted(

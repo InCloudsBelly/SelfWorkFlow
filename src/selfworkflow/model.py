@@ -13,13 +13,30 @@ class WorkflowInputError(ValueError):
         super().__init__(code)
 
 
-def _normalize_string_sequence(value: object, code: str) -> tuple[str, ...]:
-    if (
-        isinstance(value, (str, bytes, Mapping))
-        or not isinstance(value, Iterable)
+def _materialize_ordered(value: object, code: str) -> tuple[object, ...]:
+    if isinstance(value, (str, bytes, set, frozenset, Mapping)) or not isinstance(
+        value, Iterable
     ):
         raise WorkflowInputError(code)
-    normalized = tuple(value)
+    try:
+        return tuple(value)
+    except Exception:
+        raise WorkflowInputError(code) from None
+
+
+def _materialize_mapping_items(
+    value: Mapping[object, object],
+    code: str,
+) -> tuple[object, ...]:
+    try:
+        items = value.items()
+    except Exception:
+        raise WorkflowInputError(code) from None
+    return _materialize_ordered(items, code)
+
+
+def _normalize_string_sequence(value: object, code: str) -> tuple[str, ...]:
+    normalized = _materialize_ordered(value, code)
     if any(not isinstance(item, str) for item in normalized):
         raise WorkflowInputError(code)
     return normalized
@@ -29,24 +46,20 @@ def _normalize_string_pairs(
     value: object,
     code: str,
 ) -> tuple[tuple[str, str], ...]:
-    if isinstance(value, Mapping):
-        entries = value.items()
-    elif isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
-        raise WorkflowInputError(code)
+    is_mapping = isinstance(value, Mapping)
+    if is_mapping:
+        entries = _materialize_mapping_items(value, code)
     else:
-        entries = value
+        entries = _materialize_ordered(value, code)
 
     normalized: list[tuple[str, str]] = []
     for entry in entries:
-        if (
-            isinstance(entry, (str, bytes, Mapping))
-            or not isinstance(entry, Iterable)
-        ):
-            raise WorkflowInputError(code)
-        pair = tuple(entry)
+        pair = _materialize_ordered(entry, code)
         if len(pair) != 2 or any(not isinstance(item, str) for item in pair):
             raise WorkflowInputError(code)
         normalized.append((pair[0], pair[1]))
+    if is_mapping:
+        normalized.sort(key=lambda pair: pair[0])
     return tuple(normalized)
 
 
@@ -116,20 +129,16 @@ class CapabilityReport:
         | Iterable[tuple[str, CapabilityState | str]],
     ) -> None:
         if isinstance(states, Mapping):
-            entries = states.items()
-        elif isinstance(states, (str, bytes)) or not isinstance(states, Iterable):
-            raise WorkflowInputError("capability-report-invalid")
+            entries = _materialize_mapping_items(
+                states,
+                "capability-report-invalid",
+            )
         else:
-            entries = states
+            entries = _materialize_ordered(states, "capability-report-invalid")
 
         normalized: dict[str, CapabilityState] = {}
         for entry in entries:
-            if (
-                isinstance(entry, (str, bytes, Mapping))
-                or not isinstance(entry, Iterable)
-            ):
-                raise WorkflowInputError("capability-report-invalid")
-            pair = tuple(entry)
+            pair = _materialize_ordered(entry, "capability-report-invalid")
             if len(pair) != 2:
                 raise WorkflowInputError("capability-report-invalid")
             name, state = pair
