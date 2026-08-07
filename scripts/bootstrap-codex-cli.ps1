@@ -386,7 +386,7 @@ function Get-CodexCliVersion {
     if ($NormalizedOutput.EndsWith("`n", [System.StringComparison]::Ordinal)) {
         $NormalizedOutput = $NormalizedOutput.Substring(0, $NormalizedOutput.Length - 1)
     }
-    $SemVer = "(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
+    $SemVer = Get-SelfWorkflowCanonicalSemVerPattern
     $Match = [regex]::Match($NormalizedOutput, "^codex-cli (?<version>$SemVer)$")
     if (
         $ErrorOutput.Length -ne 0 -or
@@ -627,9 +627,8 @@ try {
     ) {
         throw "Metadata fields are missing or have invalid types."
     }
-    $MetadataVersionPattern = "^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"
     if (
-        $VersionProperty.Value -notmatch $MetadataVersionPattern -or
+        -not (Test-SelfWorkflowCanonicalSemVer -Value $VersionProperty.Value) -or
         $IntegrityProperty.Value -notmatch "^sha(256|384|512)-[A-Za-z0-9+/_=-]+$"
     ) {
         throw "Metadata field formats are invalid."
@@ -774,9 +773,7 @@ try {
     $VerifiedSddl = Get-VerifiedBootstrapSddl -Path $CanonicalBootstrapRoot
 }
 catch {
-    [Console]::Error.WriteLine(
-        "SelfWorkFlow: ACL security verification failed: $($_.Exception.Message)"
-    )
+    [Console]::Error.WriteLine("SelfWorkFlow: ACL security verification failed.")
     exit 48
 }
 
@@ -885,9 +882,7 @@ try {
     $FinalSddl = Get-VerifiedBootstrapSddl -Path $CanonicalBootstrapRoot
 }
 catch {
-    [Console]::Error.WriteLine(
-        "SelfWorkFlow: ACL security verification failed: $($_.Exception.Message)"
-    )
+    [Console]::Error.WriteLine("SelfWorkFlow: ACL security verification failed.")
     exit 48
 }
 $Manifest = [ordered]@{

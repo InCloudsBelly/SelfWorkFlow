@@ -1,5 +1,17 @@
 Set-StrictMode -Version Latest
 
+$script:SelfWorkflowCanonicalSemVerPattern = '(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
+
+function Get-SelfWorkflowCanonicalSemVerPattern {
+    return $script:SelfWorkflowCanonicalSemVerPattern
+}
+
+function Test-SelfWorkflowCanonicalSemVer {
+    param([Parameter(Mandatory = $true)][string]$Value)
+
+    return $Value -cmatch "^$script:SelfWorkflowCanonicalSemVerPattern`$"
+}
+
 function Get-SelfWorkflowSha256Text {
     param([Parameter(Mandatory = $true)][string]$Text)
 
@@ -141,7 +153,6 @@ function Assert-SelfWorkflowBootstrapManifest {
     $NameProperty = $Package.PSObject.Properties["name"]
     $VersionProperty = $Package.PSObject.Properties["version"]
     $IntegrityProperty = $Package.PSObject.Properties["integrity"]
-    $SemVer = "^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"
     if (
         $null -eq $NameProperty -or $NameProperty.Value -isnot [string] -or
         $null -eq $VersionProperty -or $VersionProperty.Value -isnot [string] -or
@@ -151,7 +162,8 @@ function Assert-SelfWorkflowBootstrapManifest {
         $VersionProperty.Value -cne $Plan.package.version -or
         $IntegrityProperty.Value -cne $Plan.package.integrity -or
         $CliVersionProperty.Value -cne $VersionProperty.Value -or
-        $CliVersionProperty.Value -notmatch $SemVer
+        -not (Test-SelfWorkflowCanonicalSemVer -Value $VersionProperty.Value) -or
+        -not (Test-SelfWorkflowCanonicalSemVer -Value $CliVersionProperty.Value)
     ) {
         throw "Manifest package or CLI version does not match the plan."
     }

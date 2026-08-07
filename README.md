@@ -105,9 +105,13 @@ Codex CLI.
 This is a **reconstructed baseline, not a replacement for original session
 logs**. The baseline was unpacked from
 `f5b6fd41717879da4e2e86f35f94ff389079fa9d` into a new system temporary
-directory. Only the current `tests\__init__.py`, `tests\test_smoke.py`,
-`tests\test_bootstrap_cli.py`, and `tests\fixtures\bootstrap\fake-npm.cmd`
-were then copied into it; no current production implementation was copied.
+directory. Only `tests\__init__.py`, `tests\test_smoke.py`,
+`tests\test_bootstrap_cli.py`, and `tests\fixtures\bootstrap\fake-npm.cmd` as
+recorded by source commit
+`11f6c42e9b59664965d867f515e023c4a671e050` were then copied into it; no
+production implementation from that commit was copied. That test snapshot has
+23 bootstrap tests and 15 smoke tests (38 total).
+
 The locked dependency directory was exposed to the system Python through
 `PYTHONPATH`, which does not process the editable-package `.pth` file.
 
@@ -123,7 +127,8 @@ C:\Python314\python.exe -m unittest discover -s tests -t . -v
 - Redacted output SHA-256:
   `367d19e3390747cb118882d571191fa4ed8231a45e202e769cbd079c4107c6cf`
 
-The current-tree Green command, run from the repository root, was:
+The corresponding 38-test source-snapshot Green command, run from the
+repository root, was:
 
 ```powershell
 .venv\Scripts\python.exe -m unittest discover -s tests -t . -v
@@ -137,13 +142,24 @@ The current-tree Green command, run from the repository root, was:
 For both hashes, captured stdout was concatenated with stderr, CRLF was
 normalized to LF, and the evidence temporary root, worktree root, and user
 profile were replaced with placeholders before UTF-8 SHA-256 hashing. Raw
-outputs were not added to Git.
+outputs were not added to Git. Both 38-test records are evidence for the tests
+from `11f6c42e9b59664965d867f515e023c4a671e050`; neither describes the current
+test count.
 
-## Review-hardening TDD evidence
+## Review-hardening evidence for 646fb6f
 
-The following commands were actually run in this worktree on 2026-08-07. These
-are current-session Red/Green observations, not reconstructed baseline output;
-raw command output was not added to Git.
+The source tree committed as
+`646fb6f6fa4df37a90d26be40920d8c4d12e6be7` contained 57 tests. The following
+full Green runs were actually executed in this worktree on 2026-08-07 while
+preparing that commit:
+
+- `.\scripts\test.ps1`: exit `0`; `Ran 57 tests in 67.845s`.
+- `.\scripts\verify.ps1 -Suite unit`: exit `0`; `Ran 57 tests in 71.101s`.
+
+No output hash was captured for those two runs, so none is claimed here. The
+following are also actual Red/Green observations from preparing that source
+commit, not reconstructed baseline output; raw command output was not added to
+Git.
 
 - Installed package/lock parsing:
   `.venv\Scripts\python.exe -m unittest tests.test_bootstrap_cli.BootstrapCodexCliTests.test_apply_rejects_invalid_installed_json_with_stable_redacted_error -v`
@@ -171,3 +187,32 @@ raw command output was not added to Git.
   first found `bootstrap\codex-cli` created through the injected junction, then
   passed with an empty junction target after full-chain verification moved
   before `CreateDirectory`.
+
+## Review-fix evidence after 646fb6f
+
+The following Red/Green commands were actually run in the post-`646fb6f`
+worktree represented by this README on 2026-08-07. No output hashes were
+captured, so none are claimed; raw output was not added to Git.
+
+- ACL error redaction:
+  `.\scripts\test.ps1 -Test tests.test_bootstrap_cli.BootstrapCodexCliTests.test_apply_redacts_missing_sensitive_icacls_path`
+  first failed because stderr included the missing `super-secret` command path
+  (`Ran 1 test in 1.147s`), then passed with fixed error text and code 48
+  (`Ran 1 test in 1.378s`).
+- Discover/Apply canonical SemVer:
+  `.\scripts\test.ps1 -Test tests.test_bootstrap_cli.BootstrapCodexCliTests.test_discover_and_apply_reject_numeric_prerelease_leading_zero`
+  first failed in both subcases because Discover accepted `1.2.3-01` and Apply
+  returned plan-drift code 46 (`Ran 1 test in 1.712s`), then passed with both
+  modes rejecting invalid metadata at code 47 (`Ran 1 test in 1.689s`).
+- Manifest schema canonical SemVer:
+  `.\scripts\test.ps1 -Test tests.test_bootstrap_cli.BootstrapCodexCliTests.test_manifest_schema_rejects_unsafe_static_values`
+  first failed for both package and CLI `1.2.3-01` values
+  (`Ran 1 test in 0.062s`), then passed while retaining the legal
+  `1.2.3-alpha.1+build.01` case (`Ran 1 test in 0.059s`).
+- Manifest semantic canonical SemVer:
+  `.\scripts\test.ps1 -Test tests.test_bootstrap_cli.BootstrapCodexCliTests.test_manifest_semantics_rejects_numeric_prerelease_leading_zero`
+  first accepted an internally consistent plan/manifest using `1.2.3-01`
+  (`Ran 1 test in 1.852s`), then rejected it with semantic code 58
+  (`Ran 1 test in 1.780s`).
+- Current full Green: `.\scripts\test.ps1` exited `0` with
+  `Ran 62 tests in 76.377s`.

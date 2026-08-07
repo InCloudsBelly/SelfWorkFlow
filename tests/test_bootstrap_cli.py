@@ -178,6 +178,24 @@ def _compute_package_tree_hash(package_root):
     return f"sha256:{digest.hexdigest()}"
 
 
+def _compute_plan_hash(plan):
+    plan_data = {
+        key: plan[key]
+        for key in (
+            "schemaVersion",
+            "bootstrapRoot",
+            "package",
+            "execution",
+            "security",
+            "sideEffects",
+        )
+    }
+    serialized = json.dumps(
+        plan_data, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
 def _snapshot_tree(root):
     snapshot = {}
     for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
@@ -330,6 +348,44 @@ class BootstrapCodexCliTests(unittest.TestCase):
                 unsafe_manifest = json.loads(json.dumps(manifest))
                 unsafe_manifest[field] = unsafe_value
                 self.assertTrue(list(validator.iter_errors(unsafe_manifest)))
+
+        for field_path in (("package", "version"), ("cliVersion",)):
+            with self.subTest(field_path=field_path, value="1.2.3-01"):
+                unsafe_manifest = json.loads(json.dumps(manifest))
+                target = unsafe_manifest
+                for field in field_path[:-1]:
+                    target = target[field]
+                target[field_path[-1]] = "1.2.3-01"
+                self.assertTrue(list(validator.iter_errors(unsafe_manifest)))
+
+        legal_manifest = json.loads(json.dumps(manifest))
+        legal_manifest["package"]["version"] = "1.2.3-alpha.1+build.01"
+        legal_manifest["cliVersion"] = "1.2.3-alpha.1+build.01"
+        self.assertFalse(list(validator.iter_errors(legal_manifest)))
+
+    def test_manifest_schema_semver_pattern_matches_production_rule(self):
+        schema = json.loads(MANIFEST_SCHEMA.read_text(encoding="utf-8"))
+        environment = os.environ.copy()
+        environment["SELFWORKFLOW_MANIFEST_LIBRARY"] = str(MANIFEST_LIBRARY)
+        result = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                ". $env:SELFWORKFLOW_MANIFEST_LIBRARY; "
+                "'^' + (Get-SelfWorkflowCanonicalSemVerPattern) + '$'",
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            schema["$defs"]["canonicalSemVer"]["pattern"],
+            result.stdout.strip(),
+        )
 
     def test_discover_returns_version_and_integrity_plan(self):
         self.assertTrue(BOOTSTRAP_SCRIPT.is_file(), "bootstrap script must exist")
@@ -653,6 +709,73 @@ class BootstrapCodexCliTests(unittest.TestCase):
                     "SelfWorkFlow: npm metadata response is invalid.",
                 )
                 self.assertNotIn("metadata-super-secret", combined_output)
+
+    def test_discover_and_apply_reject_numeric_prerelease_leading_zero(self):
+        invalid_version = "1.2.3-01"
+
+        with self.subTest(mode="Discover"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                result = _run_bootstrap(
+                    Path(temporary_directory) / "LocalAppData",
+                    "-Mode",
+                    "Discover",
+                    "-NpmCommand",
+                    str(FAKE_NPM),
+                    environment={"FAKE_NPM_VERSION": invalid_version},
+                )
+
+            self.assertEqual(result.returncode, 47, result.stderr + result.stdout)
+            self.assertEqual(
+                result.stderr.strip(),
+                "SelfWorkFlow: npm metadata response is invalid.",
+            )
+
+        with self.subTest(mode="Apply"):
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                temporary_root = Path(temporary_directory)
+                local_app_data = temporary_root / "LocalAppData"
+                install_marker = temporary_root / "npm-install-called"
+                _, plan = _discover_plan(local_app_data)
+                result = _apply_plan(
+                    local_app_data,
+                    plan,
+                    environment={
+                        "FAKE_NPM_VERSION": invalid_version,
+                        "FAKE_NPM_INSTALL_MARKER": str(install_marker),
+                    },
+                )
+
+                self.assertFalse(install_marker.exists())
+
+            self.assertEqual(result.returncode, 47, result.stderr + result.stdout)
+            self.assertEqual(
+                result.stderr.strip(),
+                "SelfWorkFlow: npm metadata response is invalid.",
+            )
+
+    def test_discover_and_apply_accept_canonical_prerelease_and_build(self):
+        version = "1.2.3-alpha.1+build.01"
+        environment = {"FAKE_NPM_VERSION": version}
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            local_app_data = Path(temporary_directory) / "LocalAppData"
+            discover, plan = _discover_plan(
+                local_app_data,
+                environment=environment,
+            )
+            apply_result = _apply_plan(
+                local_app_data,
+                plan,
+                environment=environment,
+            )
+            manifest = json.loads(
+                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(discover.returncode, 0, discover.stderr)
+        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
+        self.assertEqual(plan["package"]["version"], version)
+        self.assertEqual(manifest["package"]["version"], version)
+        self.assertEqual(manifest["cliVersion"], version)
 
     def test_discover_rejects_bootstrap_root_outside_allowed_boundary(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1079,7 +1202,60 @@ class BootstrapCodexCliTests(unittest.TestCase):
             self.assertFalse(install_marker.exists())
 
         self.assertEqual(result.returncode, 48)
-        self.assertIn("icacls verification failed", result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: ACL security verification failed.",
+        )
+
+    def test_apply_redacts_missing_sensitive_icacls_path(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            local_app_data = temporary_root / "LocalAppData"
+            sensitive_name = "super-secret"
+            missing_icacls = temporary_root / f"{sensitive_name}-icacls.cmd"
+            install_marker = temporary_root / "npm-install-called"
+            discover = _run_bootstrap(
+                local_app_data,
+                "-Mode",
+                "Discover",
+                "-NpmCommand",
+                str(FAKE_NPM),
+            )
+            plan_hash = json.loads(discover.stdout)["planHash"]
+
+            result = _run_bootstrap(
+                local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmPlanHash",
+                plan_hash,
+                "-NpmCommand",
+                str(FAKE_NPM),
+                "-IcaclsCommand",
+                str(missing_icacls),
+                environment={"FAKE_NPM_INSTALL_MARKER": str(install_marker)},
+            )
+            manifest_path = (
+                Path(json.loads(discover.stdout)["bootstrapRoot"])
+                / "bootstrap-tool-manifest.json"
+            )
+            persisted_bytes = b"".join(
+                path.read_bytes()
+                for path in temporary_root.rglob("*")
+                if path.is_file()
+            )
+
+            self.assertFalse(install_marker.exists())
+            self.assertFalse(manifest_path.exists())
+
+        self.assertEqual(result.returncode, 48)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: ACL security verification failed.",
+        )
+        self.assertNotIn(sensitive_name, result.stdout)
+        self.assertNotIn(sensitive_name, result.stderr)
+        self.assertNotIn(sensitive_name.encode("utf-8"), persisted_bytes)
 
     def test_apply_fails_closed_when_acl_reread_detects_inheritance(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1123,8 +1299,10 @@ exit 0
             self.assertFalse(install_marker.exists())
 
         self.assertEqual(result.returncode, 48, result.stderr)
-        self.assertIn("ACL security verification failed", result.stderr)
-        self.assertIn("DACL inheritance is not protected", result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: ACL security verification failed.",
+        )
 
     def test_apply_locks_new_bootstrap_root_before_icacls_command(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1299,6 +1477,7 @@ exit 0
             ({"FAKE_NPM_CLI_SECOND_LINE": "stdout-sensitive-extra"}, "stdout-sensitive-extra"),
             ({"FAKE_NPM_CLI_STDERR": "stderr-sensitive-extra"}, "stderr-sensitive-extra"),
             ({"FAKE_NPM_CLI_VERSION_OUTPUT": "codex-cli version 1.2.3"}, None),
+            ({"FAKE_NPM_CLI_VERSION_OUTPUT": "codex-cli 1.2.3-01"}, None),
             ({"FAKE_NPM_CLI_VERSION_OUTPUT": "codex-cli 9.9.9"}, None),
         )
         for cli_environment, sensitive_text in cases:
@@ -1412,6 +1591,38 @@ exit 0
         for result in invalid_results:
             self.assertEqual(result.returncode, 58, result.stderr)
             self.assertNotIn("extra-sensitive-text", result.stderr)
+
+    def test_manifest_semantics_rejects_numeric_prerelease_leading_zero(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            local_app_data = Path(temporary_directory) / "LocalAppData"
+            _, plan = _discover_plan(local_app_data)
+            apply_result = _apply_plan(local_app_data, plan)
+            manifest = json.loads(
+                Path(plan["sideEffects"]["manifestPath"]).read_text(encoding="utf-8")
+            )
+            invalid_plan = json.loads(json.dumps(plan))
+            invalid_plan["package"]["version"] = "1.2.3-01"
+            invalid_plan["execution"]["installArguments"][-1] = (
+                "@openai/codex@1.2.3-01"
+            )
+            invalid_plan["planHash"] = _compute_plan_hash(invalid_plan)
+            candidate = json.loads(json.dumps(manifest))
+            candidate["package"]["version"] = "1.2.3-01"
+            candidate["cliVersion"] = "1.2.3-01"
+            candidate["planHash"] = invalid_plan["planHash"]
+            result = _validate_manifest_candidate(
+                local_app_data,
+                invalid_plan,
+                candidate,
+                expected_sddl=manifest["daclSddl"],
+            )
+
+        self.assertEqual(apply_result.returncode, 0, apply_result.stderr)
+        self.assertEqual(result.returncode, 58, result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: manifest semantic validation failed.",
+        )
 
     def test_manifest_semantics_rejects_hash_drift(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

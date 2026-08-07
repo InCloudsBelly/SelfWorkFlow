@@ -4,6 +4,12 @@
   "title": "SelfWorkFlow Bootstrap Tool Manifest",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "canonicalSemVer": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    }
+  },
   "required": [
     "schemaVersion",
     "bootstrapRoot",
@@ -34,8 +40,7 @@
           "const": "@openai/codex"
         },
         "version": {
-          "type": "string",
-          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+          "$ref": "#/$defs/canonicalSemVer"
         },
         "integrity": {
           "type": "string",
@@ -55,8 +60,7 @@
       }
     },
     "cliVersion": {
-      "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+      "$ref": "#/$defs/canonicalSemVer"
     },
     "planHash": {
       "type": "string",
