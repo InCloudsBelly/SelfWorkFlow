@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/protected-rules.schema.json",
+  "title": "SelfWorkFlow protected rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "mergeOrder",
+    "ownerModificationGate",
+    "rules"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "mergeOrder": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "protected"},
+        {"const": "skill"},
+        {"const": "project"},
+        {"const": "overlay"}
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "ownerModificationGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "destructiveChangeConfirmed",
+        "versionBump",
+        "independentReview",
+        "behavioralTests"
+      ],
+      "properties": {
+        "destructiveChangeConfirmed": {"const": true},
+        "versionBump": {"const": "major"},
+        "independentReview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "requiresEvidenceHash"],
+          "properties": {
+            "status": {"const": "passed"},
+            "requiresEvidenceHash": {"const": true}
+          }
+        },
+        "behavioralTests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "requiresEvidenceHash"],
+          "properties": {
+            "status": {"const": "passed"},
+            "requiresEvidenceHash": {"const": true}
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "truthful-capability-review-verification"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "no-silent-degradation"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "protect-credentials-and-sensitive-data"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "authorize-side-effects-and-irreversible-actions"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "protect-user-existing-changes"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "require-fresh-verification-before-completion"},
+            "strength": {"const": "enforced"}
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 6,
+      "maxItems": 6
+    }
+  }
+}

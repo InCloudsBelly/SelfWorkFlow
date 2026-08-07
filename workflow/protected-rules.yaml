@@ -1,0 +1,28 @@
+schemaVersion: 1
+mergeOrder:
+  - protected
+  - skill
+  - project
+  - overlay
+ownerModificationGate:
+  destructiveChangeConfirmed: true
+  versionBump: major
+  independentReview:
+    status: passed
+    requiresEvidenceHash: true
+  behavioralTests:
+    status: passed
+    requiresEvidenceHash: true
+rules:
+  - id: truthful-capability-review-verification
+    strength: agent-policy
+  - id: no-silent-degradation
+    strength: agent-policy
+  - id: protect-credentials-and-sensitive-data
+    strength: agent-policy
+  - id: authorize-side-effects-and-irreversible-actions
+    strength: agent-policy
+  - id: protect-user-existing-changes
+    strength: agent-policy
+  - id: require-fresh-verification-before-completion
+    strength: enforced

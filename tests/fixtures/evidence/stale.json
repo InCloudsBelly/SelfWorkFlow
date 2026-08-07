@@ -1,0 +1,58 @@
+{
+  "classification": {
+    "taskKind": "modification",
+    "complexity": "C1",
+    "risk": "R1"
+  },
+  "capabilities": [
+    {
+      "name": "filesystem-write",
+      "state": "supported",
+      "evidenceHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "selectedSkills": [
+    "superpowers:test-driven-development"
+  ],
+  "acceptanceCriteria": [
+    {
+      "id": "criterion-tests",
+      "description": "Task tests pass.",
+      "applicability": "applicable",
+      "reason": "",
+      "verificationIds": [
+        "unit-tests"
+      ]
+    }
+  ],
+  "changes": {
+    "taskKind": "modification",
+    "resultContentHash": "sha256:0721e8ed5ea90b709800b5134b3f7cfa28f749f11af24aa0516972e2c6eab7a5",
+    "items": [
+      {
+        "path": "src/example.py",
+        "operation": "modified",
+        "contentHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ]
+  },
+  "review": {
+    "status": "passed",
+    "level": "L2",
+    "evidenceHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "reason": ""
+  },
+  "verification": [
+    {
+      "id": "unit-tests",
+      "status": "passed",
+      "contentHash": "sha256:0721e8ed5ea90b709800b5134b3f7cfa28f749f11af24aa0516972e2c6eab7a5",
+      "evidenceHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "verifiedAt": "2026-08-08T06:00:00Z",
+      "validForSeconds": 3600,
+      "reason": ""
+    }
+  ],
+  "skipped": [],
+  "residualRisks": []
+}
