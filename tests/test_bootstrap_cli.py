@@ -271,6 +271,36 @@ def _enable_acl_inheritance(path):
         raise AssertionError(result.stderr)
 
 
+def _add_allow_acl(path, sid, rights):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "SELFWORKFLOW_ACL_PATH": str(path),
+            "SELFWORKFLOW_ACL_SID": sid,
+            "SELFWORKFLOW_ACL_RIGHTS": rights,
+        }
+    )
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-Command",
+            "$Acl=Get-Acl -LiteralPath $env:SELFWORKFLOW_ACL_PATH; "
+            "$Rule=[Security.AccessControl.FileSystemAccessRule]::new("
+            "[Security.Principal.SecurityIdentifier]::new($env:SELFWORKFLOW_ACL_SID),"
+            "$env:SELFWORKFLOW_ACL_RIGHTS,'ContainerInherit, ObjectInherit','None','Allow'); "
+            "[void]$Acl.AddAccessRule($Rule); "
+            "Set-Acl -LiteralPath $env:SELFWORKFLOW_ACL_PATH -AclObject $Acl",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+
+
 def _remove_junction_if_present(path):
     if not os.path.lexists(path):
         return
@@ -1443,6 +1473,54 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
                     if bootstrap_root and bootstrap_root.exists():
                         shutil.rmtree(bootstrap_root)
 
+    def test_apply_rejects_rehashed_unverified_semantic_drift_before_side_effects(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        install_marker = self.temporary_root / "unverified-drift-install.marker"
+        control_path.write_text(
+            json.dumps({"installMarker": str(install_marker)}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        bootstrap_root = None
+        try:
+            plan = self._discover_v2()
+            candidate = json.loads(json.dumps(plan))
+            candidate["unverified"] = [
+                "all mutation races are verified safe",
+                "real npm, network, and Codex execution is verified",
+            ]
+            candidate["planHash"] = _compute_v2_plan_hash(candidate)
+            plan_path = self._write_plan(candidate, "unverified-drift-plan.json")
+            bootstrap_root = Path(plan["bootstrapRoot"])
+
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                candidate["planHash"],
+            )
+            install_called = install_marker.exists()
+            root_exists = bootstrap_root.exists()
+            cache_exists = Path(plan["sideEffects"]["cachePath"]).exists()
+            manifest_exists = Path(plan["sideEffects"]["manifestPath"]).exists()
+        finally:
+            control_path.unlink(missing_ok=True)
+            install_marker.unlink(missing_ok=True)
+            if bootstrap_root and bootstrap_root.exists():
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 60, result.stderr)
+        self.assertFalse(install_called)
+        self.assertFalse(root_exists)
+        self.assertFalse(cache_exists)
+        self.assertFalse(manifest_exists)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: confirmed plan validation failed.",
+        )
+
     def test_apply_rejects_relative_confirmed_plan_before_external_process(self):
         control_path = self.npm_cli.parent / "fake-npm-control.json"
         metadata_marker = self.temporary_root / "relative-plan-metadata.marker"
@@ -1638,6 +1716,8 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
                             (bootstrap_root / "sentinel.txt").write_text(
                                 "sentinel", encoding="utf-8"
                             )
+                        else:
+                            _set_protected_current_user_acl(bootstrap_root)
 
                     result = _run_bootstrap(
                         self.local_app_data,
@@ -1670,6 +1750,64 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
                         shutil.rmtree(bootstrap_root)
                     elif bootstrap_root.exists():
                         bootstrap_root.unlink()
+
+    def test_apply_rejects_existing_empty_root_with_dangerous_acl_before_install(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        secret = "dangerous-root-super-secret"
+        install_marker = self.temporary_root / f"{secret}.install"
+        control_path.write_text(
+            json.dumps({"installMarker": str(install_marker)}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        bootstrap_root = (
+            self.local_app_data
+            / "SelfWorkFlow"
+            / "bootstrap"
+            / "codex-cli"
+            / "dangerous-empty-root"
+        )
+        try:
+            plan = self._discover_v2("-BootstrapRoot", str(bootstrap_root))
+            plan_path = self._write_plan(plan, "dangerous-empty-root-plan.json")
+            bootstrap_root.mkdir(parents=True)
+            _set_protected_current_user_acl(bootstrap_root)
+            _add_allow_acl(bootstrap_root, "S-1-1-0", "FullControl")
+
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Apply",
+                "-ConfirmedPlanPath",
+                str(plan_path),
+                "-ConfirmPlanHash",
+                plan["planHash"],
+            )
+            invocation_log = (
+                Path(plan["sideEffects"]["cachePath"])
+                / "fake-npm-invocations.jsonl"
+            )
+            manifest_path = Path(plan["sideEffects"]["manifestPath"])
+            install_called = install_marker.exists()
+            invocation_exists = invocation_log.exists()
+            manifest_exists = manifest_path.exists()
+            temporary_manifests = list(bootstrap_root.glob("*.tmp"))
+        finally:
+            control_path.unlink(missing_ok=True)
+            install_marker.unlink(missing_ok=True)
+            if bootstrap_root.exists():
+                _set_protected_current_user_acl(bootstrap_root)
+                shutil.rmtree(bootstrap_root)
+
+        self.assertEqual(result.returncode, 44, result.stderr)
+        self.assertFalse(install_called)
+        self.assertFalse(invocation_exists)
+        self.assertFalse(manifest_exists)
+        self.assertFalse(temporary_manifests)
+        self.assertNotIn(secret, result.stdout + result.stderr)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: existing BootstrapRoot does not satisfy safe recovery conditions; only an empty directory is accepted.",
+        )
 
     def test_apply_runs_only_install_with_bound_cwd_and_environment(self):
         plan = self._discover_v2()
@@ -1840,26 +1978,65 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
                     self.assertNotIn(secret, result.stdout + result.stderr)
 
     def test_apply_rejects_package_tree_drift_during_verification(self):
+        import ctypes
+
         control_path = self.npm_cli.parent / "fake-npm-control.json"
-        control_path.write_text(json.dumps({"createTreeDriftFixture": True}), encoding="utf-8")
+        control_path.write_text(
+            json.dumps(
+                {
+                    "createTreeWindowFixture": True,
+                    "packagePaddingBytes": 64 * 1024 * 1024,
+                }
+            ),
+            encoding="utf-8",
+        )
         _set_protected_current_user_acl(self.local_app_data)
         bootstrap_root = None
-        stop = threading.Event()
+        mutation_observed = threading.Event()
+        worker_errors = []
 
         def mutate_tree():
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            create_file = kernel32.CreateFileW
+            create_file.argtypes = [
+                ctypes.c_wchar_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+            ]
+            create_file.restype = ctypes.c_void_p
+            close_handle = kernel32.CloseHandle
+            close_handle.argtypes = [ctypes.c_void_p]
+            invalid_handle = ctypes.c_void_p(-1).value
             deadline = time.monotonic() + 10
-            while not target.exists() and time.monotonic() < deadline:
+            while time.monotonic() < deadline:
+                if not package_json.exists() or not target.exists():
+                    time.sleep(0.001)
+                    continue
+                handle = create_file(str(package_json), 0x40000000, 0, None, 3, 0x80, None)
+                if handle == invalid_handle:
+                    error = ctypes.get_last_error()
+                    if error in {32, 33}:
+                        with target.open("ab") as stream:
+                            stream.write(b"-after")
+                        mutation_observed.set()
+                        return
+                    worker_errors.append(f"CreateFileW failed: {error}")
+                    return
+                close_handle(handle)
                 time.sleep(0.001)
-            time.sleep(0.15)
-            if not stop.is_set():
-                with target.open("ab") as stream:
-                    stream.write(b"-after")
+            worker_errors.append("verification read lock was not observed")
 
         try:
             plan = self._discover_v2()
             plan_path = self._write_plan(plan, "package-tree-drift-plan.json")
             bootstrap_root = Path(plan["bootstrapRoot"])
-            target = bootstrap_root / "node_modules" / "@openai" / "codex" / "zzz-drift.bin"
+            package_root = bootstrap_root / "node_modules" / "@openai" / "codex"
+            package_json = package_root / "package.json"
+            target = package_root / "zzz-drift.bin"
             worker = threading.Thread(target=mutate_tree)
             worker.start()
             result = _run_bootstrap(
@@ -1875,13 +2052,14 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
             manifest_exists = Path(plan["sideEffects"]["manifestPath"]).exists()
             temporary_manifests = list(bootstrap_root.glob("*.tmp"))
         finally:
-            stop.set()
             if "worker" in locals():
                 worker.join(timeout=10)
             control_path.unlink(missing_ok=True)
             if bootstrap_root.exists():
                 shutil.rmtree(bootstrap_root)
 
+        self.assertFalse(worker_errors)
+        self.assertTrue(mutation_observed.is_set())
         self.assertEqual(result.returncode, 50, result.stderr)
         self.assertEqual(
             result.stderr.strip(),

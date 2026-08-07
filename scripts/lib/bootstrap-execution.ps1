@@ -188,13 +188,14 @@ function Resolve-SelfWorkflowRegistry {
 }
 
 function Assert-SelfWorkflowSafeAcl {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param([Parameter(Mandatory = $true)][string]$Path, [switch]$AllowInheritance)
 
     $Acl = Get-Acl -LiteralPath $Path
     $CurrentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $SystemSid = "S-1-5-18"
     $OwnerSid = $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-    if (-not $Acl.AreAccessRulesProtected -or $OwnerSid -notin @($CurrentSid, $SystemSid)) {
+    if ((-not $AllowInheritance -and -not $Acl.AreAccessRulesProtected) -or
+        $OwnerSid -notin @($CurrentSid, $SystemSid)) {
         throw "Unsafe owner."
     }
     $DangerousRights = [int](
@@ -381,6 +382,11 @@ function New-SelfWorkflowNpmStageDescriptor {
     }
 }
 
+function Get-SelfWorkflowUnverifiedSemantics {
+    return @("same-SID, SYSTEM, or OS-privileged mutation after final verification",
+        "real npm, network, and Codex execution")
+}
+
 function Assert-SelfWorkflowStaticPlan {
     param([Parameter(Mandatory = $true)]$Plan)
 
@@ -405,7 +411,8 @@ function Assert-SelfWorkflowStaticPlan {
         @($Plan.execution.metadataEnvironment, $Metadata.environment),
         @($Plan.execution.installEnvironment, $Install.environment),
         @($Plan.security.expectedBootstrapDacl, $ExpectedSecurity),
-        @($Plan.sideEffects, $ExpectedEffects)
+        @($Plan.sideEffects, $ExpectedEffects),
+        @($Plan.unverified, @(Get-SelfWorkflowUnverifiedSemantics))
     )
     $Changed = @($Comparisons | Where-Object {
         (ConvertTo-SelfWorkflowCanonicalJson $_[0] 10) -cne
@@ -534,10 +541,7 @@ function Invoke-SelfWorkflowDiscoverV2 {
             manifestPath = Join-Path $CanonicalBootstrapRoot "bootstrap-tool-manifest.json"
             uninstallBoundary = $CanonicalBootstrapRoot
         }
-        unverified = @(
-            "same-SID, SYSTEM, or OS-privileged mutation after final verification",
-            "real npm, network, and Codex execution"
-        )
+        unverified = @(Get-SelfWorkflowUnverifiedSemantics)
         planHash = ""
     }
     $Plan.planHash = Get-SelfWorkflowPlanHash $Plan

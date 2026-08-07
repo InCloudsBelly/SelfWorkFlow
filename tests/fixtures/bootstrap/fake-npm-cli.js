@@ -141,11 +141,15 @@ if (command === "install") {
 
   const packageRoot = path.join(prefix, "node_modules", "@openai", "codex");
   fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
+  const packageMetadata = { name: "@openai/codex", version };
+  if (control.packagePaddingBytes) {
+    packageMetadata.padding = "x".repeat(Number(control.packagePaddingBytes));
+  }
   if (!control.omitPackageJson) {
     fs.writeFileSync(
       path.join(packageRoot, "package.json"),
       control.packageJsonRaw === undefined
-        ? JSON.stringify({ name: "@openai/codex", version })
+        ? JSON.stringify(packageMetadata)
         : String(control.packageJsonRaw),
       "utf8",
     );
@@ -164,6 +168,8 @@ if (command === "install") {
     const large = fs.openSync(path.join(packageRoot, "aaa-large.bin"), "w");
     fs.ftruncateSync(large, 256 * 1024 * 1024);
     fs.closeSync(large);
+  }
+  if (control.createTreeDriftFixture || control.createTreeWindowFixture) {
     fs.writeFileSync(path.join(packageRoot, "zzz-drift.bin"), "before", "utf8");
   }
   if (!control.omitPackageLock) {

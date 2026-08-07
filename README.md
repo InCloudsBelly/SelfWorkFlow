@@ -121,6 +121,13 @@ the complete `path/type/sha256` inventory, serialize it as canonical JSON, and
 hash that JSON with SHA-256. Reparse points and paths escaping the canonical
 root are rejected before an inventory is accepted.
 
+Installed-package verification takes independent tree snapshots before reading
+package metadata and after validating package/lock identity. A mismatch fails
+closed; the latter hash is bound into the manifest and recomputed by semantic
+validation before and after atomic publication. Ordinary package-tree files do
+not retain handles between snapshots, so this does not eliminate mutation by
+the current SID, SYSTEM, or OS-privileged actors after a final check.
+
 ### Security boundary
 
 Held directory handles provide a concrete guarantee for already opened
@@ -260,7 +267,7 @@ captured, so none are claimed; raw output was not added to Git.
   (`Ran 1 test in 1.852s`), then rejected it with semantic code 58
   (`Ran 1 test in 1.780s`).
 - Current post-migration full Green: `.\scripts\test.ps1` exited `0` with
-  `Ran 64 tests in 278.672s`.
+  `Ran 66 tests in 298.119s`.
 
 ## Manifest v2 atomic-publication evidence
 

@@ -522,12 +522,15 @@ try {
     $Root = $ConfirmedPlanContext.Plan.bootstrapRoot
     $Stage = @{ code = 43; message = "SelfWorkFlow: bootstrap path security verification failed." }
     $ToolchainContext.directories.Refresh($Root)
+    $Stage = @{ code = 44; message = "SelfWorkFlow: existing BootstrapRoot does not satisfy safe recovery conditions; only an empty directory is accepted." }
     $RootIsUnsafe = [IO.File]::Exists($Root)
     if (-not $RootIsUnsafe -and [IO.Directory]::Exists($Root)) {
         $RootIsUnsafe = [IO.Directory]::GetFileSystemEntries($Root).Count -ne 0
+        if (-not $RootIsUnsafe) {
+            $null = Assert-SelfWorkflowSafeAcl -Path $Root -AllowInheritance
+        }
     }
     if ($RootIsUnsafe) {
-        $Stage = @{ code = 44; message = "SelfWorkFlow: existing BootstrapRoot does not satisfy safe recovery conditions; only an empty directory is accepted." }
         throw "Unsafe bootstrap root."
     }
     [IO.Directory]::CreateDirectory($Root) | Out-Null
@@ -536,6 +539,8 @@ try {
     $Stage = @{ code = 48; message = "SelfWorkFlow: ACL security verification failed." }
     Set-StrictBootstrapAcl $Root
     $VerifiedSddl = Get-VerifiedBootstrapSddl $Root
+    $Stage = @{ code = 44; message = "SelfWorkFlow: existing BootstrapRoot does not satisfy safe recovery conditions; only an empty directory is accepted." }
+    if ([IO.Directory]::GetFileSystemEntries($Root).Count -ne 0) { throw "Bootstrap root changed before install." }
 
     $Stage = @{ code = 49; message = "SelfWorkFlow: npm install failed to start." }
     $InstallResult = Invoke-SelfWorkflowNodeProcess `
@@ -552,6 +557,7 @@ try {
     $Stage = @{ code = 50; message = "SelfWorkFlow: installed package verification failed." }
     $InstalledPackageRoot = Join-Path $Root "node_modules\@openai\codex"
     if (-not [IO.File]::Exists((Join-Path $InstalledPackageRoot "package.json")) -or -not [IO.File]::Exists((Join-Path $ConfirmedPlanContext.Plan.bootstrapRoot "package-lock.json"))) { throw "Missing metadata." }
+    $InitialPackageTreeHash = Get-SelfWorkflowPackageTreeHash $InstalledPackageRoot
     $InstalledPackage = ConvertFrom-SelfWorkflowStrictJsonObject ([IO.File]::ReadAllText((Join-Path $InstalledPackageRoot "package.json")))
     $PackageLock = ConvertFrom-SelfWorkflowStrictJsonObject ([IO.File]::ReadAllText((Join-Path $ConfirmedPlanContext.Plan.bootstrapRoot "package-lock.json")))
     if ($InstalledPackage.name -isnot [string] -or $InstalledPackage.version -isnot [string]) { throw "Invalid package fields." }
@@ -562,7 +568,8 @@ try {
     if ($InstalledPackage.name -cne $ConfirmedPlanContext.Plan.package.name -or $InstalledPackage.version -cne $ConfirmedPlanContext.Plan.package.version) { throw "Installed package identity changed." }
     if ($LockedPackage.name -cne $ConfirmedPlanContext.Plan.package.name -or $LockedPackage.version -cne $ConfirmedPlanContext.Plan.package.version) { throw "Locked package identity changed." }
     if ($LockedPackage.integrity -cne $ConfirmedPlanContext.Plan.package.integrity) { throw "Locked package integrity changed." }
-    if ((Get-SelfWorkflowPackageTreeHash $InstalledPackageRoot) -cne (Get-SelfWorkflowPackageTreeHash $InstalledPackageRoot)) { throw "Package tree changed." }
+    $VerifiedPackageTreeHash = Get-SelfWorkflowPackageTreeHash $InstalledPackageRoot
+    if ($InitialPackageTreeHash -cne $VerifiedPackageTreeHash) { throw "Package tree changed." }
 
     $Stage = @{ code = 48; message = "SelfWorkFlow: ACL security verification failed." }
     if ((Get-VerifiedBootstrapSddl $Root) -cne $VerifiedSddl) { throw "BootstrapRoot ACL changed." }
@@ -572,7 +579,7 @@ try {
     $Manifest = [pscustomobject][ordered]@{
         schemaVersion = 2; bootstrapRoot = $ConfirmedPlanContext.Plan.bootstrapRoot
         package = [pscustomobject][ordered]@{ name = $ConfirmedPlanContext.Plan.package.name; version = $ConfirmedPlanContext.Plan.package.version; integrity = $ConfirmedPlanContext.Plan.package.integrity }
-        packageTreeHash = Get-SelfWorkflowPackageTreeHash $InstalledPackageRoot
+        packageTreeHash = $VerifiedPackageTreeHash
         daclSddl = $VerifiedSddl; expectedCliVersion = $ConfirmedPlanContext.Plan.package.version
         cliVersionVerification = "not-run"; planHash = Get-SelfWorkflowPlanHash $ConfirmedPlanContext.Plan
     }
