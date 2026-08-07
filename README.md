@@ -82,8 +82,9 @@ from the pre-existing
 `%LOCALAPPDATA%\SelfWorkFlow\bootstrap\toolchains` anchor. Discover never
 creates or changes that anchor. The chain from `%LOCALAPPDATA%` through the
 toolchain, and every deterministic inventory entry, must be canonical,
-non-reparse, owned by the current SID or SYSTEM, and free of dangerous access
-for other principals. The plan binds absolute `node.exe` and `npm-cli.js`,
+non-reparse, owned by the current SID or SYSTEM, protected from ACL inheritance,
+and free of dangerous access for other principals. The plan binds absolute
+`node.exe` and `npm-cli.js`,
 their hashes, the complete tree inventory/hash, fixed arguments, trusted cwd,
 exact environment whitelist, explicit registry/user/global/cache settings,
 expected DACL, and all side-effect/uninstall boundaries.
@@ -125,8 +126,10 @@ root are rejected before an inventory is accepted.
 Held directory handles provide a concrete guarantee for already opened
 ancestors: while those handles remain open, another process cannot rename or
 delete those directories, and identity/reparse checks detect a changed path
-mapping. Confirmed-plan, Node, npm entry, and available inventory handles remain
-open through the child process.
+mapping. Directory-chain, confirmed-plan, Node, and npm entry handles remain
+open through the child process. Ordinary inventory files are locked only while
+their hashes are read; final rehash plus owner and protected-DACL checks bound
+their verification, but no full-tree handle set remains open.
 
 This is not an absolute same-SID adversary guarantee. Windows directory
 creation and subsequent handle acquisition are not atomic for previously
@@ -257,7 +260,7 @@ captured, so none are claimed; raw output was not added to Git.
   (`Ran 1 test in 1.852s`), then rejected it with semantic code 58
   (`Ran 1 test in 1.780s`).
 - Current post-migration full Green: `.\scripts\test.ps1` exited `0` with
-  `Ran 62 tests in 266.955s`.
+  `Ran 64 tests in 278.672s`.
 
 ## Manifest v2 atomic-publication evidence
 

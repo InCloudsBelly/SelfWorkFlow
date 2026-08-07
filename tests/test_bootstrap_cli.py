@@ -250,6 +250,27 @@ foreach ($Item in @($Items | Sort-Object { $_.FullName.Length } -Descending)) {
         raise AssertionError(result.stderr)
 
 
+def _enable_acl_inheritance(path):
+    environment = os.environ.copy()
+    environment["SELFWORKFLOW_ACL_PATH"] = str(path)
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-Command",
+            "$Acl=Get-Acl -LiteralPath $env:SELFWORKFLOW_ACL_PATH; "
+            "$Acl.SetAccessRuleProtection($false,$true); "
+            "Set-Acl -LiteralPath $env:SELFWORKFLOW_ACL_PATH -AclObject $Acl",
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+
+
 def _remove_junction_if_present(path):
     if not os.path.lexists(path):
         return
@@ -450,6 +471,30 @@ class BootstrapConfirmedPlanTests(unittest.TestCase):
         plan_path = self.temporary_root / name
         plan_path.write_text(json.dumps(plan), encoding="utf-8")
         return plan_path
+
+    def _run_with_shadowed_add_type(self, marker, *arguments):
+        wrapper = self.temporary_root / "shadow-add-type.ps1"
+        wrapper.write_text(
+            r"""
+function Add-Type {
+    param([string]$TypeDefinition)
+    [IO.File]::WriteAllText($env:SELFWORKFLOW_ADD_TYPE_MARKER, "called")
+    throw "shadow Add-Type reached"
+}
+& $env:SELFWORKFLOW_BOOTSTRAP_TARGET @args
+exit $LASTEXITCODE
+""",
+            encoding="utf-8",
+        )
+        return _run_bootstrap(
+            self.local_app_data,
+            *arguments,
+            script=wrapper,
+            environment={
+                "SELFWORKFLOW_ADD_TYPE_MARKER": str(marker),
+                "SELFWORKFLOW_BOOTSTRAP_TARGET": str(BOOTSTRAP_SCRIPT),
+            },
+        )
 
     def _assert_final_apply(self, plan, result):
         from jsonschema import Draft202012Validator
@@ -1140,6 +1185,41 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
             "SelfWorkFlow: toolchain security verification failed.",
         )
 
+    def test_discover_rejects_unprotected_toolchain_anchor_before_metadata(self):
+        control_path = self.npm_cli.parent / "fake-npm-control.json"
+        metadata_marker = self.temporary_root / "unprotected-anchor-metadata.marker"
+        control_path.write_text(
+            json.dumps({"metadataMarker": str(metadata_marker)}), encoding="utf-8"
+        )
+        _set_protected_current_user_acl(self.local_app_data)
+        _enable_acl_inheritance(self.toolchain_anchor)
+        try:
+            acl = _read_directory_acl(self.toolchain_anchor)
+            result = _run_bootstrap(
+                self.local_app_data,
+                "-Mode",
+                "Discover",
+                "-ToolchainRoot",
+                str(self.toolchain_root),
+            )
+        finally:
+            _set_protected_current_user_acl(self.local_app_data)
+            control_path.unlink(missing_ok=True)
+            metadata_called = metadata_marker.exists()
+            metadata_marker.unlink(missing_ok=True)
+
+        self.assertFalse(acl["protected"])
+        self.assertEqual(
+            {rule["sid"] for rule in acl["rules"]},
+            {acl["currentSid"], "S-1-5-18"},
+        )
+        self.assertEqual(result.returncode, 59, result.stderr)
+        self.assertFalse(metadata_called)
+        self.assertEqual(
+            result.stderr.strip(),
+            "SelfWorkFlow: toolchain security verification failed.",
+        )
+
     def test_discover_holds_toolchain_and_ancestor_locks_through_metadata_child(self):
         control_path = self.npm_cli.parent / "fake-npm-control.json"
         barrier = self.temporary_root / "metadata-lock-barrier"
@@ -1474,6 +1554,57 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
                     result.stderr.strip(),
                     "SelfWorkFlow: toolchain security verification failed.",
                 )
+
+    def test_plan_identity_gate_precedes_add_type(self):
+        _set_protected_current_user_acl(self.local_app_data)
+        plan = self._discover_v2()
+        plan_path = self._write_plan(plan, "pre-add-type-plan.json")
+        marker = self.temporary_root / "add-type.marker"
+        valid_result = self._run_with_shadowed_add_type(
+            marker,
+            "-Mode",
+            "Apply",
+            "-ConfirmedPlanPath",
+            str(plan_path),
+            "-ConfirmPlanHash",
+            plan["planHash"],
+        )
+        self.assertEqual(valid_result.returncode, 59, valid_result.stderr)
+        self.assertTrue(marker.exists(), "oracle must observe a valid plan reaching Add-Type")
+
+        mutations = (
+            ("node", self.toolchain_root / "node.exe", b"identity-drift"),
+            ("npm", self.npm_cli, b"identity-drift"),
+            ("tree", self.toolchain_root / "tree-drift.txt", b"tree-drift"),
+        )
+        for identity, target, payload in mutations:
+            with self.subTest(identity=identity):
+                marker.unlink(missing_ok=True)
+                original = target.read_bytes() if target.exists() else None
+                try:
+                    if original is None:
+                        target.write_bytes(payload)
+                    else:
+                        target.write_bytes(original + payload)
+                    _set_protected_current_user_acl(self.local_app_data)
+                    result = self._run_with_shadowed_add_type(
+                        marker,
+                        "-Mode",
+                        "Apply",
+                        "-ConfirmedPlanPath",
+                        str(plan_path),
+                        "-ConfirmPlanHash",
+                        plan["planHash"],
+                    )
+                finally:
+                    if original is None:
+                        target.unlink(missing_ok=True)
+                    else:
+                        target.write_bytes(original)
+                    _set_protected_current_user_acl(self.local_app_data)
+
+                self.assertEqual(result.returncode, 59, result.stderr)
+                self.assertFalse(marker.exists(), "identity drift must fail before Add-Type")
 
     def test_apply_enforces_bootstrap_root_states_before_install(self):
         control_path = self.npm_cli.parent / "fake-npm-control.json"

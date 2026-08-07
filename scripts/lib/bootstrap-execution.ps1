@@ -85,6 +85,23 @@ function Test-SelfWorkflowPathsOverlap {
     )
 }
 
+function Assert-SelfWorkflowToolchainPlanIdentity {
+    param($Plan, $Toolchain, $NodeIdentity, $NpmIdentity)
+
+    if ($null -eq $Plan) { return }
+    if (
+        $Toolchain.root -cne [string]$Plan.execution.toolchain.root -or
+        $Toolchain.anchor -cne [string]$Plan.security.toolchainAnchor -or
+        $Toolchain.treeHash -cne [string]$Plan.execution.toolchain.treeHash -or
+        (ConvertTo-SelfWorkflowCanonicalJson $Toolchain.inventory 10) -cne
+            (ConvertTo-SelfWorkflowCanonicalJson $Plan.execution.toolchain.inventory 10) -or
+        $NodeIdentity.path -cne [string]$Plan.execution.node.path -or
+        $NodeIdentity.sha256 -cne [string]$Plan.execution.node.sha256 -or
+        $NpmIdentity.path -cne [string]$Plan.execution.npmCli.path -or
+        $NpmIdentity.sha256 -cne [string]$Plan.execution.npmCli.sha256
+    ) { throw "Toolchain identity changed." }
+}
+
 function Open-SelfWorkflowToolchainContext {
     param([string]$Root, $Plan)
 
@@ -100,9 +117,6 @@ function Open-SelfWorkflowToolchainContext {
             (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\bootstrap\codex-cli")
         ).TrimEnd("\")
         if (
-            $Root -cne [string]$Plan.execution.toolchain.root -or
-            $Plan.execution.node.path -cne $ExpectedNode -or
-            $Plan.execution.npmCli.path -cne $ExpectedNpmCli -or
             $BootstrapRoot -cne [string]$Plan.bootstrapRoot -or
             -not ($BootstrapRoot.Equals($AllowedRoot, [StringComparison]::OrdinalIgnoreCase) -or
                 $BootstrapRoot.StartsWith($AllowedRoot + "\", [StringComparison]::OrdinalIgnoreCase)) -or
@@ -120,29 +134,18 @@ function Open-SelfWorkflowToolchainContext {
     try {
         $Initial = Get-SelfWorkflowToolchainInventory `
             -LocalAppData $env:LOCALAPPDATA -ToolchainRoot $Root
+        $NodeIdentity = Open-SelfWorkflowFileIdentity $ExpectedNode
+        $NpmIdentity = Open-SelfWorkflowFileIdentity $ExpectedNpmCli
+        Assert-SelfWorkflowToolchainPlanIdentity $Plan $Initial $NodeIdentity $NpmIdentity
         Initialize-SelfWorkflowPathLockType
         $DirectoryLocks = [SelfWorkflowPathLockSet]::new($env:LOCALAPPDATA)
         $DirectoryLocks.Refresh($Root)
         $Current = Get-SelfWorkflowToolchainInventory `
             -LocalAppData $env:LOCALAPPDATA -ToolchainRoot $Root
-        $NodeIdentity = Open-SelfWorkflowFileIdentity $ExpectedNode
-        $NpmIdentity = Open-SelfWorkflowFileIdentity $ExpectedNpmCli
         if ($Initial.treeHash -cne $Current.treeHash) {
             throw "Toolchain identity changed."
         }
-        if ($null -ne $Plan) {
-            $ExpectedInventory = ConvertTo-SelfWorkflowCanonicalJson $Plan.execution.toolchain.inventory 10
-            $CurrentInventory = ConvertTo-SelfWorkflowCanonicalJson $Current.inventory 10
-            if (
-                $Current.treeHash -cne $Plan.execution.toolchain.treeHash -or
-                $CurrentInventory -cne $ExpectedInventory -or
-                $NodeIdentity.sha256 -cne $Plan.execution.node.sha256 -or
-                $NpmIdentity.sha256 -cne $Plan.execution.npmCli.sha256 -or
-                $Current.anchor -cne $Plan.security.toolchainAnchor
-            ) {
-                throw "Toolchain identity changed."
-            }
-        }
+        Assert-SelfWorkflowToolchainPlanIdentity $Plan $Current $NodeIdentity $NpmIdentity
         $Context = [pscustomobject]@{
             directories = $DirectoryLocks
             node = $NodeIdentity
@@ -191,7 +194,7 @@ function Assert-SelfWorkflowSafeAcl {
     $CurrentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $SystemSid = "S-1-5-18"
     $OwnerSid = $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
-    if ($OwnerSid -notin @($CurrentSid, $SystemSid)) {
+    if (-not $Acl.AreAccessRulesProtected -or $OwnerSid -notin @($CurrentSid, $SystemSid)) {
         throw "Unsafe owner."
     }
     $DangerousRights = [int](
