@@ -17,6 +17,12 @@ from selfworkflow.model import (
 )
 
 
+_NON_WAIVABLE_CAPABILITY_BOUNDARIES = (
+    "one-time alternatives require explicit user authorization",
+    "required capability cannot be treated as supported without evidence",
+)
+
+
 def _capability_gap_reason(state: CapabilityState | None) -> str:
     if state is CapabilityState.UNSUPPORTED:
         return "capability is unsupported"
@@ -34,6 +40,26 @@ def _capability_gap_recommendation(
     if state is CapabilityState.UNVERIFIED:
         return f"manually verify support or provide capability: {name}"
     return f"report and verify capability support: {name}"
+
+
+def _capability_one_time_alternative(
+    name: str,
+    state: CapabilityState | None,
+) -> str:
+    if state is CapabilityState.UNSUPPORTED:
+        return (
+            "request explicit user authorization for a one-time manual "
+            f"alternative: {name}"
+        )
+    if state is CapabilityState.UNVERIFIED:
+        return (
+            "request explicit user authorization to manually verify "
+            f"capability support: {name}"
+        )
+    return (
+        "request explicit user authorization to manually report and verify "
+        f"capability support: {name}"
+    )
 
 
 def check_capabilities(
@@ -78,6 +104,17 @@ def check_capabilities(
     if not missing:
         return None
 
+    one_time_alternatives = tuple(
+        (
+            name,
+            _capability_one_time_alternative(
+                name,
+                report.state_for(name),
+            ),
+        )
+        for name in missing
+    )
+
     return PauseResult(
         missing_capabilities=missing,
         purposes=tuple(
@@ -92,6 +129,8 @@ def check_capabilities(
             (name, _capability_gap_recommendation(name, report.state_for(name)))
             for name in missing
         ),
+        one_time_alternatives=one_time_alternatives,
+        non_waivable_boundaries=_NON_WAIVABLE_CAPABILITY_BOUNDARIES,
     )
 
 

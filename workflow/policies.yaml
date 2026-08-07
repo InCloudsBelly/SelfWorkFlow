@@ -30,7 +30,7 @@ upgrades:
     mayDecreaseGlobalMinimum: false
   user:
     mayIncrease: true
-    mayDecreaseBelowMinimum: false
+    mayDecrease: false
   recordRejectedDowngrade: true
 capabilityGate:
   acceptedStates:
@@ -43,3 +43,17 @@ capabilityGate:
   pause:
     status: paused
     code: required-capabilities-unavailable
+    fields:
+      - missingCapabilities
+      - purposes
+      - reasons
+      - recommendations
+      - oneTimeAlternatives
+      - nonWaivableBoundaries
+    oneTimeAlternatives:
+      requiresExplicitUserAuthorization: true
+      allowsManualVerification: true
+      allowsAutomaticDowngrade: false
+    nonWaivableBoundaries:
+      - one-time alternatives require explicit user authorization
+      - required capability cannot be treated as supported without evidence

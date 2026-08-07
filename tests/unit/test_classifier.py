@@ -5,6 +5,68 @@ import unittest
 
 
 class ClassificationTests(unittest.TestCase):
+    def test_classification_domain_strings_require_exact_str(self):
+        from selfworkflow.classifier import classify_task
+        from selfworkflow.model import Complexity, Risk, TaskClassification
+
+        class HostileString(str):
+            calls = 0
+
+            def _explode(self):
+                type(self).calls += 1
+                raise ValueError("TOP-SECRET-STRING-METHOD")
+
+            def __hash__(self):
+                return self._explode()
+
+            def __eq__(self, other):
+                return self._explode()
+
+            def __iter__(self):
+                return self._explode()
+
+            def __lt__(self, other):
+                return self._explode()
+
+            def __len__(self):
+                return self._explode()
+
+        accepted = classify_task(Complexity.C1, Risk.R1)
+        self.assertEqual(
+            (accepted.complexity, accepted.risk),
+            (Complexity.C1, Risk.R1),
+        )
+
+        cases = (
+            lambda: classify_task(HostileString("C1"), "R1"),
+            lambda: classify_task("C1", HostileString("R1")),
+            lambda: classify_task(
+                "C1",
+                "R1",
+                global_minimum_complexity=HostileString("C0"),
+            ),
+            lambda: TaskClassification(
+                "C1",
+                "R1",
+                [HostileString("TOP-SECRET-REASON")],
+            ),
+        )
+        for index, call in enumerate(cases):
+            with self.subTest(boundary=index):
+                HostileString.calls = 0
+                caught_error = None
+                try:
+                    call()
+                except Exception as error:
+                    caught_error = error
+                else:
+                    self.fail("str subclass was accepted")
+
+                self.assertIsInstance(caught_error, ValueError)
+                self.assertEqual(str(caught_error), "classification-input-invalid")
+                self.assertEqual(HostileString.calls, 0)
+                self.assertNotIn("TOP-SECRET", str(caught_error))
+
     def test_classification_domain_accepts_c0_r0_through_c3_r3_only(self):
         try:
             from selfworkflow.classifier import classify_task

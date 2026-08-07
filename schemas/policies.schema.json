@@ -125,10 +125,10 @@
         "user": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mayIncrease", "mayDecreaseBelowMinimum"],
+          "required": ["mayIncrease", "mayDecrease"],
           "properties": {
             "mayIncrease": {"const": true},
-            "mayDecreaseBelowMinimum": {"const": false}
+            "mayDecrease": {"const": false}
           }
         },
         "recordRejectedDowngrade": {"const": true}
@@ -165,10 +165,56 @@
         "pause": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["status", "code"],
+          "required": [
+            "status",
+            "code",
+            "fields",
+            "oneTimeAlternatives",
+            "nonWaivableBoundaries"
+          ],
           "properties": {
             "status": {"const": "paused"},
-            "code": {"const": "required-capabilities-unavailable"}
+            "code": {"const": "required-capabilities-unavailable"},
+            "fields": {
+              "type": "array",
+              "prefixItems": [
+                {"const": "missingCapabilities"},
+                {"const": "purposes"},
+                {"const": "reasons"},
+                {"const": "recommendations"},
+                {"const": "oneTimeAlternatives"},
+                {"const": "nonWaivableBoundaries"}
+              ],
+              "items": false,
+              "minItems": 6
+            },
+            "oneTimeAlternatives": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requiresExplicitUserAuthorization",
+                "allowsManualVerification",
+                "allowsAutomaticDowngrade"
+              ],
+              "properties": {
+                "requiresExplicitUserAuthorization": {"const": true},
+                "allowsManualVerification": {"const": true},
+                "allowsAutomaticDowngrade": {"const": false}
+              }
+            },
+            "nonWaivableBoundaries": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "one-time alternatives require explicit user authorization"
+                },
+                {
+                  "const": "required capability cannot be treated as supported without evidence"
+                }
+              ],
+              "items": false,
+              "minItems": 2
+            }
           }
         }
       }

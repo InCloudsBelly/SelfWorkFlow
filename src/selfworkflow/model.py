@@ -37,7 +37,7 @@ def _materialize_mapping_items(
 
 def _normalize_string_sequence(value: object, code: str) -> tuple[str, ...]:
     normalized = _materialize_ordered(value, code)
-    if any(not isinstance(item, str) for item in normalized):
+    if any(type(item) is not str for item in normalized):
         raise WorkflowInputError(code)
     return normalized
 
@@ -55,7 +55,7 @@ def _normalize_string_pairs(
     normalized: list[tuple[str, str]] = []
     for entry in entries:
         pair = _materialize_ordered(entry, code)
-        if len(pair) != 2 or any(not isinstance(item, str) for item in pair):
+        if len(pair) != 2 or any(type(item) is not str for item in pair):
             raise WorkflowInputError(code)
         normalized.append((pair[0], pair[1]))
     if is_mapping:
@@ -78,6 +78,10 @@ class Risk(str, Enum):
 
 
 def _coerce_complexity(value: object) -> Complexity:
+    if type(value) is Complexity:
+        return value
+    if type(value) is not str:
+        raise WorkflowInputError("classification-input-invalid")
     try:
         return Complexity(value)
     except (TypeError, ValueError):
@@ -85,6 +89,10 @@ def _coerce_complexity(value: object) -> Complexity:
 
 
 def _coerce_risk(value: object) -> Risk:
+    if type(value) is Risk:
+        return value
+    if type(value) is not str:
+        raise WorkflowInputError("classification-input-invalid")
     try:
         return Risk(value)
     except (TypeError, ValueError):
@@ -119,6 +127,11 @@ class VerificationStatus(str, Enum):
         return self in {VerificationStatus.NOT_RUN, VerificationStatus.PARTIAL}
 
 
+REQUIRED_CAPABILITY_EVIDENCE_BOUNDARY = (
+    "required capability cannot be treated as supported without evidence"
+)
+
+
 @dataclass(frozen=True, init=False)
 class CapabilityReport:
     states: tuple[tuple[str, CapabilityState], ...]
@@ -142,9 +155,14 @@ class CapabilityReport:
             if len(pair) != 2:
                 raise WorkflowInputError("capability-report-invalid")
             name, state = pair
-            if not isinstance(name, str) or not name:
+            if type(name) is not str or not name:
                 raise WorkflowInputError("capability-report-invalid")
             if name in normalized:
+                raise WorkflowInputError("capability-report-invalid")
+            if type(state) is CapabilityState:
+                normalized[name] = state
+                continue
+            if type(state) is not str:
                 raise WorkflowInputError("capability-report-invalid")
             try:
                 normalized[name] = CapabilityState(state)
@@ -155,6 +173,8 @@ class CapabilityReport:
     def state_for(self, name: str) -> CapabilityState | None:
         """Return the declared state for a capability, if reported."""
 
+        if type(name) is not str or not name:
+            raise WorkflowInputError("capability-report-invalid")
         return dict(self.states).get(name)
 
 
@@ -164,6 +184,8 @@ class PauseResult:
     purposes: tuple[tuple[str, str], ...]
     reasons: tuple[tuple[str, str], ...]
     recommendations: tuple[tuple[str, str], ...]
+    one_time_alternatives: tuple[tuple[str, str], ...] = ()
+    non_waivable_boundaries: tuple[str, ...] = ()
     status: ExecutionStatus = field(default=ExecutionStatus.PAUSED, init=False)
     code: str = field(default="required-capabilities-unavailable", init=False)
 
@@ -176,7 +198,12 @@ class PauseResult:
                 "pause-result-invalid",
             ),
         )
-        for field_name in ("purposes", "reasons", "recommendations"):
+        for field_name in (
+            "purposes",
+            "reasons",
+            "recommendations",
+            "one_time_alternatives",
+        ):
             object.__setattr__(
                 self,
                 field_name,
@@ -185,6 +212,43 @@ class PauseResult:
                     "pause-result-invalid",
                 ),
             )
+        object.__setattr__(
+            self,
+            "non_waivable_boundaries",
+            _normalize_string_sequence(
+                self.non_waivable_boundaries,
+                "pause-result-invalid",
+            ),
+        )
+        missing = self.missing_capabilities
+        if (
+            not missing
+            or any(not name for name in missing)
+            or len(set(missing)) != len(missing)
+            or missing != tuple(sorted(missing))
+        ):
+            raise WorkflowInputError("pause-result-invalid")
+        for field_name in (
+            "purposes",
+            "reasons",
+            "recommendations",
+            "one_time_alternatives",
+        ):
+            pairs = getattr(self, field_name)
+            if (
+                tuple(name for name, _ in pairs) != missing
+                or any(not value for _, value in pairs)
+            ):
+                raise WorkflowInputError("pause-result-invalid")
+        boundaries = self.non_waivable_boundaries
+        if (
+            not boundaries
+            or any(not boundary for boundary in boundaries)
+            or len(set(boundaries)) != len(boundaries)
+            or boundaries != tuple(sorted(boundaries))
+            or REQUIRED_CAPABILITY_EVIDENCE_BOUNDARY not in boundaries
+        ):
+            raise WorkflowInputError("pause-result-invalid")
 
 
 @dataclass(frozen=True)

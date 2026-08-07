@@ -24,6 +24,325 @@ def _assert_redacted_workflow_error(
 
 
 class CapabilityGateTests(unittest.TestCase):
+    def test_pause_result_rejects_noncanonical_complete_contract(self):
+        from selfworkflow.model import PauseResult
+
+        missing = ("filesystem-read", "test-execution")
+        valid = {
+            "missing_capabilities": missing,
+            "purposes": (
+                ("filesystem-read", "read task inputs"),
+                ("test-execution", "run required tests"),
+            ),
+            "reasons": (
+                ("filesystem-read", "capability is unsupported"),
+                ("test-execution", "capability support is unverified"),
+            ),
+            "recommendations": (
+                ("filesystem-read", "provide the capability"),
+                ("test-execution", "verify the capability"),
+            ),
+            "one_time_alternatives": (
+                ("filesystem-read", "request explicit manual authorization"),
+                ("test-execution", "request explicit verification authorization"),
+            ),
+            "non_waivable_boundaries": (
+                "one-time alternatives require explicit user authorization",
+                "required capability cannot be treated as supported without evidence",
+            ),
+        }
+
+        invalid_cases = [
+            (
+                "empty missing collection",
+                {
+                    "missing_capabilities": (),
+                    "purposes": (),
+                    "reasons": (),
+                    "recommendations": (),
+                    "one_time_alternatives": (),
+                },
+            ),
+            (
+                "empty missing value",
+                {
+                    "missing_capabilities": ("",),
+                    "purposes": (("", "purpose"),),
+                    "reasons": (("", "reason"),),
+                    "recommendations": (("", "recommendation"),),
+                    "one_time_alternatives": (("", "alternative"),),
+                },
+            ),
+            (
+                "duplicate missing value",
+                {"missing_capabilities": ("filesystem-read", "filesystem-read")},
+            ),
+            (
+                "unsorted missing values",
+                {
+                    "missing_capabilities": tuple(reversed(missing)),
+                    "purposes": tuple(reversed(valid["purposes"])),
+                    "reasons": tuple(reversed(valid["reasons"])),
+                    "recommendations": tuple(reversed(valid["recommendations"])),
+                    "one_time_alternatives": tuple(
+                        reversed(valid["one_time_alternatives"])
+                    ),
+                },
+            ),
+        ]
+        for field_name in (
+            "purposes",
+            "reasons",
+            "recommendations",
+            "one_time_alternatives",
+        ):
+            pairs = valid[field_name]
+            invalid_cases.extend(
+                (
+                    (f"{field_name} missing key", {field_name: pairs[:-1]}),
+                    (
+                        f"{field_name} extra key",
+                        {field_name: pairs + (("user-confirmation", "extra"),)},
+                    ),
+                    (
+                        f"{field_name} duplicate key",
+                        {field_name: pairs + (pairs[0],)},
+                    ),
+                    (
+                        f"{field_name} unsorted",
+                        {field_name: tuple(reversed(pairs))},
+                    ),
+                    (
+                        f"{field_name} empty value",
+                        {field_name: ((pairs[0][0], ""), pairs[1])},
+                    ),
+                )
+            )
+        invalid_cases.extend(
+            (
+                ("empty boundaries", {"non_waivable_boundaries": ()}),
+                ("empty boundary", {"non_waivable_boundaries": ("",)}),
+                (
+                    "duplicate boundary",
+                    {
+                        "non_waivable_boundaries": (
+                            valid["non_waivable_boundaries"][0],
+                            valid["non_waivable_boundaries"][0],
+                        )
+                    },
+                ),
+                (
+                    "unsorted boundaries",
+                    {
+                        "non_waivable_boundaries": tuple(
+                            reversed(valid["non_waivable_boundaries"])
+                        )
+                    },
+                ),
+                (
+                    "missing evidence boundary",
+                    {
+                        "non_waivable_boundaries": (
+                            "one-time alternatives require explicit user authorization",
+                        )
+                    },
+                ),
+            )
+        )
+
+        for label, updates in invalid_cases:
+            with self.subTest(case=label):
+                arguments = dict(valid)
+                arguments.update(updates)
+                with self.assertRaises(ValueError) as raised:
+                    PauseResult(**arguments)
+                self.assertEqual(str(raised.exception), "pause-result-invalid")
+
+    def test_capability_domain_strings_require_exact_str(self):
+        from collections.abc import Mapping
+
+        from selfworkflow.classifier import check_capabilities
+        from selfworkflow.model import CapabilityReport, CapabilityState, PauseResult
+
+        class HostileString(str):
+            calls = 0
+
+            def _explode(self):
+                type(self).calls += 1
+                raise ValueError("TOP-SECRET-STRING-METHOD")
+
+            def __hash__(self):
+                return self._explode()
+
+            def __eq__(self, other):
+                return self._explode()
+
+            def __iter__(self):
+                return self._explode()
+
+            def __lt__(self, other):
+                return self._explode()
+
+            def __len__(self):
+                return self._explode()
+
+        class SinglePairMapping(Mapping):
+            def __init__(self, key, value):
+                self.key = key
+                self.value = value
+
+            def __getitem__(self, key):
+                return self.value
+
+            def __iter__(self):
+                return iter(("filesystem-read",))
+
+            def __len__(self):
+                return 1
+
+            def items(self):
+                return ((self.key, self.value),)
+
+        valid_report = CapabilityReport(
+            [("filesystem-read", CapabilityState.SUPPORTED)]
+        )
+        cases = (
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    [HostileString("filesystem-read")], (), (), ()
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), [(HostileString("filesystem-read"), "purpose")], (), ()
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), [("filesystem-read", HostileString("purpose"))], (), ()
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), (), [(HostileString("filesystem-read"), "reason")], ()
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), (), [("filesystem-read", HostileString("reason"))], ()
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), (), (), [(HostileString("filesystem-read"), "action")]
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    (), (), (), [("filesystem-read", HostileString("action"))]
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    ("filesystem-read",),
+                    (("filesystem-read", "purpose"),),
+                    (("filesystem-read", "reason"),),
+                    (("filesystem-read", "recommendation"),),
+                    (("filesystem-read", HostileString("alternative")),),
+                    (
+                        "one-time alternatives require explicit user authorization",
+                        "required capability cannot be treated as supported without evidence",
+                    ),
+                ),
+            ),
+            (
+                "pause-result-invalid",
+                lambda: PauseResult(
+                    ("filesystem-read",),
+                    (("filesystem-read", "purpose"),),
+                    (("filesystem-read", "reason"),),
+                    (("filesystem-read", "recommendation"),),
+                    (("filesystem-read", "alternative"),),
+                    (
+                        HostileString(
+                            "required capability cannot be treated as supported "
+                            "without evidence"
+                        ),
+                    ),
+                ),
+            ),
+            (
+                "capability-report-invalid",
+                lambda: CapabilityReport(
+                    [(HostileString("filesystem-read"), "supported")]
+                ),
+            ),
+            (
+                "capability-report-invalid",
+                lambda: CapabilityReport(
+                    [("filesystem-read", HostileString("supported"))]
+                ),
+            ),
+            (
+                "capability-report-invalid",
+                lambda: valid_report.state_for(
+                    HostileString("filesystem-read")
+                ),
+            ),
+            (
+                "capability-gate-input-invalid",
+                lambda: check_capabilities(
+                    [HostileString("filesystem-read")], valid_report
+                ),
+            ),
+            (
+                "capability-gate-input-invalid",
+                lambda: check_capabilities(
+                    ["filesystem-read"],
+                    valid_report,
+                    purposes=SinglePairMapping(
+                        HostileString("filesystem-read"),
+                        "purpose",
+                    ),
+                ),
+            ),
+            (
+                "capability-gate-input-invalid",
+                lambda: check_capabilities(
+                    ["filesystem-read"],
+                    valid_report,
+                    purposes=SinglePairMapping(
+                        "filesystem-read",
+                        HostileString("purpose"),
+                    ),
+                ),
+            ),
+        )
+
+        for index, (expected_code, call) in enumerate(cases):
+            with self.subTest(boundary=index):
+                HostileString.calls = 0
+                caught_error = None
+                try:
+                    call()
+                except Exception as error:
+                    caught_error = error
+                else:
+                    self.fail("str subclass was accepted")
+
+                self.assertIsInstance(caught_error, ValueError)
+                self.assertEqual(str(caught_error), expected_code)
+                self.assertEqual(HostileString.calls, 0)
+                self.assertNotIn("TOP-SECRET", str(caught_error))
+
     def test_public_ordered_inputs_reject_set_and_frozenset(self):
         from selfworkflow.classifier import check_capabilities
         from selfworkflow.model import (
@@ -201,7 +520,7 @@ class CapabilityGateTests(unittest.TestCase):
                         "TOP-SECRET",
                     )
 
-    def test_pause_result_redacts_iteration_failures_for_all_four_collections(self):
+    def test_pause_result_redacts_iteration_failures_for_all_collections(self):
         from selfworkflow.model import PauseResult
 
         class ExplodingIterable:
@@ -233,6 +552,26 @@ class CapabilityGateTests(unittest.TestCase):
                 (),
                 (),
                 ExplodingIterable(("filesystem-read", "report capability")),
+            ),
+            lambda: PauseResult(
+                (),
+                (),
+                (),
+                (),
+                ExplodingIterable(
+                    ("filesystem-read", "request explicit authorization")
+                ),
+            ),
+            lambda: PauseResult(
+                (),
+                (),
+                (),
+                (),
+                (),
+                ExplodingIterable(
+                    "required capability cannot be treated as supported "
+                    "without evidence"
+                ),
             ),
         )
 
@@ -300,17 +639,34 @@ class CapabilityGateTests(unittest.TestCase):
             ("filesystem-read", "first"),
             ("test-execution", "second"),
         )
+        missing = ("filesystem-read", "test-execution")
+        boundaries = (
+            "one-time alternatives require explicit user authorization",
+            "required capability cannot be treated as supported without evidence",
+        )
 
-        for field_index in (1, 2, 3):
-            descending_arguments = [(), (), (), ()]
-            ascending_arguments = [(), (), (), ()]
+        for field_index in (1, 2, 3, 4):
+            descending_arguments = [
+                missing,
+                ascending,
+                ascending,
+                ascending,
+                ascending,
+                boundaries,
+            ]
+            ascending_arguments = list(descending_arguments)
             descending_arguments[field_index] = descending
             ascending_arguments[field_index] = ascending
 
             with self.subTest(field_index=field_index):
                 descending_pause = PauseResult(*descending_arguments)
                 ascending_pause = PauseResult(*ascending_arguments)
-                field_name = ("purposes", "reasons", "recommendations")[
+                field_name = (
+                    "purposes",
+                    "reasons",
+                    "recommendations",
+                    "one_time_alternatives",
+                )[
                     field_index - 1
                 ]
                 self.assertEqual(getattr(descending_pause, field_name), expected)
@@ -450,6 +806,8 @@ class CapabilityGateTests(unittest.TestCase):
             lambda: PauseResult(AbortingIterable(), (), (), ()),
             lambda: PauseResult((), [AbortingIterable()], (), ()),
             lambda: PauseResult((), AbortingMapping(), (), ()),
+            lambda: PauseResult((), (), (), (), AbortingIterable(), ()),
+            lambda: PauseResult((), (), (), (), (), AbortingIterable()),
             lambda: CapabilityReport(AbortingIterable()),
             lambda: check_capabilities(
                 AbortingIterable(),
@@ -477,12 +835,31 @@ class CapabilityGateTests(unittest.TestCase):
         recommendations = [
             ["filesystem-write", "provide supported capability: filesystem-write"]
         ]
+        one_time_alternatives = {
+            "filesystem-write": (
+                "request explicit user authorization for a one-time manual "
+                "alternative: filesystem-write"
+            )
+        }
+        non_waivable_boundaries = [
+            "one-time alternatives require explicit user authorization",
+            "required capability cannot be treated as supported without evidence",
+        ]
 
-        pause = PauseResult(missing, purposes, reasons, recommendations)
+        pause = PauseResult(
+            missing,
+            purposes,
+            reasons,
+            recommendations,
+            one_time_alternatives,
+            non_waivable_boundaries,
+        )
         missing.append("test-execution")
         purposes["filesystem-write"] = "changed"
         reasons[0][1] = "changed"
         recommendations[0][1] = "changed"
+        one_time_alternatives["filesystem-write"] = "changed"
+        non_waivable_boundaries.append("changed")
 
         self.assertEqual(pause.missing_capabilities, ("filesystem-write",))
         self.assertEqual(
@@ -500,6 +877,23 @@ class CapabilityGateTests(unittest.TestCase):
                     "filesystem-write",
                     "provide supported capability: filesystem-write",
                 ),
+            ),
+        )
+        self.assertEqual(
+            pause.one_time_alternatives,
+            (
+                (
+                    "filesystem-write",
+                    "request explicit user authorization for a one-time manual "
+                    "alternative: filesystem-write",
+                ),
+            ),
+        )
+        self.assertEqual(
+            pause.non_waivable_boundaries,
+            (
+                "one-time alternatives require explicit user authorization",
+                "required capability cannot be treated as supported without evidence",
             ),
         )
 
@@ -628,6 +1022,23 @@ class CapabilityGateTests(unittest.TestCase):
             pause.reasons,
             (("filesystem-write", "capability is unsupported"),),
         )
+        self.assertEqual(
+            pause.one_time_alternatives,
+            (
+                (
+                    "filesystem-write",
+                    "request explicit user authorization for a one-time manual "
+                    "alternative: filesystem-write",
+                ),
+            ),
+        )
+        self.assertEqual(
+            pause.non_waivable_boundaries,
+            (
+                "one-time alternatives require explicit user authorization",
+                "required capability cannot be treated as supported without evidence",
+            ),
+        )
         self.assertTrue(pause.recommendations)
         with self.assertRaises(FrozenInstanceError):
             pause.status = model.ExecutionStatus.ACTIVE
@@ -646,6 +1057,23 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             unverified_pause.reasons,
             (("test-execution", "capability support is unverified"),),
+        )
+        self.assertEqual(
+            unverified_pause.one_time_alternatives,
+            (
+                (
+                    "test-execution",
+                    "request explicit user authorization to manually verify "
+                    "capability support: test-execution",
+                ),
+            ),
+        )
+        self.assertEqual(
+            unverified_pause.non_waivable_boundaries,
+            (
+                "one-time alternatives require explicit user authorization",
+                "required capability cannot be treated as supported without evidence",
+            ),
         )
         self.assertIn("manually verify", unverified_pause.recommendations[0][1])
 
@@ -673,6 +1101,23 @@ class CapabilityGateTests(unittest.TestCase):
         self.assertEqual(
             pause.reasons,
             (("filesystem-write", "capability was not reported"),),
+        )
+        self.assertEqual(
+            pause.one_time_alternatives,
+            (
+                (
+                    "filesystem-write",
+                    "request explicit user authorization to manually report and "
+                    "verify capability support: filesystem-write",
+                ),
+            ),
+        )
+        self.assertEqual(
+            pause.non_waivable_boundaries,
+            (
+                "one-time alternatives require explicit user authorization",
+                "required capability cannot be treated as supported without evidence",
+            ),
         )
         self.assertIn("report and verify", pause.recommendations[0][1])
 
