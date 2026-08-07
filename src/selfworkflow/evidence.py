@@ -163,7 +163,7 @@ class ReviewFallbackAuthorization:
     def __post_init__(self) -> None:
         if (
             type(self.capability_name) is not str
-            or self.capability_name != "independent-review-context"
+            or self.capability_name != "independent-context"
             or type(self.capability_state) is not CapabilityState
             or self.capability_state
             not in {CapabilityState.UNSUPPORTED, CapabilityState.UNVERIFIED}
@@ -1295,9 +1295,12 @@ def _evaluate_completion(
         )
         if review_number < required_number and not fallback_allowed:
             return decision("review-level-insufficient")
-        if review_number >= 2 and (
-            artifact["actorId"] == policy.implementation_actor
-            or artifact["contextId"] == policy.implementation_context
+        if (
+            review_number >= 2
+            and artifact["actorId"] == policy.implementation_actor
+        ) or (
+            (review_number >= 2 or fallback_allowed)
+            and artifact["contextId"] == policy.implementation_context
         ):
             return decision("review-independence-required")
 

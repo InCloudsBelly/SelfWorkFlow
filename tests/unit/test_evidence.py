@@ -389,6 +389,62 @@ class CompletionPolicyTests(unittest.TestCase):
 
 
 class CompletionGateTests(unittest.TestCase):
+    def test_l1_fallback_rejects_same_actor_and_implementation_context(self):
+        from selfworkflow.evidence import ReviewFallbackAuthorization
+        from selfworkflow.model import CapabilityState, Complexity, Risk
+
+        policy = _policy(
+            complexity=Complexity.C2,
+            risk=Risk.R2,
+            review_fallback=ReviewFallbackAuthorization(
+                capability_name="independent-context",
+                capability_state=CapabilityState.UNSUPPORTED,
+                user_prompted=True,
+                user_authorized=True,
+                authorization_id="user-authorization-1",
+            ),
+        )
+        case = _case(policy=policy, review_level="L1")
+        _replace_artifact(
+            case,
+            case["evidence"]["review"],
+            lambda artifact: artifact.update(
+                {
+                    "actorId": policy.implementation_actor,
+                    "contextId": policy.implementation_context,
+                }
+            ),
+        )
+        self.assertEqual(_evaluate(case).code, "review-independence-required")
+
+    def test_l1_fallback_allows_same_actor_in_new_context(self):
+        from selfworkflow.evidence import ReviewFallbackAuthorization
+        from selfworkflow.model import CapabilityState, Complexity, Risk
+
+        policy = _policy(
+            complexity=Complexity.C2,
+            risk=Risk.R2,
+            review_fallback=ReviewFallbackAuthorization(
+                capability_name="independent-context",
+                capability_state=CapabilityState.UNSUPPORTED,
+                user_prompted=True,
+                user_authorized=True,
+                authorization_id="user-authorization-1",
+            ),
+        )
+        case = _case(policy=policy, review_level="L1")
+        _replace_artifact(
+            case,
+            case["evidence"]["review"],
+            lambda artifact: artifact.update(
+                {
+                    "actorId": policy.implementation_actor,
+                    "contextId": "fallback-review-context",
+                }
+            ),
+        )
+        self.assertEqual(_evaluate(case).code, "completion-eligible")
+
     def test_l1_fallback_requires_trusted_unavailable_prompted_authorization(self):
         from selfworkflow.evidence import (
             ReviewFallbackAuthorization,
@@ -397,7 +453,7 @@ class CompletionGateTests(unittest.TestCase):
         from selfworkflow.model import CapabilityState, Complexity, Risk
 
         authorization = ReviewFallbackAuthorization(
-            capability_name="independent-review-context",
+            capability_name="independent-context",
             capability_state=CapabilityState.UNSUPPORTED,
             user_prompted=True,
             user_authorized=True,
@@ -442,7 +498,7 @@ class CompletionGateTests(unittest.TestCase):
             {"user_authorized": False},
         )
         values = {
-            "capability_name": "independent-review-context",
+            "capability_name": "independent-context",
             "capability_state": CapabilityState.UNSUPPORTED,
             "user_prompted": True,
             "user_authorized": True,

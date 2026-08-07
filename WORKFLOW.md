@@ -74,7 +74,9 @@ context independent from implementation. Only level 2 may fall back to L1,
 and only when the trusted policy carries a typed authorization recording that
 independent Review capability is unsupported or unverified, the user was
 prompted, and the user explicitly authorized the fallback. Level 3 cannot use
-this path. Evidence cannot self-report or silently trigger the exception.
+this path. L1 fallback is same-host, new-context Review: the actor may be the
+implementer, but the Review context must differ from the implementation
+context. Evidence cannot self-report or silently trigger the exception.
 
 A modifying task records exactly `classification`, `capabilities`,
 `selectedSkills`, `acceptanceCriteria`, `changes`, `review`, `verification`,
