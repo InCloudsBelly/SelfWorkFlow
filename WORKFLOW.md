@@ -174,3 +174,19 @@ but never activates it. A completed Grill-me design requires a separate-context
 Brainstorming cross-review before implementation. Source selection, dirty-state
 authorization, stage mappings, and runtime loading are deterministic contracts
 in `dependencies/superpowers.lock.yaml` and `overlays/superpowers/`.
+
+## Adapters, knowledge, and release governance
+
+Vendor adapters are thin capability declarations and bootstrap entries; they
+cannot override protected invariants. Runtime builds contain checked-in sources
+and generated Catalog data, never maintainer-local source paths. Knowledge is an
+optional `read -> propose -> update` extension: propose never publishes, update
+requires explicit confirmation and verified compare-and-swap semantics, and
+private model reasoning is not durable knowledge. A backend contract gap remains
+`unverified` rather than being inferred.
+
+Release eligibility requires a clean source commit, fresh passed unit,
+conformance, installer, and behavioral receipts, independent L2-or-higher Review,
+and native evidence for both Codex CLI and Desktop. Static conformance cannot be
+promoted to native support. Skipped checks and residual risks remain visible in
+the release manifest.

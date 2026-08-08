@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "source", "dependencyLockHash", "runtimeHash", "tests", "review", "hostEvidence", "knowledgeEvidence", "skipped", "residualRisks"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "version": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commit", "dirty"],
+      "properties": {"commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "dirty": {"type": "boolean"}}
+    },
+    "dependencyLockHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "runtimeHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "tests": {
+      "type": "array", "minItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["suite", "command", "executedAt", "status", "outputHash"],
+        "properties": {
+          "suite": {"enum": ["unit", "conformance", "installer", "behavioral", "native"]},
+          "command": {"type": "string", "minLength": 1},
+          "executedAt": {"type": "string", "format": "date-time"},
+          "status": {"enum": ["passed", "failed", "unverified"]},
+          "outputHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reviewerId", "implementationContextId", "reviewContextId", "level", "decision"],
+      "properties": {
+        "reviewerId": {"type": "string", "minLength": 1},
+        "implementationContextId": {"type": "string", "minLength": 1},
+        "reviewContextId": {"type": "string", "minLength": 1},
+        "level": {"enum": ["L0", "L1", "L2", "L3"]},
+        "decision": {"enum": ["passed", "changes-requested", "unverified"]}
+      }
+    },
+    "hostEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["codex-cli", "codex-desktop", "claude-code", "cursor", "opencode", "copilot"],
+      "properties": {
+        "codex-cli": {"enum": ["supported", "experimental-unverified", "unsupported"]},
+        "codex-desktop": {"enum": ["supported", "experimental-unverified", "unsupported"]},
+        "claude-code": {"enum": ["supported", "experimental-unverified", "unsupported"]},
+        "cursor": {"enum": ["supported", "experimental-unverified", "unsupported"]},
+        "opencode": {"enum": ["supported", "experimental-unverified", "unsupported"]},
+        "copilot": {"enum": ["supported", "instructions-only", "unsupported"]}
+      }
+    },
+    "knowledgeEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["c7-openwiki"],
+      "properties": {"c7-openwiki": {"enum": ["supported", "experimental-unverified", "disabled"]}}
+    },
+    "skipped": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "residualRisks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  }
+}

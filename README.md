@@ -4,6 +4,34 @@ SelfWorkFlow is a Windows-only foundation for reproducible, cross-vendor agent
 workflows. Task 1 provides the Python package, unified test entry points, and a
 confirmation-gated Codex CLI bootstrap.
 
+## Current capability status
+
+- Deterministic workflow, evidence, Catalog, routing, Skill absorption, adapters,
+  optional knowledge contract, C7OpenWiki contract mapping, runtime build, and
+  sandbox transaction install/verify/rollback are implemented and automated-tested.
+- Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
+  `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
+  `adapters/unknown/BOOTSTRAP.md`.
+- C7OpenWiki is optional and `experimental-unverified`. The adapter contains no
+  runtime dependency on the maintainer's OpenWiki checkout.
+- Installer manifests currently record `securityStatus: unverified`; do not use the
+  sandbox result as proof of production ACL hardening.
+- Native login, model/OAuth calls, formal global installation, and final independent
+  Review are release blockers until their versioned evidence exists.
+
+## Build and sandbox installation
+
+```powershell
+.venv\Scripts\python.exe -m selfworkflow.cli build --repository . --version 0.1.0.dev0 --output build\runtime
+.venv\Scripts\python.exe -m selfworkflow.cli install plan --artifact build\runtime --agents-root <sandbox-agents> --codex-root <sandbox-codex> --state-root <sandbox-state> --version 0.1.0.dev0 --output build\install-plan.json
+```
+
+Review the complete plan and its `planHash`, then pass that exact hash to
+`install apply`. Use the returned manifest for `install verify`; use the returned
+transaction path for `install rollback-plan`, review its hash, then run `install
+rollback`. Plans fail on artifact/target drift, damaged managed blocks, reparse
+targets, unmanaged Skill collisions, or unmanaged version snapshots.
+
 ## Development environment
 
 Run these commands from the repository root in Windows PowerShell:
@@ -34,16 +62,19 @@ Run one exact dotted unittest:
 .\scripts\test.ps1 -Test tests.test_smoke
 ```
 
-The verification wrapper currently implements the unit suite:
+The verification wrapper implements scoped automated suites:
 
 ```powershell
 .\scripts\verify.ps1 -Suite unit
+.\scripts\verify.ps1 -Suite conformance
+.\scripts\verify.ps1 -Suite installer
+.\scripts\verify.ps1 -Suite behavioral
+.\scripts\verify.ps1 -Suite automated
 ```
 
-Suites not implemented by Task 1 return structured `not-implemented` results
-and a nonzero exit code. Native verification returns
-`requires-user-action` with its own nonzero exit code. Consequently, `all`
-cannot report success while required suites remain unavailable.
+Native verification returns `requires-user-action` with its own nonzero exit code.
+Consequently, `all` reports an incomplete release while native evidence remains
+unavailable, even when every automated suite passes.
 
 ## Codex CLI bootstrap
 

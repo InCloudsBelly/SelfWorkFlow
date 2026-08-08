@@ -405,34 +405,55 @@ class VerifyScriptTests(unittest.TestCase):
         ]
         self.assertEqual(arguments, ["-m", "unittest", dotted_test, "-v"], result.stderr)
 
-    def test_unimplemented_automated_suites_return_structured_failure(self):
+    def test_automated_suites_dispatch_to_scoped_tests(self):
         repository_root = Path(__file__).resolve().parents[1]
         verify_script = repository_root / "scripts" / "verify.ps1"
 
-        for suite in ("conformance", "installer", "behavioral", "automated"):
-            with self.subTest(suite=suite):
-                result = subprocess.run(
-                    [
-                        "powershell.exe",
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        str(verify_script),
-                        "-Suite",
-                        suite,
-                    ],
-                    cwd=repository_root,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+        expected = {
+            "conformance": ["-m", "unittest", "tests.conformance", "-v"],
+            "installer": ["-m", "unittest", "tests.installer", "-v"],
+            "behavioral": ["-m", "unittest", "tests.behavioral", "-v"],
+            "automated": ["-m", "unittest", "discover", "-s", "tests", "-t", ".", "-v"],
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            temporary_scripts = temporary_root / "scripts"
+            temporary_scripts.mkdir()
+            shutil.copy2(repository_root / "scripts" / "test.ps1", temporary_scripts)
+            shutil.copy2(verify_script, temporary_scripts)
+            python_executable = temporary_root / ".venv" / "Scripts" / "python.exe"
+            python_executable.parent.mkdir(parents=True)
+            _compile_python_probe(python_executable)
+            for suite, expected_arguments in expected.items():
+                with self.subTest(suite=suite):
+                    result = subprocess.run(
+                        [
+                            "powershell.exe",
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-File",
+                            str(temporary_scripts / "verify.ps1"),
+                            "-Suite",
+                            suite,
+                        ],
+                        cwd=temporary_root,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
 
-                self.assertEqual(result.returncode, 20, result.stderr)
-                payload = json.loads(result.stdout)
-                self.assertEqual(payload["suite"], suite)
-                self.assertEqual(payload["status"], "not-implemented")
-                self.assertEqual(payload["exitCode"], 20)
+                    arguments = [
+                        line.removeprefix("ARG=")
+                        for line in result.stdout.splitlines()
+                        if line.startswith("ARG=")
+                    ]
+                    self.assertEqual(arguments, expected_arguments, result.stderr)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    payload = json.loads(result.stdout.splitlines()[-1])
+                    self.assertEqual(payload["suite"], suite)
+                    self.assertEqual(payload["status"], "passed")
+                    self.assertEqual(payload["exitCode"], 0)
 
     def test_native_suite_requires_user_action(self):
         repository_root = Path(__file__).resolve().parents[1]

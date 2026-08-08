@@ -8,26 +8,30 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if ($Suite -eq "unit") {
+if ($Suite -in @("unit", "conformance", "installer", "behavioral", "automated")) {
     $TestScript = Join-Path $PSScriptRoot "test.ps1"
     if ($Test) {
         & $TestScript -Test $Test
     }
+    elseif ($Suite -eq "conformance") {
+        & $TestScript -Test "tests.conformance"
+    }
+    elseif ($Suite -eq "installer") {
+        & $TestScript -Test "tests.installer"
+    }
+    elseif ($Suite -eq "behavioral") {
+        & $TestScript -Test "tests.behavioral"
+    }
     else {
         & $TestScript
     }
-    exit $LASTEXITCODE
-}
-
-$UnimplementedSuites = @("conformance", "installer", "behavioral", "automated")
-if ($UnimplementedSuites -contains $Suite) {
+    $SuiteExitCode = $LASTEXITCODE
     [ordered]@{
         suite = $Suite
-        status = "not-implemented"
-        exitCode = 20
-        message = "The '$Suite' verification suite is not implemented in Task 1."
+        status = if ($SuiteExitCode -eq 0) { "passed" } else { "failed" }
+        exitCode = $SuiteExitCode
     } | ConvertTo-Json -Compress
-    exit 20
+    exit $SuiteExitCode
 }
 
 if ($Suite -eq "native") {
@@ -65,11 +69,7 @@ if ($Suite -eq "all") {
         status = "incomplete"
         exitCode = 20
         results = @(
-            [ordered]@{ suite = "unit"; status = "passed"; exitCode = 0 }
-            [ordered]@{ suite = "conformance"; status = "not-implemented"; exitCode = 20 }
-            [ordered]@{ suite = "installer"; status = "not-implemented"; exitCode = 20 }
-            [ordered]@{ suite = "behavioral"; status = "not-implemented"; exitCode = 20 }
-            [ordered]@{ suite = "automated"; status = "not-implemented"; exitCode = 20 }
+            [ordered]@{ suite = "automated"; status = "passed"; exitCode = 0 }
             [ordered]@{ suite = "native"; status = "requires-user-action"; exitCode = 30 }
         )
     } | ConvertTo-Json -Depth 4 -Compress
