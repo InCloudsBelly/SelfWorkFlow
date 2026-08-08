@@ -170,10 +170,16 @@ def freeze_json(
     if counters[0] > MAX_CANONICAL_NODES:
         fail("evidence-budget-exceeded")
     if type(value) is str:
-        size = len(value.encode("utf-8"))
-        counters[1] += size
-        if size > MAX_CANONICAL_STRING_BYTES or counters[1] > MAX_CANONICAL_TOTAL_BYTES:
+        byte_limit = min(
+            MAX_CANONICAL_STRING_BYTES,
+            MAX_CANONICAL_TOTAL_BYTES - counters[1],
+        )
+        if len(value) > byte_limit:
             fail("evidence-budget-exceeded")
+        size = len(value.encode("utf-8"))
+        if size > byte_limit:
+            fail("evidence-budget-exceeded")
+        counters[1] += size
         return value
     if value is None or type(value) in (bool, int):
         return value
@@ -182,15 +188,25 @@ def freeze_json(
             fail("evidence-json-invalid")
         return value
     if type(value) is list:
+        if len(value) > MAX_CANONICAL_NODES - counters[0]:
+            fail("evidence-budget-exceeded")
         return tuple(freeze_json(item, depth=depth + 1, state=counters) for item in value)
     if type(value) is dict:
+        if len(value) > MAX_CANONICAL_NODES - counters[0]:
+            fail("evidence-budget-exceeded")
         if any(type(key) is not str for key in value):
             fail("evidence-json-invalid")
         for key in value:
-            size = len(key.encode("utf-8"))
-            counters[1] += size
-            if size > MAX_CANONICAL_STRING_BYTES or counters[1] > MAX_CANONICAL_TOTAL_BYTES:
+            byte_limit = min(
+                MAX_CANONICAL_STRING_BYTES,
+                MAX_CANONICAL_TOTAL_BYTES - counters[1],
+            )
+            if len(key) > byte_limit:
                 fail("evidence-budget-exceeded")
+            size = len(key.encode("utf-8"))
+            if size > byte_limit:
+                fail("evidence-budget-exceeded")
+            counters[1] += size
         return MappingProxyType(
             {key: freeze_json(item, depth=depth + 1, state=counters) for key, item in value.items()}
         )
@@ -235,10 +251,16 @@ def _normalize_content(
     if counters[0] > MAX_CANONICAL_NODES:
         fail("result-content-budget-exceeded")
     if type(value) is str:
-        size = len(value.encode("utf-8"))
-        counters[1] += size
-        if size > MAX_CANONICAL_STRING_BYTES or counters[1] > MAX_CANONICAL_TOTAL_BYTES:
+        byte_limit = min(
+            MAX_CANONICAL_STRING_BYTES,
+            MAX_CANONICAL_TOTAL_BYTES - counters[1],
+        )
+        if len(value) > byte_limit:
             fail("result-content-budget-exceeded")
+        size = len(value.encode("utf-8"))
+        if size > byte_limit:
+            fail("result-content-budget-exceeded")
+        counters[1] += size
         return value
     if value is None or type(value) in (bool, int):
         return value
@@ -247,6 +269,8 @@ def _normalize_content(
             fail("result-content-invalid")
         return int(value) if value.is_integer() else value
     if type(value) in (list, tuple):
+        if len(value) > MAX_CANONICAL_NODES - counters[0]:
+            fail("result-content-budget-exceeded")
         identity = id(value)
         if identity in active:
             fail("result-content-invalid")
@@ -259,22 +283,30 @@ def _normalize_content(
         finally:
             active.remove(identity)
     if type(value) in (dict, _MAPPING_PROXY_TYPE):
-        try:
-            entries = tuple(value.items())
-        except Exception:
-            fail("result-content-invalid")
-        if any(type(key) is not str for key, _ in entries):
-            fail("result-content-invalid")
-        for key, _ in entries:
-            size = len(key.encode("utf-8"))
-            counters[1] += size
-            if size > MAX_CANONICAL_STRING_BYTES or counters[1] > MAX_CANONICAL_TOTAL_BYTES:
-                fail("result-content-budget-exceeded")
+        if len(value) > MAX_CANONICAL_NODES - counters[0]:
+            fail("result-content-budget-exceeded")
         identity = id(value)
         if identity in active:
             fail("result-content-invalid")
         active.add(identity)
         try:
+            try:
+                entries = tuple(value.items())
+            except Exception:
+                fail("result-content-invalid")
+            if any(type(key) is not str for key, _ in entries):
+                fail("result-content-invalid")
+            for key, _ in entries:
+                byte_limit = min(
+                    MAX_CANONICAL_STRING_BYTES,
+                    MAX_CANONICAL_TOTAL_BYTES - counters[1],
+                )
+                if len(key) > byte_limit:
+                    fail("result-content-budget-exceeded")
+                size = len(key.encode("utf-8"))
+                if size > byte_limit:
+                    fail("result-content-budget-exceeded")
+                counters[1] += size
             return {
                 key: _normalize_content(item, depth=depth + 1, counters=counters, active=active)
                 for key, item in entries
@@ -289,13 +321,16 @@ def canonical_content_hash(content: object) -> str:
 
     try:
         normalized = _normalize_content(content, depth=0, counters=[0, 0], active=set())
-        payload = json.dumps(
+        serialized = json.dumps(
             normalized,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
-        ).encode("utf-8")
+        )
+        if len(serialized) > MAX_CANONICAL_TOTAL_BYTES:
+            fail("result-content-budget-exceeded")
+        payload = serialized.encode("utf-8")
         if len(payload) > MAX_CANONICAL_TOTAL_BYTES:
             fail("result-content-budget-exceeded")
     except WorkflowEvidenceError:

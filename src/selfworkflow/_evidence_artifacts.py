@@ -151,6 +151,8 @@ def output_content_hash(content: object) -> str:
                 fail("artifact-collector-invalid")
             return "sha256:" + hashlib.sha256(content).hexdigest()
         if type(content) is str:
+            if len(content) > MAX_ARTIFACT_OUTPUT_BYTES:
+                fail("artifact-collector-invalid")
             encoded = content.encode("utf-8")
             if len(encoded) > MAX_ARTIFACT_OUTPUT_BYTES:
                 fail("artifact-collector-invalid")

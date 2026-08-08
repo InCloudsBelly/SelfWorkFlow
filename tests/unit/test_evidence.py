@@ -1871,6 +1871,73 @@ class InputHardeningTests(unittest.TestCase):
 
 
 class ResourceBudgetTests(unittest.TestCase):
+    def test_canonical_string_budget_rejects_before_utf8_allocation(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, canonical_content_hash
+
+        payload = "x" * (16 * 1024 * 1024)
+        tracemalloc.start()
+        try:
+            with self.assertRaises(WorkflowEvidenceError) as caught:
+                canonical_content_hash(payload)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(caught.exception.code, "result-content-budget-exceeded")
+        self.assertLess(peak, 4 * 1024 * 1024)
+
+    def test_large_mapping_budget_rejects_before_entry_materialization(self):
+        from selfworkflow._evidence_values import freeze_json
+        from selfworkflow.evidence import WorkflowEvidenceError, canonical_content_hash
+
+        payload = {f"key-{index}": index for index in range(100_000)}
+        attacks = (
+            (canonical_content_hash, "result-content-budget-exceeded"),
+            (freeze_json, "evidence-budget-exceeded"),
+        )
+        for operation, expected_code in attacks:
+            tracemalloc.start()
+            try:
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    operation(payload)
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            with self.subTest(operation=operation.__name__):
+                self.assertEqual(caught.exception.code, expected_code)
+                self.assertLess(peak, 2 * 1024 * 1024)
+
+    def test_collector_string_output_budget_rejects_before_utf8_allocation(self):
+        from selfworkflow.evidence import ArtifactCollector, WorkflowEvidenceError
+
+        payload = "x" * (16 * 1024 * 1024)
+        invocation = _verification_invocation(input_hash="sha256:" + "1" * 64)
+        tracemalloc.start()
+        try:
+            with self.assertRaises(WorkflowEvidenceError) as caught:
+                ArtifactCollector().record_execution(
+                    kind="verification",
+                    status="passed",
+                    subject_id="unit-tests",
+                    subject_hash="sha256:" + "2" * 64,
+                    actor_id="test-runner",
+                    context_id="test-context",
+                    related_ids=("criterion-tests",),
+                    recorded_at="2026-08-08T08:00:00Z",
+                    provider="test-provider",
+                    receipt_id="test-receipt",
+                    invocation=invocation,
+                    output_content=payload,
+                    check_type="unit-test",
+                    exit_code=0,
+                    verification_id="unit-tests",
+                    valid_for_seconds=3600,
+                )
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(caught.exception.code, "artifact-collector-invalid")
+        self.assertLess(peak, 4 * 1024 * 1024)
+
     def test_direct_evidence_text_fields_have_a_shared_budget(self):
         from selfworkflow.evidence import WorkflowEvidenceError
 
