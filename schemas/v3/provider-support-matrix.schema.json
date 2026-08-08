@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-support-matrix.schema.json",
+  "title": "SelfWorkFlow V3 provider support matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "providerId", "entries", "matrixHash"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "providerId": {"$ref": "#/$defs/id"},
+    "entries": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/entry"}},
+    "matrixHash": {"$ref": "#/$defs/hash"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "source": {"$ref": "#/$defs/id"}, "adapter": {"$ref": "#/$defs/id"},
+        "positive": {"$ref": "#/$defs/id"}, "false": {"$ref": "#/$defs/id"},
+        "conflict": {"$ref": "#/$defs/id"}, "failure": {"$ref": "#/$defs/id"},
+        "contextCost": {"$ref": "#/$defs/id"}, "nativeValidation": {"$ref": "#/$defs/id"}
+      }
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entryId", "capabilityId", "operationId", "platform", "adapterVersion", "sourceIdentityRef", "sourceIdentityHash", "state", "observedAt", "evidence"],
+      "properties": {
+        "entryId": {"$ref": "#/$defs/id"}, "capabilityId": {"$ref": "#/$defs/id"},
+        "operationId": {"$ref": "#/$defs/id"}, "platform": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "adapterVersion": {"type": "string", "minLength": 1, "maxLength": 128},
+        "sourceIdentityRef": {"$ref": "#/$defs/id"}, "sourceIdentityHash": {"$ref": "#/$defs/hash"},
+        "state": {"enum": ["supported", "unverified", "unsupported", "needs-revalidation"]},
+        "observedAt": {"type": "string", "format": "date-time"}, "validUntil": {"type": "string", "format": "date-time"},
+        "evidence": {"$ref": "#/$defs/evidence"}, "notes": {"type": "string", "maxLength": 2000}
+      },
+      "allOf": [{
+        "if": {"properties": {"state": {"const": "supported"}}},
+        "then": {"required": ["validUntil"], "properties": {"evidence": {"required": ["source", "adapter", "positive", "false", "conflict", "failure", "contextCost", "nativeValidation"]}}}
+      }]
+    }
+  }
+}

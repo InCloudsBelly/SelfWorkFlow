@@ -1,0 +1,31 @@
+schemaVersion: 3
+providerId: codegraph.local
+kind: cli-provider
+capabilities:
+  - code.context
+  - code.relationships
+sourceIdentityRef: codegraph-local-source
+license:
+  spdxId: UNLICENSED
+adapterRef: codegraph.local.v3
+adapterHash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+operations:
+  - operationId: inspect
+    triggerLevel: recommend-before-use
+    risk: medium
+    sideEffects: []
+    ownershipDomain: user-owned
+    mutationTargets: []
+    argvTemplate: typed-local-adapter-input
+    cwdPolicy: provider-root
+    envAllowlist: []
+    networkPolicy: none
+    lockScope: provider-project
+    timeoutSeconds: 60
+    outputLimitBytes: 1048576
+    preconditions: [registered-source]
+    verification: [source-identity, native-validation]
+    rollback: none
+supportMatrixRef: codegraph-local-matrix
+dataBoundary: local-only
+remoteSourceTransfer: forbidden

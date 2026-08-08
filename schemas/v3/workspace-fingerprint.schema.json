@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/workspace-fingerprint.schema.json",
+  "title": "SelfWorkFlow V3 workspace fingerprint",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "fingerprintHash", "gitHeadTreeHash", "gitIndexHash", "files", "indexingConfigHash", "ignoredGeneratedBoundaryHash", "dependencyClosureHash"],
+  "properties": {"schemaVersion": {"const": 3}, "fingerprintHash": {"$ref": "#/$defs/hash"}, "gitHeadTreeHash": {"$ref": "#/$defs/hash"}, "gitIndexHash": {"$ref": "#/$defs/hash"}, "files": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/file"}}, "indexingConfigHash": {"$ref": "#/$defs/hash"}, "ignoredGeneratedBoundaryHash": {"$ref": "#/$defs/hash"}, "dependencyClosureHash": {"$ref": "#/$defs/hash"}},
+  "$defs": {"hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "file": {"type": "object", "additionalProperties": false, "required": ["path", "status", "size", "contentHash"], "properties": {"path": {"type": "string", "pattern": "^(?![A-Za-z]:)(?![\\/])[^\\x00]*$", "maxLength": 32767}, "status": {"enum": ["tracked", "modified", "deleted", "untracked"]}, "size": {"type": "integer", "minimum": 0, "maximum": 1099511627776}, "contentHash": {"$ref": "#/$defs/hash"}, "reparseIdentityHash": {"$ref": "#/$defs/hash"}}}}
+}

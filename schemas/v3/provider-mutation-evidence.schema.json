@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-mutation-evidence.schema.json",
+  "title": "SelfWorkFlow V3 provider mutation evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "evidenceHash", "subjectKind", "subjectPlanHash", "executionNonce", "attemptRef", "providerBindingHash", "canonicalProjectRootHash", "observedAt", "preStateIdentity", "postStateIdentity", "mutationTargetHash", "payloadHash", "evidenceKind", "before", "after"],
+  "properties": {
+    "schemaVersion": {"const": 3}, "evidenceHash": {"$ref": "#/$defs/hash"},
+    "subjectKind": {"enum": ["operation-plan", "query-plan"]}, "subjectPlanHash": {"$ref": "#/$defs/hash"},
+    "executionNonce": {"$ref": "#/$defs/id"}, "attemptRef": {"$ref": "#/$defs/id"},
+    "providerBindingHash": {"$ref": "#/$defs/hash"}, "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
+    "observedAt": {"type": "string", "format": "date-time"}, "preStateIdentity": {"$ref": "#/$defs/hash"},
+    "postStateIdentity": {"$ref": "#/$defs/hash"}, "mutationTargetHash": {"$ref": "#/$defs/hash"},
+    "payloadHash": {"$ref": "#/$defs/hash"},
+    "evidenceKind": {"enum": ["filesystem-manifest", "managed-state-manifest", "process-state-delta", "service-state-delta"]},
+    "before": {}, "after": {}
+  },
+  "allOf": [
+    {"if": {"properties": {"evidenceKind": {"const": "filesystem-manifest"}}}, "then": {"properties": {"before": {"$ref": "#/$defs/manifest"}, "after": {"$ref": "#/$defs/manifest"}}}},
+    {"if": {"properties": {"evidenceKind": {"enum": ["managed-state-manifest", "process-state-delta", "service-state-delta"]}}}, "then": {"properties": {"before": {"$ref": "#/$defs/state"}, "after": {"$ref": "#/$defs/state"}}}}
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "manifest": {"type": "array", "maxItems": 200000, "items": {"type": "object", "additionalProperties": false, "required": ["path", "type", "size", "contentHash", "reparseIdentityHash"], "properties": {"path": {"type": "string", "maxLength": 32767}, "type": {"enum": ["file", "directory", "reparse"]}, "size": {"type": "integer", "minimum": 0}, "contentHash": {"$ref": "#/$defs/hash"}, "reparseIdentityHash": {"$ref": "#/$defs/hash"}}}},
+    "state": {"type": "object", "additionalProperties": false, "required": ["identityHash", "revision"], "properties": {"identityHash": {"$ref": "#/$defs/hash"}, "revision": {"type": "string", "minLength": 1, "maxLength": 256}}}
+  }
+}

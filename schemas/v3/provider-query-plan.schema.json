@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-query-plan.schema.json",
+  "title": "SelfWorkFlow V3 provider query plan",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "queryPlanHash", "planHash", "providerId", "operationId", "bindingSnapshotHash", "adapterHash", "typedInputSchemaRef", "typedInputHash", "adapterRenderHash", "canonicalProjectRootHash", "projectStateReceiptHash", "workspaceFingerprintHash", "queryByteBudget", "callLimit", "timeoutSeconds", "sideEffects", "mutationTargets", "executionNonce", "attemptRef"],
+  "properties": {"schemaVersion": {"const": 3}, "queryPlanHash": {"$ref": "#/$defs/hash"}, "planHash": {"$ref": "#/$defs/hash"}, "providerId": {"$ref": "#/$defs/id"}, "operationId": {"$ref": "#/$defs/id"}, "bindingSnapshotHash": {"$ref": "#/$defs/hash"}, "adapterHash": {"$ref": "#/$defs/hash"}, "typedInputSchemaRef": {"$ref": "#/$defs/id"}, "typedInputHash": {"$ref": "#/$defs/hash"}, "adapterRenderHash": {"$ref": "#/$defs/hash"}, "canonicalProjectRootHash": {"$ref": "#/$defs/hash"}, "projectStateReceiptHash": {"$ref": "#/$defs/hash"}, "workspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "queryByteBudget": {"type": "integer", "minimum": 1, "maximum": 1073741824}, "callLimit": {"type": "integer", "minimum": 1, "maximum": 10000}, "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400}, "sideEffects": {"enum": ["none", "local-write", "network"]}, "mutationTargets": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/hash"}}, "approvalReceiptRef": {"$ref": "#/$defs/id"}, "executionNonce": {"$ref": "#/$defs/id"}, "attemptRef": {"$ref": "#/$defs/id"}},
+  "$defs": {"id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}, "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

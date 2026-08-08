@@ -1,0 +1,14 @@
+schemaVersion: 3
+candidates:
+  - providerId: serena
+    state: candidate
+    capabilities: [code.context, code.relationships]
+    reason: requires-native-adapter-validation
+  - providerId: joern
+    state: candidate
+    capabilities: [code.relationships]
+    reason: requires-native-adapter-validation
+  - providerId: debugmcp
+    state: unverified
+    capabilities: [debug.execute]
+    reason: requires-explicit-user-validation

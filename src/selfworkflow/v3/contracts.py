@@ -26,6 +26,19 @@ _SCHEMA_NAMES = (
     "review-aggregate.schema.json",
     "test-strategy.schema.json",
     "coverage-result.schema.json",
+    "provider-descriptor.schema.json",
+    "provider-local-config.schema.json",
+    "provider-binding-snapshot.schema.json",
+    "provider-support-matrix.schema.json",
+    "provider-source-identity.schema.json",
+    "provider-project-state-receipt.schema.json",
+    "provider-operation-plan.schema.json",
+    "provider-approval-receipt.schema.json",
+    "provider-operation-receipt.schema.json",
+    "provider-query-plan.schema.json",
+    "provider-query-receipt.schema.json",
+    "provider-mutation-evidence.schema.json",
+    "workspace-fingerprint.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
@@ -1414,6 +1427,67 @@ def validate_coverage_result(
         run_ledger,
         verification_receipt_resolver,
     )
+
+
+def _validate_provider_document(schema_name: str, document: dict[str, Any]) -> None:
+    """Validate a Provider envelope through the same closed registry as V3 core."""
+
+    _validate_schema(schema_name, document)
+
+
+def validate_provider_descriptor(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-descriptor.schema.json", document)
+
+
+def validate_provider_local_config(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-local-config.schema.json", document)
+
+
+def validate_provider_binding_snapshot(document: dict[str, Any]) -> None:
+    from selfworkflow.v3.provider_binding import validate_binding_snapshot
+    validate_binding_snapshot(document)
+
+
+def validate_provider_support_matrix(document: dict[str, Any]) -> None:
+    from selfworkflow.v3.support_matrix import validate_support_matrix
+    validate_support_matrix(document)
+
+
+def validate_provider_source_identity(document: dict[str, Any]) -> None:
+    from selfworkflow.v3.provider_binding import validate_source_identity
+    validate_source_identity(document)
+
+
+def validate_provider_project_state_receipt(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-project-state-receipt.schema.json", document)
+
+
+def validate_provider_operation_plan(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-operation-plan.schema.json", document)
+
+
+def validate_provider_approval_receipt(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-approval-receipt.schema.json", document)
+
+
+def validate_provider_operation_receipt(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-operation-receipt.schema.json", document)
+
+
+def validate_provider_query_plan(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-query-plan.schema.json", document)
+
+
+def validate_provider_query_receipt(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-query-receipt.schema.json", document)
+
+
+def validate_provider_mutation_evidence(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-mutation-evidence.schema.json", document)
+
+
+def validate_workspace_fingerprint(document: dict[str, Any]) -> None:
+    _validate_provider_document("workspace-fingerprint.schema.json", document)
 
 
 def load_contract(

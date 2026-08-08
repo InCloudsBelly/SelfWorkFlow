@@ -1,0 +1,31 @@
+schemaVersion: 3
+providerId: codegraph.public
+kind: mcp-provider
+capabilities:
+  - code.context
+  - code.relationships
+sourceIdentityRef: codegraph-public-source
+license:
+  spdxId: Apache-2.0
+adapterRef: codegraph.mcp.v3
+adapterHash: sha256:0000000000000000000000000000000000000000000000000000000000000000
+operations:
+  - operationId: inspect
+    triggerLevel: manual-only
+    risk: low
+    sideEffects: []
+    ownershipDomain: external-service
+    mutationTargets: []
+    argvTemplate: typed-mcp-input
+    cwdPolicy: workspace-root
+    envAllowlist: []
+    networkPolicy: explicit-approved
+    lockScope: none
+    timeoutSeconds: 30
+    outputLimitBytes: 1048576
+    preconditions: []
+    verification: [source-identity]
+    rollback: none
+supportMatrixRef: codegraph-public-matrix
+dataBoundary: remote-approved
+remoteSourceTransfer: explicit-only
