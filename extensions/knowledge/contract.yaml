@@ -1,0 +1,16 @@
+schemaVersion: 1
+optional: true
+phases:
+  read:
+    publishesKnowledge: false
+    requiredEvidence: [sourceId, revision, contentHash, verificationStatus]
+  propose:
+    publishesKnowledge: false
+    runtimeSideEffectsMayOccur: [oauth-refresh, temporary-transaction]
+  update:
+    requiresExplicitConfirmation: true
+    requiresCompareAndSwap: true
+    requiresIndependentReview: true
+invariants:
+  privateModelReasoning: forbidden
+  missingBackendForCodeTask: knowledge-sync-todo

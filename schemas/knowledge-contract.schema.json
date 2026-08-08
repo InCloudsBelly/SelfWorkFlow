@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "optional", "phases", "invariants"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "optional": {"const": true},
+    "phases": {
+      "type": "object", "additionalProperties": false,
+      "required": ["read", "propose", "update"],
+      "properties": {
+        "read": {
+          "type": "object", "additionalProperties": false,
+          "required": ["publishesKnowledge", "requiredEvidence"],
+          "properties": {
+            "publishesKnowledge": {"const": false},
+            "requiredEvidence": {"const": ["sourceId", "revision", "contentHash", "verificationStatus"]}
+          }
+        },
+        "propose": {
+          "type": "object", "additionalProperties": false,
+          "required": ["publishesKnowledge", "runtimeSideEffectsMayOccur"],
+          "properties": {
+            "publishesKnowledge": {"const": false},
+            "runtimeSideEffectsMayOccur": {"const": ["oauth-refresh", "temporary-transaction"]}
+          }
+        },
+        "update": {
+          "type": "object", "additionalProperties": false,
+          "required": ["requiresExplicitConfirmation", "requiresCompareAndSwap", "requiresIndependentReview"],
+          "properties": {
+            "requiresExplicitConfirmation": {"const": true},
+            "requiresCompareAndSwap": {"const": true},
+            "requiresIndependentReview": {"const": true}
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "object", "additionalProperties": false,
+      "required": ["privateModelReasoning", "missingBackendForCodeTask"],
+      "properties": {
+        "privateModelReasoning": {"const": "forbidden"},
+        "missingBackendForCodeTask": {"const": "knowledge-sync-todo"}
+      }
+    }
+  }
+}
