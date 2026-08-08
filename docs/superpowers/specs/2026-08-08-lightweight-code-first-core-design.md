@@ -45,3 +45,13 @@
 - C0/R0 只读任务不启动设计、安装、发布或知识写入流程。
 - C1/R1 代码任务完成完整 diff 自审和最窄相关测试；复杂或高风险任务才升级设计、计划和 Review 强度。
 - 所有 profile 均通过确定性构建、清单和边界测试。
+
+## 终审加固
+
+终审发现 profile 过滤、安装与发布证据还需要共享同一身份边界。补充以下约束：
+
+- 每个 profile 的 Catalog 必须包含自身条目的完整依赖闭包；构建时发现悬空依赖立即失败。
+- 安装快照由版本和 artifact hash 共同寻址，profile 切换不得覆盖或激活旧 profile 的额外文件。
+- 幂等安装只对相同 artifact、版本、profile、`agentsRoot`、`codexRoot` 和 `stateRoot` 成立。
+- `read-only` 禁止确定性或语义自动路由，但仍允许用户显式指定只读 Skill。
+- 发布证据必须记录并校验被测试 runtime 的 profile。

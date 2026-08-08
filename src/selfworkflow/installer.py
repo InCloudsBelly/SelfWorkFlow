@@ -25,6 +25,7 @@ _REPARSE = 0x400
 _MAX_FILES = 20_000
 _MAX_FILE_BYTES = 8 * 1024 * 1024
 _MAX_TREE_BYTES = 64 * 1024 * 1024
+_RUNTIME_PROFILES = {"core", "knowledge", "maintainer", "custom-unverified"}
 
 
 class InstallerError(RuntimeError):
@@ -137,6 +138,58 @@ def _load_current_manifest(state: Path) -> dict[str, object] | None:
         return None
 
 
+def _artifact_profile(artifact: Path) -> str:
+    manifest_path = artifact / "artifact-manifest.json"
+    if not manifest_path.exists():
+        return "custom-unverified"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        raise InstallerError("artifact-invalid")
+    try:
+        value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        raise InstallerError("artifact-invalid") from None
+    profile = value.get("profile") if isinstance(value, dict) else None
+    if profile not in _RUNTIME_PROFILES - {"custom-unverified"}:
+        raise InstallerError("artifact-invalid")
+    return profile
+
+
+def _snapshot_root(
+    agents: Path,
+    version: str,
+    artifact_hash: str,
+) -> Path:
+    return (
+        agents
+        / "selfworkflow"
+        / "versions"
+        / version
+        / artifact_hash.removeprefix("sha256:")
+    )
+
+
+def _same_install_identity(
+    manifest: dict[str, object],
+    *,
+    version: str,
+    profile: str,
+    artifact_hash: str,
+    agents: Path,
+    codex: Path,
+    state: Path,
+) -> bool:
+    return all(
+        (
+            manifest.get("version") == version,
+            manifest.get("profile") == profile,
+            manifest.get("artifactHash") == artifact_hash,
+            manifest.get("agentsRoot") == str(agents),
+            manifest.get("codexRoot") == str(codex),
+            manifest.get("stateRoot") == str(state),
+        )
+    )
+
+
 def create_install_plan(
     artifact_root: str | Path,
     agents_root: str | Path,
@@ -156,9 +209,11 @@ def create_install_plan(
     files = _manifest(artifact)
     if not files or not (artifact / "WORKFLOW.md").is_file():
         raise InstallerError("artifact-invalid")
+    artifact_hash = _canonical_hash(files)
+    profile = _artifact_profile(artifact)
     issues: list[str] = []
     agents_file = codex / "AGENTS.md"
-    snapshot = agents / "selfworkflow" / "versions" / version
+    snapshot = _snapshot_root(agents, version, artifact_hash)
     try:
         render_managed_block(
             _read_text(agents_file),
@@ -179,9 +234,16 @@ def create_install_plan(
             target = agents / relative
             if target.exists() and str(target) not in managed_targets:
                 issues.append(f"unmanaged-skill-conflict:{relative}")
-    artifact_hash = _canonical_hash(files)
     status = "paused" if issues else "ready"
-    if current_manifest and current_manifest.get("artifactHash") == artifact_hash and current_manifest.get("version") == version:
+    if current_manifest and _same_install_identity(
+        current_manifest,
+        version=version,
+        profile=profile,
+        artifact_hash=artifact_hash,
+        agents=agents,
+        codex=codex,
+        state=state,
+    ):
         try:
             if verify_install(Path(current_manifest["manifestPath"]))["status"] == "verified":
                 status = "already-installed"
@@ -191,6 +253,7 @@ def create_install_plan(
         "schemaVersion": 1,
         "operation": "install",
         "version": version,
+        "profile": profile,
         "artifactRoot": str(artifact),
         "agentsRoot": str(agents),
         "codexRoot": str(codex),
@@ -248,7 +311,7 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
         raise InstallerError("plan-invalid")
     expected = {
         "install": {
-            "schemaVersion", "operation", "version", "artifactRoot", "agentsRoot",
+            "schemaVersion", "operation", "version", "profile", "artifactRoot", "agentsRoot",
             "codexRoot", "stateRoot", "artifactHash", "artifactFiles",
             "baselineHashes", "status", "issues", "securityStatus", "planHash",
         },
@@ -270,11 +333,20 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     _validate_plan_hash(plan, confirmed_hash)
     if plan.get("status") == "already-installed":
         state = _safe_root(plan["stateRoot"], allow_missing=False)
+        agents = _safe_root(plan["agentsRoot"], allow_missing=False)
+        codex = _safe_root(plan["codexRoot"], allow_missing=False)
         manifest = _load_current_manifest(state)
         if (
             manifest is None
-            or manifest.get("version") != plan.get("version")
-            or manifest.get("artifactHash") != plan.get("artifactHash")
+            or not _same_install_identity(
+                manifest,
+                version=plan["version"],
+                profile=plan["profile"],
+                artifact_hash=plan["artifactHash"],
+                agents=agents,
+                codex=codex,
+                state=state,
+            )
         ):
             raise InstallerError("installed-state-drift")
         verify_install(Path(manifest["manifestPath"]))
@@ -319,7 +391,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 transaction["operations"] = operations
                 write_json_atomic(transaction_path, transaction)
 
-            snapshot = agents / "selfworkflow" / "versions" / plan["version"]
+            snapshot = _snapshot_root(agents, plan["version"], plan["artifactHash"])
             for item in _manifest(artifact):
                 source = artifact / Path(*PurePosixPath(item["path"]).parts)
                 record(snapshot / item["path"], source.read_bytes())
@@ -334,7 +406,12 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
             ).encode("utf-8")
             record(agents_path, agents_content)
             pointer = (json.dumps(
-                {"version": plan["version"], "snapshot": str(snapshot)},
+                {
+                    "version": plan["version"],
+                    "profile": plan["profile"],
+                    "artifactHash": plan["artifactHash"],
+                    "snapshot": str(snapshot),
+                },
                 sort_keys=True,
                 separators=(",", ":"),
             ) + "\n").encode("utf-8")
@@ -354,7 +431,11 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 "transactionId": transaction_id,
                 "transactionPath": str(transaction_path),
                 "version": plan["version"],
+                "profile": plan["profile"],
                 "artifactHash": plan["artifactHash"],
+                "agentsRoot": str(agents),
+                "codexRoot": str(codex),
+                "stateRoot": str(state),
                 "operations": operations,
                 "securityStatus": "unverified",
             }

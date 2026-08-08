@@ -80,3 +80,35 @@ stale aggregate/document assertions failed. Both assertions were corrected and
 their 18-test owning module then passed. The full 304-test suite was deliberately
 not repeated; native Agent, account/model, production ACL, and real OpenWiki calls
 remain `unverified`.
+
+## Chunk 3: Final-review hardening
+
+### Task 5: Close profile identity across routing, install, and release
+
+**Files:**
+- Modify: `catalog/domains/workflow.yaml`
+- Modify: `src/selfworkflow/adapters.py`
+- Modify: `src/selfworkflow/router.py`
+- Modify: `src/selfworkflow/installer.py`
+- Modify: `schemas/install-plan.schema.json`
+- Modify: `schemas/install-manifest.schema.json`
+- Modify: `docs/releases/release-manifest.schema.json`
+- Modify: `src/selfworkflow/release.py`
+- Test: `tests/conformance/test_runtime_snapshot.py`
+- Test: `tests/unit/test_router.py`
+- Test: `tests/installer/test_plan.py`
+- Test: `tests/installer/test_apply.py`
+- Test: `tests/acceptance/test_install_sandbox.py`
+- Test: `tests/conformance/test_release_gate.py`
+
+- [x] Prove profile Catalog dependency closure and fail build on future dangling dependencies.
+- [x] Prove `read-only` semantic terms cannot auto-load the workflow core.
+- [x] Bind immutable snapshot paths to version plus artifact hash so profile switches cannot activate stale files.
+- [x] Carry profile and install roots through plans/manifests; permit `already-installed` only for the exact same target identity.
+- [x] Bind release evidence to an explicit runtime profile.
+- [x] Run each owning test module Green, then the focused lightweight-core regression.
+
+Final-review hardening evidence: runtime 6/6, router 10/10, installer 13/13,
+install acceptance 3/3, release 3/3, full conformance 16/16, and Catalog 50/50
+passed. Native Agent, account/model, production ACL, formal global install, and
+real OpenWiki calls remain `unverified`.

@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -32,6 +33,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 {entry["id"] for entry in core_catalog["catalog"]["entries"]},
                 {"workflow-core", "workflow-quality", "code-quality", "grill-me"},
             )
+            core_ids = {entry["id"] for entry in core_catalog["catalog"]["entries"]}
+            self.assertTrue(all(
+                set(entry["dependencies"]) <= core_ids
+                for entry in core_catalog["catalog"]["entries"]
+            ))
             content = b"".join(
                 path.read_bytes() for path in (root / "first").rglob("*") if path.is_file()
             ).lower()
@@ -72,6 +78,30 @@ class RuntimeSnapshotTests(unittest.TestCase):
                     "0.1.0.dev0",
                     profile="unknown",
                 )
+
+    def test_profile_catalog_rejects_dangling_dependencies(self):
+        from selfworkflow.catalog import compile_catalog
+
+        compiled = json.loads(compile_catalog(self.ROOT / "catalog").content)
+        next(
+            entry
+            for entry in compiled["catalog"]["entries"]
+            if entry["id"] == "workflow-quality"
+        )["dependencies"].append("missing-profile-entry")
+        content = (json.dumps(compiled, separators=(",", ":"), sort_keys=True) + "\n").encode()
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            with mock.patch(
+                "selfworkflow.adapters.compile_catalog",
+                return_value=SimpleNamespace(content=content),
+            ):
+                with self.assertRaisesRegex(
+                    AdapterError, "runtime-profile-dependency-invalid"
+                ):
+                    build_runtime(
+                        self.ROOT,
+                        Path(temporary) / "runtime",
+                        "0.1.0.dev0",
+                    )
 
     def test_cli_build_publishes_runtime(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

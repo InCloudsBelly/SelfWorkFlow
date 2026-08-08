@@ -15,6 +15,7 @@ def _manifest():
         "source": {"commit": "a" * 40, "dirty": False},
         "dependencyLockHash": "sha256:" + "b" * 64,
         "runtimeHash": "sha256:" + "c" * 64,
+        "runtimeProfile": "core",
         "tests": [
             {"suite": suite, "command": f"verify {suite}", "executedAt": "2026-08-08T00:00:00Z", "status": "passed", "outputHash": "sha256:" + character * 64}
             for suite, character in (("unit", "d"), ("conformance", "e"), ("installer", "f"), ("behavioral", "1"))
@@ -54,6 +55,18 @@ class ReleaseGateTests(unittest.TestCase):
                 result = evaluate_release(manifest)
                 self.assertFalse(result["eligible"])
                 self.assertIn(issue, result["issues"])
+
+    def test_release_requires_a_known_runtime_profile(self):
+        for value in (None, "unknown"):
+            manifest = _manifest()
+            if value is None:
+                del manifest["runtimeProfile"]
+            else:
+                manifest["runtimeProfile"] = value
+            with self.subTest(value=value):
+                result = evaluate_release(manifest)
+                self.assertFalse(result["eligible"])
+                self.assertIn("runtime-profile-invalid", result["issues"])
 
 
 if __name__ == "__main__":

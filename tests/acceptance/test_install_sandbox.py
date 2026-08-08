@@ -91,6 +91,39 @@ class InstallSandboxAcceptanceTests(unittest.TestCase):
                 "manual-attention",
             )
 
+    def test_switching_same_version_profiles_activates_an_isolated_core_snapshot(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            knowledge = root / "knowledge"
+            core = root / "core"
+            build_runtime(
+                self.ROOT, knowledge, "0.1.0.dev0", profile="knowledge"
+            )
+            build_runtime(self.ROOT, core, "0.1.0.dev0", profile="core")
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+
+            knowledge_plan = create_install_plan(
+                knowledge, agents, codex, state, "0.1.0.dev0"
+            )
+            apply_install_plan(knowledge_plan, knowledge_plan["planHash"])
+            knowledge_pointer = json.loads(
+                (agents / "selfworkflow/current.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(
+                (Path(knowledge_pointer["snapshot"]) / "extensions/knowledge/contract.yaml")
+                .is_file()
+            )
+
+            core_plan = create_install_plan(core, agents, codex, state, "0.1.0.dev0")
+            self.assertEqual(core_plan["profile"], "core")
+            applied = apply_install_plan(core_plan, core_plan["planHash"])
+            self.assertEqual(verify_install(applied["manifestPath"])["status"], "verified")
+            core_pointer = json.loads(
+                (agents / "selfworkflow/current.json").read_text(encoding="utf-8")
+            )
+            self.assertNotEqual(core_pointer["snapshot"], knowledge_pointer["snapshot"])
+            self.assertFalse((Path(core_pointer["snapshot"]) / "extensions").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

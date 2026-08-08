@@ -11,6 +11,8 @@ def evaluate_release(manifest: dict[str, object]) -> dict[str, object]:
     issues: set[str] = set()
     if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1:
         return {"eligible": False, "issues": ("manifest-invalid",)}
+    if manifest.get("runtimeProfile") not in {"core", "knowledge", "maintainer"}:
+        issues.add("runtime-profile-invalid")
     source = manifest.get("source")
     if not isinstance(source, dict) or source.get("dirty") is not False:
         issues.add("source-dirty")

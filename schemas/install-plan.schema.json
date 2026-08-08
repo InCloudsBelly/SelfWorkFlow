@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "operation", "version", "artifactRoot", "agentsRoot", "codexRoot", "stateRoot", "artifactHash", "artifactFiles", "baselineHashes", "status", "issues", "securityStatus", "planHash"],
+  "required": ["schemaVersion", "operation", "version", "profile", "artifactRoot", "agentsRoot", "codexRoot", "stateRoot", "artifactHash", "artifactFiles", "baselineHashes", "status", "issues", "securityStatus", "planHash"],
   "properties": {
     "schemaVersion": {"const": 1},
     "operation": {"const": "install"},
     "version": {"type": "string", "minLength": 1},
+    "profile": {"enum": ["core", "knowledge", "maintainer", "custom-unverified"]},
     "artifactRoot": {"type": "string", "minLength": 1},
     "agentsRoot": {"type": "string", "minLength": 1},
     "codexRoot": {"type": "string", "minLength": 1},

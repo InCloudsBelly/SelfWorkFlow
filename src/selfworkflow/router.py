@@ -204,6 +204,8 @@ def _route_skills(
     for skill_id, entry in entry_by_id.items():
         if entry["supportStatus"] != "supported" or request.stage not in entry["stages"]:
             continue
+        if request.operation_type == "read-only":
+            continue
         excluded_terms = {term.strip().casefold() for term in entry["exclusions"]}
         if semantic_terms & excluded_terms:
             exclusions[skill_id] = "explicit-exclusion"

@@ -282,6 +282,7 @@ class RouterTests(unittest.TestCase):
                 stage="discovered",
                 operation_type="read-only",
                 file_extensions=(),
+                semantic_terms=("workflow execution",),
             ),
         )
         self.assertEqual(read_only.status, "routed")

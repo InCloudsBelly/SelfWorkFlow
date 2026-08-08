@@ -1,6 +1,9 @@
 from pathlib import Path
+import json
 import tempfile
 import unittest
+
+from jsonschema import Draft202012Validator
 
 from selfworkflow.installer import (
     InstallerError,
@@ -35,8 +38,33 @@ class InstallApplyTests(unittest.TestCase):
                 (agents / "skills/sample-skill/SKILL.md").is_file()
             )
             self.assertEqual(verify_install(Path(result["manifestPath"]))["status"], "verified")
+            manifest = json.loads(Path(result["manifestPath"]).read_text(encoding="utf-8"))
+            schema = json.loads(
+                (Path(__file__).resolve().parents[2] / "schemas/install-manifest.schema.json")
+                .read_text(encoding="utf-8")
+            )
+            Draft202012Validator(schema).validate(manifest)
+            self.assertEqual(manifest["profile"], "custom-unverified")
             second = create_install_plan(artifact, agents, codex, state, "0.1.0")
             self.assertEqual(second["status"], "already-installed")
+
+    def test_already_installed_is_bound_to_the_exact_target_roots(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            state = root / "state"
+            first = create_install_plan(
+                artifact, root / "agents-a", root / "codex-a", state, "0.1.0"
+            )
+            apply_install_plan(first, first["planHash"])
+
+            second = create_install_plan(
+                artifact, root / "agents-b", root / "codex-b", state, "0.1.0"
+            )
+            self.assertEqual(second["status"], "ready")
+            applied = apply_install_plan(second, second["planHash"])
+            self.assertEqual(applied["status"], "applied")
+            self.assertTrue((root / "agents-b/skills/sample-skill/SKILL.md").is_file())
 
     def test_apply_rejects_wrong_confirmation_and_target_or_artifact_drift(self):
         for drift in ("target", "artifact"):

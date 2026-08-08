@@ -24,6 +24,7 @@ class InstallPlanTests(unittest.TestCase):
             after = sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
             self.assertEqual(after, before)
             self.assertEqual(plan["status"], "ready")
+            self.assertEqual(plan["profile"], "custom-unverified")
             self.assertRegex(plan["planHash"], r"^sha256:[0-9a-f]{64}$")
             self.assertIn("skills/sample-skill/SKILL.md", plan["artifactFiles"])
             schema = json.loads(
@@ -57,7 +58,9 @@ class InstallPlanTests(unittest.TestCase):
             root = Path(temporary)
             artifact = create_artifact(root)
             agents, codex, state = root / "agents", root / "codex", root / "state"
-            collision = agents / "selfworkflow/versions/0.1.0/WORKFLOW.md"
+            initial = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            digest = initial["artifactHash"].removeprefix("sha256:")
+            collision = agents / f"selfworkflow/versions/0.1.0/{digest}/WORKFLOW.md"
             collision.parent.mkdir(parents=True)
             collision.write_text("unmanaged\n", encoding="utf-8")
             plan = create_install_plan(artifact, agents, codex, state, "0.1.0")

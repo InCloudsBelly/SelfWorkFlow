@@ -63,7 +63,7 @@ entries:
       semanticTerms: [file change, side effect, review evidence, verification evidence]
     stages: [implemented, reviewed, verified]
     requiredCapabilities: [filesystem-read]
-    dependencies: [workflow-core, workflow-protected-rules]
+    dependencies: [workflow-core]
     conflicts: []
     composition: augment
     mandatory: false

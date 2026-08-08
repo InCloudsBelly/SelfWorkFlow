@@ -96,6 +96,13 @@ def _profile_catalog(source: Path, profile: str) -> bytes:
     catalog["entries"] = [
         entry for entry in catalog["entries"] if entry["id"] in allowed
     ]
+    selected_ids = {entry["id"] for entry in catalog["entries"]}
+    if any(
+        dependency not in selected_ids
+        for entry in catalog["entries"]
+        for dependency in entry["dependencies"]
+    ):
+        raise AdapterError("runtime-profile-dependency-invalid")
     catalog["domains"] = sorted({entry["domain"] for entry in catalog["entries"]})
     payload = json.dumps(
         catalog,
