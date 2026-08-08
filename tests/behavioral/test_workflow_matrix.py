@@ -43,6 +43,32 @@ class WorkflowMatrixTests(unittest.TestCase):
         review = route_modules(self.catalog, ModuleRouteRequest(slot_id="design.cross-review", cardinality="zero-or-one", **common))
         self.assertEqual(grill.selected_modules + review.selected_modules, ("design-grill-me", "design-cross-review"))
 
+    def test_post_grill_policy_is_an_enforced_host_gate(self):
+        import yaml
+
+        protected = yaml.safe_load(
+            (self.ROOT / "workflow/protected-rules.yaml").read_text(encoding="utf-8")
+        )
+        rule = next(
+            item for item in protected["rules"]
+            if item["id"] == "require-independent-post-grill-brainstorming-review"
+        )
+        self.assertEqual(
+            rule,
+            {
+                "id": "require-independent-post-grill-brainstorming-review",
+                "strength": "enforced",
+                "gate": "design.post-grill-review",
+                "evaluator": "post-grill-review-independence-v1",
+                "reasonCodes": [
+                    "post-grill-independent-review-required",
+                    "post-grill-review-input-invalid",
+                    "post-grill-review-attestation-missing",
+                    "post-grill-review-user-authorization-required",
+                ],
+            },
+        )
+
     def test_core_policy_requires_reviewed_landing_and_bounded_decisions(self):
         for relative in ("WORKFLOW.md", "workflow/core.md"):
             content = (self.ROOT / relative).read_text(encoding="utf-8")

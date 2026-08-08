@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/review-fallback-authorization.schema.json",
+  "title": "SelfWorkFlow V3 review fallback authorization",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "designHash", "reviewerPolicyHash", "reason", "fallbackMode", "confirmationSource", "issuedAt", "expiresAt", "nonce", "revocationState", "authorizationHash"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "designHash": {"$ref": "#/$defs/hash"},
+    "reviewerPolicyHash": {"$ref": "#/$defs/hash"},
+    "reason": {"enum": ["host-attestation-unavailable", "independent-context-unavailable"]},
+    "fallbackMode": {"enum": ["independent-context-without-attestation", "same-agent-structured-review"]},
+    "confirmationSource": {"type": "string", "minLength": 1, "maxLength": 256},
+    "issuedAt": {"type": "string", "format": "utc-date-time"},
+    "expiresAt": {"type": "string", "format": "utc-date-time"},
+    "nonce": {"type": "string", "minLength": 1, "maxLength": 256},
+    "revocationState": {"enum": ["active", "revoked"]},
+    "authorizationHash": {"$ref": "#/$defs/hash"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"fallbackMode": {"const": "independent-context-without-attestation"}}, "required": ["fallbackMode"]},
+      "then": {"properties": {"reason": {"const": "host-attestation-unavailable"}}}
+    },
+    {
+      "if": {"properties": {"fallbackMode": {"const": "same-agent-structured-review"}}, "required": ["fallbackMode"]},
+      "then": {"properties": {"reason": {"const": "independent-context-unavailable"}}}
+    }
+  ],
+  "$defs": {"hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

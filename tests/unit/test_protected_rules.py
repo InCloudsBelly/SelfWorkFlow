@@ -136,7 +136,7 @@ def _trusted_owner_store(records, *, behavioral_invocation=None):
 def _owner_case(
     proposed_rules=None,
     *,
-    new_version="2.0.0",
+    new_version="3.0.0",
     review_level="L2",
     operation_nonce="owner-operation-1",
     proposed_at="2026-08-08T07:30:00Z",
@@ -416,7 +416,7 @@ class ProtectedRulesTests(unittest.TestCase):
             artifact_store=_trusted_owner_store(records),
             now=OWNER_NOW,
         )
-        self.assertEqual(merged.policy_version, "2.0.0")
+        self.assertEqual(merged.policy_version, "3.0.0")
 
         values = {
             field: getattr(request, field) for field in request.__dataclass_fields__
@@ -460,7 +460,7 @@ class ProtectedRulesTests(unittest.TestCase):
             artifact_store=_trusted_owner_store(records),
             now=OWNER_NOW,
         )
-        self.assertEqual(merged.policy_version, "2.0.0")
+        self.assertEqual(merged.policy_version, "3.0.0")
 
     def test_cross_layer_duplicate_constraint_ids_are_rejected_not_downgraded(self):
         from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
@@ -516,7 +516,7 @@ class ProtectedRulesTests(unittest.TestCase):
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(protected)
         self.assertEqual(_open_object_schema_paths(schema), [])
-        self.assertEqual(protected["policyVersion"], "1.0.0")
+        self.assertEqual(protected["policyVersion"], "2.0.0")
         self.assertEqual(protected["ordinaryLayerContractVersion"], 1)
         self.assertEqual(
             protected["ownerModificationGate"],
@@ -536,7 +536,12 @@ class ProtectedRulesTests(unittest.TestCase):
                 "authorize-side-effects-and-irreversible-actions",
                 "protect-user-existing-changes",
                 "require-fresh-verification-before-completion",
+                "require-independent-post-grill-brainstorming-review",
             ),
+        )
+        self.assertNotIn(
+            "require-independent-post-grill-brainstorm-review",
+            tuple(rule["id"] for rule in protected["rules"]),
         )
 
     def test_lower_layers_have_only_monotonic_typed_operations(self):
@@ -668,7 +673,7 @@ class ProtectedRulesTests(unittest.TestCase):
             now=OWNER_NOW,
         )
         self.assertEqual(merged.rules, ())
-        self.assertEqual(merged.policy_version, "2.0.0")
+        self.assertEqual(merged.policy_version, "3.0.0")
         with self.assertRaises(FrozenInstanceError):
             request.new_version = "3.0.0"
 
@@ -688,7 +693,7 @@ class ProtectedRulesTests(unittest.TestCase):
                 artifact_store=_trusted_owner_store(records),
                 now=OWNER_NOW,
             ).policy_version,
-            "2.0.0",
+            "3.0.0",
         )
 
         replayed_document = copy.deepcopy(protected)

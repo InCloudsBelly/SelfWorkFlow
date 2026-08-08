@@ -1,0 +1,27 @@
+schemaVersion: 3
+policyId: post-grill-review-independence-v1
+trigger:
+  requiresAll:
+    - explicit-grill-me-completed
+    - common-understanding-confirmed
+dispatch:
+  reviewMode: brainstorming-cross-review
+  forkContext: false
+  inputMode: summary-only
+  allowedPayloadFields:
+    - schemaVersion
+    - reviewMode
+    - designReviewSummary
+  forbiddenInputClasses:
+    - grill-transcript
+    - grill-reasoning
+    - parent-context
+attestation:
+  authority: host-only
+  ignoreAgentSelfReport: true
+gate:
+  evaluator: post-grill-review-independence-v1
+  fallbackModes:
+    - independent-context-without-attestation
+    - same-agent-structured-review
+  invalidEvidenceAction: pause

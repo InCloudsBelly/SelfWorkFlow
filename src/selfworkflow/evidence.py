@@ -1244,7 +1244,27 @@ def _parse_rule(
     source_name: str,
     protected: bool,
 ) -> MergedRule:
-    rule = _closed_mapping(value, ("id", "strength"), code)
+    entries = dict(_mapping_entries(value, code))
+    if entries.get("id") == "require-independent-post-grill-brainstorming-review":
+        rule = _closed_mapping(
+            value,
+            ("id", "strength", "gate", "evaluator", "reasonCodes"),
+            code,
+        )
+        if (
+            rule["strength"] != "enforced"
+            or rule["gate"] != "design.post-grill-review"
+            or rule["evaluator"] != "post-grill-review-independence-v1"
+            or _ordered_sequence(rule["reasonCodes"], code) != (
+                "post-grill-independent-review-required",
+                "post-grill-review-input-invalid",
+                "post-grill-review-attestation-missing",
+                "post-grill-review-user-authorization-required",
+            )
+        ):
+            _fail(code)
+    else:
+        rule = _closed_mapping(value, ("id", "strength"), code)
     rule_id = rule["id"]
     strength = rule["strength"]
     if (

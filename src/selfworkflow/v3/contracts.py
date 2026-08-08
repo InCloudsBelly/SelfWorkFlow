@@ -47,6 +47,9 @@ _SCHEMA_NAMES = (
     "provider-stale-unlock-authorization.schema.json",
     "provider-command-template.schema.json",
     "trusted-command-registry.schema.json",
+    "design-review-summary.schema.json",
+    "review-fallback-authorization.schema.json",
+    "review-independence-receipt.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
