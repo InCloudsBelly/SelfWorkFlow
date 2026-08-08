@@ -122,7 +122,7 @@ def _read_text(path: Path) -> str:
         return ""
     if path.stat().st_size > _MAX_FILE_BYTES or not path.is_file() or path.is_symlink():
         raise InstallerError("managed-file-invalid")
-    return path.read_text(encoding="utf-8")
+    return path.read_bytes().decode("utf-8")
 
 
 def _load_current_manifest(state: Path) -> dict[str, object] | None:
@@ -268,6 +268,22 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
 
 def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str, object]:
     _validate_plan_hash(plan, confirmed_hash)
+    if plan.get("status") == "already-installed":
+        state = _safe_root(plan["stateRoot"], allow_missing=False)
+        manifest = _load_current_manifest(state)
+        if (
+            manifest is None
+            or manifest.get("version") != plan.get("version")
+            or manifest.get("artifactHash") != plan.get("artifactHash")
+        ):
+            raise InstallerError("installed-state-drift")
+        verify_install(Path(manifest["manifestPath"]))
+        return {
+            "status": "already-installed",
+            "manifestPath": manifest["manifestPath"],
+            "transactionId": manifest["transactionId"],
+            "transactionPath": manifest["transactionPath"],
+        }
     if plan.get("status") != "ready":
         raise InstallerError("plan-not-ready")
     artifact = _safe_root(plan["artifactRoot"], allow_missing=False)
