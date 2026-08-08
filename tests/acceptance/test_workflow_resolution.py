@@ -13,6 +13,30 @@ from selfworkflow.installer import apply_install_plan, create_install_plan
 class WorkflowResolutionAcceptanceTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
+    @staticmethod
+    def _request(**overrides):
+        names = (
+            "filesystem-read", "filesystem-write", "skill-discovery",
+            "test-execution", "independent-context", "user-confirmation",
+        )
+        evidence = [
+            {
+                "name": name, "provider": "acceptance-host",
+                "subject": {"kind": "host", "id": "fixture", "version": "1", "build": "1", "sourceLock": "sha256:" + "1" * 64},
+                "state": "supported", "observedAt": "2026-08-08T00:00:00Z", "validUntil": "2027-08-08T00:00:00Z",
+                "evidenceRef": "fixture:" + name, "evidenceHash": "sha256:" + "1" * 64,
+            }
+            for name in names
+        ]
+        value = {
+            "schemaVersion": 2, "operationType": "implement", "complexity": "C1", "risk": "R1",
+            "writeTask": True, "ambiguity": False, "explicitModuleIds": [], "projectDefaultModuleIds": [],
+            "projectMinimums": {"strength": "Light"},
+            "capabilityEvidenceSnapshot": {"schemaVersion": 1, "capturedAt": "2026-08-08T12:00:00Z", "evidence": evidence},
+        }
+        value.update(overrides)
+        return value
+
     def test_installed_core_resolves_implement_review_and_verify_stages(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
@@ -35,36 +59,15 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             )
 
             cases = (
-                ("implemented", "implement", "C1", "R1", "test-driven-development"),
-                ("reviewed", "review", "C2", "R2", "requesting-code-review"),
-                ("verified", "verify", "C1", "R1", "verification-before-completion"),
+                ("implement", "C1", "R1", "implement-tdd"),
+                ("implement", "C2", "R2", "review-independent"),
+                ("implement", "C1", "R1", "verify-execution"),
             )
-            for stage, operation, complexity, risk, expected_skill in cases:
-                with self.subTest(stage=stage):
-                    request = root / f"{stage}.json"
+            for index, (operation, complexity, risk, expected_module) in enumerate(cases):
+                with self.subTest(expected_module=expected_module):
+                    request = root / f"request-{index}.json"
                     request.write_text(
-                        json.dumps(
-                            {
-                                "schemaVersion": 1,
-                                "stage": stage,
-                                "operationType": operation,
-                                "complexity": complexity,
-                                "risk": risk,
-                                "writeTask": True,
-                                "ambiguity": False,
-                                "explicitGrill": False,
-                                "superpowersSourceStatus": "supported",
-                                "capabilityStates": {
-                                    "filesystem-read": "supported",
-                                    "filesystem-write": "supported",
-                                    "independent-context": "supported",
-                                },
-                                "fileExtensions": [".py"],
-                                "semanticTerms": [],
-                                "explicitSkills": [],
-                                "contextBudget": 4096,
-                            }
-                        ),
+                        json.dumps(self._request(operationType=operation, complexity=complexity, risk=risk)),
                         encoding="utf-8",
                     )
                     output = io.StringIO()
@@ -77,10 +80,13 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
                     self.assertEqual(code, 0)
                     result = json.loads(output.getvalue())
                     self.assertEqual(result["status"], "active")
-                    self.assertEqual(result["task"]["stage"], stage)
-                    self.assertEqual(result["task"]["operationType"], operation)
-                    self.assertEqual(result["selectedSkills"][0], "workflow-core")
-                    self.assertIn(expected_skill, result["selectedSkills"])
+                    selected = [
+                        module
+                        for stage in result["planGraph"]["stages"]
+                        for slot in stage["slots"]
+                        for module in slot["selectedModules"]
+                    ]
+                    self.assertIn(expected_module, selected)
 
     def test_cli_rejects_duplicate_request_keys_without_echoing_values(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
@@ -130,26 +136,10 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             request = root / "request.json"
             request.write_text(
                 json.dumps(
-                    {
-                        "schemaVersion": 1,
-                        "stage": "designed",
-                        "operationType": "design",
-                        "complexity": "C2",
-                        "risk": "R2",
-                        "writeTask": True,
-                        "ambiguity": False,
-                        "explicitGrill": True,
-                        "superpowersSourceStatus": "supported",
-                        "capabilityStates": {
-                            "filesystem-read": "supported",
-                            "filesystem-write": "supported",
-                            "independent-context": "supported",
-                        },
-                        "fileExtensions": [],
-                        "semanticTerms": [],
-                        "explicitSkills": [],
-                        "contextBudget": 4096,
-                    }
+                    self._request(
+                        operationType="design", complexity="C2", risk="R2",
+                        explicitModuleIds=["design-grill-me"],
+                    )
                 ),
                 encoding="utf-8",
             )
@@ -168,8 +158,9 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             self.assertEqual(code, 0)
             result = json.loads(output.getvalue())
             self.assertEqual(result["status"], "paused")
-            self.assertNotIn("grill-me", result["selectedSkills"])
-            self.assertIn("grill-me-unavailable", result["issues"])
+            selected = [module for stage in result["planGraph"]["stages"] for slot in stage["slots"] for module in slot["selectedModules"]]
+            self.assertNotIn("design-grill-me", selected)
+            self.assertIn("explicit-selection-invalid", result["reasonCodes"])
 
 
 if __name__ == "__main__":

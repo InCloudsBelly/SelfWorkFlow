@@ -106,6 +106,17 @@ def _profile_catalog(
             entry for entry in catalog["entries"] if entry["id"] in allowed
         ]
     selected_ids = {entry["id"] for entry in catalog["entries"]}
+    modules = [
+        module
+        for module in catalog.get("modules", [])
+        if module["sourceEntryId"] in selected_ids
+    ]
+    selected_module_ids = {module["id"] for module in modules}
+    catalog["modules"] = [
+        module
+        for module in modules
+        if set(module["dependencies"]) <= selected_module_ids
+    ]
     if any(
         dependency not in selected_ids
         for entry in catalog["entries"]
@@ -120,7 +131,7 @@ def _profile_catalog(
         sort_keys=True,
     ).encode("utf-8")
     filtered = {
-        "schemaVersion": 1,
+        "schemaVersion": envelope["schemaVersion"],
         "catalog": catalog,
         "catalogHash": "sha256:" + hashlib.sha256(payload).hexdigest(),
     }

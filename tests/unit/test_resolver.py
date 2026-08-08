@@ -1,10 +1,12 @@
+from copy import deepcopy
+import json
 from pathlib import Path
 import unittest
 
 from selfworkflow.catalog import compile_catalog
 
 
-class TaskResolverTests(unittest.TestCase):
+class TaskResolverV2Tests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
     @classmethod
@@ -12,204 +14,122 @@ class TaskResolverTests(unittest.TestCase):
         cls.catalog = compile_catalog(cls.ROOT / "catalog").content
 
     @staticmethod
-    def _request(**overrides):
+    def _evidence(name, state="supported", suffix="1"):
+        return {
+            "name": name, "provider": "test-host",
+            "subject": {"kind": "host", "id": "fixture", "version": "1", "build": "1", "sourceLock": "sha256:" + suffix * 64},
+            "state": state, "observedAt": "2026-08-08T00:00:00Z", "validUntil": "2027-08-08T00:00:00Z",
+            "evidenceRef": "fixture:" + name, "evidenceHash": "sha256:" + suffix * 64,
+        }
+
+    @classmethod
+    def _request(cls, **overrides):
+        names = (
+            "filesystem-read", "filesystem-write", "skill-discovery",
+            "test-execution", "independent-context", "user-confirmation",
+        )
         request = {
-            "schemaVersion": 1,
-            "stage": "implemented",
-            "operationType": "implement",
-            "complexity": "C1",
-            "risk": "R1",
-            "writeTask": True,
-            "ambiguity": False,
-            "explicitGrill": False,
-            "superpowersSourceStatus": "supported",
-            "capabilityStates": {
-                "filesystem-read": "supported",
-                "filesystem-write": "supported",
+            "schemaVersion": 2, "operationType": "implement", "complexity": "C1", "risk": "R1",
+            "writeTask": True, "ambiguity": False, "explicitModuleIds": [], "projectDefaultModuleIds": [],
+            "projectMinimums": {"strength": "Light"},
+            "capabilityEvidenceSnapshot": {
+                "schemaVersion": 1, "capturedAt": "2026-08-08T12:00:00Z",
+                "evidence": [cls._evidence(name) for name in names],
             },
-            "fileExtensions": [".py"],
-            "semanticTerms": [],
-            "explicitSkills": [],
-            "contextBudget": 4096,
         }
         request.update(overrides)
         return request
 
-    def test_implement_plan_composes_core_stage_skill_and_minimum_requirements(self):
+    def test_all_32_strength_cells_and_read_only_static_na(self):
         from selfworkflow.resolver import resolve_task
 
-        result = resolve_task(self.catalog, self._request())
+        for write_task in (False, True):
+            for c in range(4):
+                for r in range(4):
+                    expected = "Deep" if c == 3 or r == 3 or (c == 2 and r == 2) else "Full" if c == 2 or r == 2 else "Light"
+                    with self.subTest(write=write_task, complexity=c, risk=r):
+                        result = resolve_task(
+                            self.catalog,
+                            self._request(
+                                operationType="implement" if write_task else "analyze",
+                                complexity=f"C{c}", risk=f"R{r}", writeTask=write_task,
+                            ),
+                        )
+                        self.assertEqual(result["status"], "active")
+                        self.assertEqual(result["planGraph"]["strength"], expected)
+                        implemented = next(stage for stage in result["planGraph"]["stages"] if stage["stageId"] == "implemented")
+                        method = next(slot for slot in implemented["slots"] if slot["slotId"] == "implement.method")
+                        self.assertEqual(method["applicability"], "applicable" if write_task else "not-applicable")
 
-        self.assertEqual(result["status"], "active")
-        self.assertEqual(
-            result["selectedSkills"],
-            ("workflow-core", "test-driven-development"),
-        )
-        self.assertEqual(result["classification"]["complexity"], "C1")
-        self.assertEqual(result["requirements"]["review"]["minimumIsolation"], "L0")
-        self.assertEqual(result["requirements"]["verification"]["required"], True)
+    def test_plan_hash_is_stable_and_binds_capability_identity(self):
+        from selfworkflow.resolver import resolve_task
 
-    def test_full_design_review_pauses_without_independent_context(self):
+        request = self._request()
+        first = resolve_task(self.catalog, request)
+        repeat = resolve_task(self.catalog, deepcopy(request))
+        changed_request = deepcopy(request)
+        changed_request["capabilityEvidenceSnapshot"]["evidence"][0]["subject"]["build"] = "2"
+        changed_request["capabilityEvidenceSnapshot"]["evidence"][0]["evidenceHash"] = "sha256:" + "2" * 64
+        changed = resolve_task(self.catalog, changed_request)
+
+        self.assertEqual(first["planGraph"]["planHash"], repeat["planGraph"]["planHash"])
+        self.assertNotEqual(first["planGraph"]["requestHash"], changed["planGraph"]["requestHash"])
+        self.assertNotEqual(first["planGraph"]["planHash"], changed["planGraph"]["planHash"])
+
+    def test_explicit_grill_precedes_independent_brainstorming_cross_review(self):
         from selfworkflow.resolver import resolve_task
 
         result = resolve_task(
             self.catalog,
-            self._request(
-                stage="reviewed",
-                operationType="review",
-                complexity="C2",
-                risk="R2",
-            ),
+            self._request(complexity="C3", risk="R2", explicitModuleIds=["design-grill-me"]),
         )
+        design = next(stage for stage in result["planGraph"]["stages"] if stage["stageId"] == "designed")
+        selected = [module for slot in design["slots"] for module in slot["selectedModules"]]
+        self.assertLess(selected.index("design-grill-me"), selected.index("design-cross-review"))
 
+    def test_missing_required_capability_returns_paused_reason_without_downgrade(self):
+        from selfworkflow.resolver import resolve_task
+
+        request = self._request(complexity="C2", risk="R1")
+        request["capabilityEvidenceSnapshot"]["evidence"] = [
+            item for item in request["capabilityEvidenceSnapshot"]["evidence"]
+            if item["name"] != "skill-discovery"
+        ]
+        result = resolve_task(self.catalog, request)
         self.assertEqual(result["status"], "paused")
-        self.assertEqual(
-            result["capabilityGate"]["missingCapabilities"],
-            ("independent-context",),
-        )
-        self.assertEqual(result["requirements"]["review"]["minimumIsolation"], "L2")
+        self.assertIn("required-capability-unavailable", result["reasonCodes"])
 
-    def test_missing_superpowers_pauses_write_without_silent_degradation(self):
+    def test_stale_evidence_invalidates_plan(self):
         from selfworkflow.resolver import resolve_task
 
-        result = resolve_task(
-            self.catalog,
-            self._request(superpowersSourceStatus="unselected"),
-        )
-
+        request = self._request()
+        request["capabilityEvidenceSnapshot"]["capturedAt"] = "2028-08-08T12:00:00Z"
+        result = resolve_task(self.catalog, request)
         self.assertEqual(result["status"], "paused")
-        self.assertEqual(result["superpowers"]["status"], "paused")
-        self.assertIn("superpowers", result["issues"])
+        self.assertIn("source-evidence-stale", result["reasonCodes"])
 
-    def test_explicit_grill_keeps_brainstorming_cross_review(self):
+    def test_v1_migration_is_explicit_and_never_invents_verified_capabilities(self):
         from selfworkflow.resolver import resolve_task
 
-        result = resolve_task(
-            self.catalog,
-            self._request(
-                stage="designed",
-                operationType="design",
-                complexity="C2",
-                risk="R2",
-                explicitGrill=True,
-                capabilityStates={
-                    "filesystem-read": "supported",
-                    "filesystem-write": "supported",
-                    "independent-context": "supported",
-                },
-            ),
-        )
-
-        self.assertEqual(result["status"], "active")
-        self.assertEqual(
-            result["superpowers"]["selectedSkills"],
-            ("grill-me", "brainstorming"),
-        )
-        self.assertEqual(
-            result["superpowers"]["postGrillReview"]["independentContextRequired"],
-            True,
-        )
-
-    def test_explicit_grill_pauses_when_independent_cross_review_is_unavailable(self):
-        from selfworkflow.resolver import resolve_task
-
-        result = resolve_task(
-            self.catalog,
-            self._request(
-                stage="designed",
-                operationType="design",
-                complexity="C1",
-                risk="R1",
-                explicitGrill=True,
-            ),
-        )
-
+        legacy = {
+            "schemaVersion": 1, "stage": "implemented", "operationType": "implement",
+            "complexity": "C1", "risk": "R1", "writeTask": True,
+            "superpowersSourceStatus": "supported",
+            "capabilityStates": {"filesystem-read": "supported", "filesystem-write": "supported"},
+        }
+        result = resolve_task(self.catalog, legacy)
         self.assertEqual(result["status"], "paused")
-        self.assertEqual(
-            result["capabilityGate"]["missingCapabilities"],
-            ("independent-context",),
-        )
+        self.assertEqual(result["diagnostics"], [{"code": "legacy-capability-evidence-unverified", "severity": "warning"}])
 
-    def test_read_only_task_continues_without_superpowers_or_write_capability(self):
-        from selfworkflow.resolver import resolve_task
-
-        result = resolve_task(
-            self.catalog,
-            self._request(
-                stage="discovered",
-                operationType="read-only",
-                complexity="C0",
-                risk="R0",
-                writeTask=False,
-                superpowersSourceStatus="unselected",
-                capabilityStates={"filesystem-read": "supported"},
-                fileExtensions=[],
-            ),
-        )
-
-        self.assertEqual(result["status"], "active")
-        self.assertEqual(result["selectedSkills"], ())
-        self.assertEqual(result["requirements"]["review"]["required"], False)
-
-    def test_explicit_grill_read_only_design_pauses_without_superpowers(self):
-        from selfworkflow.resolver import resolve_task
-
-        result = resolve_task(
-            self.catalog,
-            self._request(
-                stage="designed",
-                operationType="design",
-                writeTask=False,
-                explicitGrill=True,
-                superpowersSourceStatus="unsupported",
-                capabilityStates={
-                    "filesystem-read": "supported",
-                    "independent-context": "supported",
-                },
-            ),
-        )
-
-        self.assertEqual(result["status"], "paused")
-        self.assertIn("superpowers", result["issues"])
-
-    def test_implement_operation_cannot_claim_to_be_read_only(self):
-        from selfworkflow.resolver import ResolveError, resolve_task
-
-        with self.assertRaises(ResolveError) as raised:
-            resolve_task(self.catalog, self._request(writeTask=False))
-
-        self.assertEqual(raised.exception.code, "resolve-input-invalid")
-
-    def test_invalid_request_fails_with_stable_redacted_error(self):
+    def test_invalid_request_is_redacted(self):
         from selfworkflow.resolver import ResolveError, resolve_task
 
         request = self._request()
-        request["secret-value"] = "must-not-appear"
+        request["must-not-appear"] = "secret"
         with self.assertRaises(ResolveError) as raised:
             resolve_task(self.catalog, request)
-        self.assertEqual(raised.exception.code, "resolve-input-invalid")
         self.assertEqual(str(raised.exception), "resolve-failed")
-        self.assertNotIn("must-not-appear", str(raised.exception))
-
-    def test_plan_binds_normalized_request_identity(self):
-        from selfworkflow.resolver import resolve_task
-
-        first = resolve_task(self.catalog, self._request())
-        repeat = resolve_task(self.catalog, self._request())
-        changed = resolve_task(self.catalog, self._request(risk="R2"))
-
-        self.assertRegex(first["requestHash"], r"^sha256:[0-9a-f]{64}$")
-        self.assertEqual(first["requestHash"], repeat["requestHash"])
-        self.assertNotEqual(first["requestHash"], changed["requestHash"])
-        self.assertEqual(
-            first["task"],
-            {
-                "stage": "implemented",
-                "operationType": "implement",
-                "writeTask": True,
-                "superpowersSourceStatus": "supported",
-            },
-        )
+        self.assertNotIn("secret", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ stages:
       - id: review.independent
         cardinality: zero-or-one
         allowedInvocationKinds: [agent-native, skill]
-        condition: {gte: [risk, R2]}
+        condition: {all: [{eq: [writeTask, true]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}]}]}
       - id: review.remediation
         cardinality: zero-or-many
         allowedInvocationKinds: [agent-native, skill]

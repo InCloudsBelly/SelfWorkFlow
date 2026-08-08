@@ -417,6 +417,7 @@ def route_modules(
         states = dict(request.capability_states or {})
         candidates: list[tuple[int, int, str, dict[str, object]]] = []
         excluded: list[tuple[str, str]] = []
+        early_reasons: set[str] = set()
         known_ids = {module.get("id") for module in modules if type(module) is dict}
         for module in modules:
             if type(module) is not dict or type(module.get("id")) is not str:
@@ -450,12 +451,14 @@ def route_modules(
             static_layers = ("sourceIntegrity", "adapterSupport", "behaviorEvidence")
             if any(evidence[layer] != "supported" for layer in static_layers):
                 excluded.append((module_id, "support-unverified"))
+                if module_id in explicit:
+                    early_reasons.add("unsupported-contract")
                 continue
             candidates.append((rank, module["priority"], module_id, module))
         candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
         selected = candidates if request.cardinality == "zero-or-many" else candidates[:1]
         selected_ids = tuple(item[2] for item in selected)
-        reasons: set[str] = set()
+        reasons: set[str] = set(early_reasons)
         if request.cardinality in {"exactly-one", "gate"} and not selected_ids:
             reasons.add("gate-unavailable" if request.cardinality == "gate" else "primary-module-unavailable")
         if request.cardinality in {"exactly-one", "gate", "zero-or-one"} and len(

@@ -20,6 +20,18 @@ from selfworkflow.model import (
 )
 
 
+def workflow_strength(complexity: Complexity | str, risk: Risk | str) -> str:
+    """Return the pure Light/Full/Deep matrix used by modular planning."""
+
+    c = int(_coerce_complexity(complexity).value[1])
+    r = int(_coerce_risk(risk).value[1])
+    if c == 3 or r == 3 or (c == 2 and r == 2):
+        return "Deep"
+    if c == 2 or r == 2:
+        return "Full"
+    return "Light"
+
+
 def _capability_gap_reason(state: CapabilityState | None) -> str:
     if state is CapabilityState.UNSUPPORTED:
         return "capability is unsupported"
