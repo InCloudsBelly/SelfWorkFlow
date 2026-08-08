@@ -747,6 +747,12 @@ def _validate_plan_graph(document: dict[str, Any]) -> None:
                     "plan-inapplicable-slot-not-empty",
                     ("stages", stage_index, "slots", slot_index),
                 )
+            # A non-applicable slot is intentionally empty.  Its pipeline
+            # cardinality remains the contract for when the condition matches;
+            # applying it while the condition is false makes an otherwise
+            # schema-valid not-applicable bounded slot impossible to represent.
+            if slot["applicability"] != "applicable":
+                continue
             if slot["selectionMode"] == "static":
                 cardinality = slot["cardinality"]
                 valid = {
