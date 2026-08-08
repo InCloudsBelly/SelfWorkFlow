@@ -1,0 +1,20 @@
+schemaVersion: 1
+layouts:
+  - id: fresh
+    existing: []
+    expectedPlanStatus: ready
+  - id: unmanaged-content
+    existing: [AGENTS.md, skills/existing/SKILL.md]
+    expectedPlanStatus: ready-with-managed-block
+  - id: conflicting-managed-block
+    existing: [AGENTS.md]
+    expectedPlanStatus: paused
+  - id: drift-after-plan
+    existing: [AGENTS.md]
+    expectedApplyStatus: rejected
+  - id: reparse-target
+    existing: [agents-link]
+    expectedPlanStatus: rejected
+  - id: interrupted-apply
+    existing: [transaction.json]
+    expectedRecoveryStatus: attention
