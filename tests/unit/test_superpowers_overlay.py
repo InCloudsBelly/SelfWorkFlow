@@ -105,6 +105,22 @@ class SuperpowersOverlayTests(unittest.TestCase):
         self.assertEqual(readonly["allowedMode"], "read-only-analysis")
         self.assertIn("superpowers", readonly["issues"])
 
+    def test_explicit_grill_pauses_even_for_read_only_design_without_superpowers(self):
+        decision = decide_overlay(
+            stage="designed",
+            operation="design",
+            complexity=1,
+            risk=1,
+            explicit_grill=True,
+            source_status="unsupported",
+            write_task=False,
+            grill_available=True,
+        )
+
+        self.assertEqual(decision["status"], "paused")
+        self.assertEqual(decision["selectedSkills"], ())
+        self.assertIn("superpowers", decision["issues"])
+
     def test_staging_copies_only_selected_skills_and_never_mutates_source(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)

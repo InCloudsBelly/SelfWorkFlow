@@ -45,7 +45,7 @@ def decide_overlay(
         complexity >= 2 and risk >= 2
     )
     if source_status != "supported":
-        if write_task:
+        if write_task or explicit_grill:
             return {
                 "status": "paused",
                 "allowedMode": "none",

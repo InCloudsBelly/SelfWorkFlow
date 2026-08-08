@@ -103,6 +103,8 @@ def _parse_request(request: Mapping[str, object]) -> dict[str, object]:
         raise ResolveError()
     if operation == "read-only" and write_task:
         raise ResolveError()
+    if operation == "implement" and not write_task:
+        raise ResolveError()
     if explicit_grill and operation != "design":
         raise ResolveError()
     source_status = request["superpowersSourceStatus"]

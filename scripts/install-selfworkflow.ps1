@@ -225,9 +225,8 @@ function Inspect-Superpowers {
         Stop-Install "superpowers-selection" 30 "superpowers-source-unsupported"
     }
     foreach ($skill in $RequiredSuperpowersSkills) {
-        $entry = Join-Path $Source ("skills\{0}\SKILL.md" -f $skill)
-        if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
-            Stop-Install "superpowers-selection" 30 ("superpowers-skill-missing:{0}" -f $skill)
+        if (@($report.trackedSkillIds) -notcontains $skill) {
+            Stop-Install "superpowers-selection" 30 ("superpowers-skill-untracked:{0}" -f $skill)
         }
     }
     if ($report.dirty -and -not $AllowDirtySuperpowers) {
@@ -405,6 +404,12 @@ try {
             "--target", $superpowersTarget,
             "--expected-inventory-hash", $superpowersReport.inventoryHash
         ) (Join-Path $script:LogDirectory "superpowers-stage.json")
+        foreach ($skill in $RequiredSuperpowersSkills) {
+            $entry = Join-Path $superpowersTarget ("{0}\SKILL.md" -f $skill)
+            if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
+                Stop-Install "verify" 70 ("staged-superpowers-skill-missing:{0}" -f $skill)
+            }
+        }
     }
     $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null

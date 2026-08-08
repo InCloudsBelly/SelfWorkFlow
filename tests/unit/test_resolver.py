@@ -151,6 +151,35 @@ class TaskResolverTests(unittest.TestCase):
         self.assertEqual(result["selectedSkills"], ())
         self.assertEqual(result["requirements"]["review"]["required"], False)
 
+    def test_explicit_grill_read_only_design_pauses_without_superpowers(self):
+        from selfworkflow.resolver import resolve_task
+
+        result = resolve_task(
+            self.catalog,
+            self._request(
+                stage="designed",
+                operationType="design",
+                writeTask=False,
+                explicitGrill=True,
+                superpowersSourceStatus="unsupported",
+                capabilityStates={
+                    "filesystem-read": "supported",
+                    "independent-context": "supported",
+                },
+            ),
+        )
+
+        self.assertEqual(result["status"], "paused")
+        self.assertIn("superpowers", result["issues"])
+
+    def test_implement_operation_cannot_claim_to_be_read_only(self):
+        from selfworkflow.resolver import ResolveError, resolve_task
+
+        with self.assertRaises(ResolveError) as raised:
+            resolve_task(self.catalog, self._request(writeTask=False))
+
+        self.assertEqual(raised.exception.code, "resolve-input-invalid")
+
     def test_invalid_request_fails_with_stable_redacted_error(self):
         from selfworkflow.resolver import ResolveError, resolve_task
 

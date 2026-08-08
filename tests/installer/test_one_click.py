@@ -289,6 +289,47 @@ class OneClickInstallerContractTests(unittest.TestCase):
             )
             self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
 
+    def test_untracked_required_superpowers_skills_cannot_enable_write_capability(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            superpowers = root / "selected superpowers"
+            tracked = superpowers / "skills/unrelated/SKILL.md"
+            tracked.parent.mkdir(parents=True)
+            tracked.write_text("unrelated\n", encoding="utf-8")
+            _commit(superpowers)
+            for name in (
+                "brainstorming",
+                "writing-plans",
+                "test-driven-development",
+                "systematic-debugging",
+                "requesting-code-review",
+                "receiving-code-review",
+                "verification-before-completion",
+            ):
+                skill = superpowers / "skills" / name / "SKILL.md"
+                skill.parent.mkdir(parents=True, exist_ok=True)
+                skill.write_text(name + "\n", encoding="utf-8")
+
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice",
+                "Skip",
+                "-SuperpowersChoice",
+                "Existing",
+                "-SuperpowersSource",
+                str(superpowers),
+                "-AllowDirtySuperpowers",
+                "-ConfirmApply",
+            )
+
+            self.assertEqual(result.returncode, 30, result.stdout + result.stderr)
+            summary = json.loads(
+                (self._single_log_directory(root) / "summary.json").read_text()
+            )
+            self.assertEqual(summary["stage"], "superpowers-selection")
+            self.assertIn("superpowers-skill-untracked", summary["reason"])
+            self.assertFalse((root / "agents/skills/superpowers").exists())
+
     def test_approved_official_clone_path_is_exercised_without_network(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)

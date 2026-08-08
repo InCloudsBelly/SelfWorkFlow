@@ -84,6 +84,13 @@ def inspect_superpowers_source(source: str | Path) -> dict[str, object]:
             "reason": "git-inspection-failed",
         }
     inventory = _tracked_inventory(root)
+    tracked_skill_ids = sorted(
+        PurePosixPath(item["path"]).parts[1]
+        for item in inventory
+        if len(PurePosixPath(item["path"]).parts) == 3
+        and PurePosixPath(item["path"]).parts[0] == "skills"
+        and PurePosixPath(item["path"]).parts[2] == "SKILL.md"
+    )
     dirty_paths: set[str] = set()
     records = [record for record in status.stdout.split("\0") if record]
     for record in records:
@@ -103,6 +110,7 @@ def inspect_superpowers_source(source: str | Path) -> dict[str, object]:
         "commit": commit.stdout.strip(),
         "dirty": dirty,
         "inventoryHash": _inventory_hash(inventory),
+        "trackedSkillIds": tracked_skill_ids,
         "dirtyFiles": dirty_files,
     }
 
