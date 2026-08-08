@@ -446,24 +446,40 @@ def _validate_test_strategy_core(
         _raise_semantic("test-strategy-grill-me-floor-invalid", ("testLevel",))
 
     risk_ids = {risk["riskId"] for risk in document["risks"]}
-    condition_ids = {condition["conditionId"] for condition in document["acceptanceConditions"]}
-    technique_ids = {technique["techniqueId"] for technique in document["techniques"]}
+    condition_ids: set[str] = set()
+    for condition_index, condition in enumerate(document["acceptanceConditions"]):
+        condition_id = condition["conditionId"]
+        if condition_id in condition_ids:
+            _raise_semantic(
+                "test-strategy-acceptance-condition-duplicate",
+                ("acceptanceConditions", condition_index, "conditionId"),
+            )
+        condition_ids.add(condition_id)
+    technique_ids: set[str] = set()
+    for technique_index, technique in enumerate(document["techniques"]):
+        technique_id = technique["techniqueId"]
+        if technique_id in technique_ids:
+            _raise_semantic(
+                "test-strategy-technique-duplicate",
+                ("techniques", technique_index, "techniqueId"),
+            )
+        technique_ids.add(technique_id)
     obligation_ids: set[str] = set()
     for risk_index, risk in enumerate(document["risks"]):
         if len(risk_ids) != len(document["risks"]):
             _raise_semantic("test-strategy-risk-duplicate", ("risks", risk_index, "riskId"))
         if not set(risk["acceptanceConditionIds"]) <= condition_ids:
             _raise_semantic("test-strategy-acceptance-condition-unknown", ("risks", risk_index))
-    authorization_ids: set[str] = set()
+    authorization_by_id: dict[str, dict[str, Any]] = {}
     for authorization_index, requirement in enumerate(document["authorizationRequirements"]):
         authorization_id = requirement["authorizationId"]
-        if authorization_id in authorization_ids:
+        if authorization_id in authorization_by_id:
             _raise_semantic(
                 "test-strategy-authorization-requirement-duplicate",
                 ("authorizationRequirements", authorization_index, "authorizationId"),
             )
-        authorization_ids.add(authorization_id)
-    used_authorization_ids: set[str] = set()
+        authorization_by_id[authorization_id] = requirement
+    used_required_authorization_ids: set[str] = set()
     for obligation_index, obligation in enumerate(document["coverageObligations"]):
         if obligation["obligationId"] in obligation_ids:
             _raise_semantic("test-strategy-obligation-duplicate", ("coverageObligations", obligation_index, "obligationId"))
@@ -477,7 +493,8 @@ def _validate_test_strategy_core(
         for authorization_index, authorization_id in enumerate(
             obligation.get("authorizationRequirementIds", ())
         ):
-            if authorization_id not in authorization_ids:
+            requirement = authorization_by_id.get(authorization_id)
+            if requirement is None:
                 _raise_semantic(
                     "test-strategy-authorization-requirement-unknown",
                     (
@@ -485,7 +502,15 @@ def _validate_test_strategy_core(
                         "authorizationRequirementIds", authorization_index,
                     ),
                 )
-            used_authorization_ids.add(authorization_id)
+            if not requirement["required"]:
+                _raise_semantic(
+                    "test-strategy-authorization-requirement-not-required",
+                    (
+                        "coverageObligations", obligation_index,
+                        "authorizationRequirementIds", authorization_index,
+                    ),
+                )
+            used_required_authorization_ids.add(authorization_id)
 
     expected_dimensions = {"direct", "failure", "boundary", "state", "nfr"}
     dimensions: dict[str, set[str]] = {}
@@ -516,13 +541,15 @@ def _validate_test_strategy_core(
         if obligation["obligationId"] not in dimensions[obligation["dimension"]]:
             _raise_semantic("test-strategy-dimension-mismatch", ("coverageObligations", obligation_index, "dimension"))
 
-    if used_authorization_ids != authorization_ids:
-        for authorization_index, requirement in enumerate(document["authorizationRequirements"]):
-            if requirement["authorizationId"] not in used_authorization_ids:
-                _raise_semantic(
-                    "test-strategy-authorization-requirement-unused",
-                    ("authorizationRequirements", authorization_index, "authorizationId"),
-                )
+    for authorization_index, requirement in enumerate(document["authorizationRequirements"]):
+        if (
+            requirement["required"]
+            and requirement["authorizationId"] not in used_required_authorization_ids
+        ):
+            _raise_semantic(
+                "test-strategy-authorization-requirement-unused",
+                ("authorizationRequirements", authorization_index, "authorizationId"),
+            )
 
 
 def _validate_test_strategy(

@@ -633,6 +633,52 @@ class QualityArtifactSchemaTests(unittest.TestCase):
                     diff_signal_set=diff,
                 )
 
+    def test_test_strategy_rejects_duplicate_acceptance_condition_ids(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        strategy["acceptanceConditions"].append({
+            "conditionId": "accept-null",
+            "description": "different duplicate content",
+        })
+        strategy["strategyHash"] = self._hash_document(strategy, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], strategy,
+            "test-strategy-acceptance-condition-duplicate",
+            ("acceptanceConditions", 1, "conditionId"),
+            diff_signal_set=diff,
+        )
+
+    def test_test_strategy_rejects_duplicate_technique_ids(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        strategy["techniques"].append({
+            "techniqueId": "tech-unit",
+            "name": "integration",
+            "rationale": "different duplicate content",
+        })
+        strategy["strategyHash"] = self._hash_document(strategy, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], strategy,
+            "test-strategy-technique-duplicate",
+            ("techniques", 1, "techniqueId"),
+            diff_signal_set=diff,
+        )
+
+    def test_test_strategy_accepts_distinct_acceptance_and_technique_ids(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        strategy["acceptanceConditions"].append({
+            "conditionId": "accept-boundary",
+            "description": "boundary input is rejected",
+        })
+        strategy["techniques"].append({
+            "techniqueId": "tech-boundary",
+            "name": "boundary",
+            "rationale": "boundary behavior",
+        })
+        strategy["strategyHash"] = self._hash_document(strategy, "strategyHash")
+        self._load(self.SCHEMA_NAMES[3], strategy, diff_signal_set=diff)
+
     def test_test_strategy_authorization_references_are_exact(self):
         diff = self._diff()
 
@@ -704,6 +750,35 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         })
         valid["strategyHash"] = self._hash_document(valid, "strategyHash")
         self._load(self.SCHEMA_NAMES[3], valid, diff_signal_set=diff)
+
+    def test_test_strategy_authorization_dependencies_require_blocking_requirements(self):
+        diff = self._diff()
+        invalid = self._strategy(diff)
+        invalid["authorizationRequirements"] = [{
+            "authorizationId": "auth-advisory",
+            "required": False,
+            "reason": "optional diagnostic access",
+        }]
+        invalid["coverageObligations"][0].update({
+            "authorizationRequired": True,
+            "authorizationRequirementIds": ["auth-advisory"],
+        })
+        invalid["strategyHash"] = self._hash_document(invalid, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], invalid,
+            "test-strategy-authorization-requirement-not-required",
+            ("coverageObligations", 0, "authorizationRequirementIds", 0),
+            diff_signal_set=diff,
+        )
+
+        advisory = self._strategy(diff)
+        advisory["authorizationRequirements"] = [{
+            "authorizationId": "auth-advisory",
+            "required": False,
+            "reason": "optional diagnostic access",
+        }]
+        advisory["strategyHash"] = self._hash_document(advisory, "strategyHash")
+        self._load(self.SCHEMA_NAMES[3], advisory, diff_signal_set=diff)
 
     def test_review_finding_rejects_stale_diff(self):
         diff = self._diff()
