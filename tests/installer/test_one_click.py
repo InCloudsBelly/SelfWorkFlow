@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from selfworkflow.installer import tree_hash
+
 
 def _commit(root):
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
@@ -256,8 +258,20 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertTrue(staged.is_dir())
             self.assertTrue((staged / "brainstorming/SKILL.md").is_file())
             self.assertTrue((staged / ".selfworkflow-source.json").is_file())
+            log_directory = self._single_log_directory(root)
+            install_log = (log_directory / "install.log").read_text(encoding="utf-8")
+            stage_position = install_log.rfind("Running selfworkflow source stage")
+            doctor_position = install_log.rfind("Running selfworkflow doctor")
+            self.assertNotEqual(stage_position, -1)
+            self.assertLess(stage_position, doctor_position)
+            doctor_after = json.loads(
+                (log_directory / "doctor-after.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                doctor_after["agentsRoot"]["treeHash"], tree_hash(root / "agents")
+            )
             summary = json.loads(
-                (self._single_log_directory(root) / "summary.json").read_text()
+                (log_directory / "summary.json").read_text()
             )
             self.assertEqual(summary["grillMe"], "installed")
             self.assertEqual(summary["superpowers"]["supportStatus"], "supported")

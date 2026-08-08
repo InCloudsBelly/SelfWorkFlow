@@ -397,9 +397,6 @@ try {
     $verifyPath = Join-Path $script:LogDirectory "verify-result.json"
     Invoke-SelfWorkflow @("install", "verify", "--manifest", $applyResult.manifestPath) $verifyPath | Out-Null
 
-    $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
-    Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
-
     if ($SuperpowersChoice -ne "Skip") {
         $superpowersTarget = Join-Path $AgentsRoot "skills\superpowers"
         $stagedSuperpowers = Invoke-SelfWorkflow @(
@@ -409,6 +406,9 @@ try {
             "--expected-inventory-hash", $superpowersReport.inventoryHash
         ) (Join-Path $script:LogDirectory "superpowers-stage.json")
     }
+    $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
+    Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
+
     $summary = [ordered]@{
         schemaVersion = 1
         status = "installed"
