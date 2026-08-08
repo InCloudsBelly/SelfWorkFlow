@@ -107,11 +107,16 @@ def validate_ledger(
             if (stage["status"] == "skipped") != (plan_stage["applicability"] == "not-applicable"):
                 reasons.add("stage-applicability-invalid")
         statuses = [stage["status"] for stage in ledger["stages"]]
+        execution_statuses = [
+            stage["status"]
+            for stage in ledger["stages"]
+            if plan_stages[stage["stageId"]]["applicability"] == "applicable"
+        ]
         non_prefix = next(
-            (index for index, status in enumerate(statuses) if status not in {"passed", "skipped"}),
-            len(statuses),
+            (index for index, status in enumerate(execution_statuses) if status != "passed"),
+            len(execution_statuses),
         )
-        if any(status in {"passed", "skipped", "active", "paused", "failed"} for status in statuses[non_prefix + 1:]):
+        if any(status != "pending" for status in execution_statuses[non_prefix + 1:]):
             reasons.add("ledger-stage-sequence-invalid")
         ledger_status = ledger.get("status")
         if ledger_status != "superseded":

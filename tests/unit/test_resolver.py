@@ -61,6 +61,20 @@ class TaskResolverV2Tests(unittest.TestCase):
                         method = next(slot for slot in implemented["slots"] if slot["slotId"] == "implement.method")
                         self.assertEqual(method["applicability"], "applicable" if write_task else "not-applicable")
 
+    def test_read_only_plan_initial_ledger_accepts_static_skips(self):
+        from selfworkflow.ledger import new_ledger, validate_ledger
+        from selfworkflow.resolver import resolve_task
+
+        request = self._request(operationType="analyze", writeTask=False)
+        result = resolve_task(self.catalog, request)
+        plan = result["planGraph"]
+        ledger = new_ledger(plan)
+
+        self.assertEqual(result["status"], "active")
+        self.assertTrue(validate_ledger(
+            ledger, plan, request["capabilityEvidenceSnapshot"]
+        )["valid"])
+
     def test_plan_hash_is_stable_and_binds_capability_identity(self):
         from selfworkflow.resolver import resolve_task
 
