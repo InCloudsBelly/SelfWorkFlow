@@ -11,12 +11,14 @@ entries:
     aliases: []
     triggers: [mandatory-a]
     exclusions: []
+    selectors: {fileExtensions: [], operationTypes: [implement], semanticTerms: [mandatory-a]}
     stages: [discovered]
     requiredCapabilities: [filesystem-read]
     dependencies: []
     conflicts: [mandatory-b]
     composition: exclusive
     mandatory: true
+    mandatoryWhen: {match: any, scopes: [safety], fileExtensions: [], operationTypes: []}
     priority: 10
     contextCost: 10
     supportStatus: supported
@@ -31,12 +33,14 @@ entries:
     aliases: []
     triggers: [mandatory-b]
     exclusions: []
+    selectors: {fileExtensions: [], operationTypes: [implement], semanticTerms: [mandatory-b]}
     stages: [discovered]
     requiredCapabilities: [filesystem-read]
     dependencies: []
     conflicts: [mandatory-a]
     composition: exclusive
     mandatory: true
+    mandatoryWhen: {match: any, scopes: [project], fileExtensions: [], operationTypes: []}
     priority: 20
     contextCost: 20
     supportStatus: supported

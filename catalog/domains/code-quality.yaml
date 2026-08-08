@@ -16,6 +16,10 @@ entries:
       - verification evidence
     exclusions:
       - claim that a code quality skill is implemented
+    selectors:
+      fileExtensions: [.py, .ps1, .ts, .js, .cpp, .h]
+      operationTypes: [implement, debug, review, verify]
+      semanticTerms: [code quality evidence, verification evidence]
     stages:
       - reviewed
       - verified
@@ -27,6 +31,11 @@ entries:
     conflicts: []
     composition: augment
     mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
     priority: 500
     contextCost: 192
     supportStatus: unverified

@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 import re
+import subprocess
 import unicodedata
 
 import yaml
@@ -36,6 +37,8 @@ _ERROR_ORDER = {
             "alias-collision",
             "alias-target-unknown",
             "dangling-dependency",
+            "dangling-conflict",
+            "self-conflict",
             "dependency-cycle",
             "mandatory-conflict",
             "unknown-capability",
@@ -43,6 +46,8 @@ _ERROR_ORDER = {
             "protected-rule-operation-invalid",
             "source-invalid",
             "source-hash-mismatch",
+            "source-revision-invalid",
+            "source-revision-mismatch",
             "planned-source-must-be-unverified",
             "standard-capability-mismatch",
             "lifecycle-invalid",
@@ -235,6 +240,50 @@ def _source_content_hash(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _git_root(repository_root: Path) -> Path:
+    result = subprocess.run(
+        ["git", "-C", str(repository_root), "rev-parse", "--show-toplevel"],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="strict",
+    )
+    if result.returncode != 0:
+        raise CatalogError(("source-revision-invalid",)) from None
+    discovered = Path(result.stdout.strip()).resolve(strict=True)
+    expected = repository_root.resolve(strict=True)
+    if discovered != expected:
+        raise CatalogError(("source-revision-invalid",)) from None
+    return discovered
+
+
+def _revision_content_hash(
+    repository_root: Path,
+    relative_path: str,
+    revision: str,
+    verified_commits: set[str],
+) -> str:
+    commit = revision.removeprefix("git:")
+    if commit not in verified_commits:
+        commit_result = subprocess.run(
+            ["git", "-C", str(repository_root), "cat-file", "-e", f"{commit}^{{commit}}"],
+            check=False,
+            capture_output=True,
+        )
+        if commit_result.returncode != 0:
+            raise CatalogError(("source-revision-invalid",)) from None
+        verified_commits.add(commit)
+    content_result = subprocess.run(
+        ["git", "-C", str(repository_root), "show", f"{commit}:{relative_path}"],
+        check=False,
+        capture_output=True,
+    )
+    if content_result.returncode != 0:
+        raise CatalogError(("source-revision-invalid",)) from None
+    return "sha256:" + hashlib.sha256(content_result.stdout).hexdigest()
+
+
 def _valid_rule_operation(value: object) -> bool:
     if type(value) is not dict or set(value) != {"operation", "id", "constraint"}:
         return False
@@ -417,6 +466,14 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
     ):
         errors.add("dangling-dependency")
     if any(
+        conflict not in stable_ids
+        for entry in entries
+        for conflict in entry["conflicts"]
+    ):
+        errors.add("dangling-conflict")
+    if any(entry["id"] in entry["conflicts"] for entry in entries):
+        errors.add("self-conflict")
+    if any(
         capability not in standard_capabilities
         for entry in entries
         for capability in entry["requiredCapabilities"]
@@ -444,7 +501,6 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
         entry["mandatory"]
         and conflict in entry_by_id
         and entry_by_id[conflict]["mandatory"]
-        and entry["id"] in entry_by_id[conflict]["conflicts"]
         for entry in entries
         for conflict in entry["conflicts"]
     ):
@@ -465,14 +521,26 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
         for entry in entries
     ):
         errors.add("source-invalid")
-    if any(
-        _source_content_hash(
+    revision_candidates: list[dict[str, object]] = []
+    for entry in entries:
+        current_hash = _source_content_hash(
             _repository_file(repository_root, entry["source"]["path"])
         )
-        != entry["source"]["contentHash"]
-        for entry in entries
-    ):
-        errors.add("source-hash-mismatch")
+        if current_hash != entry["source"]["contentHash"]:
+            errors.add("source-hash-mismatch")
+        else:
+            revision_candidates.append(entry)
+    git_root = _git_root(repository_root)
+    verified_commits: set[str] = set()
+    for entry in revision_candidates:
+        revision_hash = _revision_content_hash(
+            git_root,
+            entry["source"]["path"],
+            entry["source"]["revision"],
+            verified_commits,
+        )
+        if revision_hash != entry["source"]["contentHash"]:
+            errors.add("source-revision-mismatch")
     display_sources: dict[str, str] = {}
     for entry in entries:
         identity = unicodedata.normalize("NFC", entry["displayName"]).casefold()

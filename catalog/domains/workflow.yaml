@@ -16,6 +16,10 @@ entries:
       - task lifecycle
     exclusions:
       - pure read-only lookup
+    selectors:
+      fileExtensions: []
+      operationTypes: [design, plan, implement, debug, review, verify, install, publish]
+      semanticTerms: [workflow execution, task lifecycle]
     stages:
       - discovered
       - capability-checked
@@ -32,6 +36,11 @@ entries:
     conflicts: []
     composition: standalone
     mandatory: true
+    mandatoryWhen:
+      match: any
+      scopes: [global]
+      fileExtensions: []
+      operationTypes: []
     priority: 1000
     contextCost: 512
     supportStatus: supported
@@ -51,6 +60,10 @@ entries:
       - protected rule change
     exclusions:
       - unrelated content generation
+    selectors:
+      fileExtensions: []
+      operationTypes: [implement, review, verify, install, publish]
+      semanticTerms: [rule merge, protected rule change]
     stages:
       - capability-checked
       - reviewed
@@ -62,6 +75,11 @@ entries:
     conflicts: []
     composition: augment
     mandatory: true
+    mandatoryWhen:
+      match: any
+      scopes: [safety]
+      fileExtensions: []
+      operationTypes: []
     priority: 900
     contextCost: 256
     supportStatus: supported

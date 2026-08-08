@@ -102,9 +102,54 @@ def _catalog_source(
             REPOSITORY_ROOT / "schemas" / "protected-rules.schema.json",
             schema_root / "protected-rules.schema.json",
         )
+        subprocess.run(
+            ["git", "init", "-q"],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "add",
+                "WORKFLOW.md",
+                "workflow",
+                "schemas",
+                *sorted((extra_sources or {}).keys()),
+            ],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=SelfWorkFlow Tests",
+                "-c",
+                "user.email=selfworkflow-tests@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture sources",
+            ],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+        )
+        source_revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         domain_document = yaml.safe_load(
             (FIXTURE_ROOT / fixture_name).read_text(encoding="utf-8")
         )
+        for entry in domain_document["entries"]:
+            if "revision" in entry["source"]:
+                entry["source"]["revision"] = f"git:{source_revision}"
         if mutate_domain is not None:
             mutate_domain(domain_document)
         (domain_root / "fixture.yaml").write_text(
@@ -135,6 +180,23 @@ class CatalogPublicApiTests(unittest.TestCase):
         self.assertTrue(issubclass(CatalogError, ValueError))
         self.assertTrue(callable(compile_catalog))
         self.assertTrue(hasattr(CompiledCatalog, "catalog_hash"))
+
+    def test_hash_bound_text_sources_are_forced_to_lf_in_fresh_checkouts(self):
+        source_paths = (
+            "WORKFLOW.md",
+            "workflow/lifecycle.yaml",
+            "workflow/protected-rules.yaml",
+            "workflow/evidence.yaml",
+        )
+        for source_path in source_paths:
+            result = subprocess.run(
+                ["git", "check-attr", "eol", "--", source_path],
+                cwd=REPOSITORY_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.stdout.strip(), f"{source_path}: eol: lf")
 
 
 class CatalogCliTests(unittest.TestCase):
@@ -308,6 +370,88 @@ class CatalogCompilationTests(unittest.TestCase):
             if source["kind"] == "planned":
                 self.assertEqual(entry["supportStatus"], "unverified")
         self.assertNotIn(str(REPOSITORY_ROOT), compiled.content.decode("utf-8"))
+        for entry in catalog["entries"]:
+            self.assertEqual(
+                set(entry["selectors"]),
+                {"fileExtensions", "operationTypes", "semanticTerms"},
+            )
+            self.assertEqual(
+                set(entry["mandatoryWhen"]),
+                {"match", "scopes", "fileExtensions", "operationTypes"},
+            )
+
+    def test_typed_selectors_and_conditional_mandatory_are_required_and_closed(self):
+        from selfworkflow.catalog import CatalogError, compile_catalog
+
+        def remove_selectors(document):
+            del document["entries"][0]["selectors"]
+
+        with _catalog_source(mutate_domain=remove_selectors) as source:
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(source)
+        self.assertEqual(caught.exception.errors, ("catalog-structure-invalid",))
+
+        def open_mandatory_when(document):
+            document["entries"][0]["mandatoryWhen"]["unexpected"] = True
+
+        with _catalog_source(mutate_domain=open_mandatory_when) as source:
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(source)
+        self.assertEqual(caught.exception.errors, ("catalog-structure-invalid",))
+
+    def test_revision_must_exist_and_bind_the_source_bytes(self):
+        from selfworkflow.catalog import CatalogError, compile_catalog
+
+        def nonexistent_revision(document):
+            document["entries"][0]["source"]["revision"] = "git:" + "0" * 40
+
+        with _catalog_source(mutate_domain=nonexistent_revision) as source:
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(source)
+        self.assertEqual(caught.exception.errors, ("source-revision-invalid",))
+
+        with _catalog_source() as source:
+            source_file = source.parent / "WORKFLOW.md"
+            source_file.write_bytes(source_file.read_bytes() + b"changed after revision\n")
+            domain_path = source / "domains" / "fixture.yaml"
+            document = yaml.safe_load(domain_path.read_text(encoding="utf-8"))
+            document["entries"][0]["source"]["contentHash"] = (
+                "sha256:" + hashlib.sha256(source_file.read_bytes()).hexdigest()
+            )
+            domain_path.write_text(
+                yaml.safe_dump(document, sort_keys=False),
+                encoding="utf-8",
+            )
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(source)
+        self.assertEqual(caught.exception.errors, ("source-revision-mismatch",))
+
+    def test_conflicts_must_resolve_and_mandatory_conflicts_are_undirected(self):
+        from selfworkflow.catalog import CatalogError, compile_catalog
+
+        def dangling_conflict(document):
+            document["entries"][0]["conflicts"] = ["missing-entry"]
+
+        with _catalog_source(mutate_domain=dangling_conflict) as source:
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(source)
+        self.assertEqual(caught.exception.errors, ("dangling-conflict",))
+
+        def one_way_mandatory_conflict(document):
+            first = document["entries"][0]
+            first["mandatory"] = True
+            first["conflicts"] = ["mandatory-b"]
+            second = copy.deepcopy(first)
+            second["id"] = "mandatory-b"
+            second["displayName"] = "Mandatory B"
+            second["conflicts"] = []
+            second["aliases"] = []
+            document["entries"].append(second)
+
+        with _catalog_source(mutate_domain=one_way_mandatory_conflict) as source:
+            with self.assertRaises(CatalogError) as caught:
+                compile_catalog(source)
+        self.assertEqual(caught.exception.errors, ("mandatory-conflict",))
 
     def test_catalog_schema_is_draft_2020_12_and_every_object_is_closed(self):
         from selfworkflow.catalog import compile_catalog

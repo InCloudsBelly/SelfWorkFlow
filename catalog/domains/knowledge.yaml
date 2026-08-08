@@ -16,6 +16,10 @@ entries:
       - on-demand loading
     exclusions:
       - claim that a knowledge skill is implemented
+    selectors:
+      fileExtensions: [.md, .markdown, .txt, .json, .yaml, .yml]
+      operationTypes: [knowledge-read, knowledge-write, document]
+      semanticTerms: [phase-specific knowledge, on-demand loading]
     stages:
       - discovered
       - capability-checked
@@ -27,6 +31,11 @@ entries:
     conflicts: []
     composition: augment
     mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
     priority: 400
     contextCost: 160
     supportStatus: unverified

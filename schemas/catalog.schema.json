@@ -39,6 +39,63 @@
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/identifier"}
     },
+    "fileExtensionList": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^\\.[a-z0-9][a-z0-9+._-]{0,31}$"
+      }
+    },
+    "operationType": {
+      "enum": [
+        "analyze",
+        "design",
+        "plan",
+        "implement",
+        "debug",
+        "review",
+        "verify",
+        "document",
+        "install",
+        "publish",
+        "knowledge-read",
+        "knowledge-write"
+      ]
+    },
+    "operationTypeList": {
+      "type": "array",
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/operationType"}
+    },
+    "selectors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileExtensions", "operationTypes", "semanticTerms"],
+      "properties": {
+        "fileExtensions": {"$ref": "#/$defs/fileExtensionList"},
+        "operationTypes": {"$ref": "#/$defs/operationTypeList"},
+        "semanticTerms": {"$ref": "#/$defs/stringList"}
+      }
+    },
+    "mandatoryWhen": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "scopes", "fileExtensions", "operationTypes"],
+      "properties": {
+        "match": {"enum": ["any", "all"]},
+        "scopes": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["global", "safety", "project"]}
+        },
+        "fileExtensions": {"$ref": "#/$defs/fileExtensionList"},
+        "operationTypes": {"$ref": "#/$defs/operationTypeList"}
+      }
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -115,12 +172,14 @@
         "aliases",
         "triggers",
         "exclusions",
+        "selectors",
         "stages",
         "requiredCapabilities",
         "dependencies",
         "conflicts",
         "composition",
         "mandatory",
+        "mandatoryWhen",
         "priority",
         "contextCost",
         "supportStatus",
@@ -142,6 +201,7 @@
         },
         "triggers": {"$ref": "#/$defs/stringList"},
         "exclusions": {"$ref": "#/$defs/stringList"},
+        "selectors": {"$ref": "#/$defs/selectors"},
         "stages": {
           "type": "array",
           "maxItems": 9,
@@ -165,6 +225,7 @@
         "conflicts": {"$ref": "#/$defs/identifierList"},
         "composition": {"enum": ["standalone", "augment", "exclusive"]},
         "mandatory": {"type": "boolean"},
+        "mandatoryWhen": {"$ref": "#/$defs/mandatoryWhen"},
         "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "contextCost": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "supportStatus": {"enum": ["supported", "unverified"]},
@@ -185,12 +246,14 @@
         "aliases",
         "triggers",
         "exclusions",
+        "selectors",
         "stages",
         "requiredCapabilities",
         "dependencies",
         "conflicts",
         "composition",
         "mandatory",
+        "mandatoryWhen",
         "priority",
         "contextCost",
         "supportStatus",
@@ -211,6 +274,7 @@
         },
         "triggers": {"$ref": "#/$defs/stringList"},
         "exclusions": {"$ref": "#/$defs/stringList"},
+        "selectors": {"$ref": "#/$defs/selectors"},
         "stages": {
           "type": "array",
           "maxItems": 9,
@@ -234,6 +298,7 @@
         "conflicts": {"$ref": "#/$defs/identifierList"},
         "composition": {"enum": ["standalone", "augment", "exclusive"]},
         "mandatory": {"type": "boolean"},
+        "mandatoryWhen": {"$ref": "#/$defs/mandatoryWhen"},
         "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "contextCost": {"type": "integer", "minimum": 0, "maximum": 1000000},
         "supportStatus": {"enum": ["supported", "unverified"]},

@@ -15,6 +15,10 @@ entries:
       - workflow
     exclusions:
       - read-only lookup
+    selectors:
+      fileExtensions: []
+      operationTypes: [implement, review, verify]
+      semanticTerms: [workflow]
     stages:
       - discovered
       - capability-checked
@@ -24,6 +28,11 @@ entries:
     conflicts: []
     composition: standalone
     mandatory: true
+    mandatoryWhen:
+      match: any
+      scopes: [global]
+      fileExtensions: []
+      operationTypes: []
     priority: 100
     contextCost: 64
     supportStatus: supported
