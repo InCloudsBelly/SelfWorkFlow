@@ -1,0 +1,14 @@
+schemaVersion: 1
+missingSource:
+  modifyingTask: pause
+  readOnlyTask: disclose-and-continue
+  silentDowngrade: forbidden
+grillMe:
+  activation: explicit-only
+  highComplexityAction: recommend-to-user
+  postReview:
+    skill: brainstorming
+    independentContextRequired: true
+runtime:
+  loading: selected-stage-only
+  mutateUpstream: forbidden

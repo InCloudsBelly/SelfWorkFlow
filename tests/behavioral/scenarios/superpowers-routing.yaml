@@ -1,0 +1,23 @@
+schemaVersion: 1
+scenarios:
+  - id: design-default-brainstorming
+    stage: designed
+    operation: design
+    explicitGrill: false
+    expectedSkills: [brainstorming]
+  - id: explicit-grill-cross-review
+    stage: designed
+    operation: design
+    explicitGrill: true
+    expectedSkills: [grill-me, brainstorming]
+    independentPostReview: true
+  - id: implementation-tdd-only
+    stage: implemented
+    operation: implement
+    explicitGrill: false
+    expectedSkills: [test-driven-development]
+  - id: missing-source-write-pause
+    stage: implemented
+    operation: implement
+    sourceStatus: unsupported
+    expectedStatus: paused

@@ -163,3 +163,14 @@ changes, and evidence rules for Review or completion. Load
 [the core implementation](src/selfworkflow/evidence.py) only when executing or
 auditing those deterministic checks. This keeps unrelated phase material out of
 the active context while preserving direct links to every implemented contract.
+
+## Superpowers overlay
+
+Modifying tasks require a user-selected, inspected Superpowers source. Missing
+or declined sources pause writes; read-only analysis may continue only with an
+explicit limitation. The overlay loads only Skills mapped to the current stage.
+Grill-me is explicit-only; a high complexity/risk classification recommends it
+but never activates it. A completed Grill-me design requires a separate-context
+Brainstorming cross-review before implementation. Source selection, dirty-state
+authorization, stage mappings, and runtime loading are deterministic contracts
+in `dependencies/superpowers.lock.yaml` and `overlays/superpowers/`.
