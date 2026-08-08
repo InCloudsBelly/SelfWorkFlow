@@ -487,6 +487,23 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
         for conflict in module["conflicts"]
     ):
         errors.add("dangling-dependency")
+    if modules and "dangling-dependency" not in errors:
+        pending_module_dependencies = {
+            module["id"]: set(module["dependencies"]) for module in modules
+        }
+        resolved_modules: set[str] = set()
+        while pending_module_dependencies:
+            ready = sorted(
+                module_id
+                for module_id, dependencies in pending_module_dependencies.items()
+                if dependencies <= resolved_modules
+            )
+            if not ready:
+                errors.add("dependency-cycle")
+                break
+            for module_id in ready:
+                resolved_modules.add(module_id)
+                del pending_module_dependencies[module_id]
     if modules:
         from selfworkflow.pipeline import load_pipeline
 

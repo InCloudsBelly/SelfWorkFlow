@@ -77,6 +77,40 @@ def build_plan_graph(
             })
         stage_applicability = "blocked" if any(slot["applicability"] == "blocked" for slot in slots) else "applicable" if any(slot["applicability"] == "applicable" for slot in slots) else "not-applicable"
         stages.append({"stageId": stage["id"], "failureOwner": stage["failureOwner"], "applicability": stage_applicability, "slots": slots})
+    module_by_id = {
+        module["id"]: module for module in envelope["catalog"].get("modules", [])
+    }
+    selected_ids = {
+        module_id
+        for stage in stages
+        for slot in stage["slots"]
+        for module_id in slot["selectedModules"]
+    }
+    dependency_blocked = {
+        module_id
+        for module_id in selected_ids
+        if any(
+            dependency not in selected_ids
+            for dependency in module_by_id[module_id]["dependencies"]
+        )
+    }
+    conflict_blocked = {
+        module_id
+        for module_id in selected_ids
+        if set(module_by_id[module_id]["conflicts"]) & selected_ids
+    }
+    if dependency_blocked:
+        reasons.add("module-dependency-unavailable")
+    if conflict_blocked:
+        reasons.add("module-conflict")
+    blocked_modules = dependency_blocked | conflict_blocked
+    if blocked_modules:
+        for stage in stages:
+            for slot in stage["slots"]:
+                if blocked_modules & set(slot["selectedModules"]):
+                    slot["applicability"] = "blocked"
+            if any(slot["applicability"] == "blocked" for slot in stage["slots"]):
+                stage["applicability"] = "blocked"
     policies = yaml.safe_load((repository_root / "workflow/policies.yaml").read_text(encoding="utf-8"))
     graph = {
         "schemaVersion": 2, "requestHash": request_hash, "capabilitySnapshotHash": capability_snapshot_hash,

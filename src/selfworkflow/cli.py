@@ -159,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     ledger_validate = ledger_commands.add_parser("validate")
     ledger_validate.add_argument("--ledger", required=True)
     ledger_validate.add_argument("--plan", required=True)
+    ledger_validate.add_argument("--capability-snapshot", required=True)
     git_policy_parser = commands.add_parser("git-policy")
     git_policy_commands = git_policy_parser.add_subparsers(dest="git_policy_command", required=True)
     git_policy_check = git_policy_commands.add_parser("check")
@@ -231,8 +232,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             plan = _read_json(arguments.plan, reject_duplicates=True)
             ledger_value = _read_json(arguments.ledger, reject_duplicates=True)
+            capability_snapshot = _read_json(
+                arguments.capability_snapshot, reject_duplicates=True
+            )
             result = validate_ledger(
-                ledger_value, plan, plan["capabilitySnapshotHash"]
+                ledger_value, plan, capability_snapshot
             )
         except Exception:
             print("SelfWorkFlow: ledger-validation-failed", file=sys.stderr)

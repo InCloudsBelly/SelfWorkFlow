@@ -23,7 +23,7 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             {
                 "name": name, "provider": "acceptance-host",
                 "subject": {"kind": "host", "id": "fixture", "version": "1", "build": "1", "sourceLock": "sha256:" + "1" * 64},
-                "state": "supported", "observedAt": "2026-08-08T00:00:00Z", "validUntil": "2027-08-08T00:00:00Z",
+                "state": "supported", "observedAt": "2020-01-01T00:00:00Z", "validUntil": "2099-01-01T00:00:00Z",
                 "evidenceRef": "fixture:" + name, "evidenceHash": "sha256:" + "1" * 64,
             }
             for name in names
@@ -32,7 +32,7 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             "schemaVersion": 2, "operationType": "implement", "complexity": "C1", "risk": "R1",
             "writeTask": True, "ambiguity": False, "explicitModuleIds": [], "projectDefaultModuleIds": [],
             "projectMinimums": {"strength": "Light"},
-            "capabilityEvidenceSnapshot": {"schemaVersion": 1, "capturedAt": "2026-08-08T12:00:00Z", "evidence": evidence},
+            "capabilityEvidenceSnapshot": {"schemaVersion": 1, "capturedAt": "2020-01-01T00:00:00Z", "evidence": evidence},
         }
         value.update(overrides)
         return value

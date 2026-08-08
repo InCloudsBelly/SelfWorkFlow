@@ -109,7 +109,9 @@ Copy-Item build\runtime\workflow\resolve-request.example.json build\request.json
 
 The result is a hash-bound PlanGraph containing static stage applicability,
 selected modules, Gates, and failure owners. Runtime results are recorded
-separately with `selfworkflow ledger validate`. Capability evidence is not
+separately. Validate a RunLedger with the exact PlanGraph and original capability
+snapshot using `selfworkflow ledger validate --ledger <ledger.json> --plan
+<plan.json> --capability-snapshot <snapshot.json>`. Capability evidence is not
 authentication or native-host proof. `paused` must not be silently promoted.
 
 Review the complete plan and its `planHash`, then pass that exact hash to

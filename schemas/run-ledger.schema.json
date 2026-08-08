@@ -12,6 +12,6 @@
   "$defs": {
     "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "stage": {"type": "object", "additionalProperties": false, "required": ["stageId", "status", "attempts", "slotResults", "gateResults", "runtimeSkips"], "properties": {"stageId": {"$ref": "#/$defs/id"}, "status": {"enum": ["pending", "active", "passed", "failed", "paused", "skipped"]}, "attempts": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/id"}}, "slotResults": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "gateResults": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "runtimeSkips": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}}}
+    "stage": {"type": "object", "additionalProperties": false, "required": ["stageId", "status", "attempts", "slotResults", "gateResults", "runtimeSkips"], "properties": {"stageId": {"$ref": "#/$defs/id"}, "status": {"enum": ["pending", "active", "passed", "failed", "paused", "skipped"]}, "attempts": {"type": "array", "uniqueItems": true, "maxItems": 1024, "items": {"$ref": "#/$defs/id"}}, "slotResults": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "gateResults": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "runtimeSkips": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/id"}}}}
   }
 }

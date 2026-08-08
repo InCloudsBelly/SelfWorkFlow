@@ -362,6 +362,21 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(grill.selected_modules, ("design-grill-me",))
         self.assertEqual(cross_review.selected_modules, ("design-cross-review",))
 
+    def test_project_default_cannot_activate_explicit_only_grill(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import ModuleRouteRequest, route_modules
+
+        result = route_modules(
+            compile_catalog(REPOSITORY_ROOT / "catalog").content,
+            ModuleRouteRequest(
+                slot_id="design.specialists", cardinality="zero-or-many",
+                operation_type="implement", strength="Deep", write_task=True,
+                project_default_module_ids=("design-grill-me",),
+                capability_states={"skill-discovery": "supported", "independent-context": "supported", "user-confirmation": "supported"},
+            ),
+        )
+        self.assertEqual(result.selected_modules, ())
+
 
 if __name__ == "__main__":
     unittest.main()

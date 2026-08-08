@@ -440,8 +440,8 @@ def route_modules(
                 rank = 400
             elif module_id in explicit:
                 rank = 300
-            elif module_id in defaults or activation == "default":
-                rank = 200
+            elif activation == "default":
+                rank = 250 if module_id in defaults else 200
             elif activation == "deterministic" and set(module["dependencies"]) <= set(explicit):
                 rank = 100
             if not rank:
@@ -459,15 +459,19 @@ def route_modules(
         selected = candidates if request.cardinality == "zero-or-many" else candidates[:1]
         selected_ids = tuple(item[2] for item in selected)
         reasons: set[str] = set(early_reasons)
+        candidate_by_id = {item[2]: item[3] for item in candidates}
+        candidate_ids = set(candidate_by_id)
+        if any(
+            set(module["conflicts"]) & (candidate_ids - {module_id})
+            for module_id, module in candidate_by_id.items()
+        ):
+            reasons.add("module-conflict")
         if request.cardinality in {"exactly-one", "gate"} and not selected_ids:
             reasons.add("gate-unavailable" if request.cardinality == "gate" else "primary-module-unavailable")
         if request.cardinality in {"exactly-one", "gate", "zero-or-one"} and len(
             [item for item in candidates if item[0] == 400]
         ) > 1:
             reasons.add("slot-cardinality-invalid")
-        for _, _, module_id, module in selected:
-            if set(module["conflicts"]) & set(selected_ids):
-                reasons.add("module-conflict")
         missing = sorted(
             {
                 capability

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Mapping
 
 from selfworkflow.pipeline import canonical_hash
@@ -21,15 +21,21 @@ def _time(value: object) -> datetime:
         raise CapabilitySnapshotError("capability-snapshot-invalid") from None
 
 
-def normalize_capability_snapshot(value: Mapping[str, object]) -> tuple[dict[str, object], str, dict[str, str], bool]:
+def normalize_capability_snapshot(
+    value: Mapping[str, object], *, trusted_now: datetime | None = None
+) -> tuple[dict[str, object], str, dict[str, str], bool]:
     if type(value) is not dict or set(value) != {"schemaVersion", "capturedAt", "evidence"}:
         raise CapabilitySnapshotError("capability-snapshot-invalid")
     if value["schemaVersion"] != 1 or type(value["evidence"]) is not list or len(value["evidence"]) > 256:
         raise CapabilitySnapshotError("capability-snapshot-invalid")
     captured = _time(value["capturedAt"])
+    now = trusted_now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise CapabilitySnapshotError("capability-snapshot-invalid")
+    snapshot_from_future = captured > now
     normalized: list[dict[str, object]] = []
     states: dict[str, str] = {}
-    stale = False
+    stale = snapshot_from_future
     for item in value["evidence"]:
         required = {"name", "provider", "subject", "state", "observedAt", "validUntil", "evidenceRef", "evidenceHash"}
         if type(item) is not dict or set(item) != required:
@@ -39,7 +45,7 @@ def normalize_capability_snapshot(value: Mapping[str, object]) -> tuple[dict[str
             raise CapabilitySnapshotError("capability-snapshot-invalid")
         observed, valid_until = _time(item["observedAt"]), _time(item["validUntil"])
         state = item["state"]
-        if not observed <= captured < valid_until:
+        if snapshot_from_future or not observed <= captured < valid_until or not observed <= now < valid_until:
             state = "unverified"
             stale = True
         subject = item["subject"]

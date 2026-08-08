@@ -18,7 +18,7 @@ class TaskResolverV2Tests(unittest.TestCase):
         return {
             "name": name, "provider": "test-host",
             "subject": {"kind": "host", "id": "fixture", "version": "1", "build": "1", "sourceLock": "sha256:" + suffix * 64},
-            "state": state, "observedAt": "2026-08-08T00:00:00Z", "validUntil": "2027-08-08T00:00:00Z",
+            "state": state, "observedAt": "2020-01-01T00:00:00Z", "validUntil": "2099-01-01T00:00:00Z",
             "evidenceRef": "fixture:" + name, "evidenceHash": "sha256:" + suffix * 64,
         }
 
@@ -33,7 +33,7 @@ class TaskResolverV2Tests(unittest.TestCase):
             "writeTask": True, "ambiguity": False, "explicitModuleIds": [], "projectDefaultModuleIds": [],
             "projectMinimums": {"strength": "Light"},
             "capabilityEvidenceSnapshot": {
-                "schemaVersion": 1, "capturedAt": "2026-08-08T12:00:00Z",
+                "schemaVersion": 1, "capturedAt": "2020-01-01T00:00:00Z",
                 "evidence": [cls._evidence(name) for name in names],
             },
         }
@@ -103,10 +103,83 @@ class TaskResolverV2Tests(unittest.TestCase):
         from selfworkflow.resolver import resolve_task
 
         request = self._request()
-        request["capabilityEvidenceSnapshot"]["capturedAt"] = "2028-08-08T12:00:00Z"
+        request["capabilityEvidenceSnapshot"]["capturedAt"] = "2024-08-08T12:00:00Z"
+        for item in request["capabilityEvidenceSnapshot"]["evidence"]:
+            item["observedAt"] = "2024-01-01T00:00:00Z"
+            item["validUntil"] = "2025-01-01T00:00:00Z"
         result = resolve_task(self.catalog, request)
         self.assertEqual(result["status"], "paused")
         self.assertIn("source-evidence-stale", result["reasonCodes"])
+
+    def test_future_snapshot_timestamp_cannot_extend_freshness(self):
+        from selfworkflow.resolver import resolve_task
+
+        request = self._request()
+        request["capabilityEvidenceSnapshot"]["capturedAt"] = "2090-01-01T00:00:00Z"
+
+        result = resolve_task(self.catalog, request)
+
+        self.assertEqual(result["status"], "paused")
+        self.assertIn("source-evidence-stale", result["reasonCodes"])
+
+    def test_cross_slot_dependency_is_fail_closed(self):
+        from selfworkflow.pipeline import canonical_hash
+        from selfworkflow.resolver import resolve_task
+
+        envelope = json.loads(self.catalog)
+        update = next(
+            module for module in envelope["catalog"]["modules"]
+            if module["id"] == "knowledge-update"
+        )
+        update["supportEvidence"]["adapterSupport"] = "supported"
+        update["supportEvidence"]["behaviorEvidence"] = "supported"
+        envelope["catalogHash"] = canonical_hash(envelope["catalog"])
+        request = self._request(
+            operationType="knowledge-write",
+            writeTask=False,
+            explicitModuleIds=["knowledge-update"],
+        )
+        request["capabilityEvidenceSnapshot"]["evidence"].append(
+            self._evidence("knowledge-write", suffix="2")
+        )
+
+        result = resolve_task(envelope, request)
+
+        self.assertEqual(result["status"], "paused")
+        self.assertIn("module-dependency-unavailable", result["reasonCodes"])
+        completed = next(
+            stage for stage in result["planGraph"]["stages"]
+            if stage["stageId"] == "completed"
+        )
+        self.assertEqual(completed["applicability"], "blocked")
+
+    def test_cross_slot_conflict_is_fail_closed(self):
+        from selfworkflow.pipeline import canonical_hash
+        from selfworkflow.resolver import resolve_task
+
+        envelope = json.loads(self.catalog)
+        grill = next(
+            module for module in envelope["catalog"]["modules"]
+            if module["id"] == "design-grill-me"
+        )
+        grill["conflicts"] = ["design-brainstorming"]
+        envelope["catalogHash"] = canonical_hash(envelope["catalog"])
+
+        result = resolve_task(
+            envelope,
+            self._request(
+                complexity="C3", risk="R2",
+                explicitModuleIds=["design-grill-me"],
+            ),
+        )
+
+        self.assertEqual(result["status"], "paused")
+        self.assertIn("module-conflict", result["reasonCodes"])
+        designed = next(
+            stage for stage in result["planGraph"]["stages"]
+            if stage["stageId"] == "designed"
+        )
+        self.assertEqual(designed["applicability"], "blocked")
 
     def test_v1_migration_is_explicit_and_never_invents_verified_capabilities(self):
         from selfworkflow.resolver import resolve_task
