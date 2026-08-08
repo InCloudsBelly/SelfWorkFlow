@@ -5,6 +5,19 @@
 首版平台：Windows
 首版完整支持目标：Codex Desktop 与 Codex CLI
 
+## 0. 2026-08-08 轻量核心修订
+
+日常任务运行面已收缩为“轻核心、显式扩展”。默认 Agent 入口只读取
+`workflow/core.md`，执行范围判断、责任层定位、必要设计/计划、最小实现、完整
+diff Review 和最窄充分验证。普通代码任务不会加载本设计后续章节描述的安装
+事务、证据 Schema、发布门禁、原生验收或知识后端实现。
+
+仓库仍保留这些治理能力，供显式的 `knowledge` 或 `maintainer` profile 使用；
+保留源码不代表进入默认上下文。若本设计后续章节与轻量默认运行面发生歧义，
+以 [轻量代码优先核心设计](../superpowers/specs/2026-08-08-lightweight-code-first-core-design.md)
+为准。完整质量 Skill 的模型行为在真实 Agent 评测前继续标记 `unverified`，默认
+核心只吸收其已经过静态测试的通用原则，不虚构真实模型效果。
+
 ## 1. 目标
 
 SelfWorkFlow 是一套独立、可版本管理、可测试、可扩展的个人开发工作流。它应当：

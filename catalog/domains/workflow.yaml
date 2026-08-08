@@ -42,7 +42,7 @@ entries:
       fileExtensions: []
       operationTypes: [design, plan, implement, debug, review, verify, install, publish]
     priority: 1000
-    contextCost: 1024
+    contextCost: 900
     supportStatus: supported
     protectedRuleOperations: []
   - id: workflow-quality

@@ -271,6 +271,35 @@ class RouterTests(unittest.TestCase):
             "support-unverified",
         )
 
+    def test_checked_in_catalog_skips_core_for_read_only_and_loads_governance_explicitly(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import route_skills
+
+        compiled = compile_catalog(REPOSITORY_ROOT / "catalog")
+        read_only = route_skills(
+            compiled.content,
+            self._request(
+                stage="discovered",
+                operation_type="read-only",
+                file_extensions=(),
+            ),
+        )
+        self.assertEqual(read_only.status, "routed")
+        self.assertEqual(read_only.selected, ())
+
+        install = route_skills(
+            compiled.content,
+            self._request(
+                stage="reviewed",
+                operation_type="install",
+                file_extensions=(),
+            ),
+        )
+        self.assertEqual(
+            install.selected,
+            ("workflow-core", "workflow-protected-rules"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

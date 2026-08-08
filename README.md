@@ -1,8 +1,35 @@
 # SelfWorkFlow
 
-SelfWorkFlow is a Windows-only foundation for reproducible, cross-vendor agent
-workflows. Task 1 provides the Python package, unified test entry points, and a
-confirmation-gated Codex CLI bootstrap.
+SelfWorkFlow is a code-first, vendor-neutral Agent workflow. Its default product is
+a compact operational core, not the repository's complete maintenance and release
+machinery.
+
+## Default workflow
+
+Ordinary work loads only `workflow/core.md` and the capability needed for the
+current stage:
+
+```text
+classify briefly
+-> locate the owning layer
+-> brainstorm/plan only when needed
+-> implement the smallest safe change
+-> review the complete diff
+-> run the narrowest sufficient verification
+```
+
+Grill-me is explicit-only. Knowledge persistence is optional and confirmation
+gated. Install, migration, release, native-Agent validation, and knowledge-backend
+maintenance are explicit maintainer operations and are never loaded merely because
+a normal code task started.
+
+Runtime profiles are closed and deterministic:
+
+- `core` (default): compact workflow, code-quality sources, stage routing, and thin
+  Agent adapters;
+- `knowledge`: `core` plus the knowledge contract and C7OpenWiki adapter;
+- `maintainer`: the complete governance, installation, release, and extension
+  snapshot.
 
 ## Current capability status
 
@@ -22,9 +49,12 @@ confirmation-gated Codex CLI bootstrap.
 ## Build and sandbox installation
 
 ```powershell
-.venv\Scripts\python.exe -m selfworkflow.cli build --repository . --version 0.1.0.dev0 --output build\runtime
+.venv\Scripts\python.exe -m selfworkflow.cli build --repository . --version 0.1.0.dev0 --profile core --output build\runtime
 .venv\Scripts\python.exe -m selfworkflow.cli install plan --artifact build\runtime --agents-root <sandbox-agents> --codex-root <sandbox-codex> --state-root <sandbox-state> --version 0.1.0.dev0 --output build\install-plan.json
 ```
+
+Use `--profile knowledge` or `--profile maintainer` only when the requested task
+actually needs those boundaries.
 
 Review the complete plan and its `planHash`, then pass that exact hash to
 `install apply`. Use the returned manifest for `install verify`; use the returned
