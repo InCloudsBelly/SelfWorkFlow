@@ -6,8 +6,8 @@ entries:
     source:
       kind: planned
       path: WORKFLOW.md
-      revision: git:74a1c05eff442000cd2ed898776f470ff15166df
-      contentHash: sha256:b0b07c0bd29106120d3b7a760f5efeba75ef49f620ad18bbbb0e1f882a698f53
+      revision: git:786f19d4902c4d4e17c0e25a2cc6e53384cb1040
+      contentHash: sha256:2889933a50b94a77009d57b9a7ee66c79fa1de4a5658b27c4b603f8b26b8903c
     aliases:
       - name: on-demand-knowledge
         target: knowledge-on-demand-loading
