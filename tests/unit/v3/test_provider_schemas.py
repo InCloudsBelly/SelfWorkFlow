@@ -29,6 +29,7 @@ class ProviderSchemaTests(unittest.TestCase):
             "workspace-fingerprint.schema.json", "provider-fallback-receipt.schema.json",
             "provider-project-lease.schema.json", "provider-machine-authorization.schema.json",
             "provider-stale-unlock-authorization.schema.json",
+            "provider-command-template.schema.json", "trusted-command-registry.schema.json",
         )
         for name in names:
             with self.subTest(name=name):
@@ -129,6 +130,7 @@ class ProviderSchemaTests(unittest.TestCase):
             "executionNonce": "nonce", "attemptRef": "attempt", "providerId": "provider",
             "bindingSnapshotHash": HASH, "canonicalProjectRootHash": HASH, "startedAt": "2026-08-09T00:00:01Z",
             "completedAt": "2026-08-09T00:00:00Z", "outcome": "failed",
+            "replayState": "terminal-failed",
             "mutationEvidenceRefs": [],
         }
         for schema, document in (
@@ -152,10 +154,13 @@ class ProviderSchemaTests(unittest.TestCase):
                 "path": "Source/main.cpp", "byteRange": [0, 1], "contentHash": HASH,
             }], "truncated": False, "preQueryWorkspaceFingerprintHash": HASH,
             "postQueryWorkspaceFingerprintHash": HASH, "actualSideEffects": "none",
+            "replayState": "terminal-succeeded",
             "mutationEvidenceRefs": [],
         }
         _rehash(receipt, "receiptHash")
-        _load("provider-query-receipt.schema.json", receipt)
+        with self.assertRaises(ContractError) as valid_unbound:
+            _load("provider-query-receipt.schema.json", receipt)
+        self.assertEqual(valid_unbound.exception.reason, "provider-receipt-plan-required")
         for invalid in ("../secret", "/absolute", "C:/secret", "Source\\secret.cpp"):
             changed = json.loads(json.dumps(receipt))
             changed["returnedFiles"][0]["path"] = invalid

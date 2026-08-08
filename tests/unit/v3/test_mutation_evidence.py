@@ -19,10 +19,15 @@ class MutationEvidenceTests(unittest.TestCase):
     def tearDown(self): self.temp.cleanup()
 
     def target(self, kind, target_id, actions):
+        mutation_hash = content_hash({
+            "targetKind": kind, "targetId": target_id,
+            "allowedActions": list(actions), "evidenceRequired": True,
+        })
         return {
             "targetKind": kind,
             "targetId": target_id,
             "canonicalTargetHash": content_hash({"targetKind": kind, "targetId": target_id}),
+            "mutationTargetHash": mutation_hash,
             "containmentRootHash": self.root_hash if kind in {"exact-file", "directory-subtree", "managed-state-root"} else content_hash({"targetKind": kind, "scope": target_id}),
             "recursion": "bounded" if kind in {"directory-subtree", "managed-state-root"} else "none",
             "reparsePolicy": "reject",
@@ -41,7 +46,7 @@ class MutationEvidenceTests(unittest.TestCase):
             provider_id=provider, started_at=NOW,
             completed_at=NOW + timedelta(seconds=1), observed_at=observed,
             pre_state_identity=H, post_state_identity=content_hash("after"),
-            mutation_target_hash=target["canonicalTargetHash"], evidence_kind=kind,
+            mutation_target_hash=target["mutationTargetHash"], evidence_kind=kind,
             before=before, after=after,
             actual_targets=({"targetKind": actual_kind, "targetId": target_id, "action": action},),
             declared_targets=(target,),
@@ -104,7 +109,7 @@ class MutationEvidenceTests(unittest.TestCase):
             provider_id="fake.provider", started_at=NOW,
             completed_at=NOW + timedelta(seconds=1), observed_at=NOW,
             pre_state_identity=H, post_state_identity=H,
-            mutation_target_hash=target["canonicalTargetHash"],
+            mutation_target_hash=target["mutationTargetHash"],
             evidence_kind="managed-state-manifest",
             before={"identityHash": H, "revision": "1"},
             after={"identityHash": H, "revision": "2"},

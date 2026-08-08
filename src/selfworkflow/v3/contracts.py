@@ -44,6 +44,8 @@ _SCHEMA_NAMES = (
     "provider-project-lease.schema.json",
     "provider-machine-authorization.schema.json",
     "provider-stale-unlock-authorization.schema.json",
+    "provider-command-template.schema.json",
+    "trusted-command-registry.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
@@ -1541,96 +1543,109 @@ def validate_provider_project_state_receipt(
 def _validate_provider_command_plan(
     document: dict[str, Any], *, final_hash_field: str, query: bool,
 ) -> None:
-    from selfworkflow.v3.hashing import (
-        canonical_project_root, canonical_relative_path, content_hash, project_root_hash,
-    )
+    from selfworkflow.v3.hashing import canonical_project_root, content_hash, project_root_hash
 
     if document[final_hash_field] != _canonical_hash(document, final_hash_field):
         _raise_semantic("provider-plan-hash-invalid", (final_hash_field,))
     command = document["commandSpec"]
     if command["commandSpecHash"] != _canonical_hash(command, "commandSpecHash"):
         _raise_semantic("provider-command-spec-hash-invalid", ("commandSpec", "commandSpecHash"))
-    if document.get("argvHash") is not None and document["argvHash"] != content_hash(command["argv"]):
-        _raise_semantic("provider-command-argv-hash-invalid", ("argvHash",))
-    if document.get("cwdHash") is not None and document["cwdHash"] != content_hash(command["cwd"]):
-        _raise_semantic("provider-command-cwd-hash-invalid", ("cwdHash",))
-    if document.get("envAllowlist") is not None and sorted(command["env"]) != sorted(document["envAllowlist"]):
-        _raise_semantic("provider-command-env-mismatch", ("commandSpec", "env"))
-    shell_pattern = re.compile(r"[\x00\r\n;&|<>`$(){}!]")
+    cross_fields = {
+        "registryHash": document["commandRegistryHash"],
+        "templateHash": document["commandTemplateHash"],
+        "providerId": document["providerId"],
+        "bindingSnapshotHash": document["bindingSnapshotHash"],
+        "adapterHash": document["adapterHash"],
+        "operationId": document["operationId"],
+        "sideEffectClass": document["sideEffects"] if query else document["sideEffectClass"],
+        "networkPolicy": "none",
+    }
+    if any(command.get(key) != value for key, value in cross_fields.items()):
+        _raise_semantic("provider-command-plan-mismatch", ("commandSpec",))
+    if document["adapterRenderHash"] != command["commandSpecHash"]:
+        _raise_semantic("provider-command-render-hash-invalid", ("adapterRenderHash",))
     argv = command["argv"]
+    shell_names = {
+        "cmd", "cmd.exe", "command.com", "powershell", "powershell.exe",
+        "pwsh", "pwsh.exe", "sh", "sh.exe", "bash", "bash.exe",
+        "wscript", "wscript.exe", "cscript", "cscript.exe",
+    }
+    executable_name = PureWindowsPath(argv[0]).name.lower()
     if (
         not Path(argv[0]).is_absolute()
-        or any(shell_pattern.search(value) for value in argv)
+        or executable_name in shell_names
+        or PureWindowsPath(executable_name).suffix in {".bat", ".cmd", ".ps1"}
+        or any(any(ord(character) < 32 for character in value) for value in argv)
     ):
-        _raise_semantic("provider-command-argv-invalid", ("commandSpec", "argv"))
+        _raise_semantic("provider-command-executable-invalid", ("commandSpec", "argv", 0))
+    dangerous_env = {
+        "PATH", "PATHEXT", "COMSPEC", "PYTHONPATH", "PYTHONHOME", "NODE_OPTIONS",
+        "PSMODULEPATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH", "RUBYOPT", "PERL5OPT", "PROMPT", "CDPATH",
+        "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA",
+        "USERPROFILE", "HOME", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    }
     for key, value in command["env"].items():
-        if re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", key) is None or shell_pattern.search(value):
+        if key.upper() in dangerous_env or any(ord(character) < 32 for character in value):
             _raise_semantic("provider-command-env-invalid", ("commandSpec", "env", key))
     try:
         root = canonical_project_root(command["canonicalProjectRoot"])
         cwd = canonical_project_root(command["cwd"])
-        cwd.relative_to(root)
     except Exception:
+        _raise_semantic("provider-command-cwd-invalid", ("commandSpec", "cwd"))
+    if cwd != root or command.get("cwdPolicy") != "project-root":
         _raise_semantic("provider-command-cwd-invalid", ("commandSpec", "cwd"))
     if document["canonicalProjectRootHash"] != project_root_hash(root):
         _raise_semantic("provider-project-root-hash-invalid", ("canonicalProjectRootHash",))
-    if command["sideEffectClass"] != (document["sideEffects"] if query else document["sideEffectClass"]):
-        _raise_semantic("provider-command-side-effect-mismatch", ("commandSpec", "sideEffectClass"))
-    if command["networkPolicy"] != document["networkPolicy"]:
-        _raise_semantic("provider-command-network-policy-mismatch", ("commandSpec", "networkPolicy"))
-    if command["mutationTargets"] != document["mutationTargets"]:
-        _raise_semantic("provider-command-target-mismatch", ("commandSpec", "mutationTargets"))
-    if command["sideEffectClass"] == "none" and command["networkPolicy"] != "none":
-        _raise_semantic("provider-command-network-policy-invalid", ("commandSpec", "networkPolicy"))
-    if command["sideEffectClass"] == "local-write" and command["networkPolicy"] not in {"none", "local-only"}:
-        _raise_semantic("provider-command-network-policy-invalid", ("commandSpec", "networkPolicy"))
-    if command["sideEffectClass"] == "network" and not any(
-        item["targetKind"] == "network" for item in document["mutationTargets"]
-    ):
-        _raise_semantic("provider-command-network-target-required", ("mutationTargets",))
-    action_sets = {
-        "exact-file": {"create", "modify", "delete"},
-        "directory-subtree": {"create", "modify", "delete"},
-        "managed-state-root": {"initialize", "sync", "rebuild", "upgrade", "repair"},
-        "process": {"start", "stop", "inspect", "mutate"},
-        "service": {"start", "stop", "connect", "configure"},
-        "network": {"connect", "listen", "download", "upload"},
+    side_effect_class = document["sideEffects"] if query else document["sideEffectClass"]
+    if document["networkPolicy"] != "none" or side_effect_class == "network":
+        _raise_semantic("provider-network-unsupported", ("networkPolicy",))
+    if side_effect_class == "none" and document["mutationTargets"]:
+        _raise_semantic("provider-readonly-targets-invalid", ("mutationTargets",))
+    if side_effect_class == "local-write":
+        if document.get("ownershipDomain") != "selfworkflow-managed":
+            _raise_semantic("provider-user-owned-source-protected", ("ownershipDomain",))
+        if not document["mutationTargets"]:
+            _raise_semantic("provider-mutation-targets-required", ("mutationTargets",))
+        if "machineAuthorization" in document or not document.get("machineAuthorizationHash"):
+            _raise_semantic("provider-authoritative-machine-authorization-required", ("machineAuthorizationHash",))
+    seen: set[str] = set()
+    operation_actions = {
+        "initialize-index": "initialize", "sync-incremental": "sync",
+        "rebuild-index": "rebuild", "upgrade-managed-adapter": "upgrade",
+        "repair-managed-state": "repair",
     }
-    seen: set[tuple[str, str]] = set()
     for index, target in enumerate(document["mutationTargets"]):
-        identity = (target["targetKind"], target["targetId"])
+        identity = target["targetId"]
         if identity in seen:
             _raise_semantic("provider-mutation-target-duplicate", ("mutationTargets", index))
         seen.add(identity)
-        if not set(target["allowedActions"]).issubset(action_sets[target["targetKind"]]):
+        if target["targetKind"] != "managed-state-root" or len(target["allowedActions"]) != 1:
+            _raise_semantic("provider-mvp-managed-state-only", ("mutationTargets", index))
+        if "delete" in target["allowedActions"]:
             _raise_semantic("provider-mutation-target-action-invalid", ("mutationTargets", index, "allowedActions"))
-        if target["targetKind"] in {"exact-file", "directory-subtree"}:
-            try:
-                canonical_relative_path(target["targetId"])
-            except Exception:
-                _raise_semantic("provider-mutation-target-invalid", ("mutationTargets", index, "targetId"))
         expected_target_hash = content_hash({"targetKind": target["targetKind"], "targetId": target["targetId"]})
         if target["canonicalTargetHash"] != expected_target_hash:
             _raise_semantic("provider-mutation-target-hash-invalid", ("mutationTargets", index, "canonicalTargetHash"))
-        expected_root_hash = (
-            document["canonicalProjectRootHash"]
-            if target["targetKind"] in {"exact-file", "directory-subtree", "managed-state-root"}
-            else content_hash({"targetKind": target["targetKind"], "scope": target["targetId"]})
-        )
-        if target["containmentRootHash"] != expected_root_hash:
+        expected_mutation_hash = content_hash({
+            "targetKind": target["targetKind"], "targetId": target["targetId"],
+            "allowedActions": target["allowedActions"], "evidenceRequired": True,
+        })
+        if target["mutationTargetHash"] != expected_mutation_hash:
+            _raise_semantic("provider-mutation-target-hash-invalid", ("mutationTargets", index, "mutationTargetHash"))
+        if target["containmentRootHash"] != document["canonicalProjectRootHash"]:
             _raise_semantic("provider-mutation-containment-invalid", ("mutationTargets", index, "containmentRootHash"))
+        if target["evidenceRequired"] is not True:
+            _raise_semantic("provider-required-evidence-disabled", ("mutationTargets", index, "evidenceRequired"))
+        if not query and document["operationId"] != "inspect" and target["allowedActions"] != [operation_actions[document["operationId"]]]:
+            _raise_semantic("provider-mutation-target-action-invalid", ("mutationTargets", index, "allowedActions"))
     if not query:
-        expected_argv = [
-            command["argv"][0], "--operation", document["operationId"],
-            "--project-root", command["canonicalProjectRoot"],
-        ]
-        if command["argv"] != expected_argv:
-            _raise_semantic("provider-operation-command-template-invalid", ("commandSpec", "argv"))
-        if document["canonicalTargetHash"] != content_hash([item["canonicalTargetHash"] for item in document["mutationTargets"]]):
+        if document["canonicalTargetHash"] != content_hash([item["mutationTargetHash"] for item in document["mutationTargets"]]):
             _raise_semantic("provider-target-set-hash-invalid", ("canonicalTargetHash",))
         if document["containmentRootHash"] != content_hash([item["containmentRootHash"] for item in document["mutationTargets"]]):
             _raise_semantic("provider-containment-set-hash-invalid", ("containmentRootHash",))
-        if document["operationId"] in {"upgrade-managed-adapter", "repair-managed-state"} and document["ownershipDomain"] != "selfworkflow-managed":
+        if document["operationId"] != "inspect" and document["ownershipDomain"] != "selfworkflow-managed":
             _raise_semantic("provider-user-owned-source-protected", ("ownershipDomain",))
 
     subject_hash_field = "queryAuthorizationSubjectHash" if query else "operationAuthorizationSubjectHash"
@@ -1652,32 +1667,14 @@ def _validate_provider_command_plan(
                 _raise_semantic("provider-approval-scope-mismatch", ("approvalReceipt", key))
         if approval["nonce"] != document["executionNonce"]:
             _raise_semantic("provider-approval-nonce-mismatch", ("approvalReceipt", "nonce"))
-        expected_targets = sorted(item["canonicalTargetHash"] for item in document["mutationTargets"])
+        expected_targets = sorted(item["mutationTargetHash"] for item in document["mutationTargets"])
         if sorted(approval["targetHashes"]) != expected_targets:
             _raise_semantic("provider-approval-target-mismatch", ("approvalReceipt", "targetHashes"))
         if approval["revocationState"] != "active":
             _raise_semantic("provider-approval-not-active", ("approvalReceipt", "revocationState"))
 
-    machine = document.get("machineAuthorization")
-    if query and document["sideEffects"] != "none":
-        if machine is None:
-            _raise_semantic("provider-machine-authorization-required", ("machineAuthorization",))
-        validate_provider_machine_authorization(machine)
-        if document.get("machineAuthorizationHash") != machine["authorizationHash"]:
-            _raise_semantic("provider-machine-authorization-hash-mismatch", ("machineAuthorizationHash",))
-        expected = {
-            "providerId": document["providerId"],
-            "canonicalProjectRootHash": document["canonicalProjectRootHash"],
-            "subjectKind": "query-plan",
-            "operationId": document["operationId"],
-            "sideEffectClass": document["sideEffects"],
-            "executionNonce": document["executionNonce"],
-            "attemptRef": document["attemptRef"],
-        }
-        if any(machine.get(key) != value for key, value in expected.items()):
-            _raise_semantic("provider-machine-authorization-scope-mismatch", ("machineAuthorization",))
-        if machine["revocationState"] != "active":
-            _raise_semantic("provider-machine-authorization-not-active", ("machineAuthorization", "revocationState"))
+    if side_effect_class == "none" and document.get("machineAuthorizationHash") is not None:
+        _raise_semantic("provider-readonly-machine-authorization-unexpected", ("machineAuthorizationHash",))
 
 
 def validate_provider_operation_plan(document: dict[str, Any]) -> None:
@@ -1698,51 +1695,119 @@ def validate_provider_approval_receipt(
             _raise_semantic("provider-approval-subject-mismatch", ("authorizationSubjectHash",))
 
 
-def validate_provider_machine_authorization(document: dict[str, Any]) -> None:
+def validate_provider_machine_authorization(
+    document: dict[str, Any], *, allow_test_issuer: bool = False,
+) -> None:
     _validate_provider_document("provider-machine-authorization.schema.json", document)
     if document["authorizationHash"] != _canonical_hash(document, "authorizationHash"):
         _raise_semantic("provider-machine-authorization-hash-invalid", ("authorizationHash",))
+    if _utc_datetime(document["issuedAt"]) >= _utc_datetime(document["expiresAt"]):
+        _raise_semantic("provider-machine-authorization-time-invalid", ("expiresAt",))
+    if not allow_test_issuer and (
+        document["issuerId"] == "test-fixture"
+        or document["confirmationSource"] == "test-fixture"
+    ):
+        _raise_semantic("provider-test-authorization-rejected", ("issuerId",))
+    if document["revocationState"] != "active":
+        _raise_semantic("provider-machine-authorization-not-active", ("revocationState",))
+
+
+ProviderEvidenceResolver = Callable[[str], dict[str, Any] | None]
+
+
+def _validate_receipt_evidence(
+    document: dict[str, Any], plan: dict[str, Any], *, subject_kind: str,
+    evidence_resolver: ProviderEvidenceResolver | None,
+) -> None:
+    refs = document["mutationEvidenceRefs"]
+    required_targets = {
+        target["mutationTargetHash"]: target
+        for target in plan["mutationTargets"] if target["evidenceRequired"]
+    }
+    if evidence_resolver is None:
+        _raise_semantic("provider-receipt-evidence-resolver-required", ("mutationEvidenceRefs",))
+    if len(refs) != len(required_targets):
+        _raise_semantic("provider-receipt-required-evidence-cardinality", ("mutationEvidenceRefs",))
+    if not refs:
+        return
+    resolved: list[dict[str, Any]] = []
+    for index, reference in enumerate(refs):
+        try:
+            item = evidence_resolver(reference)
+        except Exception:
+            _raise_semantic("provider-receipt-evidence-resolution-failed", ("mutationEvidenceRefs", index))
+        if not isinstance(item, dict):
+            _raise_semantic("provider-receipt-evidence-unresolved", ("mutationEvidenceRefs", index))
+        validate_provider_mutation_evidence(item)
+        if reference != "evidence-" + item["evidenceHash"][7:]:
+            _raise_semantic("provider-receipt-evidence-ref-invalid", ("mutationEvidenceRefs", index))
+        resolved.append(item)
+    hashes = [item["mutationTargetHash"] for item in resolved]
+    if len(set(hashes)) != len(hashes) or set(hashes) != set(required_targets):
+        _raise_semantic("provider-receipt-evidence-target-mismatch", ("mutationEvidenceRefs",))
+    plan_hash_field = "operationPlanHash" if subject_kind == "operation-plan" else "queryPlanHash"
+    for item in resolved:
+        expected = {
+            "subjectKind": subject_kind,
+            "subjectPlanHash": plan[plan_hash_field],
+            "executionNonce": plan["executionNonce"],
+            "attemptRef": plan["attemptRef"],
+            "providerId": plan["providerId"],
+            "providerBindingHash": plan["bindingSnapshotHash"],
+            "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
+            "startedAt": document["startedAt"],
+            "completedAt": document["completedAt"],
+        }
+        if any(item.get(key) != value for key, value in expected.items()):
+            _raise_semantic("provider-receipt-evidence-context-mismatch", ("mutationEvidenceRefs",))
+        if not (document["startedAt"] <= item["observedAt"] <= document["completedAt"]):
+            _raise_semantic("provider-receipt-evidence-time-invalid", ("mutationEvidenceRefs",))
+        target = required_targets[item["mutationTargetHash"]]
+        actual = item["actualTargets"]
+        if len(actual) != 1:
+            _raise_semantic("provider-receipt-evidence-cardinality", ("mutationEvidenceRefs",))
+        expected_kind = "managed-state" if target["targetKind"] == "managed-state-root" else None
+        if (
+            actual[0]["targetKind"] != expected_kind
+            or actual[0]["targetId"] != target["targetId"]
+            or actual[0]["action"] not in target["allowedActions"]
+        ):
+            _raise_semantic("provider-receipt-evidence-target-mismatch", ("mutationEvidenceRefs",))
+
+
+def _validate_provider_operation_receipt_document(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-operation-receipt.schema.json", document)
+    if document["receiptHash"] != _canonical_hash(document, "receiptHash"):
+        _raise_semantic("provider-operation-receipt-hash-invalid", ("receiptHash",))
+    expected_replay = "terminal-succeeded" if document["outcome"] == "succeeded" else "terminal-failed"
+    if document["replayState"] != expected_replay:
+        _raise_semantic("provider-operation-receipt-replay-state-invalid", ("replayState",))
 
 
 def validate_provider_operation_receipt(
     document: dict[str, Any], plan: dict[str, Any] | None = None,
-    evidence: tuple[dict[str, Any], ...] = (),
+    evidence_resolver: ProviderEvidenceResolver | None = None,
 ) -> None:
-    _validate_provider_document("provider-operation-receipt.schema.json", document)
-    if document["receiptHash"] != _canonical_hash(document, "receiptHash"):
-        _raise_semantic("provider-operation-receipt-hash-invalid", ("receiptHash",))
-    if plan is not None:
-        validate_provider_operation_plan(plan)
-        expected = {
-            "operationPlanHash": plan["operationPlanHash"],
-            "executionNonce": plan["executionNonce"],
-            "attemptRef": plan["attemptRef"],
-            "providerId": plan["providerId"],
-            "bindingSnapshotHash": plan["bindingSnapshotHash"],
-            "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
-        }
-        if any(document.get(key) != value for key, value in expected.items()):
-            _raise_semantic("provider-operation-receipt-plan-mismatch", ())
-        if document.get("approvalReceiptRef") != plan.get("approvalReceiptRef"):
-            _raise_semantic("provider-operation-receipt-approval-mismatch", ("approvalReceiptRef",))
-        refs = set(document["mutationEvidenceRefs"])
-        expected_refs = {"evidence-" + item["evidenceHash"][7:] for item in evidence}
-        if refs != expected_refs:
-            _raise_semantic("provider-operation-receipt-evidence-mismatch", ("mutationEvidenceRefs",))
-        for item in evidence:
-            validate_provider_mutation_evidence(item)
-            if any(item.get(key) != value for key, value in {
-                "subjectKind": "operation-plan",
-                "subjectPlanHash": plan["operationPlanHash"],
-                "executionNonce": plan["executionNonce"],
-                "attemptRef": plan["attemptRef"],
-                "providerId": plan["providerId"],
-                "providerBindingHash": plan["bindingSnapshotHash"],
-                "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
-            }.items()):
-                _raise_semantic("provider-operation-receipt-evidence-context-mismatch", ())
-            if not (document["startedAt"] <= item["observedAt"] <= document["completedAt"]):
-                _raise_semantic("provider-operation-receipt-evidence-time-invalid", ("mutationEvidenceRefs",))
+    _validate_provider_operation_receipt_document(document)
+    if plan is None:
+        _raise_semantic("provider-receipt-plan-required", ())
+    validate_provider_operation_plan(plan)
+    expected = {
+        "operationPlanHash": plan["operationPlanHash"],
+        "executionNonce": plan["executionNonce"],
+        "attemptRef": plan["attemptRef"],
+        "providerId": plan["providerId"],
+        "bindingSnapshotHash": plan["bindingSnapshotHash"],
+        "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
+    }
+    if any(document.get(key) != value for key, value in expected.items()):
+        _raise_semantic("provider-operation-receipt-plan-mismatch", ())
+    if document.get("approvalReceiptRef") != plan.get("approvalReceiptRef"):
+        _raise_semantic("provider-operation-receipt-approval-mismatch", ("approvalReceiptRef",))
+    _validate_receipt_evidence(
+        document, plan, subject_kind="operation-plan",
+        evidence_resolver=evidence_resolver,
+    )
 
 
 def validate_provider_query_plan(document: dict[str, Any]) -> None:
@@ -1750,51 +1815,42 @@ def validate_provider_query_plan(document: dict[str, Any]) -> None:
     _validate_provider_command_plan(document, final_hash_field="queryPlanHash", query=True)
 
 
-def validate_provider_query_receipt(
-    document: dict[str, Any], plan: dict[str, Any] | None = None,
-    evidence: tuple[dict[str, Any], ...] = (),
-) -> None:
+def _validate_provider_query_receipt_document(document: dict[str, Any]) -> None:
     _validate_provider_document("provider-query-receipt.schema.json", document)
     if document["receiptHash"] != _canonical_hash(document, "receiptHash"):
         _raise_semantic("provider-query-receipt-hash-invalid", ("receiptHash",))
-    if plan is not None:
-        validate_provider_query_plan(plan)
-        expected = {
-            "queryPlanHash": plan["queryPlanHash"],
-            "executionNonce": plan["executionNonce"],
-            "attemptRef": plan["attemptRef"],
-            "providerId": plan["providerId"],
-            "adapterHash": plan["adapterHash"],
-            "projectStateReceiptHash": plan["projectStateReceiptHash"],
-            "workspaceFingerprintHash": plan["workspaceFingerprintHash"],
-            "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
-        }
-        if any(document.get(key) != value for key, value in expected.items()):
-            _raise_semantic("provider-query-receipt-plan-mismatch", ())
-        if document.get("approvalReceiptRef") != plan.get("approvalReceiptRef"):
-            _raise_semantic("provider-query-receipt-approval-mismatch", ("approvalReceiptRef",))
-        refs = set(document["mutationEvidenceRefs"])
-        expected_refs = {"evidence-" + item["evidenceHash"][7:] for item in evidence}
-        if refs != expected_refs:
-            _raise_semantic("provider-query-receipt-evidence-mismatch", ("mutationEvidenceRefs",))
-        if document["actualSideEffects"] in {"local-write", "network"} and any(
-            target["evidenceRequired"] for target in plan["mutationTargets"]
-        ) and not evidence:
-            _raise_semantic("provider-query-receipt-required-evidence-missing", ("mutationEvidenceRefs",))
-        for item in evidence:
-            validate_provider_mutation_evidence(item)
-            if any(item.get(key) != value for key, value in {
-                "subjectKind": "query-plan",
-                "subjectPlanHash": plan["queryPlanHash"],
-                "executionNonce": plan["executionNonce"],
-                "attemptRef": plan["attemptRef"],
-                "providerId": plan["providerId"],
-                "providerBindingHash": plan["bindingSnapshotHash"],
-                "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
-            }.items()):
-                _raise_semantic("provider-query-receipt-evidence-context-mismatch", ())
-            if not (document["startedAt"] <= item["observedAt"] <= document["completedAt"]):
-                _raise_semantic("provider-query-receipt-evidence-time-invalid", ("mutationEvidenceRefs",))
+    if document["replayState"] != "terminal-succeeded":
+        _raise_semantic("provider-query-receipt-replay-state-invalid", ("replayState",))
+    if document["actualSideEffects"] == "network":
+        _raise_semantic("provider-network-unsupported", ("actualSideEffects",))
+
+
+def validate_provider_query_receipt(
+    document: dict[str, Any], plan: dict[str, Any] | None = None,
+    evidence_resolver: ProviderEvidenceResolver | None = None,
+) -> None:
+    _validate_provider_query_receipt_document(document)
+    if plan is None:
+        _raise_semantic("provider-receipt-plan-required", ())
+    validate_provider_query_plan(plan)
+    expected = {
+        "queryPlanHash": plan["queryPlanHash"],
+        "executionNonce": plan["executionNonce"],
+        "attemptRef": plan["attemptRef"],
+        "providerId": plan["providerId"],
+        "adapterHash": plan["adapterHash"],
+        "projectStateReceiptHash": plan["projectStateReceiptHash"],
+        "workspaceFingerprintHash": plan["workspaceFingerprintHash"],
+        "canonicalProjectRootHash": plan["canonicalProjectRootHash"],
+    }
+    if any(document.get(key) != value for key, value in expected.items()):
+        _raise_semantic("provider-query-receipt-plan-mismatch", ())
+    if document.get("approvalReceiptRef") != plan.get("approvalReceiptRef"):
+        _raise_semantic("provider-query-receipt-approval-mismatch", ("approvalReceiptRef",))
+    _validate_receipt_evidence(
+        document, plan, subject_kind="query-plan",
+        evidence_resolver=evidence_resolver,
+    )
 
 
 def validate_provider_mutation_evidence(document: dict[str, Any]) -> None:
@@ -1845,10 +1901,18 @@ def validate_provider_project_lease(document: dict[str, Any]) -> None:
         _raise_semantic("provider-lease-hash-invalid", ("leaseHash",))
 
 
-def validate_provider_stale_unlock_authorization(document: dict[str, Any]) -> None:
+def validate_provider_stale_unlock_authorization(
+    document: dict[str, Any], *, allow_test_issuer: bool = False,
+) -> None:
     _validate_provider_document("provider-stale-unlock-authorization.schema.json", document)
     if document["authorizationHash"] != _canonical_hash(document, "authorizationHash"):
         _raise_semantic("provider-stale-unlock-hash-invalid", ("authorizationHash",))
+    if _utc_datetime(document["issuedAt"]) >= _utc_datetime(document["expiresAt"]):
+        _raise_semantic("provider-stale-unlock-time-invalid", ("expiresAt",))
+    if not allow_test_issuer and document["issuerId"] == "test-fixture":
+        _raise_semantic("provider-test-authorization-rejected", ("issuerId",))
+    if document["revocationState"] != "active":
+        _raise_semantic("provider-stale-unlock-not-active", ("revocationState",))
 
 
 def load_contract(
@@ -1865,6 +1929,8 @@ def load_contract(
     verification_receipt_resolver: VerificationReceiptResolver | None = None,
     provider_support_registry: object | None = None,
     provider_support_resolver: Callable[[str, str], object | None] | None = None,
+    provider_plan: dict[str, Any] | None = None,
+    provider_evidence_resolver: ProviderEvidenceResolver | None = None,
 ) -> dict[str, Any]:
     """Load one registered V3 JSON contract."""
 
@@ -1941,11 +2007,15 @@ def load_contract(
     elif schema_name == "provider-approval-receipt.schema.json":
         validate_provider_approval_receipt(document)
     elif schema_name == "provider-operation-receipt.schema.json":
-        validate_provider_operation_receipt(document)
+        validate_provider_operation_receipt(
+            document, provider_plan, provider_evidence_resolver,
+        )
     elif schema_name == "provider-query-plan.schema.json":
         validate_provider_query_plan(document)
     elif schema_name == "provider-query-receipt.schema.json":
-        validate_provider_query_receipt(document)
+        validate_provider_query_receipt(
+            document, provider_plan, provider_evidence_resolver,
+        )
     elif schema_name == "provider-mutation-evidence.schema.json":
         validate_provider_mutation_evidence(document)
     elif schema_name == "workspace-fingerprint.schema.json":
@@ -1956,6 +2026,18 @@ def load_contract(
         validate_provider_project_lease(document)
     elif schema_name == "provider-stale-unlock-authorization.schema.json":
         validate_provider_stale_unlock_authorization(document)
+    elif schema_name == "provider-command-template.schema.json":
+        from selfworkflow.v3.command_registry import CommandRegistryError, validate_adapter_command_template
+        try:
+            validate_adapter_command_template(document)
+        except CommandRegistryError as error:
+            _raise_semantic(error.reason, ())
+    elif schema_name == "trusted-command-registry.schema.json":
+        from selfworkflow.v3.command_registry import CommandRegistryError, validate_trusted_command_registry
+        try:
+            validate_trusted_command_registry(document, production=True)
+        except CommandRegistryError as error:
+            _raise_semantic(error.reason, ())
     else:
         _validate_provider_time_semantics(schema_name, document)
     return document

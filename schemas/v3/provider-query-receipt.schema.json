@@ -3,7 +3,7 @@
   "$id": "https://selfworkflow.local/schemas/v3/provider-query-receipt.schema.json",
   "title": "SelfWorkFlow V3 provider query receipt",
   "type": "object", "additionalProperties": false,
-  "required": ["schemaVersion", "receiptHash", "queryPlanHash", "executionNonce", "attemptRef", "providerId", "adapterHash", "sourceIdentityHash", "projectStateReceiptHash", "workspaceFingerprintHash", "canonicalProjectRootHash", "startedAt", "completedAt", "indexRevision", "indexCompleteness", "returnedFiles", "truncated", "preQueryWorkspaceFingerprintHash", "postQueryWorkspaceFingerprintHash", "actualSideEffects", "mutationEvidenceRefs"],
+  "required": ["schemaVersion", "receiptHash", "queryPlanHash", "executionNonce", "attemptRef", "providerId", "adapterHash", "sourceIdentityHash", "projectStateReceiptHash", "workspaceFingerprintHash", "canonicalProjectRootHash", "startedAt", "completedAt", "indexRevision", "indexCompleteness", "returnedFiles", "truncated", "preQueryWorkspaceFingerprintHash", "postQueryWorkspaceFingerprintHash", "actualSideEffects", "replayState", "mutationEvidenceRefs"],
   "properties": {
     "schemaVersion": {"const": 3}, "receiptHash": {"$ref": "#/$defs/hash"},
     "queryPlanHash": {"$ref": "#/$defs/hash"}, "executionNonce": {"$ref": "#/$defs/id"},
@@ -19,6 +19,7 @@
     "truncated": {"type": "boolean"}, "heuristicProvenance": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}},
     "preQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "preQueryWorkspaceIdentityHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceIdentityHash": {"$ref": "#/$defs/hash"}, "approvalReceiptRef": {"$ref": "#/$defs/id"},
     "actualSideEffects": {"enum": ["none", "local-write", "network", "unknown"]},
+    "replayState": {"enum": ["terminal-succeeded", "terminal-failed"]},
     "mutationEvidenceRefs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
   },
   "$defs": {

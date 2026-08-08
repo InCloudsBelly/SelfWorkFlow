@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
 from selfworkflow.v3.contracts import (
+    _validate_provider_operation_receipt_document,
+    _validate_provider_query_receipt_document,
     validate_provider_mutation_evidence,
-    validate_provider_operation_receipt,
-    validate_provider_query_receipt,
 )
 from selfworkflow.v3.hashing import canonical_relative_path, clone, content_hash, require_hash
 
@@ -36,7 +36,8 @@ def build_operation_receipt(
     provider_id: str, binding_snapshot_hash: str, canonical_project_root_hash: str,
     started_at: datetime | str, completed_at: datetime | str,
     outcome: str, approval_receipt_ref: str | None,
-    mutation_evidence_refs: Iterable[str], output_hash: str | None = None,
+    mutation_evidence_refs: Iterable[str], replay_state: str,
+    output_hash: str | None = None,
 ) -> dict[str, Any]:
     for value in (operation_plan_hash, binding_snapshot_hash, canonical_project_root_hash):
         require_hash(value)
@@ -51,6 +52,7 @@ def build_operation_receipt(
         "startedAt": _utc(started_at),
         "completedAt": _utc(completed_at),
         "outcome": outcome,
+        "replayState": replay_state,
         "mutationEvidenceRefs": sorted(set(mutation_evidence_refs)),
     }
     if approval_receipt_ref is not None:
@@ -62,7 +64,7 @@ def build_operation_receipt(
         body["outputHash"] = require_hash(output_hash)
     body["receiptHash"] = _hash_document(body, "receiptHash")
     try:
-        validate_provider_operation_receipt(body)
+        _validate_provider_operation_receipt_document(body)
     except Exception as error:
         raise ReceiptError("operation-receipt-invalid") from error
     return clone(body)
@@ -78,6 +80,7 @@ def build_query_receipt(
     returned_files: Iterable[Mapping[str, Any]], truncated: bool,
     pre_fingerprint_hash: str, post_fingerprint_hash: str,
     actual_side_effects: str, mutation_evidence_refs: Iterable[str],
+    replay_state: str,
     approval_receipt_ref: str | None = None,
     pre_workspace_identity_hash: str | None = None,
     post_workspace_identity_hash: str | None = None,
@@ -117,6 +120,7 @@ def build_query_receipt(
         "preQueryWorkspaceFingerprintHash": pre_fingerprint_hash,
         "postQueryWorkspaceFingerprintHash": post_fingerprint_hash,
         "actualSideEffects": actual_side_effects,
+        "replayState": replay_state,
         "mutationEvidenceRefs": sorted(set(mutation_evidence_refs)),
     }
     if approval_receipt_ref is not None:
@@ -130,7 +134,7 @@ def build_query_receipt(
         body["postQueryWorkspaceIdentityHash"] = require_hash(post_workspace_identity_hash)
     body["receiptHash"] = _hash_document(body, "receiptHash")
     try:
-        validate_provider_query_receipt(body)
+        _validate_provider_query_receipt_document(body)
     except Exception as error:
         raise ReceiptError("query-receipt-invalid") from error
     return clone(body)
@@ -156,6 +160,8 @@ def _normalize_actual(actual_targets: Iterable[Mapping[str, Any]]) -> list[dict[
         result.append({"targetKind": kind, "targetId": target, "action": action})
     if not result:
         raise ReceiptError("mutation-actual-target-required")
+    if len(result) != 1:
+        raise ReceiptError("mutation-evidence-must-match-one-target")
     return sorted(result, key=lambda item: (item["targetKind"], item["targetId"], item["action"]))
 
 
@@ -185,7 +191,7 @@ def _validate_actual_subset(
 ) -> None:
     candidates = [
         target for target in declared_targets
-        if target.get("canonicalTargetHash") == mutation_target_hash
+        if target.get("mutationTargetHash") == mutation_target_hash
     ]
     if len(candidates) != 1:
         raise ReceiptError("mutation-target-hash-mismatch")

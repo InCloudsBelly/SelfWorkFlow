@@ -44,9 +44,27 @@ class ApprovalReceipt:
 
 
 class ReplayStore(Protocol):
-    """Atomic, shared replay boundary. False means the key was already consumed."""
+    """Atomic replay state machine supplied by the trusted host."""
 
-    def consume(self, key: str) -> bool: ...
+    def reserve(self, key: str) -> bool: ...
+    def commit(self, key: str, terminal_state: str) -> bool: ...
+    def abort(self, key: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class AuthorizationResolution:
+    """Current authoritative status for one immutable authorization document."""
+
+    document: dict[str, Any]
+    status: str
+    issuer_trusted: bool
+    authority_class: str
+
+
+class AuthorizationResolver(Protocol):
+    """Resolve current authorization state; serialized plan copies are not authority."""
+
+    def resolve(self, authorization_hash: str) -> AuthorizationResolution | None: ...
 
 
 @dataclass(frozen=True)
@@ -63,6 +81,7 @@ def build_machine_authorization(
     operation_id: str, side_effect_class: str, execution_nonce: str,
     attempt_ref: str, issued_at: datetime | str, expires_at: datetime | str,
     nonce: str, confirmation_source: str = "machine-policy",
+    issuer_id: str = "host-local-authority", test_mode: bool = False,
 ) -> MachineAuthorization:
     if subject_kind not in {"operation-plan", "query-plan"}:
         raise ApprovalError("machine-authorization-subject-invalid")
@@ -70,6 +89,11 @@ def build_machine_authorization(
         raise ApprovalError("machine-authorization-side-effect-invalid")
     if confirmation_source not in {"user-confirmation", "machine-policy", "test-fixture"}:
         raise ApprovalError("machine-authorization-source-invalid")
+    if not isinstance(issuer_id, str) or not issuer_id or issuer_id == "test-fixture":
+        if not (test_mode and issuer_id == "test-fixture"):
+            raise ApprovalError("machine-authorization-issuer-invalid")
+    if confirmation_source == "test-fixture" and not test_mode:
+        raise ApprovalError("test-authorization-rejected")
     body: dict[str, Any] = {
         "schemaVersion": 3,
         "providerId": provider_id,
@@ -82,12 +106,13 @@ def build_machine_authorization(
         "issuedAt": _utc(issued_at),
         "expiresAt": _utc(expires_at),
         "nonce": nonce,
+        "issuerId": issuer_id,
         "confirmationSource": confirmation_source,
         "revocationState": "active",
     }
     body["authorizationHash"] = content_hash(body)
     try:
-        validate_provider_machine_authorization(body)
+        validate_provider_machine_authorization(body, allow_test_issuer=test_mode)
     except Exception as error:
         raise ApprovalError("machine-authorization-invalid") from error
     return MachineAuthorization(clone(body))
@@ -98,10 +123,11 @@ def validate_machine_authorization(
     provider_id: str, project_root_hash: str, subject_kind: str,
     operation_id: str, side_effect_class: str, execution_nonce: str,
     attempt_ref: str, now: datetime | str, test_mode: bool = False,
+    issuer_trusted: bool = True,
 ) -> None:
     document = authorization.document if isinstance(authorization, MachineAuthorization) else dict(authorization)
     try:
-        validate_provider_machine_authorization(document)
+        validate_provider_machine_authorization(document, allow_test_issuer=test_mode)
     except Exception as error:
         raise ApprovalError("machine-authorization-invalid") from error
     expected = {
@@ -117,11 +143,54 @@ def validate_machine_authorization(
         raise ApprovalError("machine-authorization-scope-mismatch")
     if document.get("revocationState") != "active":
         raise ApprovalError("machine-authorization-revoked")
+    if not issuer_trusted:
+        raise ApprovalError("machine-authorization-issuer-untrusted")
     current = _utc(now)
     if not (document["issuedAt"] <= current <= document["expiresAt"]):
         raise ApprovalError("machine-authorization-expired")
     if document.get("confirmationSource") == "test-fixture" and not test_mode:
         raise ApprovalError("test-authorization-rejected")
+
+
+def resolve_machine_authorization(
+    resolver: AuthorizationResolver | None, *, authorization_hash: str,
+    provider_id: str, project_root_hash: str, subject_kind: str,
+    operation_id: str, side_effect_class: str, execution_nonce: str,
+    attempt_ref: str, now: datetime | str, test_mode: bool = False,
+) -> dict[str, Any]:
+    """Resolve and validate the current authoritative authorization on every run."""
+
+    if resolver is None:
+        raise ApprovalError("machine-authorization-resolver-required")
+    try:
+        resolution = resolver.resolve(require_hash(authorization_hash))
+    except Exception:
+        raise ApprovalError("machine-authorization-resolution-failed") from None
+    if not isinstance(resolution, AuthorizationResolution):
+        raise ApprovalError("machine-authorization-resolution-invalid")
+    if resolution.status != "active":
+        raise ApprovalError("machine-authorization-revoked")
+    if resolution.authority_class not in {"external-host", "fake-test"}:
+        raise ApprovalError("machine-authorization-resolution-invalid")
+    if resolution.authority_class == "fake-test" and not test_mode:
+        raise ApprovalError("test-authorization-resolver-rejected")
+    document = clone(resolution.document)
+    if document.get("authorizationHash") != authorization_hash:
+        raise ApprovalError("machine-authorization-hash-mismatch")
+    validate_machine_authorization(
+        document,
+        provider_id=provider_id,
+        project_root_hash=project_root_hash,
+        subject_kind=subject_kind,
+        operation_id=operation_id,
+        side_effect_class=side_effect_class,
+        execution_nonce=execution_nonce,
+        attempt_ref=attempt_ref,
+        now=now,
+        test_mode=test_mode,
+        issuer_trusted=resolution.issuer_trusted,
+    )
+    return document
 
 
 def _subject(kind: str, body: Mapping[str, Any], final_hash_field: str) -> AuthorizationSubject:

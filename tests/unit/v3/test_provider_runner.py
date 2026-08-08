@@ -1,240 +1,276 @@
+from __future__ import annotations
+
+from datetime import timedelta
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
-from tests.fixtures.providers.fake_provider import FakeEffectPort
-from selfworkflow.v3.approvals import (
-    build_machine_authorization,
-    build_operation_plan_subject,
-    build_query_plan_subject,
-    issue_approval,
-)
-from selfworkflow.v3.hashing import content_hash
 from selfworkflow.v3.effects import EffectMutation
-from selfworkflow.v3.plans import PlanError, build_operation_plan, build_query_plan
-from selfworkflow.v3.project_lease import ProviderLeaseManager
+from selfworkflow.v3.hashing import clone, content_hash
 from selfworkflow.v3.project_state import WorkspaceObservation
 from selfworkflow.v3.runner import RunnerError, run_operation, run_query
-
-
-H = "sha256:" + "a" * 64
-NOW = datetime(2026, 8, 9, tzinfo=timezone.utc)
+from tests.fixtures.providers.fake_provider import FakeEffectPort
+from tests.fixtures.providers.security_fakes import (
+    FakeHostAtomicLeasePort,
+    FakeReplayStore,
+    H,
+    NOW,
+    evidence_for,
+    lease_manager,
+    operation_bundle,
+    query_bundle,
+)
 
 
 class Observer:
-    def __init__(self, observations): self.observations = iter(observations)
-    def capture(self): return next(self.observations)
+    def __init__(self, *observations):
+        self.observations = iter(observations)
 
-
-class Clock:
-    def now(self): return NOW
-
-
-class Process:
-    def current(self): return 100, "start-a"
-    def is_live(self, pid, start): return pid == 100 and start == "start-a"
-
-
-class Boot:
-    def current(self): return "boot-a"
-
-
-class Store:
-    def __init__(self): self.values = {}
-    def read(self, key): return None if key not in self.values else dict(self.values[key])
-    def create(self, key, document):
-        if key in self.values: return False
-        self.values[key] = dict(document); return True
-    def replace(self, key, expected_hash, document):
-        if key not in self.values or self.values[key]["leaseHash"] != expected_hash: return False
-        self.values[key] = dict(document); return True
-    def delete(self, key, expected_hash):
-        if key not in self.values or self.values[key]["leaseHash"] != expected_hash: return False
-        del self.values[key]; return True
-
-
-class Replay:
-    def __init__(self): self.values = set()
-    def consume(self, key):
-        if key in self.values: return False
-        self.values.add(key); return True
+    def capture(self):
+        return next(self.observations)
 
 
 class ProviderRunnerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
-        self.target = {
-            "targetKind": "managed-state-root", "targetId": "provider-index",
-            "recursion": "bounded", "reparsePolicy": "reject",
-            "allowedActions": ["sync"], "evidenceRequired": False,
-        }
-        self.manager = ProviderLeaseManager(
-            store=Store(), clock=Clock(), process=Process(), boot=Boot(),
-            host_identity="host-a", user_session="session-a",
-        )
 
-    def tearDown(self): self.temp.cleanup()
+    def tearDown(self):
+        self.temp.cleanup()
 
-    def operation(self, *, confirmation_source="user-confirmation", nonce="nonce-a"):
-        kwargs = dict(
-            provider_id="fake.provider", operation_id="sync-incremental",
-            binding_snapshot_hash=H, plan_hash=H, project_root=str(self.root),
-            executable=str(self.root / "provider.exe"), env={"LANG": "C"},
-            env_allowlist=("LANG",), mutation_targets=(self.target,),
-            execution_nonce=nonce, attempt_ref="attempt-a", adapter_render_hash=H,
-            ownership_domain="selfworkflow-managed",
+    def write_context(self, plan):
+        manager = lease_manager()
+        lease = manager.acquire(
+            project_root=self.temp.name, provider_id=plan.document["providerId"],
+            operation_id=plan.document["operationId"],
+            nonce=plan.document["executionNonce"],
         )
-        draft = build_operation_plan(**kwargs)
-        approval = issue_approval(
-            build_operation_plan_subject(draft.document),
-            confirmation_source=confirmation_source, scope="one",
-            target_hashes=tuple(item["canonicalTargetHash"] for item in draft.document["mutationTargets"]),
-            issued_at=NOW, expires_at=NOW + timedelta(minutes=5),
-            nonce=nonce,
-        )
-        return build_operation_plan(**kwargs, approval=approval), approval
+        return manager, lease
 
-    def lease(self, nonce="nonce-a"):
-        return self.manager.acquire(
-            project_root=str(self.root), provider_id="fake.provider",
-            operation_id="sync-incremental", nonce=nonce,
+    def test_success_executes_only_sealed_command_and_commits_terminal_success(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
+        manager, lease = self.write_context(plan)
+        evidence = evidence_for(plan)
+        port = FakeEffectPort(
+            mutations=(EffectMutation("managed-state", "index", "sync"),),
+            mutation_evidence=(evidence,),
         )
-
-    def test_effect_port_uses_only_plan_command_and_receipt(self):
-        plan, approval = self.operation()
-        port = FakeEffectPort()
-        receipt, result = run_operation(
+        replay = FakeReplayStore()
+        receipt, _result = run_operation(
             plan, approval=approval, effect_port=port, now=NOW,
-            lease=self.lease(), lease_manager=self.manager,
-            replay_store=Replay(), test_mode=True,
+            trusted_command_registry=registry, authorization_resolver=resolver,
+            lease=lease, lease_manager=manager, replay_store=replay,
+            test_mode=True,
         )
-        self.assertEqual(len(port.calls), 1)
         self.assertEqual(port.calls[0].argv, tuple(plan.document["commandSpec"]["argv"]))
+        self.assertEqual(port.calls[0].env, plan.document["commandSpec"]["env"])
+        self.assertEqual(port.calls[0].cwd, plan.document["commandSpec"]["cwd"])
         self.assertEqual(receipt["outcome"], "succeeded")
-        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(receipt["replayState"], "terminal-succeeded")
+        self.assertIn("terminal-succeeded", replay.states.values())
 
-    def test_production_rejects_test_port_and_test_receipt(self):
-        plan, approval = self.operation()
-        with self.assertRaisesRegex(RunnerError, "test-effect-port-rejected"):
-            run_operation(plan, approval=approval, effect_port=FakeEffectPort(), now=NOW)
-        test_plan, test_approval = self.operation(confirmation_source="test-fixture", nonce="nonce-b")
-        class ProductionPort(FakeEffectPort): is_test_port = False
-        with self.assertRaisesRegex(RunnerError, "test-approval-rejected"):
+    def test_missing_registry_resolver_lease_or_host_capability_fails_before_effect(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
+        port = FakeEffectPort()
+        replay = FakeReplayStore()
+        with self.assertRaisesRegex(RunnerError, "trusted-command-registry-required"):
             run_operation(
-                test_plan, approval=test_approval, effect_port=ProductionPort(), now=NOW,
-                lease=self.lease("nonce-b"), lease_manager=self.manager,
-                replay_store=Replay(),
+                plan, approval=approval, effect_port=port, now=NOW,
+                authorization_resolver=resolver, replay_store=replay, test_mode=True,
             )
+        with self.assertRaisesRegex(RunnerError, "machine-authorization-resolver-required"):
+            run_operation(
+                plan, approval=approval, effect_port=port, now=NOW,
+                trusted_command_registry=registry, replay_store=replay, test_mode=True,
+            )
+        with self.assertRaisesRegex(RunnerError, "live-provider-lease-required"):
+            run_operation(
+                plan, approval=approval, effect_port=port, now=NOW,
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                replay_store=replay, test_mode=True,
+            )
+        self.assertEqual(port.calls, [])
 
-    def test_env_cwd_and_post_plan_command_tamper_are_rejected(self):
-        with self.assertRaisesRegex(PlanError, "env-injection"):
-            build_operation_plan(
-                provider_id="fake.provider", operation_id="inspect",
-                binding_snapshot_hash=H, plan_hash=H, project_root=str(self.root),
-                executable=str(self.root / "provider.exe"), env={"BAD": "x;evil"},
-                env_allowlist=("BAD",), mutation_targets=(self.target,),
-                execution_nonce="nonce-a", attempt_ref="attempt-a",
-                adapter_render_hash=H, ownership_domain="selfworkflow-managed",
-            )
-        generated_allowlist = (name for name in ("LANG",))
-        generated = build_operation_plan(
-            provider_id="fake.provider", operation_id="inspect",
-            binding_snapshot_hash=H, plan_hash=H, project_root=str(self.root),
-            executable=str(self.root / "provider.exe"), env={"LANG": "C"},
-            env_allowlist=generated_allowlist, mutation_targets=(self.target,),
-            execution_nonce="nonce-env", attempt_ref="attempt-env",
-            adapter_render_hash=H, ownership_domain="selfworkflow-managed",
-        )
-        self.assertEqual(generated.document["envAllowlist"], ["LANG"])
-        plan, approval = self.operation()
-        plan.document["commandSpec"]["argv"][0] = str(self.root / "other.exe")
-        with self.assertRaisesRegex(RunnerError, "operation-plan-invalid"):
+    def test_revoked_or_untrusted_authoritative_machine_state_is_rejected(self):
+        plan, approval, registry, machine, resolver = operation_bundle(self.temp.name)
+        manager, lease = self.write_context(plan)
+        resolver.revoke(machine.authorization_hash)
+        with self.assertRaisesRegex(RunnerError, "machine-authorization-revoked"):
             run_operation(
                 plan, approval=approval, effect_port=FakeEffectPort(), now=NOW,
-                lease=self.lease(), lease_manager=self.manager,
-                replay_store=Replay(), test_mode=True,
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                lease=lease, lease_manager=manager, replay_store=FakeReplayStore(),
+                test_mode=True,
             )
-
-    def test_local_write_query_requires_typed_machine_authorization(self):
-        kwargs = dict(
-            provider_id="fake.provider", operation_id="inspect",
-            binding_snapshot_hash=H, plan_hash=H, adapter_hash=H,
-            typed_input_schema_ref="query.input", typed_input={"q": "x"},
-            adapter_render_hash=H, project_root=str(self.root),
-            project_state_receipt_hash=H, workspace_fingerprint_hash=H,
-            query_byte_budget=1000, call_limit=1, timeout_seconds=1,
-            mutation_targets=(self.target,), execution_nonce="nonce-q",
-            attempt_ref="attempt-q", executable=str(self.root / "provider.exe"),
-            arguments=("query",),
-        )
-        with self.assertRaisesRegex(PlanError, "machine-project-authorization-required"):
-            build_query_plan(**kwargs, side_effects="local-write")
-        authorization = build_machine_authorization(
-            provider_id="fake.provider", project_root=str(self.root),
-            subject_kind="query-plan", operation_id="inspect",
-            side_effect_class="local-write", execution_nonce="nonce-q",
-            attempt_ref="attempt-q", issued_at=NOW,
-            expires_at=NOW + timedelta(minutes=5), nonce="machine-a",
-        )
-        draft = build_query_plan(
-            **kwargs, side_effects="local-write",
-            machine_authorization=authorization, now=NOW,
-        )
-        approval = issue_approval(
-            build_query_plan_subject(draft.document),
-            confirmation_source="user-confirmation", scope="query",
-            target_hashes=tuple(item["canonicalTargetHash"] for item in draft.document["mutationTargets"]),
-            issued_at=NOW, expires_at=NOW + timedelta(minutes=5), nonce="nonce-q",
-        )
-        build_query_plan(
-            **kwargs, side_effects="local-write",
-            machine_authorization=authorization, now=NOW, approval=approval,
-        )
-
-    def test_readonly_query_drift_fails_without_external_command_override(self):
-        kwargs = dict(
-            provider_id="fake.provider", operation_id="inspect",
-            binding_snapshot_hash=H, plan_hash=H, adapter_hash=H,
-            typed_input_schema_ref="query.input", typed_input={"q": "x"},
-            adapter_render_hash=H, project_root=str(self.root),
-            project_state_receipt_hash=H, workspace_fingerprint_hash=H,
-            query_byte_budget=1000, call_limit=1, timeout_seconds=1,
-            side_effects="none", mutation_targets=(), execution_nonce="nonce-q",
-            attempt_ref="attempt-q", executable=str(self.root / "provider.exe"),
-            arguments=("query",),
-        )
-        draft = build_query_plan(**kwargs)
-        approval = issue_approval(
-            build_query_plan_subject(draft.document),
-            confirmation_source="user-confirmation", scope="query", target_hashes=(),
-            issued_at=NOW, expires_at=NOW + timedelta(minutes=5), nonce="nonce-q",
-        )
-        plan = build_query_plan(**kwargs, approval=approval)
-        pre = WorkspaceObservation(H, {"fingerprintHash": H}, ())
-        post_hash = content_hash("other")
-        post = WorkspaceObservation(post_hash, {"fingerprintHash": post_hash}, ("Source/a.cpp",))
-        with self.assertRaisesRegex(RunnerError, "workspace-drift-during-query"):
-            run_query(
+        resolver.statuses[machine.authorization_hash] = "active"
+        resolver.trusted = False
+        with self.assertRaisesRegex(RunnerError, "issuer-untrusted"):
+            run_operation(
+                plan, approval=approval, effect_port=FakeEffectPort(), now=NOW,
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                lease=lease, lease_manager=manager, replay_store=FakeReplayStore(),
+                test_mode=True,
+            )
+        resolver.trusted = True
+        with self.assertRaisesRegex(RunnerError, "machine-authorization-expired"):
+            run_operation(
                 plan, approval=approval, effect_port=FakeEffectPort(),
-                observer=Observer([pre, post]), now=NOW, returned_files=[],
-                index_revision="1", index_completeness="complete",
-                replay_store=Replay(), test_mode=True,
+                now=NOW + timedelta(minutes=11),
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                lease=lease, lease_manager=manager, replay_store=FakeReplayStore(),
+                test_mode=True,
             )
 
-    def test_required_effect_evidence_cannot_be_omitted(self):
-        self.target["evidenceRequired"] = True
-        plan, approval = self.operation()
-        with self.assertRaisesRegex(RunnerError, "required-mutation-evidence-missing"):
+    def test_zero_mutation_still_requires_exact_verified_evidence(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
+        manager, lease = self.write_context(plan)
+        replay = FakeReplayStore()
+        with self.assertRaises(RunnerError) as raised:
+            run_operation(
+                plan, approval=approval, effect_port=FakeEffectPort(), now=NOW,
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                lease=lease, lease_manager=manager, replay_store=replay,
+                test_mode=True,
+            )
+        self.assertEqual(raised.exception.reason, "required-mutation-evidence-missing")
+        self.assertEqual(raised.exception.replay_state, "terminal-failed")
+        self.assertIn("terminal-failed", replay.states.values())
+
+    def test_effect_not_started_is_only_retryable_abort_path(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(
+            self.temp.name, operation_id="inspect", ownership_domain="user-owned",
+        )
+        replay = FakeReplayStore()
+        with self.assertRaises(RunnerError) as raised:
+            run_operation(
+                plan, approval=approval, effect_port=FakeEffectPort(not_started=True),
+                now=NOW, trusted_command_registry=registry,
+                authorization_resolver=resolver, replay_store=replay, test_mode=True,
+            )
+        self.assertEqual(raised.exception.replay_state, "aborted")
+        self.assertTrue(raised.exception.retryable)
+        receipt, _ = run_operation(
+            plan, approval=approval, effect_port=FakeEffectPort(), now=NOW,
+            trusted_command_registry=registry, authorization_resolver=resolver,
+            replay_store=replay, test_mode=True,
+        )
+        self.assertEqual(receipt["replayState"], "terminal-succeeded")
+
+    def test_post_effect_failure_is_terminal_and_cannot_replay(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(
+            self.temp.name, operation_id="inspect", ownership_domain="user-owned",
+        )
+        replay = FakeReplayStore()
+        bad_window = FakeEffectPort(
+            started_at=NOW + timedelta(seconds=1),
+            completed_at=NOW + timedelta(seconds=2),
+        )
+        with self.assertRaises(RunnerError) as raised:
+            run_operation(
+                plan, approval=approval, effect_port=bad_window, now=NOW,
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                replay_store=replay, test_mode=True,
+            )
+        self.assertEqual(raised.exception.reason, "effect-invocation-outside-window")
+        self.assertEqual(raised.exception.replay_state, "terminal-failed")
+        with self.assertRaisesRegex(RunnerError, "approval-replay"):
+            run_operation(
+                plan, approval=approval, effect_port=FakeEffectPort(), now=NOW,
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                replay_store=replay, test_mode=True,
+            )
+
+    def test_past_effect_window_is_rejected_as_terminal(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(
+            self.temp.name, operation_id="inspect", ownership_domain="user-owned",
+            nonce="nonce-past", attempt="attempt-past",
+        )
+        with self.assertRaises(RunnerError) as raised:
             run_operation(
                 plan, approval=approval,
                 effect_port=FakeEffectPort(
-                    mutations=(EffectMutation("managed-state", "provider-index", "sync"),),
+                    started_at=NOW - timedelta(seconds=2),
+                    completed_at=NOW - timedelta(seconds=1),
                 ),
-                now=NOW, lease=self.lease(), lease_manager=self.manager,
-                replay_store=Replay(), test_mode=True,
+                now=NOW, trusted_command_registry=registry,
+                authorization_resolver=resolver, replay_store=FakeReplayStore(),
+                test_mode=True,
             )
+        self.assertEqual(raised.exception.reason, "effect-invocation-outside-window")
+        self.assertEqual(raised.exception.replay_state, "terminal-failed")
+
+    def test_lease_takeover_during_effect_cannot_succeed(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
+        host = FakeHostAtomicLeasePort()
+        manager = lease_manager(port=host)
+        lease = manager.acquire(
+            project_root=self.temp.name, provider_id="fake.provider",
+            operation_id="sync-incremental", nonce="nonce-a",
+        )
+        key = manager._key("fake.provider", lease.document["canonicalProjectRootHash"])
+
+        def takeover():
+            current = host.read(key)
+            current["ownerNonce"] = "takeover"
+            current["leaseHash"] = content_hash({
+                k: v for k, v in current.items() if k != "leaseHash"
+            })
+            host.replace_with_takeover(key, current)
+
+        replay = FakeReplayStore()
+        with self.assertRaises(RunnerError) as raised:
+            run_operation(
+                plan, approval=approval,
+                effect_port=FakeEffectPort(
+                    mutation_evidence=(evidence_for(plan),), during_effect=takeover,
+                ),
+                now=NOW, trusted_command_registry=registry,
+                authorization_resolver=resolver, lease=lease,
+                lease_manager=manager, replay_store=replay, test_mode=True,
+            )
+        self.assertEqual(raised.exception.replay_state, "terminal-failed")
+
+    def test_readonly_query_drift_is_terminal_and_production_rejects_fake_port(self):
+        plan, approval, registry, _machine, resolver = query_bundle(self.temp.name)
+        observation = WorkspaceObservation(H, {"fingerprintHash": H})
+        drift = WorkspaceObservation("identity-b", {"fingerprintHash": H})
+        with self.assertRaisesRegex(RunnerError, "test-effect-port-rejected"):
+            run_query(
+                plan, approval=approval, effect_port=FakeEffectPort(),
+                observer=Observer(observation, observation), now=NOW,
+                returned_files=[], index_revision="r1", index_completeness="complete",
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                replay_store=FakeReplayStore(), test_mode=False,
+            )
+        with self.assertRaises(RunnerError) as raised:
+            run_query(
+                plan, approval=approval, effect_port=FakeEffectPort(),
+                observer=Observer(observation, drift), now=NOW,
+                returned_files=[], index_revision="r1", index_completeness="complete",
+                trusted_command_registry=registry, authorization_resolver=resolver,
+                replay_store=FakeReplayStore(), test_mode=True,
+            )
+        self.assertEqual(raised.exception.reason, "workspace-drift-during-query")
+        self.assertEqual(raised.exception.replay_state, "terminal-failed")
+
+    def test_local_write_query_uses_authority_lease_guard_and_exact_evidence(self):
+        plan, approval, registry, _machine, resolver = query_bundle(
+            self.temp.name, side_effects="local-write",
+            operation_id="sync-incremental", action="sync",
+        )
+        manager, lease = self.write_context(plan)
+        observation = WorkspaceObservation(H, {"fingerprintHash": H})
+        execution = run_query(
+            plan, approval=approval,
+            effect_port=FakeEffectPort(mutation_evidence=(evidence_for(plan),)),
+            observer=Observer(observation, observation), now=NOW,
+            returned_files=[], index_revision="r1", index_completeness="complete",
+            trusted_command_registry=registry, authorization_resolver=resolver,
+            lease=lease, lease_manager=manager, replay_store=FakeReplayStore(),
+            test_mode=True,
+        )
+        self.assertEqual(execution.receipt["actualSideEffects"], "none")
+        self.assertEqual(execution.receipt["replayState"], "terminal-succeeded")
+        self.assertEqual(len(execution.receipt["mutationEvidenceRefs"]), 1)
 
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()

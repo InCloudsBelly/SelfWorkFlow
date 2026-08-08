@@ -4,7 +4,7 @@
   "title": "SelfWorkFlow V3 stale lease unlock authorization",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "authorizationHash", "leaseHash", "providerId", "canonicalProjectRootHash", "operationId", "operationNonce", "ownerNonce", "storeVersion", "issuedAt", "expiresAt", "nonce", "confirmationSource", "revocationState"],
+  "required": ["schemaVersion", "authorizationHash", "leaseHash", "providerId", "canonicalProjectRootHash", "operationId", "operationNonce", "ownerNonce", "storeVersion", "issuedAt", "expiresAt", "nonce", "issuerId", "confirmationSource", "revocationState"],
   "properties": {
     "schemaVersion": {"const": 3},
     "authorizationHash": {"$ref": "#/$defs/hash"},
@@ -18,6 +18,7 @@
     "issuedAt": {"type": "string", "format": "utc-date-time"},
     "expiresAt": {"type": "string", "format": "utc-date-time"},
     "nonce": {"$ref": "#/$defs/id"},
+    "issuerId": {"$ref": "#/$defs/id"},
     "confirmationSource": {"const": "user-confirmation"},
     "revocationState": {"enum": ["active", "revoked", "expired"]}
   },

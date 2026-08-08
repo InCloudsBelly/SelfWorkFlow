@@ -266,6 +266,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
   写操作使用独立 `ProviderProjectLease`，字段至少包含 canonical project root hash、providerId、operationId、operation nonce、owner PID、process start time、user/session、host identity、boot identity、heartbeat、issued/expires time。Clock、ProcessIdentity 和 BootIdentity 都可注入。测试 live owner、PID 重用、主机重启后的旧 lease、heartbeat 漂移、nonce 不匹配、并发竞争和经显式授权的 stale unlock；不得直接复用只有 PID 的 installer lock。
 
+  终审后的严格 MVP 边界见 [ADR 0002](../../decisions/0002-provider-execution-mvp-boundaries.md)：仓库不提供 Python 文件 lease backend；生产 local-write 必须注入外部 Host 原子 CAS、权威授权 resolver、可信命令 registry 和执行期 live guard。network、delete、user-owned mutation 均为 unsupported；Fake-only 验证不得升级真实 Provider 支持状态。
+
 - [ ] **Step 7: 运行测试并提交**
 
   ```powershell

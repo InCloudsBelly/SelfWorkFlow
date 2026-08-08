@@ -1,16 +1,14 @@
-"""Effect ports. Production code receives effects; it never discovers or runs them."""
+"""Injected Provider effect boundary; no production process implementation lives here."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Protocol
 
 
 @dataclass(frozen=True)
 class EffectMutation:
-    """One observed side effect reported by a Host-owned effect boundary."""
-
     kind: str
     target: str
     action: str
@@ -29,20 +27,25 @@ class EffectResult:
     observation_complete: bool = True
 
 
+class LiveLeaseGuard(Protocol):
+    """Runner-owned callback that the host effect port must invoke during execution."""
+
+    def check(self) -> str: ...
+
+
 class EffectPort(Protocol):
     def run(
-        self,
-        argv: Sequence[str],
-        *,
-        env: Mapping[str, str],
-        cwd: str,
-        timeout_seconds: int,
-        output_limit_bytes: int,
-    ) -> EffectResult:
-        """Run one already-rendered command through a host-owned effect boundary."""
+        self, command_spec: Mapping[str, Any], *, timeout_seconds: int,
+        output_limit_bytes: int, invocation_time: datetime,
+        live_lease_guard: LiveLeaseGuard | None,
+    ) -> EffectResult: ...
 
 
 class EffectError(ValueError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
+
+
+class EffectNotStarted(EffectError):
+    """The sole effect failure proving no external action began."""

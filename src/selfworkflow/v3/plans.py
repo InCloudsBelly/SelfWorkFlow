@@ -1,11 +1,9 @@
-"""Content-addressed Provider plans containing the exact executable command."""
+"""Fail-closed, content-addressed Provider operation and query plans."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import os
-from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping
 
@@ -19,16 +17,13 @@ from selfworkflow.v3.approvals import (
     finalize_document,
     validate_machine_authorization,
 )
-from selfworkflow.v3.contracts import validate_provider_operation_plan, validate_provider_query_plan
-from selfworkflow.v3.hashing import (
-    HashingError,
-    canonical_project_root,
-    canonical_relative_path,
-    clone,
-    content_hash,
-    project_root_hash,
-    require_hash,
+from selfworkflow.v3.command_registry import (
+    CommandRegistryError,
+    TrustedCommandRegistry,
+    render_command,
 )
+from selfworkflow.v3.contracts import validate_provider_operation_plan, validate_provider_query_plan
+from selfworkflow.v3.hashing import clone, content_hash, canonical_project_root, project_root_hash, require_hash
 
 
 class PlanError(ValueError):
@@ -42,15 +37,14 @@ OPERATION_IDS = (
     "upgrade-managed-adapter", "repair-managed-state",
 )
 FORBIDDEN_OPERATION_IDS = {"remove", "delete", "upgrade-user-source", "repair-user-source"}
-_SHELL = re.compile(r"[\x00\r\n;&|<>`$(){}!]")
-_ACTIONS = {
-    "exact-file": {"create", "modify", "delete"},
-    "directory-subtree": {"create", "modify", "delete"},
-    "managed-state-root": {"initialize", "sync", "rebuild", "upgrade", "repair"},
-    "process": {"start", "stop", "inspect", "mutate"},
-    "service": {"start", "stop", "connect", "configure"},
-    "network": {"connect", "listen", "download", "upload"},
+_OPERATION_ACTION = {
+    "initialize-index": "initialize",
+    "sync-incremental": "sync",
+    "rebuild-index": "rebuild",
+    "upgrade-managed-adapter": "upgrade",
+    "repair-managed-state": "repair",
 }
+_MANAGED_ACTIONS = frozenset(_OPERATION_ACTION.values())
 
 
 def _safe_id(value: object, reason: str) -> str:
@@ -66,128 +60,110 @@ def _safe_hash(value: object) -> str:
         raise PlanError("plan-hash-invalid") from None
 
 
-def _safe_argv(values: Iterable[str]) -> list[str]:
-    argv = list(values)
-    if not argv or len(argv) > 256:
-        raise PlanError("command-argv-invalid")
-    for value in argv:
-        if not isinstance(value, str) or not value or len(value) > 4096 or _SHELL.search(value):
-            raise PlanError("argv-template-injection")
-    if not os.path.isabs(argv[0]):
-        raise PlanError("argv-executable-not-absolute")
-    return argv
-
-
-def _env(env: Mapping[str, str], allowlist: Iterable[str]) -> dict[str, str]:
-    allowed = set(allowlist)
-    if set(env) - allowed:
-        raise PlanError("env-injection")
-    result: dict[str, str] = {}
-    for key, value in env.items():
-        if (
-            not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", key)
-            or not isinstance(value, str) or len(value) > 8192 or _SHELL.search(value)
-        ):
-            raise PlanError("env-injection")
-        result[key] = value
-    return dict(sorted(result.items()))
-
-
-def _cwd(root: Path, value: str | None) -> Path:
-    try:
-        cwd = canonical_project_root(root if value is None else value)
-        cwd.relative_to(root)
-        return cwd
-    except (HashingError, ValueError):
-        raise PlanError("command-cwd-outside-project") from None
-
-
-def _target_id(kind: str, value: object) -> str:
-    if kind in {"exact-file", "directory-subtree"}:
-        try:
-            return canonical_relative_path(value)
-        except HashingError:
-            raise PlanError("mutation-target-invalid") from None
-    if not isinstance(value, str) or not value or len(value) > 512 or _SHELL.search(value):
-        raise PlanError("mutation-target-invalid")
-    return value
-
-
 def _targets(
     targets: Iterable[Mapping[str, Any]], *, root_hash: str,
-    allow_empty: bool = False,
+    side_effect_class: str, operation_id: str,
 ) -> list[dict[str, Any]]:
+    sources = list(targets)
+    if side_effect_class == "none":
+        if sources:
+            raise PlanError("readonly-mutation-target-unsupported")
+        return []
+    if side_effect_class == "network":
+        raise PlanError("network-unsupported")
+    if not sources:
+        raise PlanError("mutation-targets-required")
+    expected_action = _OPERATION_ACTION.get(operation_id)
     result: list[dict[str, Any]] = []
-    identities: set[tuple[str, str]] = set()
-    for source in targets:
-        kind = source.get("targetKind")
-        if kind not in _ACTIONS:
+    identities: set[str] = set()
+    for source in sources:
+        if source.get("targetKind") != "managed-state-root":
+            raise PlanError("mvp-managed-state-target-required")
+        target_id = source.get("targetId")
+        if not isinstance(target_id, str) or not target_id or len(target_id) > 512 or any(ord(c) < 32 for c in target_id):
             raise PlanError("mutation-target-invalid")
-        target_id = _target_id(kind, source.get("targetId"))
-        identity = (kind, target_id)
-        if identity in identities:
+        if target_id in identities:
             raise PlanError("mutation-target-duplicate")
-        identities.add(identity)
+        identities.add(target_id)
         actions = sorted(set(source.get("allowedActions", ())))
-        if not actions or not set(actions).issubset(_ACTIONS[kind]):
+        if len(actions) != 1 or actions[0] not in _MANAGED_ACTIONS:
             raise PlanError("mutation-target-action-invalid")
-        canonical_hash = content_hash({"targetKind": kind, "targetId": target_id})
-        containment_hash = (
-            root_hash if kind in {"exact-file", "directory-subtree", "managed-state-root"}
-            else content_hash({"targetKind": kind, "scope": target_id})
-        )
+        if expected_action is not None and actions != [expected_action]:
+            raise PlanError("mutation-target-action-invalid")
+        if source.get("evidenceRequired", True) is not True:
+            raise PlanError("required-evidence-cannot-be-disabled")
+        canonical_hash = content_hash({"targetKind": "managed-state-root", "targetId": target_id})
+        target_hash = content_hash({
+            "targetKind": "managed-state-root",
+            "targetId": target_id,
+            "allowedActions": actions,
+            "evidenceRequired": True,
+        })
         if source.get("canonicalTargetHash", canonical_hash) != canonical_hash:
             raise PlanError("mutation-target-hash-invalid")
-        if source.get("containmentRootHash", containment_hash) != containment_hash:
+        if source.get("mutationTargetHash", target_hash) != target_hash:
+            raise PlanError("mutation-target-hash-invalid")
+        if source.get("containmentRootHash", root_hash) != root_hash:
             raise PlanError("mutation-containment-hash-invalid")
-        evidence_required = source.get("evidenceRequired", True)
-        if not isinstance(evidence_required, bool):
-            raise PlanError("mutation-target-evidence-policy-invalid")
         result.append({
-            "targetKind": kind,
+            "targetKind": "managed-state-root",
             "targetId": target_id,
             "canonicalTargetHash": canonical_hash,
-            "containmentRootHash": containment_hash,
-            "recursion": source.get("recursion", "none"),
-            "reparsePolicy": source.get("reparsePolicy", "reject"),
+            "mutationTargetHash": target_hash,
+            "containmentRootHash": root_hash,
+            "recursion": "none",
+            "reparsePolicy": "reject",
             "allowedActions": actions,
-            "evidenceRequired": evidence_required,
+            "evidenceRequired": True,
         })
-    if not result and not allow_empty:
-        raise PlanError("mutation-targets-required")
-    return sorted(result, key=lambda item: (item["targetKind"], item["targetId"]))
+    return sorted(result, key=lambda item: item["targetId"])
 
 
-def _command_spec(
-    *, root: Path, cwd: Path, argv: Iterable[str], env: Mapping[str, str],
-    env_allowlist: Iterable[str], side_effect_class: str, network_policy: str,
-    mutation_targets: list[dict[str, Any]],
+def _machine_hash(
+    authorization: MachineAuthorization | Mapping[str, Any] | None, *,
+    provider_id: str, root_hash: str, subject_kind: str, operation_id: str,
+    side_effect_class: str, execution_nonce: str, attempt_ref: str,
+    now: datetime | str | None, test_mode: bool,
+) -> str | None:
+    if side_effect_class == "none":
+        if authorization is not None:
+            raise PlanError("readonly-machine-authorization-unexpected")
+        return None
+    if authorization is None or now is None:
+        raise PlanError("machine-project-authorization-required")
+    document = authorization.document if isinstance(authorization, MachineAuthorization) else dict(authorization)
+    try:
+        validate_machine_authorization(
+            document,
+            provider_id=provider_id,
+            project_root_hash=root_hash,
+            subject_kind=subject_kind,
+            operation_id=operation_id,
+            side_effect_class=side_effect_class,
+            execution_nonce=execution_nonce,
+            attempt_ref=attempt_ref,
+            now=now,
+            test_mode=test_mode,
+        )
+    except ApprovalError as error:
+        raise PlanError(error.reason) from None
+    return document["authorizationHash"]
+
+
+def _finalize(
+    body: dict[str, Any], subject: AuthorizationSubject,
+    approval: ApprovalReceipt | Mapping[str, Any] | None, *, hash_field: str,
 ) -> dict[str, Any]:
-    if side_effect_class not in {"none", "local-write", "network"}:
-        raise PlanError("side-effect-class-invalid")
-    if network_policy not in {"none", "local-only", "explicit-approved", "allowed"}:
-        raise PlanError("network-policy-invalid")
-    if side_effect_class == "network" and network_policy not in {"explicit-approved", "allowed"}:
-        raise PlanError("network-authorization-required")
-    if side_effect_class == "none" and network_policy != "none":
-        raise PlanError("network-policy-invalid")
-    if side_effect_class == "local-write" and network_policy not in {"none", "local-only"}:
-        raise PlanError("network-policy-invalid")
-    if side_effect_class == "network" and not any(item["targetKind"] == "network" for item in mutation_targets):
-        raise PlanError("network-target-required")
-    if side_effect_class != "network" and any(item["targetKind"] == "network" for item in mutation_targets):
-        raise PlanError("undeclared-network-policy")
-    command = {
-        "argv": _safe_argv(argv),
-        "env": _env(env, env_allowlist),
-        "canonicalProjectRoot": str(root),
-        "cwd": str(cwd),
-        "sideEffectClass": side_effect_class,
-        "networkPolicy": network_policy,
-        "mutationTargets": clone(mutation_targets),
-    }
-    command["commandSpecHash"] = content_hash(command)
-    return command
+    if approval is None:
+        body[hash_field] = content_hash(body)
+        return body
+    body = finalize_document(subject, approval, final_hash_field=hash_field, base_document=body)
+    approval_document = approval.document if isinstance(approval, ApprovalReceipt) else dict(approval)
+    body["approvalReceipt"] = clone(approval_document)
+    body["approvalReceiptRef"] = "approval-" + approval_document["receiptHash"][7:]
+    body["approvalReceiptHash"] = approval_document["receiptHash"]
+    body[hash_field] = content_hash({key: value for key, value in body.items() if key != hash_field})
+    return body
 
 
 @dataclass(frozen=True)
@@ -224,50 +200,68 @@ class QueryPlan:
 
 def build_operation_plan(
     *, provider_id: str, operation_id: str, binding_snapshot_hash: str,
-    plan_hash: str, project_root: str, executable: str,
-    env: Mapping[str, str] = {}, env_allowlist: Iterable[str] = (),
-    network_policy: str = "none", timeout_seconds: int = 60,
-    output_limit_bytes: int = 1024 * 1024,
-    mutation_targets: Iterable[Mapping[str, Any]], execution_nonce: str,
-    attempt_ref: str, adapter_render_hash: str,
-    ownership_domain: str,
-    cwd: str | None = None,
+    adapter_hash: str, plan_hash: str, project_root: str,
+    command_registry: TrustedCommandRegistry, command_template_id: str,
+    command_parameters: Mapping[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
+    timeout_seconds: int = 60, output_limit_bytes: int = 1024 * 1024,
+    mutation_targets: Iterable[Mapping[str, Any]] = (), execution_nonce: str,
+    attempt_ref: str, ownership_domain: str,
+    machine_authorization: MachineAuthorization | Mapping[str, Any] | None = None,
+    now: datetime | str | None = None, test_mode: bool = False,
     approval: ApprovalReceipt | Mapping[str, Any] | None = None,
 ) -> OperationPlan:
     assert_maintenance_operation(operation_id, ownership_domain=ownership_domain)
-    root = canonical_project_root(project_root)
-    working = _cwd(root, cwd)
-    for value in (binding_snapshot_hash, plan_hash, adapter_render_hash):
+    for value in (binding_snapshot_hash, adapter_hash, plan_hash):
         _safe_hash(value)
     provider_id = _safe_id(provider_id, "provider-id-invalid")
     operation_id = _safe_id(operation_id, "operation-id-invalid")
     execution_nonce = _safe_id(execution_nonce, "nonce-invalid")
     attempt_ref = _safe_id(attempt_ref, "attempt-invalid")
+    root = canonical_project_root(project_root)
     root_hash = project_root_hash(root)
-    target_list = _targets(mutation_targets, root_hash=root_hash)
-    env_names = tuple(env_allowlist)
     side_effect_class = "none" if operation_id == "inspect" else "local-write"
-    if network_policy in {"explicit-approved", "allowed"}:
-        side_effect_class = "network"
-    argv = (executable, "--operation", operation_id, "--project-root", str(root))
-    command = _command_spec(
-        root=root, cwd=working, argv=argv, env=env, env_allowlist=env_names,
-        side_effect_class=side_effect_class, network_policy=network_policy,
-        mutation_targets=target_list,
+    if side_effect_class != "none" and ownership_domain != "selfworkflow-managed":
+        raise PlanError("user-owned-source-protected")
+    target_list = _targets(
+        mutation_targets, root_hash=root_hash,
+        side_effect_class=side_effect_class, operation_id=operation_id,
     )
+    authorization_hash = _machine_hash(
+        machine_authorization,
+        provider_id=provider_id, root_hash=root_hash, subject_kind="operation-plan",
+        operation_id=operation_id, side_effect_class=side_effect_class,
+        execution_nonce=execution_nonce, attempt_ref=attempt_ref, now=now,
+        test_mode=test_mode,
+    )
+    try:
+        command = render_command(
+            command_registry,
+            template_id=command_template_id,
+            provider_id=provider_id,
+            binding_snapshot_hash=binding_snapshot_hash,
+            adapter_hash=adapter_hash,
+            operation_id=operation_id,
+            side_effect_class=side_effect_class,
+            canonical_project_root=str(root),
+            parameters=command_parameters,
+            env=env,
+        )
+    except CommandRegistryError as error:
+        raise PlanError(error.reason) from None
     body: dict[str, Any] = {
         "schemaVersion": 3,
         "planHash": plan_hash,
         "providerId": provider_id,
         "operationId": operation_id,
         "bindingSnapshotHash": binding_snapshot_hash,
-        "canonicalTargetHash": content_hash([item["canonicalTargetHash"] for item in target_list]),
+        "adapterHash": adapter_hash,
+        "commandRegistryHash": command_registry.registry_hash,
+        "commandTemplateHash": command["templateHash"],
+        "adapterRenderHash": command["commandSpecHash"],
+        "canonicalTargetHash": content_hash([item["mutationTargetHash"] for item in target_list]),
         "containmentRootHash": content_hash([item["containmentRootHash"] for item in target_list]),
-        "adapterRenderHash": adapter_render_hash,
-        "argvHash": content_hash(command["argv"]),
-        "cwdHash": content_hash(command["cwd"]),
-        "envAllowlist": sorted(set(env_names)),
-        "networkPolicy": network_policy,
+        "networkPolicy": "none",
         "sideEffectClass": side_effect_class,
         "timeoutSeconds": timeout_seconds,
         "outputLimitBytes": output_limit_bytes,
@@ -278,17 +272,11 @@ def build_operation_plan(
         "canonicalProjectRootHash": root_hash,
         "ownershipDomain": ownership_domain,
     }
+    if authorization_hash is not None:
+        body["machineAuthorizationHash"] = authorization_hash
     subject = build_operation_plan_subject(body)
     body["operationAuthorizationSubjectHash"] = subject.subject_hash
-    if approval is not None:
-        body = finalize_document(subject, approval, final_hash_field="operationPlanHash", base_document=body)
-        approval_document = approval.document if isinstance(approval, ApprovalReceipt) else dict(approval)
-        body["approvalReceipt"] = clone(approval_document)
-        body["approvalReceiptRef"] = "approval-" + approval_document["receiptHash"][7:]
-        body["approvalReceiptHash"] = approval_document["receiptHash"]
-        body["operationPlanHash"] = content_hash({key: value for key, value in body.items() if key != "operationPlanHash"})
-    else:
-        body["operationPlanHash"] = content_hash(body)
+    body = _finalize(body, subject, approval, hash_field="operationPlanHash")
     validate_provider_operation_plan(body)
     return OperationPlan(clone(body), subject)
 
@@ -296,51 +284,62 @@ def build_operation_plan(
 def build_query_plan(
     *, provider_id: str, operation_id: str, binding_snapshot_hash: str,
     plan_hash: str, adapter_hash: str, typed_input_schema_ref: str,
-    typed_input: Any, adapter_render_hash: str, project_root: str,
+    typed_input: Any, project_root: str,
     project_state_receipt_hash: str, workspace_fingerprint_hash: str,
     query_byte_budget: int, call_limit: int, timeout_seconds: int,
     side_effects: str, mutation_targets: Iterable[Mapping[str, Any]],
-    execution_nonce: str, attempt_ref: str, executable: str,
-    arguments: Iterable[str] = (), env: Mapping[str, str] = {},
-    env_allowlist: Iterable[str] = (), cwd: str | None = None,
-    network_policy: str = "none",
+    execution_nonce: str, attempt_ref: str,
+    command_registry: TrustedCommandRegistry, command_template_id: str,
+    command_parameters: Mapping[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
+    ownership_domain: str = "user-owned",
     machine_authorization: MachineAuthorization | Mapping[str, Any] | None = None,
-    now: datetime | str | None = None,
+    now: datetime | str | None = None, test_mode: bool = False,
     approval: ApprovalReceipt | Mapping[str, Any] | None = None,
 ) -> QueryPlan:
-    if side_effects not in {"none", "local-write", "network"}:
+    if side_effects == "network":
+        raise PlanError("network-unsupported")
+    if side_effects not in {"none", "local-write"}:
         raise PlanError("query-side-effects-invalid")
+    if side_effects == "local-write" and ownership_domain != "selfworkflow-managed":
+        raise PlanError("user-owned-source-protected")
     for value in (
-        binding_snapshot_hash, plan_hash, adapter_hash, adapter_render_hash,
+        binding_snapshot_hash, plan_hash, adapter_hash,
         project_state_receipt_hash, workspace_fingerprint_hash,
     ):
         _safe_hash(value)
     root = canonical_project_root(project_root)
-    working = _cwd(root, cwd)
     root_hash = project_root_hash(root)
     provider_id = _safe_id(provider_id, "provider-id-invalid")
     operation_id = _safe_id(operation_id, "operation-id-invalid")
     execution_nonce = _safe_id(execution_nonce, "nonce-invalid")
     attempt_ref = _safe_id(attempt_ref, "attempt-invalid")
-    target_list = _targets(mutation_targets, root_hash=root_hash, allow_empty=side_effects == "none")
-    if side_effects != "none":
-        if machine_authorization is None or now is None:
-            raise PlanError("machine-project-authorization-required")
-        try:
-            validate_machine_authorization(
-                machine_authorization,
-                provider_id=provider_id, project_root_hash=root_hash,
-                subject_kind="query-plan", operation_id=operation_id,
-                side_effect_class=side_effects, execution_nonce=execution_nonce,
-                attempt_ref=attempt_ref, now=now,
-            )
-        except ApprovalError as error:
-            raise PlanError(error.reason) from None
-    command = _command_spec(
-        root=root, cwd=working, argv=(executable, *tuple(arguments)),
-        env=env, env_allowlist=env_allowlist, side_effect_class=side_effects,
-        network_policy=network_policy, mutation_targets=target_list,
+    target_list = _targets(
+        mutation_targets, root_hash=root_hash,
+        side_effect_class=side_effects, operation_id=operation_id,
     )
+    authorization_hash = _machine_hash(
+        machine_authorization,
+        provider_id=provider_id, root_hash=root_hash, subject_kind="query-plan",
+        operation_id=operation_id, side_effect_class=side_effects,
+        execution_nonce=execution_nonce, attempt_ref=attempt_ref, now=now,
+        test_mode=test_mode,
+    )
+    try:
+        command = render_command(
+            command_registry,
+            template_id=command_template_id,
+            provider_id=provider_id,
+            binding_snapshot_hash=binding_snapshot_hash,
+            adapter_hash=adapter_hash,
+            operation_id=operation_id,
+            side_effect_class=side_effects,
+            canonical_project_root=str(root),
+            parameters=command_parameters,
+            env=env,
+        )
+    except CommandRegistryError as error:
+        raise PlanError(error.reason) from None
     body: dict[str, Any] = {
         "schemaVersion": 3,
         "planHash": plan_hash,
@@ -350,7 +349,9 @@ def build_query_plan(
         "adapterHash": adapter_hash,
         "typedInputSchemaRef": _safe_id(typed_input_schema_ref, "typed-input-schema-invalid"),
         "typedInputHash": content_hash(typed_input),
-        "adapterRenderHash": adapter_render_hash,
+        "commandRegistryHash": command_registry.registry_hash,
+        "commandTemplateHash": command["templateHash"],
+        "adapterRenderHash": command["commandSpecHash"],
         "canonicalProjectRootHash": root_hash,
         "projectStateReceiptHash": project_state_receipt_hash,
         "workspaceFingerprintHash": workspace_fingerprint_hash,
@@ -358,31 +359,18 @@ def build_query_plan(
         "callLimit": call_limit,
         "timeoutSeconds": timeout_seconds,
         "sideEffects": side_effects,
-        "networkPolicy": network_policy,
+        "networkPolicy": "none",
         "mutationTargets": target_list,
         "commandSpec": command,
         "executionNonce": execution_nonce,
         "attemptRef": attempt_ref,
+        "ownershipDomain": ownership_domain,
     }
-    if machine_authorization is not None:
-        authorization_document = (
-            machine_authorization.document
-            if isinstance(machine_authorization, MachineAuthorization)
-            else dict(machine_authorization)
-        )
-        body["machineAuthorization"] = clone(authorization_document)
-        body["machineAuthorizationHash"] = authorization_document["authorizationHash"]
+    if authorization_hash is not None:
+        body["machineAuthorizationHash"] = authorization_hash
     subject = build_query_plan_subject(body)
     body["queryAuthorizationSubjectHash"] = subject.subject_hash
-    if approval is not None:
-        body = finalize_document(subject, approval, final_hash_field="queryPlanHash", base_document=body)
-        approval_document = approval.document if isinstance(approval, ApprovalReceipt) else dict(approval)
-        body["approvalReceipt"] = clone(approval_document)
-        body["approvalReceiptRef"] = "approval-" + approval_document["receiptHash"][7:]
-        body["approvalReceiptHash"] = approval_document["receiptHash"]
-        body["queryPlanHash"] = content_hash({key: value for key, value in body.items() if key != "queryPlanHash"})
-    else:
-        body["queryPlanHash"] = content_hash(body)
+    body = _finalize(body, subject, approval, hash_field="queryPlanHash")
     validate_provider_query_plan(body)
     return QueryPlan(clone(body), subject)
 
@@ -390,5 +378,5 @@ def build_query_plan(
 def assert_maintenance_operation(operation_id: str, *, ownership_domain: str) -> None:
     if operation_id not in OPERATION_IDS or operation_id in FORBIDDEN_OPERATION_IDS:
         raise PlanError("operation-not-allowed")
-    if operation_id in {"upgrade-managed-adapter", "repair-managed-state"} and ownership_domain != "selfworkflow-managed":
+    if operation_id != "inspect" and ownership_domain != "selfworkflow-managed":
         raise PlanError("user-owned-source-protected")
