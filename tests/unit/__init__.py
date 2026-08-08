@@ -12,6 +12,7 @@ UNIT_TEST_MODULES = (
     "tests.unit.test_evidence",
     "tests.unit.test_imports",
     "tests.unit.test_knowledge_contract",
+    "tests.unit.test_ledger",
     "tests.unit.test_pipeline",
     "tests.unit.test_protected_rules",
     "tests.unit.test_resolver",

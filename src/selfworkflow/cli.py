@@ -20,6 +20,7 @@ from selfworkflow.installer import (
     verify_install,
 )
 from selfworkflow.resolver import resolve_task
+from selfworkflow.ledger import validate_ledger
 from selfworkflow.sources import (
     SourceSelectionError,
     inspect_superpowers_source,
@@ -152,6 +153,11 @@ def main(argv: list[str] | None = None) -> int:
     resolve_parser = commands.add_parser("resolve")
     resolve_parser.add_argument("--catalog", required=True)
     resolve_parser.add_argument("--request", required=True)
+    ledger_parser = commands.add_parser("ledger")
+    ledger_commands = ledger_parser.add_subparsers(dest="ledger_command", required=True)
+    ledger_validate = ledger_commands.add_parser("validate")
+    ledger_validate.add_argument("--ledger", required=True)
+    ledger_validate.add_argument("--plan", required=True)
     source_parser = commands.add_parser("source")
     source_commands = source_parser.add_subparsers(
         dest="source_command", required=True
@@ -215,6 +221,18 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+    if arguments.command == "ledger" and arguments.ledger_command == "validate":
+        try:
+            plan = _read_json(arguments.plan, reject_duplicates=True)
+            ledger_value = _read_json(arguments.ledger, reject_duplicates=True)
+            result = validate_ledger(
+                ledger_value, plan, plan["capabilitySnapshotHash"]
+            )
+        except Exception:
+            print("SelfWorkFlow: ledger-validation-failed", file=sys.stderr)
+            return 51
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0 if result["valid"] else 51
     if arguments.command == "source" and arguments.source_command == "inspect":
         try:
             result = inspect_superpowers_source(arguments.path)
