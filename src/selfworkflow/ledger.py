@@ -93,7 +93,8 @@ def new_ledger(plan: Mapping[str, object]) -> dict[str, object]:
 
 
 def _result_binding_reasons(
-    ledger_stage: Mapping[str, object], plan_stage: Mapping[str, object]
+    ledger_stage: Mapping[str, object], plan_stage: Mapping[str, object],
+    capability_evidence_refs: set[str],
 ) -> set[str]:
     reasons: set[str] = set()
     attempts = ledger_stage["attempts"]
@@ -114,6 +115,11 @@ def _result_binding_reasons(
         slot["slotId"] for slot in plan_stage["slots"]
         if slot["cardinality"] in {"zero-or-one", "zero-or-many"}
     }
+    same_attempt_gate_refs = {
+        (item["attemptRef"], item["resultRef"])
+        for item in ledger_stage["gateResults"]
+        if item["attemptRef"] in allowed and item["gateId"] in gates
+    }
     seen: set[tuple[str, str, str]] = set()
     for collection, identity_key, valid_ids in (
         ("slotResults", "moduleId", modules),
@@ -127,6 +133,13 @@ def _result_binding_reasons(
             if key in seen:
                 reasons.add("ledger-result-duplicate")
             seen.add(key)
+    for item in ledger_stage["runtimeSkips"]:
+        if (
+            item["evidenceRef"] not in capability_evidence_refs
+            and (item["attemptRef"], item["evidenceRef"])
+            not in same_attempt_gate_refs
+        ):
+            reasons.add("ledger-skip-evidence-invalid")
     if ledger_stage["status"] in {"active", "passed", "failed", "paused"} and not refs:
         reasons.add("ledger-attempt-missing")
     if ledger_stage["status"] in {"pending", "skipped"} and (
@@ -145,7 +158,12 @@ def validate_ledger(
             reasons.add("ledger-schema-version-unsupported")
         if next(Draft202012Validator(_schema("run-ledger.schema.json")).iter_errors(ledger), None) is not None:
             reasons.add("ledger-schema-invalid")
-        _, snapshot_hash, _, stale = normalize_capability_snapshot(capability_snapshot)
+        normalized_snapshot, snapshot_hash, _, stale = normalize_capability_snapshot(
+            capability_snapshot
+        )
+        capability_evidence_refs = {
+            item["evidenceRef"] for item in normalized_snapshot["evidence"]
+        }
         if stale:
             reasons.add("capability-snapshot-stale")
         if ledger.get("planHash") != plan.get("planHash") or ledger.get("requestHash") != plan.get("requestHash"):
@@ -161,18 +179,30 @@ def validate_ledger(
             reasons.add("multiple-active-stages")
         plan_stages = {stage["stageId"]: stage for stage in plan["stages"]}
         all_attempt_refs: list[str] = []
+        all_result_refs: list[str] = []
         for stage in ledger["stages"]:
             plan_stage = plan_stages.get(stage["stageId"])
             if plan_stage is None:
                 continue
-            reasons.update(_result_binding_reasons(stage, plan_stage))
+            reasons.update(
+                _result_binding_reasons(
+                    stage, plan_stage, capability_evidence_refs
+                )
+            )
             all_attempt_refs.extend(item["attemptRef"] for item in stage["attempts"])
+            all_result_refs.extend(
+                item["resultRef"]
+                for collection in ("slotResults", "gateResults")
+                for item in stage[collection]
+            )
             if stage["status"] == "passed" and not _requirements_met(stage, plan_stage):
                 reasons.add("stage-results-incomplete")
             if (stage["status"] == "skipped") != (plan_stage["applicability"] == "not-applicable"):
                 reasons.add("stage-applicability-invalid")
         if len(all_attempt_refs) != len(set(all_attempt_refs)):
             reasons.add("ledger-attempt-duplicate")
+        if len(all_result_refs) != len(set(all_result_refs)):
+            reasons.add("ledger-result-ref-duplicate")
         statuses = [stage["status"] for stage in ledger["stages"]]
         execution_statuses = [
             stage["status"] for stage in ledger["stages"]
@@ -205,8 +235,14 @@ def _requirements_met(ledger_stage: Mapping[str, object], plan_stage: Mapping[st
         current = _attempt_ref(ledger_stage)
     except LedgerError:
         return False
+    skipped_slots = {
+        item["slotId"] for item in ledger_stage["runtimeSkips"]
+        if item["attemptRef"] == current
+    }
     slot_modules = {
-        module_id for slot in plan_stage["slots"] for module_id in slot["selectedModules"]
+        module_id for slot in plan_stage["slots"]
+        if slot["slotId"] not in skipped_slots
+        for module_id in slot["selectedModules"]
         if module_id not in slot["gates"]
     }
     completed_modules = {
@@ -277,13 +313,16 @@ def record_stage_attempt(
     if (
         stage["status"] != "active" or type(attempt_ref) is not str
         or _REFERENCE.fullmatch(attempt_ref) is None or attempt_ref in all_refs
+        or len(stage["attempts"]) >= 1024
     ):
         raise LedgerError("ledger-attempt-invalid")
     stage["attempts"].append(_new_attempt(stage, attempt_ref))
     return result
 
 
-def _record(ledger, plan, stage_id, collection, value, identity_key):
+def _record(
+    ledger, plan, stage_id, collection, value, identity_key, reference_key=None
+):
     if _plan_reasons(plan):
         raise LedgerError("plan-invalid")
     result = deepcopy(dict(ledger))
@@ -296,11 +335,22 @@ def _record(ledger, plan, stage_id, collection, value, identity_key):
         raise LedgerError("ledger-stage-not-active")
     current = _attempt_ref(stage)
     value = {"attemptRef": current, **value}
+    if len(stage[collection]) >= 256:
+        raise LedgerError("ledger-result-limit")
     if any(
         item["attemptRef"] == current and item[identity_key] == value[identity_key]
         for item in stage[collection]
     ):
         raise LedgerError("ledger-result-duplicate")
+    if reference_key is not None:
+        used_refs = {
+            item["resultRef"]
+            for ledger_stage in result["stages"]
+            for result_collection in ("slotResults", "gateResults")
+            for item in ledger_stage[result_collection]
+        }
+        if value[reference_key] in used_refs:
+            raise LedgerError("ledger-result-ref-duplicate")
     stage[collection].append(value)
     return result
 
@@ -310,10 +360,19 @@ def record_slot_result(ledger, plan, stage_id: str, module_id: str, result_ref: 
     modules = {module for slot in plan_stage["slots"] for module in slot["selectedModules"] if module not in slot["gates"]}
     if module_id not in modules or _REFERENCE.fullmatch(result_ref or "") is None:
         raise LedgerError("slot-result-invalid")
-    return _record(ledger, plan, stage_id, "slotResults", {"moduleId": module_id, "resultRef": result_ref}, "moduleId")
+    return _record(
+        ledger, plan, stage_id, "slotResults",
+        {"moduleId": module_id, "resultRef": result_ref}, "moduleId", "resultRef",
+    )
 
 
-def record_runtime_skip(ledger, plan, stage_id: str, slot_id: str, evidence_ref: str):
+def record_runtime_skip(
+    ledger, plan, stage_id: str, slot_id: str, evidence_ref: str, *,
+    capability_snapshot: Mapping[str, object],
+):
+    validation = validate_ledger(ledger, plan, capability_snapshot)
+    if not validation["valid"]:
+        raise LedgerError(validation["reasonCodes"][0])
     plan_stage = _plan_stage(plan, stage_id)
     try:
         slot = next(slot for slot in plan_stage["slots"] if slot["slotId"] == slot_id)
@@ -321,7 +380,22 @@ def record_runtime_skip(ledger, plan, stage_id: str, slot_id: str, evidence_ref:
         raise LedgerError("plan-slot-unknown") from None
     if slot["cardinality"] not in {"zero-or-one", "zero-or-many"} or _REFERENCE.fullmatch(evidence_ref or "") is None:
         raise LedgerError("runtime-skip-not-optional")
-    return _record(ledger, plan, stage_id, "runtimeSkips", {"slotId": slot_id, "evidenceRef": evidence_ref}, "slotId")
+    normalized_snapshot, _, _, _ = normalize_capability_snapshot(capability_snapshot)
+    stage = _stage(dict(ledger), stage_id)
+    current = _attempt_ref(stage)
+    capability_refs = {
+        item["evidenceRef"] for item in normalized_snapshot["evidence"]
+    }
+    gate_refs = {
+        item["resultRef"] for item in stage["gateResults"]
+        if item["attemptRef"] == current
+    }
+    if evidence_ref not in capability_refs | gate_refs:
+        raise LedgerError("runtime-skip-evidence-invalid")
+    return _record(
+        ledger, plan, stage_id, "runtimeSkips",
+        {"slotId": slot_id, "evidenceRef": evidence_ref}, "slotId",
+    )
 
 
 def record_gate_result(ledger, plan, stage_id: str, gate_id: str, result_ref: str, *, outcome: str = "passed"):
@@ -329,7 +403,11 @@ def record_gate_result(ledger, plan, stage_id: str, gate_id: str, result_ref: st
     gates = {gate for slot in plan_stage["slots"] for gate in slot["gates"]}
     if gate_id not in gates or outcome not in {"passed", "failed", "paused"} or _REFERENCE.fullmatch(result_ref or "") is None:
         raise LedgerError("gate-result-invalid")
-    return _record(ledger, plan, stage_id, "gateResults", {"gateId": gate_id, "outcome": outcome, "resultRef": result_ref}, "gateId")
+    return _record(
+        ledger, plan, stage_id, "gateResults",
+        {"gateId": gate_id, "outcome": outcome, "resultRef": result_ref},
+        "gateId", "resultRef",
+    )
 
 
 def failure_owner_for(plan: Mapping[str, object], failed_stage_id: str) -> str:

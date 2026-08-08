@@ -88,6 +88,58 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
                         for module in slot["selectedModules"]
                     ]
                     self.assertIn(expected_module, selected)
+                    if operation == "document":
+                        from selfworkflow.ledger import (
+                            new_ledger, record_gate_result, record_slot_result,
+                            transition_stage, validate_ledger,
+                        )
+
+                        plan_graph = result["planGraph"]
+                        snapshot_value = self._request(
+                            operationType=operation,
+                            complexity=complexity,
+                            risk=risk,
+                        )["capabilityEvidenceSnapshot"]
+                        ledger = new_ledger(plan_graph)
+                        visited = []
+                        for stage_index, stage in enumerate(plan_graph["stages"], 1):
+                            if stage["applicability"] != "applicable":
+                                continue
+                            visited.append(stage["stageId"])
+                            attempt_ref = f"document-attempt-{stage_index}"
+                            ledger = transition_stage(
+                                ledger, plan_graph, stage["stageId"], "active",
+                                capability_snapshot=snapshot_value,
+                                attempt_ref=attempt_ref,
+                            )
+                            for slot in stage["slots"]:
+                                gates = set(slot["gates"])
+                                for module in slot["selectedModules"]:
+                                    if module not in gates:
+                                        ledger = record_slot_result(
+                                            ledger, plan_graph, stage["stageId"], module,
+                                            f"{attempt_ref}-{module}",
+                                        )
+                                for gate in slot["gates"]:
+                                    ledger = record_gate_result(
+                                        ledger, plan_graph, stage["stageId"], gate,
+                                        f"{attempt_ref}-{gate}",
+                                    )
+                            ledger = transition_stage(
+                                ledger, plan_graph, stage["stageId"], "passed",
+                                capability_snapshot=snapshot_value,
+                            )
+
+                        self.assertEqual(ledger["status"], "completed")
+                        self.assertTrue(
+                            {"implemented", "reviewed", "verified", "completed"}
+                            <= set(visited)
+                        )
+                        self.assertTrue(
+                            validate_ledger(
+                                ledger, plan_graph, snapshot_value
+                            )["valid"]
+                        )
 
     def test_cli_rejects_duplicate_request_keys_without_echoing_values(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

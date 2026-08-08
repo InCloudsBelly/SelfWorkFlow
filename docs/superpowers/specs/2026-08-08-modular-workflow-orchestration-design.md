@@ -213,9 +213,12 @@ supersededByPlanHash?
 追加 attempt，不覆盖旧结果。每个 slot result、Gate result 和 runtime skip 都绑定
 产生它的 attemptRef；当前 attempt 是 `attempts[]` 的最后一项，阶段通过条件只读取
 当前 attempt 的结果。追加新 attempt 后，旧结果保留审计但立即失去通过效力，直到
-新 attempt 产生完整结果。Runtime skip 仅允许用于计划声明的 optional slot，且必须
-引用 Gate 结果或能力证据。失败按 PlanGraph 的 failureOwner 回流。请求或能力证据
-变化时，旧 Ledger 标为 superseded 并绑定新 planHash，不能在旧 Ledger 中继续。
+新 attempt 产生完整结果。slot/Gate 的 `resultRef` 在整个 Ledger 内不可复用，禁止把
+旧产出换绑到新 attempt。Runtime skip 仅允许用于计划声明的 optional slot；它免除
+该 slot 在当前 attempt 的模块结果要求，并且必须引用同一 attempt 的 Gate 结果，或
+当前已校验且仍新鲜的 capability snapshot 证据。失败按 PlanGraph 的 failureOwner
+回流。请求或能力证据变化时，旧 Ledger 标为 superseded 并绑定新 planHash，不能在
+旧 Ledger 中继续。
 
 attemptRef 在整个 Ledger 内唯一。首个 attempt 固定 `ordinal=1` 且 previous 为 null；
 后续 ordinal 严格加一并引用紧邻前一个 attemptRef，形成可验证连续链。结构化结果的
@@ -223,6 +226,9 @@ attemptRef 必须属于同一 stage 的 attempts，未知、跨 stage、重复�
 全部拒绝。只有最后一个合法 attempt 的结果参与阶段完成判定。旧 v1 结果没有可靠
 attempt 归属，V2 CLI 和 API 以稳定的 `ledger-schema-version-unsupported` 拒绝，
 不猜测迁移、不静默采用旧结果。
+
+Host 写入帮助函数不得返回超出 RunLedger Schema 数组上限的对象；达到 attempt 或
+结果数量上限时必须在追加前 fail closed。
 
 模块返回最小 StageResult：
 

@@ -111,17 +111,32 @@ class LedgerTests(unittest.TestCase):
             record_runtime_skip, record_slot_result, supersede_ledger,
             transition_stage,
         )
+        from selfworkflow.pipeline import canonical_hash
 
         plan = _plan()
+        plan["stages"][0]["slots"][1]["selectedModules"] = ["design-grill-me"]
+        plan.pop("planHash")
+        plan["planHash"] = canonical_hash(plan)
         ledger = new_ledger(plan)
         active_design = transition_stage(ledger, plan, "designed", "active", capability_snapshot=_snapshot(), attempt_ref="attempt-1")
-        skipped = record_runtime_skip(active_design, plan, "designed", "design.specialists", "evidence-1")
+        skipped = record_runtime_skip(
+            active_design, plan, "designed", "design.specialists", "fixture",
+            capability_snapshot=_snapshot(),
+        )
         self.assertEqual(skipped["stages"][0]["runtimeSkips"], [{
             "attemptRef": "attempt-1", "slotId": "design.specialists",
-            "evidenceRef": "evidence-1",
+            "evidenceRef": "fixture",
         }])
         with self.assertRaises(LedgerError):
-            record_runtime_skip(active_design, plan, "designed", "design.primary", "evidence-1")
+            record_runtime_skip(
+                active_design, plan, "designed", "design.primary", "fixture",
+                capability_snapshot=_snapshot(),
+            )
+        with self.assertRaises(LedgerError):
+            record_runtime_skip(
+                active_design, plan, "designed", "design.specialists", "missing",
+                capability_snapshot=_snapshot(),
+            )
         design_result = record_slot_result(skipped, plan, "designed", "design-light", "result-1")
         designed = transition_stage(design_result, plan, "designed", "passed", capability_snapshot=_snapshot())
         active_plan = transition_stage(designed, plan, "planned", "active", capability_snapshot=_snapshot(), attempt_ref="attempt-2")
@@ -173,6 +188,8 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(len(retry["stages"][0]["slotResults"]), 1)
         with self.assertRaises(LedgerError):
             transition_stage(retry, plan, "designed", "passed", capability_snapshot=_snapshot())
+        with self.assertRaises(LedgerError):
+            record_slot_result(retry, plan, "designed", "design-light", "result-1")
         second = record_slot_result(retry, plan, "designed", "design-light", "result-2")
         passed = transition_stage(second, plan, "designed", "passed", capability_snapshot=_snapshot())
         self.assertTrue(validate_ledger(passed, plan, _snapshot())["valid"])
@@ -247,6 +264,17 @@ class LedgerTests(unittest.TestCase):
             "ledger-result-duplicate",
             validate_ledger(duplicate_result, plan, _snapshot())["reasonCodes"],
         )
+        replayed = record_stage_attempt(
+            result, plan, "designed", "attempt-2", capability_snapshot=_snapshot()
+        )
+        replayed["stages"][0]["slotResults"].append({
+            "attemptRef": "attempt-2", "moduleId": "design-light",
+            "resultRef": "result-1",
+        })
+        self.assertIn(
+            "ledger-result-ref-duplicate",
+            validate_ledger(replayed, plan, _snapshot())["reasonCodes"],
+        )
         cross_stage = deepcopy(result)
         cross_stage["stages"][1]["gateResults"] = [{
             "attemptRef": "attempt-1", "gateId": "plan-gate",
@@ -272,6 +300,51 @@ class LedgerTests(unittest.TestCase):
             result = json.loads(output.getvalue())
             self.assertEqual(code, 51)
             self.assertIn("ledger-schema-version-unsupported", result["reasonCodes"])
+
+    def test_write_helpers_reject_schema_collection_limits_before_append(self):
+        from selfworkflow.ledger import (
+            LedgerError, new_ledger, record_slot_result, record_stage_attempt,
+            transition_stage,
+        )
+
+        plan = _plan()
+        active = transition_stage(
+            new_ledger(plan), plan, "designed", "active",
+            capability_snapshot=_snapshot(), attempt_ref="attempt-1",
+        )
+        attempt_limit = deepcopy(active)
+        attempt_limit["stages"][0]["attempts"] = [
+            {
+                "attemptRef": f"attempt-{index}", "ordinal": index,
+                "previousAttemptRef": f"attempt-{index - 1}" if index > 1 else None,
+            }
+            for index in range(1, 1025)
+        ]
+        with self.assertRaisesRegex(LedgerError, "ledger-attempt-invalid"):
+            record_stage_attempt(
+                attempt_limit, plan, "designed", "attempt-1025",
+                capability_snapshot=_snapshot(),
+            )
+
+        result_limit = deepcopy(active)
+        result_limit["stages"][0]["attempts"] = [
+            {
+                "attemptRef": f"attempt-{index}", "ordinal": index,
+                "previousAttemptRef": f"attempt-{index - 1}" if index > 1 else None,
+            }
+            for index in range(1, 258)
+        ]
+        result_limit["stages"][0]["slotResults"] = [
+            {
+                "attemptRef": f"attempt-{index}", "moduleId": "design-light",
+                "resultRef": f"result-{index}",
+            }
+            for index in range(1, 257)
+        ]
+        with self.assertRaisesRegex(LedgerError, "ledger-result-limit"):
+            record_slot_result(
+                result_limit, plan, "designed", "design-light", "result-257"
+            )
 
 
 if __name__ == "__main__":

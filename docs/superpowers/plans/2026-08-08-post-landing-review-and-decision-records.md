@@ -85,6 +85,8 @@
 - [ ] Implement `record_stage_attempt` as a fail-closed RunLedger helper that validates the current plan/snapshot, active stage, bounded unique ref, and appends without changing prior evidence.
 - [ ] Upgrade RunLedger to schemaVersion 2. Store attempts as `{attemptRef,ordinal,previousAttemptRef}` and results as `{attemptRef,moduleId,resultRef}`, `{attemptRef,gateId,outcome,resultRef}`, and `{attemptRef,slotId,evidenceRef}`; make `_requirements_met` consider only the latest attempt.
 - [ ] Validate ordinal continuity and exact previous links, plus global attemptRef uniqueness and same-stage result ownership.
+- [ ] Reject slot/Gate `resultRef` replay across attempts, validate runtime-skip evidence against the current capability snapshot or same-attempt Gate result, and let a valid optional-slot skip waive only that slot's current-attempt module results.
+- [ ] Reject attempt/result writes before they exceed RunLedger Schema collection limits.
 - [ ] Reject legacy v1 with `ledger-schema-version-unsupported`; do not infer or migrate missing attempt ownership.
 - [ ] Run adapter, Ledger, and contract-Schema tests GREEN. Run the existing `test_completion_subject_blocks_manifest_and_acceptance_graph_replay` to prove a final diff/hash change invalidates the old Review receipt.
 - [ ] Run the Catalog/behavioral test once and confirm its only expected RED is `workflow/core.md` source-integrity drift.
@@ -111,6 +113,7 @@
 - [ ] Run focused contract, Pipeline, resolver, adapter, and behavioral tests.
 - [ ] Run `.\scripts\verify.ps1 -Suite automated` and record exact count/exit code.
 - [ ] Dispatch one independent reviewer over the complete feature diff. Fix Critical/Important findings and rerun affected tests; Review fixes themselves require another narrow Review.
+- [ ] Add a document-operation RunLedger lifecycle regression that advances the resolved PlanGraph through Implement, Review, Verify, and Completed.
 - [ ] Confirm frozen C7 paths and `D:\openwikiC7` are unchanged, and no untracked runtime/credential artifacts exist.
 - [ ] Record test evidence, native/unverified boundaries, reviewer verdict, and final commit IDs in this plan.
 - [ ] Dispatch a final narrow document Review over the evidence update; if it finds Critical/Important issues, fix them and repeat Review until approved (maximum five iterations). At the limit, pause and request user direction.
