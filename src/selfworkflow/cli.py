@@ -21,6 +21,7 @@ from selfworkflow.installer import (
 )
 from selfworkflow.resolver import resolve_task
 from selfworkflow.ledger import validate_ledger
+from selfworkflow.git_policy import check_repository
 from selfworkflow.sources import (
     SourceSelectionError,
     inspect_superpowers_source,
@@ -158,6 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     ledger_validate = ledger_commands.add_parser("validate")
     ledger_validate.add_argument("--ledger", required=True)
     ledger_validate.add_argument("--plan", required=True)
+    git_policy_parser = commands.add_parser("git-policy")
+    git_policy_commands = git_policy_parser.add_subparsers(dest="git_policy_command", required=True)
+    git_policy_check = git_policy_commands.add_parser("check")
+    git_policy_check.add_argument("--repo", required=True)
+    git_policy_check.add_argument("--policy")
     source_parser = commands.add_parser("source")
     source_commands = source_parser.add_subparsers(
         dest="source_command", required=True
@@ -233,6 +239,16 @@ def main(argv: list[str] | None = None) -> int:
             return 51
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0 if result["valid"] else 51
+    if arguments.command == "git-policy" and arguments.git_policy_command == "check":
+        try:
+            repository = _absolute_path(arguments.repo).resolve(strict=True)
+            policy = arguments.policy or str(repository / "workflow/git-policy.yaml")
+            result = check_repository(repository, policy)
+        except Exception:
+            print("SelfWorkFlow: git-policy-check-failed", file=sys.stderr)
+            return 52
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 52 if result["status"] == "failed" else 0
     if arguments.command == "source" and arguments.source_command == "inspect":
         try:
             result = inspect_superpowers_source(arguments.path)

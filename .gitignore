@@ -6,3 +6,16 @@ build/
 dist/
 *.egg-info/
 artifacts/
+logs/
+runtime/
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+*.sqlite
+*.sqlite3
+*.db-wal
+*.sqlite-wal
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,6 @@
+schemaVersion: 1
+forbiddenRoots: [.venv, build, dist, artifacts, logs, runtime, .pytest_cache, htmlcov]
+allowedSensitiveNames: [.env.example, .env.sample]
+databaseSuffixes: [.sqlite, .sqlite3, .db-wal, .sqlite-wal]
+sizeBytes: {warning: 1048576, failure: 5242880}
+allowlist: []
