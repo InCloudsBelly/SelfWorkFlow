@@ -10,8 +10,6 @@
 4. **完整 Review**：检查验收条件、完整 diff、逻辑闭环、安全、侵入性和无关修改。普通修改可结构化自审；复杂或高风险任务提高 Review 独立性。
 5. **最窄充分验证**：运行覆盖本次行为、失败路径和相关回归的最小测试集合。Bug 修复应证明原症状修复前失败、修复后通过。未执行或失败的检查必须如实标为 `unverified`，不得声称完成。
 
-## Review 与决策闭环
-
 - 所有落地修改在完成前必须执行 `post-landing Review`。Review 修正保持在当前阶段并创建新的 RunLedger v2 attempt；旧 attempt 结果保留审计但不能让最新 attempt 通过。最终 Review receipt 必须绑定最终文档或完整 diff hash。
 - 设计/规格文档由 `design.gate` Review，实施计划由 `plan.gate` Review；通过后继续实现。文档本身是最终交付物时，也必须经过 document 落地、Review 和 Verify。
 - `critical decision` 包括范围或验收变化、公共接口/Schema/兼容性/持久数据、安全与敏感数据、外部或不可逆副作用、受保护默认值、用户已有修改和实质不确定性，必须询问用户。
