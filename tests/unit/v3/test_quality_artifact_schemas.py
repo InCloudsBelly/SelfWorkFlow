@@ -78,6 +78,23 @@ class QualityArtifactSchemaTests(unittest.TestCase):
     def _aggregate(cls, diff=None, findings=None):
         diff = diff or cls._diff()
         findings = findings or [cls._finding(diff)]
+        grouped = {}
+        for finding in findings:
+            grouped.setdefault(finding["fingerprint"], []).append(finding)
+        dedup_groups = [
+            {
+                "fingerprint": fingerprint,
+                "findingHashes": [item["findingHash"] for item in items],
+                "representativeFindingHash": items[0]["findingHash"],
+            }
+            for fingerprint, items in grouped.items()
+        ]
+        finding_by_hash = {item["findingHash"]: item for item in findings}
+        coverage_by_owner = {}
+        for group in dedup_groups:
+            representative = group["representativeFindingHash"]
+            owner = finding_by_hash[representative]["rootCauseOwner"]
+            coverage_by_owner.setdefault(owner, []).append(representative)
         document = {
             "schemaVersion": 3,
             "planHash": diff["planHash"],
@@ -86,10 +103,11 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             "finalDiffHash": diff["finalDiffHash"],
             "diffSignalSetHash": diff["signalSetHash"],
             "findingHashes": [item["findingHash"] for item in findings],
-            "dedupGroups": [],
+            "dedupGroups": dedup_groups,
             "conflictAdjudications": [],
             "rootCauseCoverage": [
-                {"rootCauseOwner": "implemented", "findingHashes": [findings[0]["findingHash"]]}
+                {"rootCauseOwner": owner, "findingHashes": hashes}
+                for owner, hashes in coverage_by_owner.items()
             ],
             "residualRisks": [],
             "aggregateHash": cls.HASH_A,
@@ -144,12 +162,44 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         return document
 
     @classmethod
+    def _invocation_evidence(cls, input_hash=None):
+        evidence = {
+            "executable": ".venv/Scripts/python.exe",
+            "moduleId": "tests.unit.v3.test-quality-artifact-schemas",
+            "argvHash": cls.HASH_A,
+            "cwdHash": cls.HASH_B,
+            "environmentHash": cls.HASH_C,
+            "inputHash": input_hash or cls.HASH_D,
+            "startedAt": "2026-08-09T01:05:30Z",
+            "invocationHash": cls.HASH_A,
+        }
+        evidence["invocationHash"] = cls._hash_document(evidence, "invocationHash")
+        return evidence
+
+    @classmethod
+    def _result_evidence(cls, invocation):
+        evidence = {
+            "invocationHash": invocation["invocationHash"],
+            "exitCode": 0,
+            "stdoutHash": cls.HASH_A,
+            "stderrHash": cls.HASH_B,
+            "completedAt": "2026-08-09T01:05:45Z",
+            "resultHash": cls.HASH_C,
+        }
+        evidence["resultHash"] = cls._hash_document(evidence, "resultHash")
+        return evidence
+
+    @classmethod
     def _coverage(cls, diff=None, strategy=None, status="fulfilled"):
         diff = diff or cls._diff()
         strategy = strategy or cls._strategy(diff)
         item = {"obligationId": "obligation-direct", "status": status}
         if status == "fulfilled":
-            item.update({"invocationHash": cls.HASH_C, "resultHash": cls.HASH_D})
+            invocation = cls._invocation_evidence(strategy["strategyHash"])
+            item.update({
+                "invocationEvidence": invocation,
+                "resultEvidence": cls._result_evidence(invocation),
+            })
         else:
             item["reason"] = "not executed"
         document = {
@@ -299,7 +349,7 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             diff_signal_set=current, findings=(old_finding,),
         )
 
-    def test_review_aggregate_rejects_duplicate_fingerprint_and_unadjudicated_conflict(self):
+    def test_review_aggregate_dedup_groups_are_complete_and_fingerprint_bound(self):
         diff = self._diff()
         first = self._finding(diff, "fp-same")
         second = self._finding(diff, "fp-same")
@@ -307,22 +357,152 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         second["findingHash"] = self.HASH_D
         second["findingHash"] = self._hash_document(second, "findingHash")
         aggregate = self._aggregate(diff, [first, second])
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-duplicate-fingerprint", ("findingHashes", 1),
+        self._load(
+            self.SCHEMA_NAMES[2], aggregate,
             diff_signal_set=diff, findings=(first, second),
         )
-        conflict_second = self._finding(diff, "fp-other")
-        conflict_second["evidenceLocations"][0]["line"] = 12
-        conflict_second["findingHash"] = self._hash_document(conflict_second, "findingHash")
-        aggregate = self._aggregate(diff, [first, conflict_second])
-        aggregate["conflictAdjudications"] = [{
-            "conflictId": "conflict-1", "findingHashes": [first["findingHash"], conflict_second["findingHash"]],
-            "decision": "pending", "evidenceRefs": ["evidence-1"],
-        }]
+
+        other = self._finding(diff, "fp-other")
+        other["evidenceLocations"][0]["line"] = 12
+        other["findingHash"] = self._hash_document(other, "findingHash")
+        aggregate = self._aggregate(diff, [first, other])
+        aggregate["dedupGroups"][0]["findingHashes"].append(other["findingHash"])
+        aggregate["dedupGroups"].pop()
         aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
         self._assert_contract_error(
-            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-conflict-unadjudicated", ("conflictAdjudications", 0, "decision"),
-            diff_signal_set=diff, findings=(first, conflict_second),
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-dedup-fingerprint-mismatch", ("dedupGroups", 0, "findingHashes", 1),
+            diff_signal_set=diff, findings=(first, other),
+        )
+
+        aggregate = self._aggregate(diff, [first, other])
+        aggregate["dedupGroups"].pop()
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-dedup-incomplete", ("dedupGroups",),
+            diff_signal_set=diff, findings=(first, other),
+        )
+
+        aggregate = self._aggregate(diff, [first])
+        aggregate["dedupGroups"].append(deepcopy(aggregate["dedupGroups"][0]))
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-dedup-overlap", ("dedupGroups", 1, "findingHashes", 0),
+            diff_signal_set=diff, findings=(first,),
+        )
+
+        aggregate = self._aggregate(diff, [first])
+        aggregate["dedupGroups"][0]["representativeFindingHash"] = self.HASH_A
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-dedup-representative-invalid", ("dedupGroups", 0, "representativeFindingHash"),
+            diff_signal_set=diff, findings=(first,),
+        )
+
+    def test_review_aggregate_root_cause_coverage_is_exact_and_owner_unique(self):
+        diff = self._diff()
+        first = self._finding(diff, "fp-first")
+        second = self._finding(diff, "fp-second")
+        second["rootCauseOwner"] = "design"
+        second["evidenceLocations"][0]["line"] = 12
+        second["findingHash"] = self._hash_document(second, "findingHash")
+
+        same_owner = self._finding(diff, "fp-same-owner")
+        same_owner["evidenceLocations"][0]["line"] = 13
+        same_owner["findingHash"] = self._hash_document(same_owner, "findingHash")
+        aggregate = self._aggregate(diff, [first, same_owner])
+        moved_hash = aggregate["rootCauseCoverage"][0]["findingHashes"].pop()
+        aggregate["rootCauseCoverage"].append({
+            "rootCauseOwner": "implemented", "findingHashes": [moved_hash],
+        })
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-root-cause-owner-duplicate", ("rootCauseCoverage", 1, "rootCauseOwner"),
+            diff_signal_set=diff, findings=(first, same_owner),
+        )
+
+        aggregate = self._aggregate(diff, [first, second])
+        aggregate["rootCauseCoverage"].pop()
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-root-cause-incomplete", ("rootCauseCoverage",),
+            diff_signal_set=diff, findings=(first, second),
+        )
+
+        aggregate = self._aggregate(diff, [first, second])
+        aggregate["rootCauseCoverage"][1]["findingHashes"].append(first["findingHash"])
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-root-cause-overlap", ("rootCauseCoverage", 1, "findingHashes", 1),
+            diff_signal_set=diff, findings=(first, second),
+        )
+
+        aggregate = self._aggregate(diff, [first])
+        aggregate["rootCauseCoverage"][0]["rootCauseOwner"] = "design"
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-root-cause-owner-mismatch", ("rootCauseCoverage", 0, "rootCauseOwner"),
+            diff_signal_set=diff, findings=(first,),
+        )
+
+    def test_review_aggregate_conflicts_are_closed_and_unique(self):
+        diff = self._diff()
+        findings = []
+        for index, fingerprint in enumerate(("fp-first", "fp-second", "fp-third"), start=10):
+            finding = self._finding(diff, fingerprint)
+            finding["evidenceLocations"][0]["line"] = index
+            finding["findingHash"] = self._hash_document(finding, "findingHash")
+            findings.append(finding)
+        aggregate = self._aggregate(diff, findings)
+        hashes = [item["findingHash"] for item in findings]
+        aggregate["conflictAdjudications"] = [
+            {"conflictId": "conflict-1", "findingHashes": hashes[:2], "decision": "accepted", "evidenceRefs": ["evidence-1"]},
+            {"conflictId": "conflict-1", "findingHashes": hashes[1:], "decision": "rejected", "evidenceRefs": ["evidence-2"]},
+        ]
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-conflict-id-duplicate", ("conflictAdjudications", 1, "conflictId"),
+            diff_signal_set=diff, findings=tuple(findings),
+        )
+
+        aggregate["conflictAdjudications"][1]["conflictId"] = "conflict-2"
+        aggregate["aggregateHash"] = self._hash_document(aggregate, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], aggregate, "review-aggregate-conflict-overlap", ("conflictAdjudications", 1, "findingHashes", 0),
+            diff_signal_set=diff, findings=tuple(findings),
+        )
+
+        for participants in ([hashes[0]], [hashes[0], hashes[0]]):
+            invalid = self._aggregate(diff, findings)
+            invalid["conflictAdjudications"] = [{
+                "conflictId": "conflict-1", "findingHashes": participants,
+                "decision": "accepted", "evidenceRefs": ["evidence-1"],
+            }]
+            invalid["aggregateHash"] = self._hash_document(invalid, "aggregateHash")
+            self._assert_contract_error(
+                self.SCHEMA_NAMES[2], invalid, "contract-schema-invalid", ("conflictAdjudications", 0, "findingHashes"),
+                diff_signal_set=diff, findings=tuple(findings),
+            )
+
+        invalid = self._aggregate(diff, findings)
+        invalid["conflictAdjudications"] = [{
+            "conflictId": "conflict-1", "findingHashes": [hashes[0], self.HASH_A],
+            "decision": "accepted", "evidenceRefs": ["evidence-1"],
+        }]
+        invalid["aggregateHash"] = self._hash_document(invalid, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], invalid, "review-aggregate-conflict-finding-unknown", ("conflictAdjudications", 0, "findingHashes", 1),
+            diff_signal_set=diff, findings=tuple(findings),
+        )
+
+        invalid = self._aggregate(diff, findings)
+        invalid["conflictAdjudications"] = [{
+            "conflictId": "conflict-1", "findingHashes": hashes[:2],
+            "decision": "pending", "evidenceRefs": ["evidence-1"],
+        }]
+        invalid["aggregateHash"] = self._hash_document(invalid, "aggregateHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[2], invalid, "review-aggregate-conflict-unadjudicated", ("conflictAdjudications", 0, "decision"),
+            diff_signal_set=diff, findings=tuple(findings),
         )
 
     def test_coverage_obligations_must_exactly_match_strategy(self):
@@ -354,11 +534,137 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             diff_signal_set=diff, test_strategy=strategy,
         )
         invalid = self._coverage(diff, strategy)
-        del invalid["obligations"][0]["invocationHash"]
+        del invalid["obligations"][0]["invocationEvidence"]
         invalid["resultHash"] = self._hash_document(invalid, "resultHash")
         self._assert_contract_error(
             self.SCHEMA_NAMES[4], invalid, "contract-schema-invalid", ("obligations", 0),
             diff_signal_set=diff, test_strategy=strategy,
+        )
+
+    def test_coverage_fulfilled_requires_closed_canonical_execution_evidence(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+
+        naked = self._coverage(diff, strategy)
+        naked["obligations"][0] = {
+            "obligationId": "obligation-direct", "status": "fulfilled",
+            "invocationHash": self.HASH_A, "resultHash": self.HASH_B,
+        }
+        naked["resultHash"] = self._hash_document(naked, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], naked, "contract-schema-invalid", ("obligations", 0, "invocationHash"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+        invalid = self._coverage(diff, strategy)
+        invalid["obligations"][0]["invocationEvidence"]["invocationHash"] = self.HASH_A
+        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], invalid, "coverage-invocation-hash-invalid", ("obligations", 0, "invocationEvidence", "invocationHash"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+        invalid = self._coverage(diff, strategy)
+        invalid["obligations"][0]["resultEvidence"]["resultHash"] = self.HASH_A
+        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], invalid, "coverage-execution-result-hash-invalid", ("obligations", 0, "resultEvidence", "resultHash"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+    def test_coverage_execution_result_binds_invocation_time_and_success(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+
+        invalid = self._coverage(diff, strategy)
+        result = invalid["obligations"][0]["resultEvidence"]
+        result["invocationHash"] = self.HASH_A
+        result["resultHash"] = self._hash_document(result, "resultHash")
+        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], invalid, "coverage-result-invocation-mismatch", ("obligations", 0, "resultEvidence", "invocationHash"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+        invalid = self._coverage(diff, strategy)
+        invocation = invalid["obligations"][0]["invocationEvidence"]
+        invocation["inputHash"] = self.HASH_A
+        invocation["invocationHash"] = self._hash_document(invocation, "invocationHash")
+        result = invalid["obligations"][0]["resultEvidence"]
+        result["invocationHash"] = invocation["invocationHash"]
+        result["resultHash"] = self._hash_document(result, "resultHash")
+        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], invalid, "coverage-invocation-input-mismatch", ("obligations", 0, "invocationEvidence", "inputHash"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+        invalid = self._coverage(diff, strategy)
+        result = invalid["obligations"][0]["resultEvidence"]
+        result["completedAt"] = "2026-08-09T01:05:29Z"
+        result["resultHash"] = self._hash_document(result, "resultHash")
+        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], invalid, "coverage-result-time-invalid", ("obligations", 0, "resultEvidence", "completedAt"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+        invalid = self._coverage(diff, strategy)
+        result = invalid["obligations"][0]["resultEvidence"]
+        result["exitCode"] = 1
+        result["resultHash"] = self._hash_document(result, "resultHash")
+        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], invalid, "coverage-result-exit-unsuccessful", ("obligations", 0, "resultEvidence", "exitCode"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+    def test_coverage_nonfulfilled_rejects_execution_evidence(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        for status in ("unverified", "blocked"):
+            invalid = self._coverage(diff, strategy, status=status)
+            invocation = self._invocation_evidence()
+            invalid["obligations"][0]["invocationEvidence"] = invocation
+            invalid["obligations"][0]["resultEvidence"] = self._result_evidence(invocation)
+            invalid["resultHash"] = self._hash_document(invalid, "resultHash")
+            with self.subTest(status=status):
+                self._assert_contract_error(
+                    self.SCHEMA_NAMES[4], invalid, "contract-schema-invalid", ("obligations", 0),
+                    diff_signal_set=diff, test_strategy=strategy,
+                )
+
+    def test_coverage_requires_strategy_and_unique_obligation_ids(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        coverage = self._coverage(diff, strategy)
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage, "coverage-strategy-required", (),
+            diff_signal_set=diff,
+        )
+
+        duplicate = deepcopy(coverage["obligations"][0])
+        duplicate["status"] = "blocked"
+        duplicate.pop("invocationEvidence")
+        duplicate.pop("resultEvidence")
+        duplicate["reason"] = "duplicate result"
+        coverage["obligations"].append(duplicate)
+        coverage["passed"] = False
+        coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage, "coverage-obligation-id-duplicate", ("obligations", 1, "obligationId"),
+            diff_signal_set=diff, test_strategy=strategy,
+        )
+
+    def test_coverage_binds_strategy_plan_attempt_and_diff_identity(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        coverage = self._coverage(diff, strategy)
+        coverage["planHash"] = self.HASH_D
+        coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage, "coverage-strategy-binding-mismatch", ("planHash",),
+            test_strategy=strategy,
         )
 
     def test_quality_artifacts_reject_plan_attempt_and_diff_hash_drift(self):

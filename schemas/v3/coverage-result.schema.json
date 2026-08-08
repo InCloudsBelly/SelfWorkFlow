@@ -27,21 +27,61 @@
       "type": "string", "format": "date-time",
       "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$"
     },
+    "invocationEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "executable", "moduleId", "argvHash", "cwdHash", "environmentHash",
+        "inputHash", "startedAt", "invocationHash"
+      ],
+      "properties": {
+        "executable": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$"},
+        "moduleId": {"$ref": "#/$defs/stableId"},
+        "argvHash": {"$ref": "#/$defs/sha256"},
+        "cwdHash": {"$ref": "#/$defs/sha256"},
+        "environmentHash": {"$ref": "#/$defs/sha256"},
+        "inputHash": {"$ref": "#/$defs/sha256"},
+        "startedAt": {"$ref": "#/$defs/utcTimestamp"},
+        "invocationHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "resultEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "invocationHash", "exitCode", "stdoutHash", "stderrHash", "completedAt", "resultHash"
+      ],
+      "properties": {
+        "invocationHash": {"$ref": "#/$defs/sha256"},
+        "exitCode": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+        "stdoutHash": {"$ref": "#/$defs/sha256"},
+        "stderrHash": {"$ref": "#/$defs/sha256"},
+        "completedAt": {"$ref": "#/$defs/utcTimestamp"},
+        "resultHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "obligationResult": {
       "type": "object", "additionalProperties": false,
       "required": ["obligationId", "status"],
       "properties": {
         "obligationId": {"$ref": "#/$defs/stableId"},
         "status": {"enum": ["fulfilled", "unverified", "blocked"]},
-        "invocationHash": {"$ref": "#/$defs/sha256"},
-        "resultHash": {"$ref": "#/$defs/sha256"},
+        "invocationEvidence": {"$ref": "#/$defs/invocationEvidence"},
+        "resultEvidence": {"$ref": "#/$defs/resultEvidence"},
         "reason": {"type": "string", "minLength": 1, "maxLength": 4096}
       },
       "allOf": [
         {
           "if": {"properties": {"status": {"const": "fulfilled"}}, "required": ["status"]},
-          "then": {"required": ["invocationHash", "resultHash"]},
-          "else": {"required": ["reason"]}
+          "then": {
+            "required": ["invocationEvidence", "resultEvidence"],
+            "not": {"required": ["reason"]}
+          },
+          "else": {
+            "required": ["reason"],
+            "allOf": [
+              {"not": {"required": ["invocationEvidence"]}},
+              {"not": {"required": ["resultEvidence"]}}
+            ]
+          }
         }
       ]
     }

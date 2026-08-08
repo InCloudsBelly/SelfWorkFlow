@@ -224,11 +224,15 @@ def _validate_review_aggregate(
         _raise_semantic("review-aggregate-hash-invalid", ("aggregateHash",))
     if diff_signal_set is not None:
         _validate_artifact_binding(document, diff_signal_set, "review-aggregate")
+    if document["findingHashes"] and not findings:
+        _raise_semantic("review-aggregate-findings-required", ("findingHashes",))
+    finding_by_hash: dict[str, dict[str, Any]] = {}
     if findings:
         finding_by_hash = {finding["findingHash"]: finding for finding in findings}
+        if len(finding_by_hash) != len(findings):
+            _raise_semantic("review-aggregate-finding-hash-duplicate", ("findingHashes",))
         if set(document["findingHashes"]) != set(finding_by_hash):
             _raise_semantic("review-aggregate-finding-set-mismatch", ("findingHashes",))
-        fingerprints: dict[str, int] = {}
         for index, finding_hash in enumerate(document["findingHashes"]):
             finding = finding_by_hash[finding_hash]
             for field in ("planHash", "attemptRef", "finalDiffHash", "diffSignalSetHash"):
@@ -238,28 +242,75 @@ def _validate_review_aggregate(
                         ("findingHashes", index),
                     )
             _validate_review_finding(finding, diff_signal_set)
-            if finding["fingerprint"] in fingerprints:
-                _raise_semantic(
-                    "review-aggregate-duplicate-fingerprint",
-                    ("findingHashes", index),
-                )
-            fingerprints[finding["fingerprint"]] = index
     finding_hashes = set(document["findingHashes"])
+    dedup_assignments: set[str] = set()
+    dedup_fingerprints: set[str] = set()
     for index, group in enumerate(document["dedupGroups"]):
         group_hashes = set(group["findingHashes"])
-        if not group_hashes <= finding_hashes or group["representativeFindingHash"] not in group_hashes:
-            _raise_semantic("review-aggregate-dedup-group-invalid", ("dedupGroups", index))
+        if not group_hashes <= finding_hashes:
+            _raise_semantic("review-aggregate-dedup-finding-unknown", ("dedupGroups", index, "findingHashes"))
+        if group["representativeFindingHash"] not in group_hashes:
+            _raise_semantic("review-aggregate-dedup-representative-invalid", ("dedupGroups", index, "representativeFindingHash"))
+        for hash_index, finding_hash in enumerate(group["findingHashes"]):
+            if finding_hash in dedup_assignments:
+                _raise_semantic("review-aggregate-dedup-overlap", ("dedupGroups", index, "findingHashes", hash_index))
+            dedup_assignments.add(finding_hash)
+            if findings and finding_by_hash[finding_hash]["fingerprint"] != group["fingerprint"]:
+                _raise_semantic("review-aggregate-dedup-fingerprint-mismatch", ("dedupGroups", index, "findingHashes", hash_index))
+        if group["fingerprint"] in dedup_fingerprints:
+            _raise_semantic("review-aggregate-dedup-fingerprint-duplicate", ("dedupGroups", index, "fingerprint"))
+        dedup_fingerprints.add(group["fingerprint"])
+    if dedup_assignments != finding_hashes:
+        _raise_semantic("review-aggregate-dedup-incomplete", ("dedupGroups",))
+    representative_hashes = {
+        group["representativeFindingHash"]
+        for group in document["dedupGroups"]
+    }
+    conflict_ids: set[str] = set()
+    conflict_assignments: set[str] = set()
     for index, conflict in enumerate(document["conflictAdjudications"]):
+        if conflict["conflictId"] in conflict_ids:
+            _raise_semantic(
+                "review-aggregate-conflict-id-duplicate",
+                ("conflictAdjudications", index, "conflictId"),
+            )
+        conflict_ids.add(conflict["conflictId"])
         if conflict["decision"] == "pending":
             _raise_semantic(
                 "review-aggregate-conflict-unadjudicated",
                 ("conflictAdjudications", index, "decision"),
             )
-        if not set(conflict["findingHashes"]) <= finding_hashes:
-            _raise_semantic("review-aggregate-conflict-finding-unknown", ("conflictAdjudications", index))
+        for hash_index, finding_hash in enumerate(conflict["findingHashes"]):
+            path = ("conflictAdjudications", index, "findingHashes", hash_index)
+            if finding_hash not in representative_hashes:
+                _raise_semantic("review-aggregate-conflict-finding-unknown", path)
+            if finding_hash in conflict_assignments:
+                _raise_semantic("review-aggregate-conflict-overlap", path)
+            conflict_assignments.add(finding_hash)
+    root_cause_owners: set[str] = set()
+    root_cause_assignments: set[str] = set()
     for index, coverage in enumerate(document["rootCauseCoverage"]):
-        if not set(coverage["findingHashes"]) <= finding_hashes:
-            _raise_semantic("review-aggregate-root-cause-finding-unknown", ("rootCauseCoverage", index))
+        owner_duplicate = coverage["rootCauseOwner"] in root_cause_owners
+        for hash_index, finding_hash in enumerate(coverage["findingHashes"]):
+            path = ("rootCauseCoverage", index, "findingHashes", hash_index)
+            if finding_hash not in representative_hashes:
+                _raise_semantic("review-aggregate-root-cause-finding-unknown", path)
+            if finding_hash in root_cause_assignments:
+                _raise_semantic("review-aggregate-root-cause-overlap", path)
+            if findings and finding_by_hash[finding_hash]["rootCauseOwner"] != coverage["rootCauseOwner"]:
+                _raise_semantic(
+                    "review-aggregate-root-cause-owner-mismatch",
+                    ("rootCauseCoverage", index, "rootCauseOwner"),
+                )
+            root_cause_assignments.add(finding_hash)
+        if owner_duplicate:
+            _raise_semantic(
+                "review-aggregate-root-cause-owner-duplicate",
+                ("rootCauseCoverage", index, "rootCauseOwner"),
+            )
+        root_cause_owners.add(coverage["rootCauseOwner"])
+    if root_cause_assignments != representative_hashes:
+        _raise_semantic("review-aggregate-root-cause-incomplete", ("rootCauseCoverage",))
 
 
 _TEST_LEVEL_ORDER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3}
@@ -317,14 +368,63 @@ def _validate_coverage_result(
         _raise_semantic("coverage-result-hash-invalid", ("resultHash",))
     if diff_signal_set is not None:
         _validate_artifact_binding(document, diff_signal_set, "coverage-result")
-    if test_strategy is not None:
-        _validate_test_strategy(test_strategy, diff_signal_set)
-        if document["strategyHash"] != test_strategy["strategyHash"]:
-            _raise_semantic("coverage-strategy-mismatch", ("strategyHash",))
-        expected = {item["obligationId"] for item in test_strategy["coverageObligations"]}
-        actual = [item["obligationId"] for item in document["obligations"]]
-        if len(actual) != len(set(actual)) or set(actual) != expected:
-            _raise_semantic("coverage-obligations-mismatch", ("obligations",))
+    if test_strategy is None:
+        _raise_semantic("coverage-strategy-required", ())
+    _validate_test_strategy(test_strategy, diff_signal_set)
+    for field in ("planHash", "attemptRef", "finalDiffHash", "diffSignalSetHash"):
+        if document[field] != test_strategy[field]:
+            _raise_semantic("coverage-strategy-binding-mismatch", (field,))
+    if document["strategyHash"] != test_strategy["strategyHash"]:
+        _raise_semantic("coverage-strategy-mismatch", ("strategyHash",))
+    expected = {item["obligationId"] for item in test_strategy["coverageObligations"]}
+    actual: list[str] = []
+    seen_obligations: set[str] = set()
+    for index, item in enumerate(document["obligations"]):
+        obligation_id = item["obligationId"]
+        if obligation_id in seen_obligations:
+            _raise_semantic(
+                "coverage-obligation-id-duplicate",
+                ("obligations", index, "obligationId"),
+            )
+        seen_obligations.add(obligation_id)
+        actual.append(obligation_id)
+    if set(actual) != expected:
+        _raise_semantic("coverage-obligations-mismatch", ("obligations",))
+    for index, item in enumerate(document["obligations"]):
+        if item["status"] != "fulfilled":
+            continue
+        invocation = item["invocationEvidence"]
+        result = item["resultEvidence"]
+        if invocation["invocationHash"] != _canonical_hash(invocation, "invocationHash"):
+            _raise_semantic(
+                "coverage-invocation-hash-invalid",
+                ("obligations", index, "invocationEvidence", "invocationHash"),
+            )
+        if result["resultHash"] != _canonical_hash(result, "resultHash"):
+            _raise_semantic(
+                "coverage-execution-result-hash-invalid",
+                ("obligations", index, "resultEvidence", "resultHash"),
+            )
+        if result["invocationHash"] != invocation["invocationHash"]:
+            _raise_semantic(
+                "coverage-result-invocation-mismatch",
+                ("obligations", index, "resultEvidence", "invocationHash"),
+            )
+        if invocation["inputHash"] != test_strategy["strategyHash"]:
+            _raise_semantic(
+                "coverage-invocation-input-mismatch",
+                ("obligations", index, "invocationEvidence", "inputHash"),
+            )
+        if _utc_datetime(result["completedAt"]) < _utc_datetime(invocation["startedAt"]):
+            _raise_semantic(
+                "coverage-result-time-invalid",
+                ("obligations", index, "resultEvidence", "completedAt"),
+            )
+        if result["exitCode"] != 0:
+            _raise_semantic(
+                "coverage-result-exit-unsuccessful",
+                ("obligations", index, "resultEvidence", "exitCode"),
+            )
     if document["passed"] and any(item["status"] != "fulfilled" for item in document["obligations"]):
         _raise_semantic("coverage-passed-with-unfulfilled", ("passed",))
 
