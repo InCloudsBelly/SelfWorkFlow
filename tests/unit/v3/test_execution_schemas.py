@@ -494,7 +494,7 @@ class ExecutionSchemaTests(unittest.TestCase):
                 validate_selection_receipt(receipt, plan)
             self.assertEqual(raised.exception.reason, reason)
 
-    def test_run_ledger_rejects_old_attempt_receipt_mismatch(self):
+    def test_run_ledger_preserves_old_attempt_receipt_for_retry_history(self):
         plan = self._plan()
         ledger = self._ledger(plan)
         ledger["stages"][0]["attempts"].append(
@@ -505,9 +505,6 @@ class ExecutionSchemaTests(unittest.TestCase):
             }
         )
         ledger["stages"][0]["attempts"][0]["completedAt"] = "2026-08-09T01:00:00Z"
-        ledger["stages"][0]["selectionReceiptRefs"] = [
-            {"attemptRef": "attempt-a-1", "receiptHash": self.HASH_A}
-        ]
         receipt = self._receipt(plan)
         receipt["stageId"] = "stage-a"
         receipt["slotId"] = "slot-a"
@@ -515,13 +512,20 @@ class ExecutionSchemaTests(unittest.TestCase):
         receipt["attemptRef"] = "attempt-a-1"
         receipt["eligibleModuleIds"] = ["module-a"]
         receipt["selectedModuleIds"] = ["module-a"]
+        receipt["estimatedContextCost"] = 1
+        receipt["estimatedExecutionCost"] = 2
+        receipt["coverageDecisions"] = [{
+            "obligationId": "coverage-a",
+            "decision": "fulfilled",
+            "evidenceRefs": ["signal-b"],
+        }]
         receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        ledger["stages"][0]["selectionReceiptRefs"] = [
+            {"attemptRef": "attempt-a-1", "receiptHash": receipt["receiptHash"]}
+        ]
         from selfworkflow.v3.contracts import validate_run_ledger
 
-        with self.assertRaises(Exception) as raised:
-            validate_run_ledger(ledger, plan, (receipt,))
-        self.assertEqual(raised.exception.reason, "ledger-receipt-attempt-stale")
-        self.assertEqual(raised.exception.path, ("stages", 0, "selectionReceiptRefs", 0, "attemptRef"))
+        self.assertIsNone(validate_run_ledger(ledger, plan, (receipt,)))
 
     def test_run_ledger_rejects_receipt_plan_stage_slot_and_attempt_mismatch(self):
         from selfworkflow.v3.contracts import ContractError, validate_run_ledger

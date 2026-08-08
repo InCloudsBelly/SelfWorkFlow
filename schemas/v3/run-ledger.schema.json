@@ -59,7 +59,8 @@
           "oneOf": [{"type": "null"}, {"$ref": "#/$defs/stableId"}]
         },
         "startedAt": {"$ref": "#/$defs/utcTimestamp"},
-        "completedAt": {"$ref": "#/$defs/utcTimestamp"}
+        "completedAt": {"$ref": "#/$defs/utcTimestamp"},
+        "inputArtifactHashes": {"$ref": "#/$defs/hashList"}
       }
     },
     "slotResult": {

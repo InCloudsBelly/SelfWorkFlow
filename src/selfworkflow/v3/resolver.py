@@ -1,14 +1,12 @@
-"""Explicit V3 resolver: compile, plan, and issue a matching empty ledger."""
+"""Explicit V3 resolver: compile inputs and return an immutable PlanGraph."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-import copy
 from typing import Any
 
 from selfworkflow.v3.catalog import CompiledCatalog, CatalogError, compile_catalog
 from selfworkflow.v3.contracts import ContractError, load_contract, validate_resolve_result
-from selfworkflow.v3.ledger import LedgerError, new_ledger
 from selfworkflow.v3.pipeline import LoadedPipeline, PipelineError, load_pipeline
 from selfworkflow.v3.plan_graph import PlanGraphError, build_plan_graph
 
@@ -62,7 +60,7 @@ def resolve_request(
     execution_policy_snapshot: Mapping[str, Any] | None = None,
     policy_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a schema-valid V3 ResolveResult with a V3 RunLedger."""
+    """Return a schema-valid V3 ResolveResult containing only its PlanGraph."""
 
     normalized = _load_request(request)
     catalog = _artifact_or_compile_catalog(catalog_source)
@@ -78,8 +76,7 @@ def resolve_request(
             execution_policy_snapshot=execution_policy_snapshot,
             policy_snapshot=policy_snapshot,
         )
-        ledger = new_ledger(plan)
-    except (PlanGraphError, LedgerError) as error:
+    except PlanGraphError as error:
         result = {
             "schemaVersion": 3,
             "status": "paused",
@@ -90,7 +87,6 @@ def resolve_request(
                 "message": getattr(error, "reason", "v3-resolution-failed"),
             }],
             "planGraph": None,
-            "runLedger": None,
         }
         try:
             validate_resolve_result(result)
@@ -103,7 +99,6 @@ def resolve_request(
         "reasonCodes": [],
         "diagnostics": [],
         "planGraph": plan.as_dict(),
-        "runLedger": copy.deepcopy(ledger),
     }
     try:
         validate_resolve_result(result)

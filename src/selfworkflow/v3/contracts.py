@@ -925,12 +925,6 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
         _validate_plan_graph(plan)
         if not _plan_is_executable(plan):
             _raise_semantic("resolve-active-plan-not-executable", ("planGraph",))
-        ledger = document.get("runLedger")
-        if ledger is not None:
-            _validate_schema("run-ledger.schema.json", ledger)
-            _validate_run_ledger(ledger, plan)
-    elif document.get("runLedger") is not None:
-        _raise_semantic("resolve-paused-ledger-without-plan", ("runLedger",))
 
 
 def _validate_receipt_coverage(document: dict[str, Any]) -> set[str]:
@@ -1194,6 +1188,7 @@ def _validate_run_ledger(
 
         attempts = stage["attempts"]
         local_refs: set[str] = set()
+        stage_artifact_hashes = set(stage["artifactHashes"])
         for attempt_index, attempt in enumerate(attempts):
             path = ("stages", stage_index, "attempts", attempt_index)
             ref = attempt["attemptRef"]
@@ -1211,6 +1206,11 @@ def _validate_run_ledger(
                 _raise_semantic("ledger-active-attempt-completed", path + ("completedAt",))
             if (stage["status"] != "active" or not is_latest) and "completedAt" not in attempt:
                 _raise_semantic("ledger-attempt-incomplete", path + ("completedAt",))
+            if not set(attempt.get("inputArtifactHashes", [])) <= stage_artifact_hashes:
+                _raise_semantic(
+                    "ledger-attempt-input-artifact-unregistered",
+                    path + ("inputArtifactHashes",),
+                )
             local_refs.add(ref)
             all_attempt_refs.add(ref)
         if stage["status"] == "active" and not attempts:
@@ -1222,8 +1222,6 @@ def _validate_run_ledger(
             base = ("stages", stage_index, "selectionReceiptRefs", ref_index)
             if reference["attemptRef"] not in local_refs:
                 _raise_semantic("ledger-attempt-unknown", base + ("attemptRef",))
-            if reference["attemptRef"] != current_ref:
-                _raise_semantic("ledger-receipt-attempt-stale", base + ("attemptRef",))
             receipt = receipt_by_hash.get(reference["receiptHash"])
             if receipt is None:
                 if plan is not None or receipts:
@@ -1239,15 +1237,27 @@ def _validate_run_ledger(
                 if not any(slot["slotId"] == receipt["slotId"] for slot in plan_stage["slots"]):
                     _raise_semantic("ledger-receipt-slot-mismatch", base + ("receiptHash",))
                 _validate_selection_receipt(receipt, plan)
-            verified[(receipt["attemptRef"], receipt["slotId"])] = set(receipt["selectedModuleIds"])
+            receipt_key = (receipt["attemptRef"], receipt["slotId"])
+            if receipt_key in verified:
+                _raise_semantic(
+                    "ledger-receipt-slot-duplicate", base + ("receiptHash",),
+                )
+            verified[receipt_key] = set(receipt["selectedModuleIds"])
 
         slots = {slot["slotId"]: slot for slot in plan_stage["slots"]} if plan_stage else {}
         for collection in ("slotResults", "gateResults", "runtimeSkips"):
             for item_index, item in enumerate(stage[collection]):
                 if item["attemptRef"] not in local_refs:
                     _raise_semantic("ledger-attempt-unknown", ("stages", stage_index, collection, item_index, "attemptRef"))
+        seen_slot_results: set[tuple[str, str, str]] = set()
         for item_index, item in enumerate(stage["slotResults"]):
             base = ("stages", stage_index, "slotResults", item_index)
+            result_key = (
+                item["attemptRef"], item["slotId"], item["moduleId"],
+            )
+            if result_key in seen_slot_results:
+                _raise_semantic("ledger-slot-result-duplicate", base)
+            seen_slot_results.add(result_key)
             slot = slots.get(item["slotId"])
             if plan is not None and slot is None:
                 _raise_semantic("ledger-slot-unknown", base + ("slotId",))
@@ -1257,7 +1267,15 @@ def _validate_run_ledger(
                     reason = "ledger-module-not-selected" if slot["selectionMode"] == "static" else "ledger-module-selection-receipt-missing"
                     _raise_semantic(reason, base + ("moduleId",))
         gates = {gate for slot in slots.values() for gate in slot["gates"]}
+        seen_gate_results: set[tuple[str, str]] = set()
         for item_index, item in enumerate(stage["gateResults"]):
+            gate_key = (item["attemptRef"], item["gateId"])
+            if gate_key in seen_gate_results:
+                _raise_semantic(
+                    "ledger-gate-result-duplicate",
+                    ("stages", stage_index, "gateResults", item_index),
+                )
+            seen_gate_results.add(gate_key)
             if plan is not None and item["gateId"] not in gates:
                 _raise_semantic("ledger-gate-unknown", ("stages", stage_index, "gateResults", item_index, "gateId"))
         for item_index, item in enumerate(stage["runtimeSkips"]):
@@ -1317,7 +1335,7 @@ def validate_run_ledger(
 
 
 def validate_resolve_result(document: dict[str, Any]) -> None:
-    """Validate a V3 ResolveResult and its optional matching RunLedger."""
+    """Validate a V3 ResolveResult containing only its immutable PlanGraph."""
 
     _validate_schema("resolve-result.schema.json", document)
     _validate_resolve_result(document)

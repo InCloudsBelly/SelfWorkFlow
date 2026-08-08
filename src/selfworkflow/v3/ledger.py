@@ -60,6 +60,15 @@ def _id(value: object, reason: str) -> str:
     return value
 
 
+def _hashes(value: object, reason: str) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        raise LedgerError(reason)
+    items = [_hash(item, reason) for item in value]
+    if len(items) != len(set(items)):
+        raise LedgerError(reason)
+    return sorted(items)
+
+
 def _validate_or_raise(
     ledger: Mapping[str, Any],
     plan: Mapping[str, Any],
@@ -182,6 +191,8 @@ def start_stage(
     attempt_ref: str,
     started_at: str,
     receipts: Sequence[Any] = (),
+    *,
+    input_artifact_hashes: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Activate exactly the next applicable stage."""
 
@@ -190,7 +201,10 @@ def start_stage(
     result, _ = _copy_and_validate_active(ledger, plan_document, receipt_documents)
     stage = _stage(result, stage_id)
     plan_stage = _plan_stage(plan_document, stage_id)
-    if stage["status"] != "pending" or plan_stage["applicability"] != "applicable":
+    if (
+        stage["status"] not in {"pending", "failed", "paused"}
+        or plan_stage["applicability"] != "applicable"
+    ):
         raise LedgerError("v3-stage-transition-invalid")
     index = next(i for i, item in enumerate(result["stages"]) if item["stageId"] == stage_id)
     for previous, previous_plan in zip(
@@ -201,18 +215,28 @@ def start_stage(
     if any(item["status"] == "active" for item in result["stages"]):
         raise LedgerError("v3-stage-active-exists")
     _id(attempt_ref, "v3-attempt-invalid")
+    registered_inputs = _hashes(
+        input_artifact_hashes, "v3-attempt-input-artifacts-invalid",
+    )
     if any(
         attempt["attemptRef"] == attempt_ref
         for item in result["stages"] for attempt in item["attempts"]
     ):
         raise LedgerError("v3-attempt-duplicate")
     stage["status"] = "active"
+    previous_attempt = stage["attempts"][-1] if stage["attempts"] else None
     stage["attempts"].append({
         "attemptRef": attempt_ref,
-        "ordinal": 1,
-        "previousAttemptRef": None,
+        "ordinal": len(stage["attempts"]) + 1,
+        "previousAttemptRef": (
+            previous_attempt["attemptRef"] if previous_attempt else None
+        ),
         "startedAt": started_at,
+        "inputArtifactHashes": registered_inputs,
     })
+    stage["artifactHashes"] = sorted(set(
+        stage["artifactHashes"] + registered_inputs
+    ))
     result["status"] = "active"
     _validate_or_raise(result, plan_document, receipt_documents)
     return result
@@ -228,9 +252,14 @@ def apply_stage_result(
 
     plan_document = _plan_document(plan)
     supplied_receipts = list(receipts)
+    new_receipts: list[Any] = []
     if type(stage_result) is dict and "selectionReceipts" in stage_result:
-        supplied_receipts.extend(stage_result["selectionReceipts"])
+        if type(stage_result["selectionReceipts"]) is not list:
+            raise LedgerError("v3-stage-result-receipts-invalid")
+        new_receipts = list(stage_result["selectionReceipts"])
+        supplied_receipts.extend(new_receipts)
     receipt_documents = tuple(_receipt_document(item) for item in supplied_receipts)
+    new_receipt_documents = tuple(_receipt_document(item) for item in new_receipts)
     result, active = _copy_and_validate_active(ledger, plan_document, receipt_documents)
     if type(stage_result) is not dict or stage_result.get("schemaVersion") != 3:
         raise LedgerError("v3-stage-result-schema-invalid")
@@ -257,17 +286,21 @@ def apply_stage_result(
     if not isinstance(stage_result["completedAt"], str):
         raise LedgerError("v3-stage-result-time-invalid")
 
-    def hashes(field: str) -> list[str]:
-        value = stage_result[field]
-        if type(value) is not list or len(value) != len(set(value)):
-            raise LedgerError("v3-stage-result-hash-list-invalid")
-        return sorted(_hash(item, "v3-stage-result-hash-invalid") for item in value)
-
-    input_hashes = hashes("inputArtifactHashes")
-    output_hashes = hashes("outputArtifactHashes")
-    artifact_hashes = hashes("artifactHashes")
+    input_hashes = _hashes(
+        stage_result["inputArtifactHashes"], "v3-stage-result-hash-list-invalid",
+    )
+    output_hashes = _hashes(
+        stage_result["outputArtifactHashes"], "v3-stage-result-hash-list-invalid",
+    )
+    artifact_hashes = _hashes(
+        stage_result["artifactHashes"], "v3-stage-result-hash-list-invalid",
+    )
+    registered_inputs = sorted(current_attempt.get("inputArtifactHashes", []))
+    if input_hashes != registered_inputs:
+        raise LedgerError("v3-stage-result-input-binding-invalid")
     if artifact_hashes != sorted(set(input_hashes + output_hashes)):
         raise LedgerError("v3-stage-result-artifact-binding-invalid")
+    declared_artifacts = set(input_hashes + output_hashes)
 
     plan_stage = _plan_stage(plan_document, active["stageId"])
     slots = {slot["slotId"]: slot for slot in plan_stage["slots"]}
@@ -276,15 +309,23 @@ def apply_stage_result(
     runtime_skips = copy.deepcopy(stage_result["runtimeSkips"])
     if not all(type(item) is dict for item in slot_results + gate_results + runtime_skips):
         raise LedgerError("v3-stage-result-artifact-invalid")
+    seen_slot_results: set[tuple[str, str]] = set()
     for item in slot_results:
         if set(item) != {"slotId", "moduleId", "artifactHash"}:
             raise LedgerError("v3-stage-result-slot-result-invalid")
         _id(item["slotId"], "v3-stage-result-slot-invalid")
         _id(item["moduleId"], "v3-stage-result-module-invalid")
         _hash(item["artifactHash"], "v3-stage-result-artifact-invalid")
+        if item["artifactHash"] not in declared_artifacts:
+            raise LedgerError("v3-stage-result-artifact-unbound")
+        identity = (item["slotId"], item["moduleId"])
+        if identity in seen_slot_results:
+            raise LedgerError("v3-stage-result-slot-result-duplicate")
+        seen_slot_results.add(identity)
         slot = slots.get(item["slotId"])
         if slot is None or item["moduleId"] not in set(slot["selectedModules"]):
             raise LedgerError("v3-stage-result-module-not-selected")
+    seen_gate_results: set[str] = set()
     for item in gate_results:
         if set(item) != {"gateId", "outcome", "artifactHash"}:
             raise LedgerError("v3-stage-result-gate-result-invalid")
@@ -292,6 +333,11 @@ def apply_stage_result(
         if item["outcome"] not in {"passed", "failed", "paused"}:
             raise LedgerError("v3-stage-result-gate-outcome-invalid")
         _hash(item["artifactHash"], "v3-stage-result-artifact-invalid")
+        if item["artifactHash"] not in declared_artifacts:
+            raise LedgerError("v3-stage-result-artifact-unbound")
+        if item["gateId"] in seen_gate_results:
+            raise LedgerError("v3-stage-result-gate-result-duplicate")
+        seen_gate_results.add(item["gateId"])
     for item in runtime_skips:
         if set(item) != {"slotId", "reasonCode", "evidenceHash"}:
             raise LedgerError("v3-stage-result-runtime-skip-invalid")
@@ -304,7 +350,7 @@ def apply_stage_result(
 
     receipt_refs = [
         {"attemptRef": stage_result["attemptRef"], "receiptHash": item["receiptHash"]}
-        for item in receipt_documents
+        for item in new_receipt_documents
     ]
     for receipt in receipt_documents:
         from selfworkflow.v3.contracts import validate_selection_receipt
@@ -312,26 +358,32 @@ def apply_stage_result(
             validate_selection_receipt(receipt, plan_document)
         except ContractError as error:
             raise LedgerError(error.reason) from None
-        if receipt["stageId"] != active["stageId"] or receipt["attemptRef"] != stage_result["attemptRef"]:
+    for receipt in new_receipt_documents:
+        if (
+            receipt["stageId"] != active["stageId"]
+            or receipt["attemptRef"] != stage_result["attemptRef"]
+        ):
             raise LedgerError("v3-stage-result-receipt-binding-invalid")
 
     target = _stage(result, active["stageId"])
     target["status"] = stage_result["status"]
     target["attempts"][-1]["completedAt"] = stage_result["completedAt"]
-    target["slotResults"] = [
+    target["slotResults"].extend([
         {"attemptRef": stage_result["attemptRef"], **item}
         for item in slot_results
-    ]
-    target["gateResults"] = [
+    ])
+    target["gateResults"].extend([
         {"attemptRef": stage_result["attemptRef"], **item}
         for item in gate_results
-    ]
-    target["runtimeSkips"] = [
+    ])
+    target["runtimeSkips"].extend([
         {"attemptRef": stage_result["attemptRef"], **item}
         for item in runtime_skips
-    ]
-    target["selectionReceiptRefs"] = receipt_refs
-    target["artifactHashes"] = artifact_hashes
+    ])
+    target["selectionReceiptRefs"].extend(receipt_refs)
+    target["artifactHashes"] = sorted(set(
+        target["artifactHashes"] + artifact_hashes
+    ))
     if stage_result["status"] == "failed":
         result["status"] = "failed"
     elif stage_result["status"] == "paused":
