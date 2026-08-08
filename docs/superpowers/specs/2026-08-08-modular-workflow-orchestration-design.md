@@ -340,9 +340,11 @@ knowledge.propose
 knowledge.update
 ```
 
-本轮只实现厂商无关的 Knowledge 插槽和接口类型，不实现、启用、调用或验证任何
-C7OpenWiki 专属行为，也不修改 `D:\openwikiC7`。以下现有 SelfWorkFlow 路径同样
-冻结，不得出现在本功能相对基线的 diff 中：
+本轮只实现厂商无关的 Knowledge 插槽和接口类型，不实现或启用任何 C7OpenWiki
+专属行为，不调用真实 C7 MCP，也不修改 `D:\openwikiC7`。完整自动回归可以只读
+执行既有 FakeClient/契约测试，以证明冻结能力未被本功能破坏；该回归不构成 C7
+专项验收，不得提升其支持状态。以下现有 SelfWorkFlow 路径同样冻结，不得出现在
+本功能相对基线的 diff 中：
 
 ```text
 extensions/knowledge/c7-openwiki/**
