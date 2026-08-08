@@ -48,8 +48,12 @@ Repository-owner changes to protected rules require all four gates together:
 an explicit confirmation attestation, an actual SemVer major increase, an
 independent Review attestation, and a passed behavioral-test execution receipt.
 All three receipts bind the canonical proposal hash over the base and proposed
-rule hashes plus both policy versions. Every referenced artifact is resolved
-from a collector-sealed store and its canonical hash is recomputed. The exact
+rule hashes, both policy versions, an operation nonce, proposal time, and
+validity window. The trusted owner request also fixes the expected behavioral
+test invocation. The proposal must precede all three receipts; receipts cannot
+be future-dated or outlive the proposal window. Owner Review accepts L2 or L3
+through the same review-level comparator used by completion. Every referenced
+artifact is resolved from a collector-sealed store and its canonical hash is recomputed. The exact
 invariants and gate shape are in
 [the protected-rule source](workflow/protected-rules.yaml), its
 [closed schema](schemas/protected-rules.schema.json), and
@@ -68,7 +72,9 @@ changes; and completion without fresh verification evidence.
 A trusted, deeply immutable completion policy is passed separately from the
 evidence. It fixes task kind, C/R classification, the ordered required
 capability list, required criterion and verification IDs, and implementation
-identity. Evidence cannot declare its own governing policy. C1/R1 requires at
+identity. It also fixes a per-task operation nonce, artifact freshness window,
+and the canonical expected invocation hash for each required verification.
+Evidence cannot declare its own governing policy. C1/R1 requires at
 least L0 Review; any C/R level 2 or 3 requires at least L2, with reviewer and
 context independent from implementation. Only level 2 may fall back to L1,
 and only when the trusted policy carries a typed authorization recording that
@@ -84,9 +90,13 @@ A modifying task records exactly `classification`, `capabilities`,
 records cannot be replaced by empty collections or prose claims. Capability,
 Review, and verification references resolve only through a collector-sealed,
 deeply immutable artifact store. Review attestations record provider, receipt,
-input and output hashes, decision, level, and identities. Verification
-execution receipts additionally record finite check and command types, exit
-code, timestamps, and criterion links. Every acceptance criterion and
+input and output hashes, decision, level, and identities; the collector derives
+the input hash from the completion subject and the output hash from the actual
+provided receipt content. Verification execution receipts additionally bind a
+frozen invocation containing executable/module identity, argv, repository cwd,
+controlled environment keys and digest, and input digest. They record finite
+check type, exit code, timestamps, and criterion links. The trusted policy—not
+the evidence—fixes the expected invocation hash. Every acceptance criterion and
 verification artifact links in both directions. Every skipped or
 not-applicable item has a non-empty reason; required policy items cannot be
 skipped.
@@ -103,12 +113,27 @@ validity window. `failed`,
 evidence cannot complete. `not-applicable` is eligible only for a pure
 `read-only` task with no change items.
 
+Inputs are bounded before expensive normalization: evidence JSON is limited to
+1 MiB by characters and UTF-8 bytes; canonical values to 50,000 nodes, 1 MiB
+per string, and 8 MiB total; artifact stores to 2,048 records and receipt output
+to 8 MiB. Evidence collections are capped at 64 capabilities, 256 skills, 512
+criteria/verifications/skips, 256 residual risks, and 10,000 changes. Manifests
+are capped at 20,000 paths, 8 MiB per file, and 64 MiB total. Repository paths
+are canonical Windows-safe relative paths with a 1,024-character path and
+255-character segment limit; aliases by NFC/casefold, reserved device names,
+ADS, traversal, absolute paths, controls, invalid characters, and trailing dots
+or spaces are rejected.
+
 These checks provide deterministic structural, hash, time, manifest, and
 policy validation. `ArtifactCollector` is an explicit trusted collection
 boundary that preserves audit fields; it is not a defense against malicious
 code in the same process and does not independently prove that an external
 provider executed a command. Provider trust and receipt acquisition are
-deployment responsibilities. Separately, `agent-policy` rules depend on agent
+deployment responsibilities. Nonces bind receipts to the current trusted
+policy/proposal, while durable cross-process replay registries remain a future
+transaction-layer responsibility. The collector rejects duplicate
+`(provider, receiptId)` pairs within one store, including across artifact kinds.
+Separately, `agent-policy` rules depend on agent
 adherence and have unit-tested structure, not technical or behavioral
 enforcement.
 

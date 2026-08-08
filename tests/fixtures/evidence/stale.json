@@ -3,13 +3,13 @@
     "taskKind": "modification",
     "complexity": "C1",
     "risk": "R1",
-    "policyHash": "sha256:de1fb6ecf0d5da0557d4820f1d9c5a9aa6731a106c3fdd14213f55ec917e621c"
+    "policyHash": "sha256:86e0ac6f17fb953e09632af04925cfd7cffec2d4168c39081b1a0dab8f9f60bc"
   },
   "capabilities": [
     {
       "name": "filesystem-write",
       "state": "supported",
-      "artifactHash": "sha256:65fc6ee4563a2e7063fa7c9167fa86e4e7edb235af591c094d82d9a159af0eaf"
+      "artifactHash": "sha256:5350ddfd6a003b4c99b09f7e2466e98a95a4229477d058f59e815402c7ddd161"
     }
   ],
   "selectedSkills": [
@@ -43,14 +43,14 @@
     "id": "completion-review",
     "status": "passed",
     "level": "L0",
-    "artifactHash": "sha256:be2be65f86e75d2cb248dcf4231eb27f5542a8b3e65e9cd2efd3a782d663488b",
+    "artifactHash": "sha256:70c4ef37a416eb8e7ef14dfba1ef9ea9fd72be644f88c41c08f759cb4e70ebf5",
     "reason": ""
   },
   "verification": [
     {
       "id": "unit-tests",
       "status": "passed",
-      "artifactHash": "sha256:1cc76c87adcf7b3ecc6d00f6fd7d676fafa1c10cbc3f8dc2f3a9b2687756d321",
+      "artifactHash": "sha256:cdfc9eb3a51a7821d396477201402eb971b5bdc439f613ce96db0cb6ac255364",
       "verifiedAt": "2026-08-08T06:00:00Z",
       "validForSeconds": 3600,
       "reason": ""

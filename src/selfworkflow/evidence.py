@@ -2,52 +2,39 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import hashlib
-import json
-import math
-from pathlib import PurePosixPath
 import re
 from types import MappingProxyType
 
+from ._evidence_artifacts import (
+    _ARTIFACT_STATUSES,
+    _parse_timestamp,
+    ArtifactCollector,
+    ExecutionInvocation,
+    TrustedArtifactStore,
+    prepare_artifacts as _prepare_artifacts,
+)
+from ._evidence_values import (
+    MAX_ACCEPTANCE_CRITERIA,
+    MAX_CAPABILITIES,
+    MAX_CHANGES,
+    MAX_RESIDUAL_RISKS,
+    MAX_SELECTED_SKILLS,
+    MAX_SKIPPED,
+    MAX_VERIFICATIONS,
+    WorkflowEvidenceError,
+    canonical_content_hash,
+    fail as _fail,
+    manifest_hashes,
+    parse_evidence_json,
+    repository_path_identity,
+    require_collection_budget,
+    review_level_at_least,
+)
 from .model import CapabilityState, Complexity, Risk
 
 
 _MAPPING_PROXY_TYPE = type(MappingProxyType({}))
 _LAYER_ORDER = {"skill": 1, "project": 2, "overlay": 3}
-_ERROR_MESSAGES = MappingProxyType(
-    {
-        "protected-rules-invalid": "The protected-rule document is invalid.",
-        "protected-rule-layer-invalid": "A lower-priority rule layer is invalid.",
-        "protected-rule-layer-conflict": (
-            "Lower-priority rule layers contain a conflicting rule identity."
-        ),
-        "protected-rule-override-denied": (
-            "A lower-priority rule cannot replace a protected rule."
-        ),
-        "protected-rule-owner-authorization-required": (
-            "A protected-rule change requires the complete breaking-change gate."
-        ),
-        "evidence-json-invalid": "The evidence JSON document is invalid.",
-        "evidence-invalid": "The completion evidence structure is invalid.",
-        "result-content-invalid": "The completion result content is invalid.",
-        "evidence-time-invalid": "The completion evidence time is invalid.",
-        "completion-policy-invalid": "The completion policy is invalid.",
-        "artifact-store-invalid": "The evidence artifact store is invalid.",
-        "manifest-invalid": "A completion file manifest is invalid.",
-        "workflow-error-code-invalid": "The workflow error code is invalid.",
-        "output-construction-denied": "Workflow output types use private factories.",
-        "review-fallback-authorization-invalid": (
-            "The trusted review fallback authorization is invalid."
-        ),
-        "trusted-artifact-store-required": (
-            "A collector-sealed trusted artifact store is required."
-        ),
-        "trusted-artifact-store-construction-denied": (
-            "Trusted artifact stores are created only by the collector."
-        ),
-        "artifact-collector-invalid": "The artifact collector input is invalid.",
-    }
-)
 _DECISION_MESSAGES = MappingProxyType(
     {
         "completion-eligible": "The evidence satisfies the completion gate.",
@@ -110,6 +97,9 @@ _DECISION_MESSAGES = MappingProxyType(
         "artifact-identity-duplicate": (
             "The artifact store contains a duplicate artifact identity."
         ),
+        "artifact-receipt-duplicate": (
+            "The artifact store contains a duplicate provider receipt."
+        ),
         "artifact-binding-mismatch": (
             "An evidence record does not match its resolved artifact."
         ),
@@ -122,6 +112,17 @@ _DECISION_MESSAGES = MappingProxyType(
         "verification-required": (
             "A policy-required verification record is missing."
         ),
+        "verification-invocation-mismatch": (
+            "A verification used an invocation other than the trusted policy expectation."
+        ),
+        "capability-time-in-future": (
+            "Capability evidence cannot be newer than the observation time."
+        ),
+        "capability-stale": "Capability evidence is outside the trusted freshness window.",
+        "review-time-in-future": (
+            "Review evidence cannot be newer than the observation time."
+        ),
+        "review-stale": "Review evidence is outside the trusted freshness window.",
     }
 )
 _VERIFICATION_FAILURE_CODES = MappingProxyType(
@@ -132,22 +133,6 @@ _VERIFICATION_FAILURE_CODES = MappingProxyType(
     }
 )
 _OUTPUT_TOKEN = object()
-_TRUSTED_STORE_TOKEN = object()
-
-
-class WorkflowEvidenceError(ValueError):
-    """Stable workflow failure that does not include rejected input values."""
-
-    def __init__(self, code: str):
-        if type(code) is not str or code not in _ERROR_MESSAGES:
-            code = "workflow-error-code-invalid"
-        self.code = code
-        self.message = _ERROR_MESSAGES[code]
-        super().__init__(self.message)
-
-
-class _DuplicateJsonKeyError(ValueError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -187,8 +172,11 @@ class CompletionPolicy:
     required_capabilities: tuple[str, ...]
     required_criterion_ids: tuple[str, ...]
     required_verification_ids: tuple[str, ...]
+    expected_verification_invocations: tuple[tuple[str, str], ...]
     implementation_actor: str
     implementation_context: str
+    task_nonce: str
+    artifact_freshness_seconds: int
     review_fallback: ReviewFallbackAuthorization | None
 
     def __init__(
@@ -200,8 +188,11 @@ class CompletionPolicy:
         required_capabilities: tuple[str, ...],
         required_criterion_ids: tuple[str, ...],
         required_verification_ids: tuple[str, ...],
+        expected_verification_invocations: tuple[tuple[str, str], ...],
         implementation_actor: str,
         implementation_context: str,
+        task_nonce: str,
+        artifact_freshness_seconds: int,
         review_fallback: ReviewFallbackAuthorization | None = None,
     ) -> None:
         name_groups = (
@@ -225,6 +216,11 @@ class CompletionPolicy:
             or not implementation_actor
             or type(implementation_context) is not str
             or not implementation_context
+            or type(task_nonce) is not str
+            or not task_nonce
+            or len(task_nonce.encode("utf-8")) > 256
+            or type(artifact_freshness_seconds) is not int
+            or not 1 <= artifact_freshness_seconds <= 86400
             or (
                 review_fallback is not None
                 and type(review_fallback) is not ReviewFallbackAuthorization
@@ -233,6 +229,17 @@ class CompletionPolicy:
                 task_kind == "modification"
                 and (complexity is Complexity.C0 or risk is Risk.R0)
             )
+            or type(expected_verification_invocations) is not tuple
+            or any(
+                type(item) is not tuple
+                or len(item) != 2
+                or type(item[0]) is not str
+                or not item[0]
+                or not _is_sha256(item[1])
+                for item in expected_verification_invocations
+            )
+            or tuple(item[0] for item in expected_verification_invocations)
+            != required_verification_ids
         ):
             _fail("completion-policy-invalid")
         object.__setattr__(self, "task_kind", task_kind)
@@ -241,8 +248,17 @@ class CompletionPolicy:
         object.__setattr__(self, "required_capabilities", required_capabilities)
         object.__setattr__(self, "required_criterion_ids", required_criterion_ids)
         object.__setattr__(self, "required_verification_ids", required_verification_ids)
+        object.__setattr__(
+            self,
+            "expected_verification_invocations",
+            expected_verification_invocations,
+        )
         object.__setattr__(self, "implementation_actor", implementation_actor)
         object.__setattr__(self, "implementation_context", implementation_context)
+        object.__setattr__(self, "task_nonce", task_nonce)
+        object.__setattr__(
+            self, "artifact_freshness_seconds", artifact_freshness_seconds
+        )
         object.__setattr__(self, "review_fallback", review_fallback)
 
     @property
@@ -255,8 +271,11 @@ class CompletionPolicy:
                 "requiredCapabilities": self.required_capabilities,
                 "requiredCriterionIds": self.required_criterion_ids,
                 "requiredVerificationIds": self.required_verification_ids,
+                "expectedVerificationInvocations": self.expected_verification_invocations,
                 "implementationActor": self.implementation_actor,
                 "implementationContext": self.implementation_context,
+                "taskNonce": self.task_nonce,
+                "artifactFreshnessSeconds": self.artifact_freshness_seconds,
                 "reviewFallback": (
                     None
                     if self.review_fallback is None
@@ -283,14 +302,23 @@ class OwnerChangeRequest:
     owner_actor: str
     implementation_actor: str
     implementation_context: str
+    operation_nonce: str
+    proposed_at: datetime
+    valid_for_seconds: int
+    behavioral_test_invocation_hash: str
     confirmation_artifact_hash: str
     review_artifact_hash: str
     behavioral_test_artifact_hash: str
 
     def __init__(self, **values: object) -> None:
         fields = tuple(self.__dataclass_fields__)
+        text_fields = tuple(
+            field
+            for field in fields
+            if field not in {"proposed_at", "valid_for_seconds"}
+        )
         if set(values) != set(fields) or any(
-            type(values[field]) is not str or not values[field] for field in fields
+            type(values[field]) is not str or not values[field] for field in text_fields
         ):
             _fail("protected-rule-owner-authorization-required")
         hash_fields = (
@@ -299,11 +327,25 @@ class OwnerChangeRequest:
             "confirmation_artifact_hash",
             "review_artifact_hash",
             "behavioral_test_artifact_hash",
+            "behavioral_test_invocation_hash",
         )
-        if any(not _is_sha256(values[field]) for field in hash_fields):
+        try:
+            proposed_at = _as_utc(values["proposed_at"])
+        except WorkflowEvidenceError:
+            _fail("protected-rule-owner-authorization-required")
+        if (
+            any(not _is_sha256(values[field]) for field in hash_fields)
+            or len(values["operation_nonce"].encode("utf-8")) > 256
+            or type(values["valid_for_seconds"]) is not int
+            or not 1 <= values["valid_for_seconds"] <= 86400
+        ):
             _fail("protected-rule-owner-authorization-required")
         for field in fields:
-            object.__setattr__(self, field, values[field])
+            object.__setattr__(
+                self,
+                field,
+                proposed_at if field == "proposed_at" else values[field],
+            )
 
 
 def _initialize_output(instance: object, values: dict[str, object], token: object) -> None:
@@ -367,160 +409,6 @@ class MergedRules:
         return next((rule for rule in self.rules if rule.id == rule_id), None)
 
 
-def _fail(code: str) -> None:
-    raise WorkflowEvidenceError(code) from None
-
-
-def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise _DuplicateJsonKeyError
-        result[key] = value
-    return result
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError
-
-
-def _freeze_json(
-    value: object,
-    *,
-    depth: int = 0,
-    state: list[int] | None = None,
-) -> object:
-    if depth > 64:
-        _fail("evidence-json-invalid")
-    counters = state if state is not None else [0]
-    counters[0] += 1
-    if counters[0] > 10000:
-        _fail("evidence-json-invalid")
-    if value is None or type(value) in (str, bool, int):
-        return value
-    if type(value) is float:
-        if not math.isfinite(value):
-            _fail("evidence-json-invalid")
-        return value
-    if type(value) is list:
-        return tuple(
-            _freeze_json(item, depth=depth + 1, state=counters) for item in value
-        )
-    if type(value) is dict:
-        if any(type(key) is not str for key in value):
-            _fail("evidence-json-invalid")
-        return MappingProxyType(
-            {
-                key: _freeze_json(item, depth=depth + 1, state=counters)
-                for key, item in value.items()
-            }
-        )
-    _fail("evidence-json-invalid")
-
-
-def parse_evidence_json(document: object) -> MappingProxyType:
-    """Parse duplicate-free finite JSON into a deeply immutable structure."""
-
-    if type(document) is not str:
-        _fail("evidence-json-invalid")
-    try:
-        loaded = json.loads(
-            document,
-            object_pairs_hook=_unique_json_object,
-            parse_constant=_reject_json_constant,
-        )
-        frozen = _freeze_json(loaded)
-    except WorkflowEvidenceError:
-        raise
-    except Exception:
-        _fail("evidence-json-invalid")
-    if type(frozen) is not _MAPPING_PROXY_TYPE:
-        _fail("evidence-json-invalid")
-    return frozen
-
-
-def _normalize_content(
-    value: object,
-    *,
-    depth: int,
-    counters: list[int],
-    active: set[int],
-) -> object:
-    if depth > 64:
-        _fail("result-content-invalid")
-    counters[0] += 1
-    if counters[0] > 10000:
-        _fail("result-content-invalid")
-    if value is None or type(value) in (str, bool, int):
-        return value
-    if type(value) is float:
-        if not math.isfinite(value):
-            _fail("result-content-invalid")
-        if value.is_integer():
-            return int(value)
-        return value
-    if type(value) in (list, tuple):
-        identity = id(value)
-        if identity in active:
-            _fail("result-content-invalid")
-        active.add(identity)
-        try:
-            return [
-                _normalize_content(
-                    item,
-                    depth=depth + 1,
-                    counters=counters,
-                    active=active,
-                )
-                for item in value
-            ]
-        finally:
-            active.remove(identity)
-    if type(value) in (dict, _MAPPING_PROXY_TYPE):
-        entries = _mapping_entries(value, "result-content-invalid")
-        identity = id(value)
-        if identity in active:
-            _fail("result-content-invalid")
-        active.add(identity)
-        try:
-            return {
-                key: _normalize_content(
-                    item,
-                    depth=depth + 1,
-                    counters=counters,
-                    active=active,
-                )
-                for key, item in entries
-            }
-        finally:
-            active.remove(identity)
-    _fail("result-content-invalid")
-
-
-def canonical_content_hash(content: object) -> str:
-    """Hash normalized finite JSON content with deterministic object ordering."""
-
-    try:
-        normalized = _normalize_content(
-            content,
-            depth=0,
-            counters=[0],
-            active=set(),
-        )
-        payload = json.dumps(
-            normalized,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    except WorkflowEvidenceError:
-        raise
-    except Exception:
-        _fail("result-content-invalid")
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
-
-
 def _as_utc(value: object) -> datetime:
     if type(value) is not datetime:
         _fail("evidence-time-invalid")
@@ -554,395 +442,6 @@ def _completion_decision(
     )
 
 
-@dataclass(frozen=True, init=False)
-class TrustedArtifactStore:
-    """Immutable resolver output produced only by ArtifactCollector.seal()."""
-
-    _records: MappingProxyType
-    _seal: object
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
-        _fail("trusted-artifact-store-construction-denied")
-
-
-def _new_trusted_store(records: dict[str, object]) -> TrustedArtifactStore:
-    store = object.__new__(TrustedArtifactStore)
-    object.__setattr__(store, "_records", MappingProxyType(dict(records)))
-    object.__setattr__(store, "_seal", _TRUSTED_STORE_TOKEN)
-    return store
-
-
-class ArtifactCollector:
-    """Explicit in-process trust boundary for externally verified receipts."""
-
-    __slots__ = ("_records", "_identities", "_sealed")
-
-    def __init__(self) -> None:
-        self._records: dict[str, object] = {}
-        self._identities: set[tuple[str, str]] = set()
-        self._sealed = False
-
-    def _record(self, artifact: dict[str, object]) -> str:
-        if self._sealed:
-            _fail("artifact-collector-invalid")
-        try:
-            parsed = _parse_artifact(artifact, "artifact-collector-invalid")
-            artifact_hash = canonical_content_hash(artifact)
-            frozen = _freeze_json(artifact)
-        except WorkflowEvidenceError:
-            _fail("artifact-collector-invalid")
-        identity = (parsed["kind"], parsed["subjectId"])
-        if identity in self._identities:
-            _fail("artifact-collector-invalid")
-        self._identities.add(identity)
-        self._records[artifact_hash] = frozen
-        return artifact_hash
-
-    def record_capability(
-        self,
-        *,
-        name: str,
-        state: CapabilityState,
-        policy_hash: str,
-        actor_id: str,
-        context_id: str,
-        recorded_at: str,
-    ) -> str:
-        if type(state) is not CapabilityState:
-            _fail("artifact-collector-invalid")
-        return self._record(
-            {
-                "kind": "capability",
-                "status": "passed",
-                "subjectId": name,
-                "subjectHash": policy_hash,
-                "actorId": actor_id,
-                "contextId": context_id,
-                "relatedIds": [],
-                "recordedAt": recorded_at,
-                "attributes": {
-                    "name": name,
-                    "state": state.value,
-                    "policyHash": policy_hash,
-                },
-            }
-        )
-
-    def record_attestation(
-        self,
-        *,
-        kind: str,
-        subject_id: str,
-        subject_hash: str,
-        actor_id: str,
-        context_id: str,
-        recorded_at: str,
-        provider: str,
-        receipt_id: str,
-        input_hash: str,
-        output_hash: str,
-        decision: str,
-        level: str = "",
-        implementation_actor: str = "",
-        implementation_context: str = "",
-        scope: str = "",
-    ) -> str:
-        common = {
-            "provider": provider,
-            "receiptId": receipt_id,
-            "inputHash": input_hash,
-            "outputHash": output_hash,
-            "decision": decision,
-        }
-        if kind in {"review", "owner-review"}:
-            attributes = common | {
-                "level": level,
-                "implementationActor": implementation_actor,
-                "implementationContext": implementation_context,
-            }
-        elif kind == "owner-confirmation":
-            attributes = common | {"scope": scope}
-        else:
-            _fail("artifact-collector-invalid")
-        return self._record(
-            {
-                "kind": kind,
-                "status": "passed",
-                "subjectId": subject_id,
-                "subjectHash": subject_hash,
-                "actorId": actor_id,
-                "contextId": context_id,
-                "relatedIds": [],
-                "recordedAt": recorded_at,
-                "attributes": attributes,
-            }
-        )
-
-    def record_execution(
-        self,
-        *,
-        kind: str,
-        status: str,
-        subject_id: str,
-        subject_hash: str,
-        actor_id: str,
-        context_id: str,
-        related_ids: tuple[str, ...],
-        recorded_at: str,
-        provider: str,
-        receipt_id: str,
-        input_hash: str,
-        output_hash: str,
-        check_type: str,
-        command_type: str,
-        exit_code: int | None,
-        verification_id: str = "",
-        valid_for_seconds: int = 0,
-        suite: str = "",
-    ) -> str:
-        common = {
-            "provider": provider,
-            "receiptId": receipt_id,
-            "inputHash": input_hash,
-            "outputHash": output_hash,
-            "checkType": check_type,
-            "commandType": command_type,
-            "exitCode": exit_code,
-        }
-        if kind == "verification":
-            attributes = common | {
-                "verificationId": verification_id,
-                "validForSeconds": valid_for_seconds,
-            }
-        elif kind == "behavioral-test":
-            attributes = common | {"suite": suite}
-        else:
-            _fail("artifact-collector-invalid")
-        return self._record(
-            {
-                "kind": kind,
-                "status": status,
-                "subjectId": subject_id,
-                "subjectHash": subject_hash,
-                "actorId": actor_id,
-                "contextId": context_id,
-                "relatedIds": list(related_ids),
-                "recordedAt": recorded_at,
-                "attributes": attributes,
-            }
-        )
-
-    def seal(self) -> TrustedArtifactStore:
-        if self._sealed:
-            _fail("artifact-collector-invalid")
-        self._sealed = True
-        return _new_trusted_store(self._records)
-
-
-_ARTIFACT_ATTRIBUTE_KEYS = MappingProxyType(
-    {
-        "capability": ("name", "state", "policyHash"),
-        "review": (
-            "provider", "receiptId", "inputHash", "outputHash", "decision",
-            "level", "implementationActor", "implementationContext",
-        ),
-        "verification": (
-            "provider", "receiptId", "inputHash", "outputHash", "checkType",
-            "commandType", "exitCode", "verificationId", "validForSeconds",
-        ),
-        "owner-confirmation": (
-            "provider", "receiptId", "inputHash", "outputHash", "decision", "scope",
-        ),
-        "owner-review": (
-            "provider", "receiptId", "inputHash", "outputHash", "decision",
-            "level", "implementationActor", "implementationContext",
-        ),
-        "behavioral-test": (
-            "provider", "receiptId", "inputHash", "outputHash", "checkType",
-            "commandType", "exitCode", "suite",
-        ),
-    }
-)
-_ARTIFACT_STATUSES = {"passed", "failed", "not-run", "partial", "not-applicable"}
-
-
-def _parse_timestamp(value: object, code: str) -> datetime:
-    if type(value) is not str or re.fullmatch(
-        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
-        value,
-    ) is None:
-        _fail(code)
-    try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc
-        )
-    except (TypeError, ValueError):
-        _fail(code)
-
-
-def _parse_artifact(value: object, code: str) -> dict[str, object]:
-    record = _closed_mapping(
-        value,
-        (
-            "kind",
-            "status",
-            "subjectId",
-            "subjectHash",
-            "actorId",
-            "contextId",
-            "relatedIds",
-            "recordedAt",
-            "attributes",
-        ),
-        code,
-    )
-    kind = record["kind"]
-    if type(kind) is not str or kind not in _ARTIFACT_ATTRIBUTE_KEYS:
-        _fail(code)
-    attributes = _closed_mapping(
-        record["attributes"],
-        _ARTIFACT_ATTRIBUTE_KEYS[kind],
-        code,
-    )
-    related = _ordered_sequence(record["relatedIds"], code)
-    if (
-        type(record["status"]) is not str
-        or record["status"] not in _ARTIFACT_STATUSES
-        or any(
-            type(record[field]) is not str or not record[field]
-            for field in ("subjectId", "actorId", "contextId")
-        )
-        or not _is_sha256(record["subjectHash"])
-        or any(type(item) is not str or not item for item in related)
-        or len(set(related)) != len(related)
-    ):
-        _fail(code)
-    _parse_timestamp(record["recordedAt"], code)
-    if kind == "capability":
-        if (
-            any(type(item) is not str or not item for item in attributes.values())
-            or attributes["state"] not in {"supported", "unsupported", "unverified"}
-            or not _is_sha256(attributes["policyHash"])
-        ):
-            _fail(code)
-    else:
-        if (
-            any(
-                type(attributes[field]) is not str or not attributes[field]
-                for field in ("provider", "receiptId")
-            )
-            or not _is_sha256(attributes["inputHash"])
-            or not _is_sha256(attributes["outputHash"])
-            or attributes["inputHash"] != record["subjectHash"]
-        ):
-            _fail(code)
-    if kind in {"review", "owner-review"}:
-        if (
-            type(attributes["decision"]) is not str
-            or attributes["decision"] != "passed"
-            or type(attributes["level"]) is not str
-            or attributes["level"] not in {"L0", "L1", "L2", "L3"}
-            or any(
-                type(attributes[field]) is not str or not attributes[field]
-                for field in ("implementationActor", "implementationContext")
-            )
-        ):
-            _fail(code)
-    elif kind == "owner-confirmation":
-        if (
-            type(attributes["decision"]) is not str
-            or attributes["decision"] != "authorized"
-            or type(attributes["scope"]) is not str
-            or attributes["scope"] != "replace-protected-rules"
-        ):
-            _fail(code)
-    elif kind in {"verification", "behavioral-test"}:
-        exit_code = attributes["exitCode"]
-        if (
-            type(attributes["checkType"]) is not str
-            or attributes["checkType"]
-            not in {"unit-test", "integration-test", "static-analysis", "behavioral-test", "manual-check"}
-            or type(attributes["commandType"]) is not str
-            or attributes["commandType"]
-            not in {"python-module", "powershell-script", "native-command", "manual-procedure"}
-            or (
-                record["status"] == "passed"
-                and (type(exit_code) is not int or exit_code != 0)
-            )
-            or (
-                record["status"] == "failed"
-                and (type(exit_code) is not int or exit_code == 0)
-            )
-            or (
-                record["status"] in {"not-run", "partial", "not-applicable"}
-                and exit_code is not None
-            )
-        ):
-            _fail(code)
-    if kind == "verification":
-        if (
-            type(attributes["verificationId"]) is not str
-            or not attributes["verificationId"]
-            or type(attributes["validForSeconds"]) is not int
-            or not 1 <= attributes["validForSeconds"] <= 86400
-        ):
-            _fail(code)
-    elif kind == "behavioral-test" and (
-        type(attributes["suite"]) is not str or not attributes["suite"]
-    ):
-        _fail(code)
-    record["relatedIds"] = related
-    record["attributes"] = attributes
-    return record
-
-
-def _prepare_artifacts(
-    store: object,
-) -> tuple[dict[str, dict[str, object]], str | None]:
-    if (
-        type(store) is not TrustedArtifactStore
-        or getattr(store, "_seal", None) is not _TRUSTED_STORE_TOKEN
-        or type(getattr(store, "_records", None)) is not _MAPPING_PROXY_TYPE
-    ):
-        _fail("trusted-artifact-store-required")
-    entries = _mapping_entries(store._records, "artifact-store-invalid")
-    parsed: dict[str, dict[str, object]] = {}
-    identities: set[tuple[object, object]] = set()
-    for artifact_hash, value in entries:
-        if not _is_sha256(artifact_hash):
-            _fail("artifact-store-invalid")
-        artifact = _parse_artifact(value, "artifact-store-invalid")
-        if canonical_content_hash(value) != artifact_hash:
-            return {}, "artifact-hash-mismatch"
-        identity = (artifact["kind"], artifact["subjectId"])
-        if identity in identities:
-            return {}, "artifact-identity-duplicate"
-        identities.add(identity)
-        parsed[artifact_hash] = artifact
-    return parsed, None
-
-
-def _manifest_hashes(value: object) -> dict[str, str]:
-    entries = _mapping_entries(value, "manifest-invalid")
-    result: dict[str, str] = {}
-    for path, content in entries:
-        normalized = str(PurePosixPath(path)) if type(path) is str else ""
-        if (
-            type(path) is not str
-            or not path
-            or path != normalized
-            or path.startswith("/")
-            or "\\" in path
-            or ".." in PurePosixPath(path).parts
-            or type(content) is not str
-            or path in result
-        ):
-            _fail("manifest-invalid")
-        result[path] = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
-    return dict(sorted(result.items()))
-
-
 def _derived_changes(
     base: dict[str, str], final: dict[str, str]
 ) -> tuple[dict[str, str], ...]:
@@ -966,7 +465,9 @@ def _parse_acceptance_graph(
     value: object, policy: CompletionPolicy
 ) -> list[dict[str, object]]:
     criteria = []
-    for item in _ordered_sequence(value, "evidence-invalid"):
+    values = _ordered_sequence(value, "evidence-invalid")
+    require_collection_budget(values, MAX_ACCEPTANCE_CRITERIA)
+    for item in values:
         criterion = _closed_mapping(
             item,
             ("id", "description", "applicability", "reason", "verificationIds"),
@@ -1068,8 +569,13 @@ def _evaluate_completion(
     artifacts, artifact_failure = _prepare_artifacts(artifact_store)
     if artifact_failure is not None:
         return decision(artifact_failure)
-    base_hashes = _manifest_hashes(base_manifest)
-    final_hashes = _manifest_hashes(final_manifest)
+    base_hashes, base_identities = manifest_hashes(base_manifest)
+    final_hashes, final_identities = manifest_hashes(final_manifest)
+    if any(
+        base_identities[identity] != final_identities[identity]
+        for identity in set(base_identities) & set(final_identities)
+    ):
+        _fail("manifest-invalid")
 
     document = _closed_mapping(
         evidence,
@@ -1101,6 +607,7 @@ def _evaluate_completion(
         return decision("completion-policy-mismatch")
 
     selected_skills = _ordered_sequence(document["selectedSkills"], "evidence-invalid")
+    require_collection_budget(selected_skills, MAX_SELECTED_SKILLS)
     if (
         any(type(skill) is not str or not skill for skill in selected_skills)
         or len(set(selected_skills)) != len(selected_skills)
@@ -1108,6 +615,7 @@ def _evaluate_completion(
         _fail("evidence-invalid")
 
     capability_values = _ordered_sequence(document["capabilities"], "evidence-invalid")
+    require_collection_budget(capability_values, MAX_CAPABILITIES)
     capabilities = []
     for value in capability_values:
         capability = _closed_mapping(
@@ -1143,9 +651,20 @@ def _evaluate_completion(
                 "name": capability["name"],
                 "state": capability["state"],
                 "policyHash": policy.policy_hash,
+                "provider": attributes["provider"],
+                "receiptId": attributes["receiptId"],
             }
         ):
             return decision("artifact-binding-mismatch")
+        capability_time = _parse_timestamp(
+            artifact["recordedAt"], "evidence-time-invalid"
+        )
+        if capability_time > observed_at:
+            return decision("capability-time-in-future")
+        if observed_at > capability_time + timedelta(
+            seconds=policy.artifact_freshness_seconds
+        ):
+            return decision("capability-stale")
         if capability["state"] == "unsupported":
             return decision("required-capability-unsupported")
         if capability["state"] == "unverified":
@@ -1172,7 +691,9 @@ def _evaluate_completion(
     if changes["resultContentHash"] != content_hash:
         return decision("result-content-hash-mismatch")
     declared_changes = []
-    for value in _ordered_sequence(changes["items"], "evidence-invalid"):
+    change_values = _ordered_sequence(changes["items"], "evidence-invalid")
+    require_collection_budget(change_values, MAX_CHANGES)
+    for value in change_values:
         item = _closed_mapping(
             value, ("path", "operation", "contentHash"), "evidence-invalid"
         )
@@ -1184,6 +705,7 @@ def _evaluate_completion(
             or not _is_sha256(item["contentHash"])
         ):
             _fail("evidence-invalid")
+        repository_path_identity(item["path"])
         declared_changes.append(item)
     derived_changes = _derived_changes(base_hashes, final_hashes)
     if (
@@ -1208,6 +730,7 @@ def _evaluate_completion(
     )
 
     skipped_values = _ordered_sequence(document["skipped"], "evidence-invalid")
+    require_collection_budget(skipped_values, MAX_SKIPPED)
     for value in skipped_values:
         skipped = _closed_mapping(
             value,
@@ -1282,6 +805,13 @@ def _evaluate_completion(
             or attributes["implementationContext"] != policy.implementation_context
         ):
             return decision("artifact-binding-mismatch")
+        review_time = _parse_timestamp(artifact["recordedAt"], "evidence-time-invalid")
+        if review_time > observed_at:
+            return decision("review-time-in-future")
+        if observed_at > review_time + timedelta(
+            seconds=policy.artifact_freshness_seconds
+        ):
+            return decision("review-stale")
         review_number = int(review["level"][1])
         governing_level = max(
             int(policy.complexity.value[1]),
@@ -1293,7 +823,8 @@ def _evaluate_completion(
             and review_number == 1
             and policy.review_fallback is not None
         )
-        if review_number < required_number and not fallback_allowed:
+        required_level = f"L{required_number}"
+        if not review_level_at_least(review["level"], required_level) and not fallback_allowed:
             return decision("review-level-insufficient")
         if (
             review_number >= 2
@@ -1305,6 +836,7 @@ def _evaluate_completion(
             return decision("review-independence-required")
 
     verification_values = _ordered_sequence(document["verification"], "evidence-invalid")
+    require_collection_budget(verification_values, MAX_VERIFICATIONS)
     verifications = []
     for value in verification_values:
         verification = _closed_mapping(
@@ -1343,12 +875,18 @@ def _evaluate_completion(
         )
         for verification_id in verification_ids
     }
+    expected_invocations = dict(policy.expected_verification_invocations)
     for verification in verifications:
         artifact = artifacts.get(verification["artifactHash"])
         if artifact is None:
             return decision("artifact-unresolved")
         if artifact["subjectHash"] != completion_subject:
             return decision("verification-content-hash-mismatch")
+        if (
+            artifact["attributes"].get("invocationHash")
+            != expected_invocations[verification["id"]]
+        ):
+            return decision("verification-invocation-mismatch")
         if (
             artifact["kind"] != "verification"
             or artifact["status"] != verification["status"]
@@ -1357,6 +895,8 @@ def _evaluate_completion(
             or artifact["attributes"]["verificationId"] != verification["id"]
             or artifact["attributes"]["validForSeconds"]
             != verification["validForSeconds"]
+            or verification["validForSeconds"]
+            != policy.artifact_freshness_seconds
         ):
             return decision("artifact-binding-mismatch")
         if artifact["relatedIds"] != reverse_links[verification["id"]]:
@@ -1390,7 +930,9 @@ def _evaluate_completion(
         if any(statuses.get(item) != expected for item in criterion["verificationIds"]):
             return decision("acceptance-criterion-unverified")
 
-    for value in _ordered_sequence(document["residualRisks"], "evidence-invalid"):
+    residual_risks = _ordered_sequence(document["residualRisks"], "evidence-invalid")
+    require_collection_budget(residual_risks, MAX_RESIDUAL_RISKS)
+    for value in residual_risks:
         risk = _closed_mapping(value, ("risk", "disposition"), "evidence-invalid")
         if any(type(item) is not str or not item.strip() for item in risk.values()):
             _fail("evidence-invalid")
@@ -1546,6 +1088,7 @@ def _validate_owner_change(
     selected_rules: object,
     request: object,
     artifact_store: object,
+    now: object,
 ) -> str:
     code = "protected-rule-owner-authorization-required"
     if type(request) is not OwnerChangeRequest:
@@ -1558,8 +1101,15 @@ def _validate_owner_change(
             "proposedRulesHash": proposed_hash,
             "previousVersion": request.previous_version,
             "newVersion": request.new_version,
+            "operationNonce": request.operation_nonce,
+            "proposedAt": _format_utc(request.proposed_at),
+            "validForSeconds": request.valid_for_seconds,
         }
     )
+    try:
+        observed_at = _as_utc(now)
+    except WorkflowEvidenceError:
+        _fail(code)
     previous = _parse_semver(request.previous_version)
     new = _parse_semver(request.new_version)
     if (
@@ -1569,6 +1119,9 @@ def _validate_owner_change(
         or previous is None
         or new is None
         or new[0] <= previous[0]
+        or request.proposed_at > observed_at
+        or observed_at
+        > request.proposed_at + timedelta(seconds=request.valid_for_seconds)
         or len(
             {
                 request.confirmation_artifact_hash,
@@ -1607,7 +1160,7 @@ def _validate_owner_change(
         or review["actorId"] == request.implementation_actor
         or review["contextId"] == request.implementation_context
         or review["attributes"]["decision"] != "passed"
-        or review["attributes"]["level"] != "L2"
+        or not review_level_at_least(review["attributes"]["level"], "L2")
         or review["attributes"]["implementationActor"]
         != request.implementation_actor
         or review["attributes"]["implementationContext"]
@@ -1618,8 +1171,21 @@ def _validate_owner_change(
         or tests["subjectHash"] != proposal_hash
         or tests["relatedIds"]
         or tests["attributes"]["suite"] != "protected-rules"
+        or tests["attributes"]["invocationHash"]
+        != request.behavioral_test_invocation_hash
     ):
         _fail(code)
+    for artifact in (confirmation, review, tests):
+        recorded_at = _parse_timestamp(
+            artifact["recordedAt"], "protected-rule-owner-authorization-required"
+        )
+        if (
+            recorded_at < request.proposed_at
+            or recorded_at > observed_at
+            or recorded_at
+            > request.proposed_at + timedelta(seconds=request.valid_for_seconds)
+        ):
+            _fail(code)
     return request.new_version
 
 
@@ -1656,6 +1222,7 @@ def merge_protected_rules(
     owner_rules: object | None = None,
     owner_change: object | None = None,
     artifact_store: object | None = None,
+    now: object | None = None,
 ) -> MergedRules:
     """Merge rules in fixed priority order without allowing protected overrides."""
 
@@ -1690,9 +1257,10 @@ def merge_protected_rules(
             selected_rules,
             owner_change,
             artifact_store,
+            now,
         )
         source_name = "repository-owner"
-    elif owner_change is not None or artifact_store is not None:
+    elif owner_change is not None or artifact_store is not None or now is not None:
         _fail("protected-rule-owner-authorization-required")
     protected = tuple(
         _parse_rule(

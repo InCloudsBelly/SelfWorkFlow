@@ -24,6 +24,20 @@ def _file_hash(content):
     return "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _verification_invocation(verification_id="unit-tests", **overrides):
+    from selfworkflow.evidence import ExecutionInvocation
+
+    values = {
+        "executable": "python",
+        "module": "unittest",
+        "argv": ("-m", "unittest", verification_id),
+        "cwd": ".",
+        "environment": {"PYTHONPATH": "src"},
+        "input_content": {"verificationId": verification_id},
+    }
+    return ExecutionInvocation(**(values | overrides))
+
+
 def _policy(**overrides):
     from selfworkflow.evidence import CompletionPolicy
     from selfworkflow.model import Complexity, Risk
@@ -35,8 +49,13 @@ def _policy(**overrides):
         "required_capabilities": ("filesystem-write",),
         "required_criterion_ids": ("criterion-tests",),
         "required_verification_ids": ("unit-tests",),
+        "expected_verification_invocations": (
+            ("unit-tests", _verification_invocation().invocation_hash),
+        ),
         "implementation_actor": "implementer",
         "implementation_context": "task-3",
+        "task_nonce": "task-3-operation-1",
+        "artifact_freshness_seconds": 3600,
     }
     return CompletionPolicy(**(values | overrides))
 
@@ -49,7 +68,7 @@ def _put_artifact(store, artifact):
     return artifact_hash
 
 
-def _trusted_artifact_store(records):
+def _trusted_artifact_store(records, invocations=None):
     from selfworkflow.evidence import ArtifactCollector
     from selfworkflow.model import CapabilityState
 
@@ -64,6 +83,8 @@ def _trusted_artifact_store(records):
                 actor_id=artifact["actorId"],
                 context_id=artifact["contextId"],
                 recorded_at=artifact["recordedAt"],
+                provider=attributes["provider"],
+                receipt_id=attributes["receiptId"],
             )
         elif artifact["kind"] == "review":
             collector.record_attestation(
@@ -75,8 +96,10 @@ def _trusted_artifact_store(records):
                 recorded_at=artifact["recordedAt"],
                 provider=attributes["provider"],
                 receipt_id=attributes["receiptId"],
-                input_hash=attributes["inputHash"],
-                output_hash=attributes["outputHash"],
+                output_content={
+                    "decision": attributes["decision"],
+                    "level": attributes["level"],
+                },
                 decision=attributes["decision"],
                 level=attributes["level"],
                 implementation_actor=attributes["implementationActor"],
@@ -94,10 +117,15 @@ def _trusted_artifact_store(records):
                 recorded_at=artifact["recordedAt"],
                 provider=attributes["provider"],
                 receipt_id=attributes["receiptId"],
-                input_hash=attributes["inputHash"],
-                output_hash=attributes["outputHash"],
+                invocation=(
+                    (invocations or {}).get(attributes["verificationId"])
+                    or _verification_invocation(attributes["verificationId"])
+                ),
+                output_content={
+                    "status": artifact["status"],
+                    "verificationId": attributes["verificationId"],
+                },
                 check_type=attributes["checkType"],
-                command_type=attributes["commandType"],
                 exit_code=attributes["exitCode"],
                 verification_id=attributes["verificationId"],
                 valid_for_seconds=attributes["validForSeconds"],
@@ -163,6 +191,8 @@ def _case(*, policy=None, review_level=None, stale=False):
                 "name": name,
                 "state": "supported",
                 "policyHash": governing_policy.policy_hash,
+                "provider": "test-capability-provider",
+                "receiptId": f"capability-{name}",
             },
         }
         capabilities.append(
@@ -252,8 +282,10 @@ def _case(*, policy=None, review_level=None, stale=False):
                 "outputHash": canonical_content_hash(
                     {"status": "passed", "verificationId": verification_id}
                 ),
+                "invocationHash": _verification_invocation(
+                    verification_id
+                ).invocation_hash,
                 "checkType": "unit-test",
-                "commandType": "python-module",
                 "exitCode": 0,
                 "verificationId": verification_id,
                 "validForSeconds": 3600,
@@ -326,6 +358,123 @@ def _evaluate(case, **overrides):
 
 
 class CompletionPolicyTests(unittest.TestCase):
+    def test_task_nonce_and_trusted_freshness_block_replay_future_and_stale_receipts(self):
+        first_policy = _policy(task_nonce="task-nonce-a")
+        first = _case(policy=first_policy)
+        self.assertTrue(_evaluate(first).eligible)
+
+        replay_policy = _policy(task_nonce="task-nonce-b")
+        replay = dict(first)
+        replay["policy"] = replay_policy
+        self.assertEqual(_evaluate(replay).code, "completion-policy-mismatch")
+
+        for target, recorded_at, code in (
+            ("capabilities", "2026-08-08T09:00:00Z", "capability-time-in-future"),
+            ("capabilities", "2026-08-08T06:00:00Z", "capability-stale"),
+            ("review", "2026-08-08T09:00:00Z", "review-time-in-future"),
+            ("review", "2026-08-08T06:00:00Z", "review-stale"),
+        ):
+            case = _case()
+            record = (
+                case["evidence"][target][0]
+                if target == "capabilities"
+                else case["evidence"][target]
+            )
+            _replace_artifact(
+                case,
+                record,
+                lambda artifact, value=recorded_at: artifact.update(
+                    {"recordedAt": value}
+                ),
+            )
+            with self.subTest(target=target):
+                self.assertEqual(_evaluate(case).code, code)
+
+    def test_policy_requires_the_exact_expected_verification_invocation(self):
+        expected = _verification_invocation()
+        policy = _policy(
+            expected_verification_invocations=(
+                ("unit-tests", expected.invocation_hash),
+            )
+        )
+        self.assertTrue(_evaluate(_case(policy=policy)).eligible)
+
+        no_op = _verification_invocation(
+            executable="python",
+            module=None,
+            argv=("-c", "pass"),
+        )
+        wrong_policy = _policy(
+            expected_verification_invocations=(
+                ("unit-tests", no_op.invocation_hash),
+            )
+        )
+        self.assertEqual(
+            _evaluate(_case(policy=wrong_policy)).code,
+            "verification-invocation-mismatch",
+        )
+
+        for label, actual in (
+            (
+                "wrong-command",
+                _verification_invocation(
+                    executable="pytest",
+                    module=None,
+                    argv=("tests/unit",),
+                ),
+            ),
+            ("no-op", no_op),
+        ):
+            case = _case()
+            record = case["evidence"]["verification"][0]
+            _replace_artifact(
+                case,
+                record,
+                lambda artifact, invocation=actual: artifact["attributes"].update(
+                    {"invocationHash": invocation.invocation_hash}
+                ),
+            )
+            store = _trusted_artifact_store(
+                case["artifacts"], {"unit-tests": actual}
+            )
+            with self.subTest(label=label):
+                self.assertEqual(
+                    _evaluate(case, artifact_store=store).code,
+                    "verification-invocation-mismatch",
+                )
+
+    def test_execution_invocation_is_frozen_and_hashes_actual_inputs(self):
+        from selfworkflow.evidence import ExecutionInvocation
+
+        environment = {"PYTHONPATH": "src", "MODE": "test"}
+        invocation = ExecutionInvocation(
+            executable="python",
+            module="unittest",
+            argv=("-m", "unittest", "tests.unit"),
+            cwd=".",
+            environment=environment,
+            input_content={"suite": "unit", "selection": ["tests.unit"]},
+        )
+        environment["MODE"] = "changed-after-construction"
+
+        self.assertEqual(invocation.environment_keys, ("MODE", "PYTHONPATH"))
+        self.assertRegex(invocation.environment_hash, r"^sha256:[0-9a-f]{64}$")
+        self.assertRegex(invocation.input_hash, r"^sha256:[0-9a-f]{64}$")
+        self.assertRegex(invocation.invocation_hash, r"^sha256:[0-9a-f]{64}$")
+        self.assertNotEqual(
+            invocation.invocation_hash,
+            ExecutionInvocation(
+                executable="python",
+                module="unittest",
+                argv=("-m", "unittest", "tests.unit"),
+                cwd=".",
+                environment={"PYTHONPATH": "src", "MODE": "test"},
+                input_content={"suite": "different"},
+            ).invocation_hash,
+        )
+        with self.assertRaises(FrozenInstanceError):
+            invocation.cwd = "other"
+
     def test_policy_is_typed_ordered_and_deeply_immutable(self):
         from selfworkflow.evidence import CompletionPolicy, WorkflowEvidenceError
         from selfworkflow.model import Complexity, Risk
@@ -603,6 +752,288 @@ class CompletionGateTests(unittest.TestCase):
 
 
 class ArtifactAndManifestTests(unittest.TestCase):
+    def test_collector_derives_attestation_input_and_output_hashes(self):
+        from selfworkflow.evidence import ArtifactCollector, canonical_content_hash
+
+        subject = canonical_content_hash({"subject": "completion"})
+        output = {"decision": "passed", "level": "L2"}
+        collector = ArtifactCollector()
+        reference = collector.record_attestation(
+            kind="review",
+            subject_id="completion-review",
+            subject_hash=subject,
+            actor_id="reviewer",
+            context_id="review-context",
+            recorded_at="2026-08-08T08:00:00Z",
+            provider="fake-review-provider",
+            receipt_id="review-1",
+            output_content=output,
+            decision="passed",
+            level="L2",
+            implementation_actor="implementer",
+            implementation_context="implementation-context",
+        )
+        artifact = collector.seal()._records[reference]
+        self.assertEqual(artifact["attributes"]["inputHash"], subject)
+        self.assertEqual(
+            artifact["attributes"]["outputHash"], canonical_content_hash(output)
+        )
+
+    def test_attestation_output_must_match_the_declared_receipt_result(self):
+        from selfworkflow.evidence import (
+            ArtifactCollector,
+            WorkflowEvidenceError,
+            canonical_content_hash,
+        )
+
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            ArtifactCollector().record_attestation(
+                kind="review",
+                subject_id="completion-review",
+                subject_hash=canonical_content_hash({"subject": "completion"}),
+                actor_id="reviewer",
+                context_id="review-context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="fake-review-provider",
+                receipt_id="review-1",
+                output_content={"decision": "failed", "level": "L2"},
+                decision="passed",
+                level="L2",
+                implementation_actor="implementer",
+                implementation_context="implementation-context",
+            )
+        self.assertEqual(caught.exception.code, "artifact-collector-invalid")
+
+    def test_collector_derives_receipt_hashes_from_invocation_and_output(self):
+        from selfworkflow.evidence import (
+            ArtifactCollector,
+            ExecutionInvocation,
+            canonical_content_hash,
+        )
+
+        subject = canonical_content_hash({"subject": "completion"})
+        invocation = ExecutionInvocation(
+            executable="python",
+            module="unittest",
+            argv=("-m", "unittest", "tests.unit"),
+            cwd=".",
+            environment={"PYTHONPATH": "src"},
+            input_content={"suite": "unit"},
+        )
+
+        def collect(output_content):
+            collector = ArtifactCollector()
+            reference = collector.record_execution(
+                kind="verification",
+                status="passed",
+                subject_id="unit-tests",
+                subject_hash=subject,
+                actor_id="runner",
+                context_id="verification-context",
+                related_ids=("criterion-tests",),
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="fake-executor",
+                receipt_id="execution-1",
+                invocation=invocation,
+                output_content=output_content,
+                check_type="unit-test",
+                exit_code=0,
+                verification_id="unit-tests",
+                valid_for_seconds=3600,
+            )
+            return reference, collector.seal()
+
+        first_reference, first_store = collect(b"1 passed\n")
+        second_reference, _ = collect(b"no tests ran\n")
+        self.assertNotEqual(first_reference, second_reference)
+        artifact = first_store._records[first_reference]
+        self.assertEqual(artifact["attributes"]["inputHash"], subject)
+        self.assertEqual(
+            artifact["attributes"]["invocationHash"],
+            invocation.invocation_hash,
+        )
+        self.assertEqual(
+            artifact["attributes"]["outputHash"],
+            "sha256:" + hashlib.sha256(b"1 passed\n").hexdigest(),
+        )
+
+    def test_collector_rejects_non_tuple_and_hostile_related_ids_without_leak(self):
+        from selfworkflow.evidence import (
+            ArtifactCollector,
+            WorkflowEvidenceError,
+            canonical_content_hash,
+        )
+
+        secret = "HOSTILE-RELATED-IDS-SECRET"
+
+        class HostileRelatedIds:
+            def __iter__(self):
+                raise RuntimeError(secret)
+
+        subject = canonical_content_hash({"subject": "completion"})
+        for related_ids in (["criterion-tests"], HostileRelatedIds()):
+            with self.subTest(payload=type(related_ids).__name__):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    ArtifactCollector().record_execution(
+                        kind="verification",
+                        status="passed",
+                        subject_id="unit-tests",
+                        subject_hash=subject,
+                        actor_id="runner",
+                        context_id="verification-context",
+                        related_ids=related_ids,
+                        recorded_at="2026-08-08T08:00:00Z",
+                        provider="execution-provider",
+                        receipt_id="execution-1",
+                        invocation=_verification_invocation(),
+                        output_content={"status": "passed"},
+                        check_type="unit-test",
+                        exit_code=0,
+                        verification_id="unit-tests",
+                        valid_for_seconds=3600,
+                    )
+                self.assertEqual(caught.exception.code, "artifact-collector-invalid")
+                self.assertNotIn(
+                    secret,
+                    "".join(traceback.format_exception(caught.exception)),
+                )
+
+    def test_collector_rejects_provider_receipt_reuse_across_kinds(self):
+        from selfworkflow.evidence import (
+            ArtifactCollector,
+            WorkflowEvidenceError,
+            canonical_content_hash,
+        )
+
+        subject = canonical_content_hash({"subject": "shared-receipt"})
+        collector = ArtifactCollector()
+        collector.record_attestation(
+            kind="review",
+            subject_id="completion-review",
+            subject_hash=subject,
+            actor_id="reviewer",
+            context_id="review-context",
+            recorded_at="2026-08-08T08:00:00Z",
+            provider="shared-provider",
+            receipt_id="shared-receipt",
+            output_content={"decision": "passed", "level": "L2"},
+            decision="passed",
+            level="L2",
+            implementation_actor="implementer",
+            implementation_context="implementation-context",
+        )
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            collector.record_attestation(
+                kind="owner-confirmation",
+                subject_id="protected-rules-change",
+                subject_hash=subject,
+                actor_id="owner",
+                context_id="owner-context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="shared-provider",
+                receipt_id="shared-receipt",
+                output_content={
+                    "decision": "authorized",
+                    "scope": "replace-protected-rules",
+                },
+                decision="authorized",
+                scope="replace-protected-rules",
+            )
+        self.assertEqual(caught.exception.code, "artifact-collector-invalid")
+
+    def test_capability_receipts_participate_in_global_replay_detection(self):
+        from selfworkflow.evidence import ArtifactCollector, WorkflowEvidenceError
+        from selfworkflow.model import CapabilityState
+
+        policy = _policy()
+        collector = ArtifactCollector()
+        collector.record_capability(
+            name="filesystem-write",
+            state=CapabilityState.SUPPORTED,
+            policy_hash=policy.policy_hash,
+            actor_id="probe",
+            context_id="task-3",
+            recorded_at="2026-08-08T08:00:00Z",
+            provider="shared-provider",
+            receipt_id="shared-receipt",
+        )
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            collector.record_attestation(
+                kind="review",
+                subject_id="completion-review",
+                subject_hash=policy.policy_hash,
+                actor_id="reviewer",
+                context_id="review-context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="shared-provider",
+                receipt_id="shared-receipt",
+                output_content={"decision": "passed", "level": "L2"},
+                decision="passed",
+                level="L2",
+                implementation_actor="implementer",
+                implementation_context="task-3",
+            )
+        self.assertEqual(caught.exception.code, "artifact-collector-invalid")
+
+    def test_collector_budget_and_hostile_output_fail_closed(self):
+        from selfworkflow.evidence import (
+            ArtifactCollector,
+            WorkflowEvidenceError,
+            canonical_content_hash,
+        )
+        from selfworkflow.model import CapabilityState
+
+        policy_hash = canonical_content_hash({"policy": "bounded"})
+        collector = ArtifactCollector()
+        for index in range(2048):
+            collector.record_capability(
+                name=f"capability-{index}",
+                state=CapabilityState.SUPPORTED,
+                policy_hash=policy_hash,
+                actor_id="probe",
+                context_id="context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="probe-provider",
+                receipt_id=f"receipt-{index}",
+            )
+        with self.assertRaises(WorkflowEvidenceError) as budget:
+            collector.record_capability(
+                name="capability-over-budget",
+                state=CapabilityState.SUPPORTED,
+                policy_hash=policy_hash,
+                actor_id="probe",
+                context_id="context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="probe-provider",
+                receipt_id="receipt-over-budget",
+            )
+        self.assertEqual(budget.exception.code, "artifact-collector-invalid")
+
+        secret = "HOSTILE-OUTPUT-SECRET"
+
+        class HostileOutput(dict):
+            def items(self):
+                raise RuntimeError(secret)
+
+        with self.assertRaises(WorkflowEvidenceError) as hostile:
+            ArtifactCollector().record_attestation(
+                kind="review",
+                subject_id="review",
+                subject_hash=policy_hash,
+                actor_id="reviewer",
+                context_id="review-context",
+                recorded_at="2026-08-08T08:00:00Z",
+                provider="review-provider",
+                receipt_id="review-receipt",
+                output_content=HostileOutput(),
+                decision="passed",
+                level="L2",
+                implementation_actor="implementer",
+                implementation_context="implementation-context",
+            )
+        self.assertEqual(hostile.exception.code, "artifact-collector-invalid")
+        self.assertNotIn(secret, "".join(traceback.format_exception(hostile.exception)))
+
     def test_collector_receipts_require_exact_typed_audit_fields(self):
         from selfworkflow.evidence import (
             ArtifactCollector,
@@ -622,8 +1053,7 @@ class ArtifactAndManifestTests(unittest.TestCase):
             "recorded_at": "2026-08-08T08:00:00Z",
             "provider": "review-provider",
             "receipt_id": "receipt-1",
-            "input_hash": subject,
-            "output_hash": canonical_content_hash({"decision": "passed"}),
+            "output_content": {"decision": "passed"},
         }
         attacks = (
             lambda collector: collector.record_attestation(
@@ -645,10 +1075,9 @@ class ArtifactAndManifestTests(unittest.TestCase):
                 recorded_at="2026-08-08T08:00:00Z",
                 provider="execution-provider",
                 receipt_id="receipt-2",
-                input_hash=subject,
-                output_hash=canonical_content_hash({"status": "passed"}),
+                invocation=_verification_invocation(),
+                output_content={"status": "passed"},
                 check_type=Text("unit-test"),
-                command_type="python-module",
                 exit_code=0,
                 verification_id="unit-tests",
                 valid_for_seconds=3600,
@@ -662,8 +1091,7 @@ class ArtifactAndManifestTests(unittest.TestCase):
                 recorded_at="2026-08-08T08:00:00Z",
                 provider="owner-provider",
                 receipt_id="receipt-3",
-                input_hash=subject,
-                output_hash=canonical_content_hash({"decision": "authorized"}),
+                output_content={"decision": "authorized"},
                 decision="authorized",
                 scope=Text("replace-protected-rules"),
             ),
@@ -854,7 +1282,22 @@ class ArtifactAndManifestTests(unittest.TestCase):
 
 
 class VerificationTests(unittest.TestCase):
+    def test_verification_window_cannot_exceed_the_trusted_policy_window(self):
+        case = _case()
+        verification = case["evidence"]["verification"][0]
+        verification["validForSeconds"] = 7200
+        _replace_artifact(
+            case,
+            verification,
+            lambda artifact: artifact["attributes"].update(
+                {"validForSeconds": 7200}
+            ),
+        )
+        self.assertEqual(_evaluate(case).code, "artifact-binding-mismatch")
+
     def test_nonpassing_stale_and_mismatched_verification_cannot_complete(self):
+        from selfworkflow.evidence import canonical_content_hash
+
         for status, code in (
             ("failed", "verification-failed"),
             ("not-run", "verification-not-run"),
@@ -868,6 +1311,9 @@ class VerificationTests(unittest.TestCase):
                 artifact["status"] = value
                 artifact["attributes"]["exitCode"] = (
                     1 if value == "failed" else None
+                )
+                artifact["attributes"]["outputHash"] = canonical_content_hash(
+                    {"status": value, "verificationId": "unit-tests"}
                 )
 
             _replace_artifact(case, record, set_status)
@@ -991,7 +1437,17 @@ class VerificationTests(unittest.TestCase):
             verification,
             lambda artifact: (
                 artifact.update({"status": "not-applicable"}),
-                artifact["attributes"].update({"exitCode": None}),
+                artifact["attributes"].update(
+                    {
+                        "exitCode": None,
+                        "outputHash": canonical_content_hash(
+                            {
+                                "status": "not-applicable",
+                                "verificationId": "unit-tests",
+                            }
+                        ),
+                    }
+                ),
             ),
         )
         _rebind_completion_receipts(case)
@@ -1085,6 +1541,114 @@ class InputHardeningTests(unittest.TestCase):
             case = _case()
             mutate(case["evidence"])
             self.assertFalse(_evaluate(case).eligible)
+
+
+class ResourceBudgetTests(unittest.TestCase):
+    def test_canonical_content_rejects_an_oversized_mapping_key(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, canonical_content_hash
+
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            canonical_content_hash({"k" * (1024 * 1024 + 1): "value"})
+        self.assertEqual(caught.exception.code, "result-content-budget-exceeded")
+
+    def test_json_input_budget_counts_utf8_bytes_before_parsing(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, parse_evidence_json
+
+        oversized = '{"value":"' + ("é" * 600_000) + '"}'
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            parse_evidence_json(oversized)
+        self.assertEqual(caught.exception.code, "evidence-budget-exceeded")
+        self.assertNotIn("é" * 100, str(caught.exception))
+
+    def test_canonical_content_rejects_single_string_over_budget(self):
+        from selfworkflow.evidence import WorkflowEvidenceError, canonical_content_hash
+
+        oversized = "x" * (1024 * 1024 + 1)
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            canonical_content_hash(oversized)
+        self.assertEqual(caught.exception.code, "result-content-budget-exceeded")
+        self.assertNotIn(oversized[:100], str(caught.exception))
+
+    def test_public_gate_rejects_twenty_thousand_selected_skills(self):
+        from selfworkflow.evidence import WorkflowEvidenceError
+
+        case = _case()
+        case["evidence"]["selectedSkills"] = [
+            f"skill-{index}" for index in range(20_000)
+        ]
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            _evaluate(case)
+        self.assertEqual(caught.exception.code, "evidence-budget-exceeded")
+
+    def test_public_gate_rejects_single_manifest_file_over_budget(self):
+        from selfworkflow.evidence import WorkflowEvidenceError
+
+        case = _case()
+        case["final"]["large.bin"] = "x" * (8 * 1024 * 1024 + 1)
+        with self.assertRaises(WorkflowEvidenceError) as caught:
+            _evaluate(case)
+        self.assertEqual(caught.exception.code, "manifest-budget-exceeded")
+
+
+class ManifestPathTests(unittest.TestCase):
+    def test_public_gate_rejects_windows_invalid_and_reserved_paths(self):
+        from selfworkflow.evidence import WorkflowEvidenceError
+
+        reserved = (
+            "CON",
+            "prn.txt",
+            "AUX.log",
+            "nul",
+            *(f"COM{index}.txt" for index in range(1, 10)),
+            *(f"lpt{index}" for index in range(1, 10)),
+        )
+        invalid_paths = (
+            ".",
+            "",
+            "src//file.py",
+            "src/./file.py",
+            "../file.py",
+            "/absolute.py",
+            "C:/absolute.py",
+            "src\\file.py",
+            "file.txt:stream",
+            "control\u0001.txt",
+            "bad<name>.txt",
+            "bad|name.txt",
+            "trailing.",
+            "trailing ",
+            "x" * 256,
+            ("a/" * 512) + "x",
+            *reserved,
+        )
+        for path in invalid_paths:
+            case = _case()
+            case["base"] = {path: "old"}
+            case["final"] = {path: "new"}
+            with self.subTest(path=path[:32]):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    _evaluate(case)
+                self.assertEqual(caught.exception.code, "manifest-invalid")
+
+    def test_public_gate_rejects_casefold_and_nfc_path_aliases(self):
+        from selfworkflow.evidence import WorkflowEvidenceError
+
+        attacks = (
+            (
+                {"README.md": "one", "readme.md": "two"},
+                {"README.md": "new", "readme.md": "two"},
+            ),
+            ({"e\u0301.txt": "old"}, {"e\u0301.txt": "new"}),
+            ({"README.md": "old"}, {"readme.md": "new"}),
+        )
+        for base, final in attacks:
+            case = _case()
+            case["base"] = base
+            case["final"] = final
+            with self.subTest(paths=(tuple(base), tuple(final))):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    _evaluate(case)
+                self.assertEqual(caught.exception.code, "manifest-invalid")
 
 
 if __name__ == "__main__":

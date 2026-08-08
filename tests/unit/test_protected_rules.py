@@ -1,5 +1,6 @@
 import copy
 from dataclasses import FrozenInstanceError
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ import yaml
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+OWNER_NOW = datetime(2026, 8, 8, 8, 30, tzinfo=timezone.utc)
 
 
 def _protected_document():
@@ -51,6 +53,20 @@ def _put(store, artifact):
     return artifact_hash
 
 
+def _owner_invocation(**overrides):
+    from selfworkflow.evidence import ExecutionInvocation
+
+    values = {
+        "executable": "powershell",
+        "module": None,
+        "argv": ("-File", "scripts/test.ps1", "-Test", "protected-rules"),
+        "cwd": ".",
+        "environment": {},
+        "input_content": {"suite": "protected-rules"},
+    }
+    return ExecutionInvocation(**(values | overrides))
+
+
 def _trusted_owner_store(records):
     from selfworkflow.evidence import ArtifactCollector
 
@@ -67,8 +83,14 @@ def _trusted_owner_store(records):
                 recorded_at=artifact["recordedAt"],
                 provider=attributes["provider"],
                 receipt_id=attributes["receiptId"],
-                input_hash=attributes["inputHash"],
-                output_hash=attributes["outputHash"],
+                output_content={
+                    "decision": attributes["decision"],
+                    **(
+                        {"level": attributes["level"]}
+                        if "level" in attributes
+                        else {"scope": attributes["scope"]}
+                    ),
+                },
                 decision=attributes["decision"],
                 level=attributes.get("level", ""),
                 implementation_actor=attributes.get("implementationActor", ""),
@@ -87,10 +109,9 @@ def _trusted_owner_store(records):
                 recorded_at=artifact["recordedAt"],
                 provider=attributes["provider"],
                 receipt_id=attributes["receiptId"],
-                input_hash=attributes["inputHash"],
-                output_hash=attributes["outputHash"],
+                invocation=_owner_invocation(),
+                output_content={"status": artifact["status"]},
                 check_type=attributes["checkType"],
-                command_type=attributes["commandType"],
                 exit_code=attributes["exitCode"],
                 suite=attributes["suite"],
             )
@@ -99,7 +120,15 @@ def _trusted_owner_store(records):
     return collector.seal()
 
 
-def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
+def _owner_case(
+    proposed_rules=None,
+    *,
+    new_version="2.0.0",
+    review_level="L2",
+    operation_nonce="owner-operation-1",
+    proposed_at="2026-08-08T07:30:00Z",
+    valid_for_seconds=7200,
+):
     from selfworkflow.evidence import OwnerChangeRequest, canonical_content_hash
 
     protected = _protected_document()
@@ -112,6 +141,9 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
             "proposedRulesHash": proposed_hash,
             "previousVersion": protected["policyVersion"],
             "newVersion": new_version,
+            "operationNonce": operation_nonce,
+            "proposedAt": proposed_at,
+            "validForSeconds": valid_for_seconds,
         }
     )
     store = {}
@@ -128,7 +160,12 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
             "provider": "owner-confirmation-provider",
             "receiptId": "owner-confirmation-1",
             "inputHash": proposal_hash,
-            "outputHash": canonical_content_hash({"decision": "authorized"}),
+            "outputHash": canonical_content_hash(
+                {
+                    "decision": "authorized",
+                    "scope": "replace-protected-rules",
+                }
+            ),
             "decision": "authorized",
             "scope": "replace-protected-rules",
         },
@@ -147,10 +184,10 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
             "receiptId": "owner-review-1",
             "inputHash": proposal_hash,
             "outputHash": canonical_content_hash(
-                {"decision": "passed", "level": "L2"}
+                {"decision": "passed", "level": review_level}
             ),
             "decision": "passed",
-            "level": "L2",
+            "level": review_level,
             "implementationActor": "implementer",
             "implementationContext": "task-3",
         },
@@ -169,8 +206,8 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
             "receiptId": "behavioral-test-1",
             "inputHash": proposal_hash,
             "outputHash": canonical_content_hash({"status": "passed"}),
+            "invocationHash": _owner_invocation().invocation_hash,
             "checkType": "behavioral-test",
-            "commandType": "powershell-script",
             "exitCode": 0,
             "suite": "protected-rules",
         },
@@ -183,6 +220,12 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
         owner_actor="repository-owner",
         implementation_actor="implementer",
         implementation_context="task-3",
+        operation_nonce=operation_nonce,
+        proposed_at=datetime.strptime(proposed_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        ),
+        valid_for_seconds=valid_for_seconds,
+        behavioral_test_invocation_hash=_owner_invocation().invocation_hash,
         confirmation_artifact_hash=_put(store, confirmation),
         review_artifact_hash=_put(store, review),
         behavioral_test_artifact_hash=_put(store, tests),
@@ -191,6 +234,67 @@ def _owner_case(proposed_rules=None, *, new_version="2.0.0"):
 
 
 class ProtectedRulesTests(unittest.TestCase):
+    def test_owner_nonce_and_trusted_timeline_block_replay_future_and_stale_receipts(self):
+        from selfworkflow.evidence import (
+            OwnerChangeRequest,
+            WorkflowEvidenceError,
+            merge_protected_rules,
+        )
+
+        protected, proposed, request, records = _owner_case([])
+        merged = merge_protected_rules(
+            protected,
+            owner_rules=proposed,
+            owner_change=request,
+            artifact_store=_trusted_owner_store(records),
+            now=OWNER_NOW,
+        )
+        self.assertEqual(merged.policy_version, "2.0.0")
+
+        values = {
+            field: getattr(request, field) for field in request.__dataclass_fields__
+        }
+        replay = OwnerChangeRequest(**(values | {"operation_nonce": "other-operation"}))
+        for label, candidate, observation in (
+            ("nonce", replay, OWNER_NOW),
+            (
+                "future-proposal",
+                _owner_case([], proposed_at="2026-08-08T08:31:00Z")[2],
+                OWNER_NOW,
+            ),
+            (
+                "stale-proposal",
+                request,
+                datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc),
+            ),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    merge_protected_rules(
+                        protected,
+                        owner_rules=proposed,
+                        owner_change=candidate,
+                        artifact_store=_trusted_owner_store(records),
+                        now=observation,
+                    )
+                self.assertEqual(
+                    caught.exception.code,
+                    "protected-rule-owner-authorization-required",
+                )
+
+    def test_owner_review_accepts_l3_through_the_shared_level_order(self):
+        from selfworkflow.evidence import merge_protected_rules
+
+        protected, proposed, request, records = _owner_case([], review_level="L3")
+        merged = merge_protected_rules(
+            protected,
+            owner_rules=proposed,
+            owner_change=request,
+            artifact_store=_trusted_owner_store(records),
+            now=OWNER_NOW,
+        )
+        self.assertEqual(merged.policy_version, "2.0.0")
+
     def test_cross_layer_duplicate_constraint_ids_are_rejected_not_downgraded(self):
         from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
 
@@ -394,6 +498,7 @@ class ProtectedRulesTests(unittest.TestCase):
             owner_rules=[],
             owner_change=request,
             artifact_store=_trusted_owner_store(store),
+            now=OWNER_NOW,
         )
         self.assertEqual(merged.rules, ())
         self.assertEqual(merged.policy_version, "2.0.0")
@@ -414,6 +519,7 @@ class ProtectedRulesTests(unittest.TestCase):
                 owner_rules=proposed,
                 owner_change=request,
                 artifact_store=_trusted_owner_store(records),
+                now=OWNER_NOW,
             ).policy_version,
             "2.0.0",
         )
@@ -578,11 +684,7 @@ class ProtectedRulesTests(unittest.TestCase):
                     )
                 self.assertEqual(
                     caught.exception.code,
-                    (
-                        "artifact-collector-invalid"
-                        if mutation_index == 1
-                        else "protected-rule-owner-authorization-required"
-                    ),
+                    "protected-rule-owner-authorization-required",
                 )
 
         protected, proposed, request, store = _owner_case([])
