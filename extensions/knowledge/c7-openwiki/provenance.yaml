@@ -1,0 +1,17 @@
+schemaVersion: 1
+sourceHead: 5b7fc8cb959d3fa2342db96c346803435e2644c8
+sourceBranch: main
+sourceDirty: true
+sourceTree:
+  fileCount: 152
+  hash: sha256:bb223fd2eea40e0b987edfaed23d953db0f466401159a44ab4ce47a420b6139a
+contractFiles:
+  - id: mcp-contracts
+    hash: sha256:c547e31ed1209e9ca48c61a5946c856b0afc154160b81051559d92d6f1c6df23
+  - id: capability-matrix
+    hash: sha256:5d2ad53af76ec42dc13c89b01712b8f15965d4a37349f107ba45c6c9889c2626
+  - id: agent-orchestration-contract
+    hash: sha256:bbcdabcc33a5e3b7188c93fc733a1e0ff6dbe45a7454642fc1c9c9bf041a2510
+capabilityEvidenceHash: sha256:f6eed41865ad4c3a5afe3a8685a3501ebee1c4bf7fdf33af1dd350fa4f0dadf6
+extractedAt: 2026-08-08T04:01:06.3768287Z
+nativeBehaviorStatus: unverified

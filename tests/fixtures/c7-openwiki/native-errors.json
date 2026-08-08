@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "errors": [
+    "capability_unverified",
+    "source_changed",
+    "confirmation_required",
+    "restore_required"
+  ]
+}
