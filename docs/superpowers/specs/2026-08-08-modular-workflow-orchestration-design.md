@@ -285,7 +285,29 @@ Gate。为控制 V1 成本，普通 Plan 不单独启动独立 Review；实现�
 
 Implement 使用 TDD，Debug 使用 Systematic Debugging，再按确定性条件加载领域增强
 模块。Review 至少覆盖完整 diff、验收条件、逻辑闭环、失败路径、安全、侵入性和
-无关修改。Verify 执行任务类型对应的最窄充分直接路径、失败路径和相关回归。
+无关修改。任何方案对应的实现落地后都必须进入 Review；Review 发现的问题修正后
+必须重新 Review，不能用实现前的方案审查替代落地后的结果审查。Verify 执行任务
+类型对应的最窄充分直接路径、失败路径和相关回归。
+
+设计、规格和实施计划是中间产物：写入文档后先 Review 文档，再继续实现。用户明确
+要求的交付物本身是文档时，文档仍作为一次修改进入 Review 和 Verify，通过后才能
+交付；用户要求构建、修改或修复时，不得把“已输出方案文档”误当作完成。
+
+前置文档 Review 不新增生命周期阶段：`design.gate` 负责设计/规格文档，`plan.gate`
+负责实施计划。只要当前阶段产生了文档，对应 Gate 就必须取得绑定最终文档 hash 的
+Review receipt；发现问题时阶段保持 active，修正文档并废弃旧 receipt，再对新 hash
+Review。只有当前 hash 的 Review 通过后 Gate 才能通过并进入下一阶段，RunLedger
+不记录中间稿为 passed。前置文档复用现有 Review receipt artifact envelope，以文档
+ID/hash 作为 subject，不新增 Gate 专用 receipt 格式。纯文档交付使用
+`operationType=document`，由内建
+`implement-documentation` 模块落地，之后仍经过普通 `reviewed` 和 `verified` 阶段。
+
+实现 Review 同样复用现有 receipt，并绑定当前完整实现 subject 和 diff/hash。Review
+发现问题时 `reviewed` 阶段保持 active，在当前 RunLedger 追加 attempt；修正后旧
+receipt 立即失效并重新 Review，只有最终 diff/hash 对应的 receipt 可使 Review Gate
+通过。普通实现修正不重新解析静态计划；只有 Request、能力证据或其他 PlanGraph
+输入变化时才 supersede/re-plan。任何修正都会使旧 Review 和完成证据失效，且最终
+完成 subject 必须重新绑定最终 diff/hash。
 
 ## 8. 模块选择与冲突
 
@@ -329,6 +351,49 @@ V1 不实现持久化用户 Profile。Brainstorming 是仓库默认；Grill-me �
 时使用独立 SubAgent Review，并在完成后汇报。修正必须回到最早拥有数据和不变量
 的责任阶段。相同 failure fingerprint 在输入、diff 和证据均未变化时重复出现，
 应停止自动循环并报告，不得伪称完成。
+
+次要决策必须同时满足：处于用户批准范围内；只影响一个局部组件；可通过局部回退
+轻易恢复；不改变公共接口、Schema、持久数据、兼容性或用户可见验收结果；不涉及
+安全、凭据、敏感数据、外部副作用或用户已有修改；备选方案均满足受保护不变量；
+不确定性为低。任一条件不满足或无法确认，就按关键决策询问用户。
+
+满足上述全部条件时，可以交给独立 SubAgent 比较 2–4 个备选并采用推荐项，不需要
+为每个细节打断用户。采用后必须把 `kind=decision-record` 的有界 artifact 作为
+StageResult typed artifact 或任务证据保存。其内容由
+`schemas/decision-record.schema.json` 约束：
+
+```text
+schemaVersion: 1
+decisionId: stable ID, <= 128 chars
+question: <= 1024 chars
+alternatives: 2..4 {id, summary <= 1024 chars}
+recommendationId: alternative ID
+selectedId: alternative ID
+rationaleSummary: <= 2048 chars
+impact:
+  scope: local-component
+  rollback: easy
+  compatibility: unchanged
+  security: unchanged
+  externalSideEffects: false
+  uncertainty: low
+reviewContext:
+  mode: independent-subagent | structured-self-review
+  contextId: stable ID
+  independence: independent | unverified
+verificationRefs: 0..16 bounded artifact references
+```
+
+Schema 关闭未知字段并约束字段长度、数量和枚举；语义校验器要求
+`recommendationId`、`selectedId` 都引用 alternatives 中唯一 ID，并固定
+`independent-subagent -> independent`、`structured-self-review -> unverified`。
+自动落地时还要求 `selectedId == recommendationId`；若 Agent 希望采用其他备选，
+必须升级为用户决策，不能使用次要决策路径自行偏离推荐。
+记录只保存结论和可审计依据，不保存模型私有推理过程。SubAgent 不可用时允许同一
+Agent 做结构化自审并标记 `independence: unverified`；一旦判断可能触及本节关键
+决策边界，必须升级询问用户，不能借“次要决策”路径规避授权。V1 对记录结构和语义
+提供机械校验，但“何时必须委托和记录”仍属于 `agent-policy`，不得虚构为 Resolver
+或 RunLedger 的机械强制。
 
 ## 10. Knowledge 与 C7OpenWiki 边界
 
@@ -428,6 +493,11 @@ Secret heuristic 只能报告“未发现已知模式”，不能宣称不存在
 - PlanGraph hash 和能力快照变化使旧计划失效；
 - Slot 基数、排序、依赖、冲突、去重和 Unsupported 路径通过；
 - Grill-me 后独立 Brainstorming 的顺序可证明；
+- 方案实现后必经 Review，设计/计划文档分别经对应 Gate Review 后继续落地；
+- 纯文档交付可解析并在落地后进入普通 Review/Verify；
+- 实现修正使旧 Review receipt 失效，并在当前 active RunLedger 重新 Review；仅静态
+  计划输入变化时 supersede/re-plan；
+- 次要决策允许独立 SubAgent 推荐并形成有界记录，关键决策仍必须询问用户；
 - conforming Host 与 agent-policy 边界准确；
 - Superpowers 来源漂移会暂停相关 Primary/Gate；
 - v1 请求迁移器保留现有调用兼容入口；
@@ -466,6 +536,10 @@ Resolver 返回脱敏 ResolveError，不产生 PlanGraph。
 | 计划身份 | ResolveResult + PlanGraph | hash 稳定、证据变化失效、paused 原因码 |
 | 运行边界 | RunLedger v1 + StageResult | 状态转换、单 active、重试追加、supersede |
 | Grill 流程 | Design slot order | 显式/推荐确认、独立 Brainstorming 顺序 |
+| 中间文档 Review | design/plan Gate + Host policy | 最终 hash receipt、修正后旧 receipt 失效、Review 后继续实现 |
+| 纯文档交付 | `implement-documentation` + Review/Verify | document 请求可解析、落地后 Review、文档验证 |
+| 实现后 Review | Review receipt + active RunLedger attempt | 最终 diff/hash 绑定、修正使旧 receipt 失效、重新 Review、静态输入变化才 re-plan |
+| 次要决策 | `decision-record` Schema/validator + agent-policy | 引用一致性、独立性组合、委托与关键决策拒绝自动裁决 |
 | Git 边界 | git-policy + index scanner | forbidden、allowlist、symlink/submodule/binary |
 | Knowledge 边界 | Generic slot/interface | C7 冻结路径无 diff、无 MCP 调用 |
 | 迁移 | v1 request migrator | 兼容输入、拒绝歧义输入 |
