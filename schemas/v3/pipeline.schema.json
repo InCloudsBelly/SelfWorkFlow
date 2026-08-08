@@ -51,27 +51,193 @@
         "condition": {"$ref": "#/$defs/condition"}
       }
     },
-    "field": {
+    "operationType": {
       "enum": [
-        "writeTask",
-        "operationType",
-        "complexity",
-        "risk",
-        "explicitModuleIds",
-        "projectMinimums",
-        "capabilityStates"
+        "analyze",
+        "design",
+        "plan",
+        "implement",
+        "debug",
+        "review",
+        "verify",
+        "document",
+        "install",
+        "publish",
+        "knowledge-read",
+        "knowledge-write"
       ]
     },
-    "scalar": {"type": ["string", "boolean", "integer", "null"]},
-    "binaryCondition": {
-      "type": "array",
-      "prefixItems": [
-        {"$ref": "#/$defs/field"},
-        {"$ref": "#/$defs/scalar"}
-      ],
-      "items": false,
-      "minItems": 2,
-      "maxItems": 2
+    "taskArchetype": {
+      "enum": [
+        "mechanical-change",
+        "bounded-feature",
+        "bugfix",
+        "behavioral-refactor",
+        "exploratory-design",
+        "architecture-change",
+        "migration",
+        "spec-document",
+        "cross-project"
+      ]
+    },
+    "eqCondition": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [{"const": "writeTask"}, {"type": "boolean"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "operationType"}, {"$ref": "#/$defs/operationType"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "complexity"}, {"enum": ["C0", "C1", "C2", "C3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "risk"}, {"enum": ["R0", "R1", "R2", "R3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "projectMinimums"}, {"enum": ["Light", "Full", "Deep"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "taskArchetype"}, {"$ref": "#/$defs/taskArchetype"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "requirementsMaturity"},
+            {"enum": ["exploratory", "defined", "approved"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "scopeShape"},
+            {"enum": ["single-file", "single-module", "cross-module", "cross-project"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "classificationConfidence"},
+            {"type": "number", "minimum": 0, "maximum": 1}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "testLevelFloor"}, {"enum": ["T0", "T1", "T2", "T3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "gteCondition": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [{"const": "complexity"}, {"enum": ["C0", "C1", "C2", "C3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "risk"}, {"enum": ["R0", "R1", "R2", "R3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "projectMinimums"}, {"enum": ["Light", "Full", "Deep"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "requirementsMaturity"},
+            {"enum": ["exploratory", "defined", "approved"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "classificationConfidence"},
+            {"type": "number", "minimum": 0, "maximum": 1}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "testLevelFloor"}, {"enum": ["T0", "T1", "T2", "T3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "containsCondition": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "explicitModuleIds"},
+            {"$ref": "#/$defs/stableId"}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "capabilityStates"},
+            {"enum": ["supported", "unsupported", "unverified"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
     },
     "condition": {
       "oneOf": [
@@ -111,19 +277,19 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["eq"],
-          "properties": {"eq": {"$ref": "#/$defs/binaryCondition"}}
+          "properties": {"eq": {"$ref": "#/$defs/eqCondition"}}
         },
         {
           "type": "object",
           "additionalProperties": false,
           "required": ["gte"],
-          "properties": {"gte": {"$ref": "#/$defs/binaryCondition"}}
+          "properties": {"gte": {"$ref": "#/$defs/gteCondition"}}
         },
         {
           "type": "object",
           "additionalProperties": false,
           "required": ["contains"],
-          "properties": {"contains": {"$ref": "#/$defs/binaryCondition"}}
+          "properties": {"contains": {"$ref": "#/$defs/containsCondition"}}
         }
       ]
     }
