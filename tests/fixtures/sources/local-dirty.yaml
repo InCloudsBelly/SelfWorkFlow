@@ -1,0 +1,4 @@
+sourceType: local-git
+supportStatus: supported
+reproducibilityStatus: dirty-snapshot
+dirty: true

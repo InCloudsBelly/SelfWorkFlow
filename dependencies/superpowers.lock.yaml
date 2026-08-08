@@ -1,0 +1,4 @@
+schemaVersion: 1
+selectionStatus: unselected
+requiredForWrites: true
+allowedWithoutSelection: read-only-analysis

@@ -1,0 +1,4 @@
+sourceType: official-git
+sourceLocator: https://github.com/obra/superpowers.git
+supportStatus: unverified
+reproducibilityStatus: requires-fetch
