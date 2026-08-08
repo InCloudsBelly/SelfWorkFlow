@@ -17,6 +17,10 @@ _SCHEMA_NAMES = (
     "module.schema.json",
     "pipeline.schema.json",
     "resolve-request.schema.json",
+    "resolve-result.schema.json",
+    "plan-graph.schema.json",
+    "selection-receipt.schema.json",
+    "run-ledger.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
@@ -149,6 +153,278 @@ def _validate_resolve_request(document: dict[str, Any]) -> None:
             )
 
 
+def _canonical_hash(document: dict[str, Any], field: str) -> str:
+    material = dict(document)
+    material.pop(field, None)
+    payload = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _raise_semantic(reason: str, path: tuple[str | int, ...]) -> None:
+    raise ContractError(reason, path, "semantic")
+
+
+def _validate_plan_graph(document: dict[str, Any]) -> None:
+    if document["planHash"] != _canonical_hash(document, "planHash"):
+        _raise_semantic("plan-hash-invalid", ("planHash",))
+
+    stage_ids: set[str] = set()
+    for stage_index, stage in enumerate(document["stages"]):
+        if stage["stageId"] in stage_ids:
+            _raise_semantic("plan-stage-id-duplicate", ("stages", stage_index, "stageId"))
+        stage_ids.add(stage["stageId"])
+        if stage["ordinal"] != stage_index + 1:
+            _raise_semantic("plan-stage-order-invalid", ("stages", stage_index, "ordinal"))
+
+        slot_ids: set[str] = set()
+        for slot_index, slot in enumerate(stage["slots"]):
+            if slot["slotId"] in slot_ids:
+                _raise_semantic(
+                    "plan-slot-id-duplicate",
+                    ("stages", stage_index, "slots", slot_index, "slotId"),
+                )
+            slot_ids.add(slot["slotId"])
+            if slot["ordinal"] != slot_index + 1:
+                _raise_semantic(
+                    "plan-slot-order-invalid",
+                    ("stages", stage_index, "slots", slot_index, "ordinal"),
+                )
+            selected = slot["selectedModules"]
+            eligible = set(slot["eligibleModules"])
+            for module_index, module_id in enumerate(selected):
+                if module_id not in eligible:
+                    _raise_semantic(
+                        "plan-selected-module-ineligible",
+                        (
+                            "stages", stage_index, "slots", slot_index,
+                            "selectedModules", module_index,
+                        ),
+                    )
+            if slot["applicability"] == "not-applicable" and (selected or eligible):
+                _raise_semantic(
+                    "plan-inapplicable-slot-not-empty",
+                    ("stages", stage_index, "slots", slot_index),
+                )
+            if slot["selectionMode"] == "static":
+                cardinality = slot["cardinality"]
+                valid = {
+                    "exactly-one": len(selected) == 1,
+                    "zero-or-one": len(selected) <= 1,
+                    "zero-or-many": True,
+                    "gate": len(selected) >= 1,
+                }[cardinality]
+                if not valid:
+                    _raise_semantic(
+                        "plan-static-cardinality-invalid",
+                        (
+                            "stages", stage_index, "slots", slot_index,
+                            "selectedModules",
+                        ),
+                    )
+            else:
+                if slot["cardinality"] in {"exactly-one", "gate"} and not eligible:
+                    _raise_semantic(
+                        "plan-runtime-cardinality-invalid",
+                        (
+                            "stages", stage_index, "slots", slot_index,
+                            "eligibleModules",
+                        ),
+                    )
+                if slot["cardinality"] in {"exactly-one", "zero-or-one"} and len(selected) > 1:
+                    _raise_semantic(
+                        "plan-runtime-cardinality-invalid",
+                        (
+                            "stages", stage_index, "slots", slot_index,
+                            "selectedModules",
+                        ),
+                    )
+
+
+def _plan_is_executable(plan: dict[str, Any]) -> bool:
+    return any(
+        stage["applicability"] == "applicable"
+        and any(
+            slot["applicability"] == "applicable"
+            and bool(slot["selectedModules"] or slot["eligibleModules"])
+            for slot in stage["slots"]
+        )
+        for stage in plan["stages"]
+    )
+
+
+def _validate_resolve_result(document: dict[str, Any]) -> None:
+    if document["status"] == "active":
+        plan = document["planGraph"]
+        if plan is None:
+            _raise_semantic("resolve-active-plan-missing", ("planGraph",))
+        _validate_plan_graph(plan)
+        if not _plan_is_executable(plan):
+            _raise_semantic("resolve-active-plan-not-executable", ("planGraph",))
+
+
+def _validate_selection_receipt(
+    document: dict[str, Any],
+    plan: dict[str, Any] | None = None,
+) -> None:
+    if document["receiptHash"] != _canonical_hash(document, "receiptHash"):
+        _raise_semantic("selection-receipt-hash-invalid", ("receiptHash",))
+    eligible = set(document["eligibleModuleIds"])
+    for index, module_id in enumerate(document["selectedModuleIds"]):
+        if module_id not in eligible:
+            _raise_semantic(
+                "selection-receipt-selected-module-ineligible",
+                ("selectedModuleIds", index),
+            )
+    if plan is None:
+        return
+    if document["planHash"] != plan["planHash"]:
+        _raise_semantic("selection-receipt-plan-mismatch", ("planHash",))
+    for stage_index, stage in enumerate(plan["stages"]):
+        for slot_index, slot in enumerate(stage["slots"]):
+            if stage["stageId"] == document["stageId"] and slot["slotId"] == document["slotId"]:
+                if document["eligibleModuleIds"] != slot["eligibleModules"]:
+                    _raise_semantic(
+                        "selection-receipt-eligible-set-mismatch",
+                        ("eligibleModuleIds",),
+                    )
+                return
+    _raise_semantic("selection-receipt-slot-mismatch", ("slotId",))
+
+
+def _validate_run_ledger(
+    document: dict[str, Any],
+    plan: dict[str, Any] | None = None,
+    receipts: tuple[dict[str, Any], ...] = (),
+) -> None:
+    if document["status"] == "superseded" and document["supersededByPlanHash"] == document["planHash"]:
+        _raise_semantic("ledger-superseding-plan-invalid", ("supersededByPlanHash",))
+
+    active_stage_count = sum(stage["status"] == "active" for stage in document["stages"])
+    if active_stage_count > 1:
+        active_index = next(index for index, stage in enumerate(document["stages"]) if stage["status"] == "active")
+        second_index = next(
+            index for index, stage in enumerate(document["stages"])
+            if index > active_index and stage["status"] == "active"
+        )
+        _raise_semantic("multiple-active-stages", ("stages", second_index, "status"))
+
+    all_attempt_refs: set[str] = set()
+    receipt_by_hash = {receipt["receiptHash"]: receipt for receipt in receipts}
+    for stage_index, stage in enumerate(document["stages"]):
+        attempts = stage["attempts"]
+        local_refs: set[str] = set()
+        for attempt_index, attempt in enumerate(attempts):
+            ref = attempt["attemptRef"]
+            if ref in all_attempt_refs or ref in local_refs:
+                _raise_semantic(
+                    "ledger-attempt-duplicate",
+                    ("stages", stage_index, "attempts", attempt_index, "attemptRef"),
+                )
+            if attempt["ordinal"] != attempt_index + 1:
+                _raise_semantic(
+                    "ledger-attempt-order-invalid",
+                    ("stages", stage_index, "attempts", attempt_index, "ordinal"),
+                )
+            expected_previous = attempts[attempt_index - 1]["attemptRef"] if attempt_index else None
+            if attempt["previousAttemptRef"] != expected_previous:
+                _raise_semantic(
+                    "ledger-attempt-chain-invalid",
+                    (
+                        "stages", stage_index, "attempts", attempt_index,
+                        "previousAttemptRef",
+                    ),
+                )
+            local_refs.add(ref)
+            all_attempt_refs.add(ref)
+        if stage["status"] == "active" and not attempts:
+            _raise_semantic("ledger-active-attempt-missing", ("stages", stage_index, "attempts"))
+        current_ref = attempts[-1]["attemptRef"] if attempts else None
+        for collection in ("slotResults", "gateResults", "runtimeSkips"):
+            for item_index, item in enumerate(stage[collection]):
+                if item["attemptRef"] not in local_refs:
+                    _raise_semantic(
+                        "ledger-attempt-unknown",
+                        ("stages", stage_index, collection, item_index, "attemptRef"),
+                    )
+        for ref_index, reference in enumerate(stage["selectionReceiptRefs"]):
+            attempt_path = (
+                "stages", stage_index, "selectionReceiptRefs", ref_index, "attemptRef"
+            )
+            if reference["attemptRef"] not in local_refs:
+                _raise_semantic("ledger-attempt-unknown", attempt_path)
+            if current_ref is not None and reference["attemptRef"] != current_ref:
+                _raise_semantic("ledger-receipt-attempt-stale", attempt_path)
+            receipt = receipt_by_hash.get(reference["receiptHash"])
+            if receipts and receipt is None:
+                _raise_semantic("ledger-receipt-ref-invalid", ("stages", stage_index, "selectionReceiptRefs", ref_index, "receiptHash"))
+            if receipt is not None:
+                if receipt["attemptRef"] != reference["attemptRef"]:
+                    _raise_semantic("ledger-receipt-attempt-mismatch", attempt_path)
+                if plan is not None:
+                    _validate_selection_receipt(receipt, plan)
+
+        if plan is not None and stage["status"] == "passed":
+            plan_stage = next(
+                (item for item in plan["stages"] if item["stageId"] == stage["stageId"]),
+                None,
+            )
+            if plan_stage is None:
+                _raise_semantic("ledger-stage-unknown", ("stages", stage_index, "stageId"))
+            current_results = {
+                item["moduleId"]
+                for item in stage["slotResults"]
+                if item["attemptRef"] == current_ref
+            }
+            required_modules = {
+                module_id
+                for slot in plan_stage["slots"]
+                if slot["applicability"] == "applicable"
+                and slot["selectionMode"] == "static"
+                for module_id in slot["selectedModules"]
+            }
+            missing = sorted(required_modules - current_results)
+            if missing:
+                _raise_semantic(
+                    "ledger-current-attempt-incomplete",
+                    ("stages", stage_index, "slotResults"),
+                )
+
+    if plan is not None:
+        if document["planHash"] != plan["planHash"]:
+            _raise_semantic("ledger-plan-binding-invalid", ("planHash",))
+        if document["requestHash"] != plan["requestHash"]:
+            _raise_semantic("ledger-request-binding-invalid", ("requestHash",))
+        if document["capabilitySnapshotHash"] != plan["capabilitySnapshotHash"]:
+            _raise_semantic("ledger-capability-binding-invalid", ("capabilitySnapshotHash",))
+
+
+def validate_plan_graph(document: dict[str, Any]) -> None:
+    """Validate a V3 PlanGraph schema and its immutable/selection semantics."""
+
+    _validate_schema("plan-graph.schema.json", document)
+    _validate_plan_graph(document)
+
+
+def validate_selection_receipt(
+    document: dict[str, Any], plan: dict[str, Any] | None = None
+) -> None:
+    """Validate a V3 SelectionReceipt, optionally against its PlanGraph."""
+
+    _validate_schema("selection-receipt.schema.json", document)
+    _validate_selection_receipt(document, plan)
+
+
+def validate_run_ledger(
+    document: dict[str, Any],
+    plan: dict[str, Any] | None = None,
+    receipts: tuple[dict[str, Any], ...] = (),
+) -> None:
+    """Validate a V3 RunLedger, optionally against a plan and receipt set."""
+
+    _validate_schema("run-ledger.schema.json", document)
+    _validate_run_ledger(document, plan, receipts)
+
+
 def load_contract(schema_name: str, text: str) -> dict[str, Any]:
     """Load one registered V3 JSON contract."""
 
@@ -175,6 +451,14 @@ def load_contract(schema_name: str, text: str) -> dict[str, Any]:
     _validate_schema(schema_name, document)
     if schema_name == "resolve-request.schema.json":
         _validate_resolve_request(document)
+    elif schema_name == "resolve-result.schema.json":
+        _validate_resolve_result(document)
+    elif schema_name == "plan-graph.schema.json":
+        _validate_plan_graph(document)
+    elif schema_name == "selection-receipt.schema.json":
+        _validate_selection_receipt(document)
+    elif schema_name == "run-ledger.schema.json":
+        _validate_run_ledger(document)
     return document
 
 
