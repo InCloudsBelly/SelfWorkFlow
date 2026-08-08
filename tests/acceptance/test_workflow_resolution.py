@@ -62,6 +62,7 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
                 ("implement", "C1", "R1", "implement-tdd"),
                 ("implement", "C2", "R2", "review-independent"),
                 ("implement", "C1", "R1", "verify-execution"),
+                ("document", "C1", "R1", "implement-documentation"),
             )
             for index, (operation, complexity, risk, expected_module) in enumerate(cases):
                 with self.subTest(expected_module=expected_module):

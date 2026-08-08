@@ -65,7 +65,7 @@ def normalize_request(request: Mapping[str, object], repository_root: Path) -> t
         schema = json.loads((repository_root / "schemas/resolve-request.schema.json").read_text(encoding="utf-8"))
         if next(Draft202012Validator(schema).iter_errors(value), None) is not None:
             raise RequestV2Error("resolve-input-invalid")
-        if value["operationType"] == "implement" and value["writeTask"] is not True:
+        if value["operationType"] in {"implement", "document"} and value["writeTask"] is not True:
             raise RequestV2Error("resolve-input-invalid")
         snapshot, snapshot_hash, states, stale = normalize_capability_snapshot(value["capabilityEvidenceSnapshot"])
     except RequestV2Error:

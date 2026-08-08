@@ -31,6 +31,12 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("knowledge.propose", slots)
         self.assertIn("knowledge.update", slots)
         self.assertNotIn("knowledge", tuple(stage["id"] for stage in pipeline.document["stages"]))
+        implemented = next(
+            stage for stage in pipeline.document["stages"]
+            if stage["id"] == "implemented"
+        )
+        method = next(slot for slot in implemented["slots"] if slot["id"] == "implement.method")
+        self.assertEqual(method["allowedInvocationKinds"], ("agent-native", "skill"))
         self.assertRegex(pipeline.pipeline_hash, r"^sha256:[0-9a-f]{64}$")
 
     def test_pipeline_hash_is_deterministic(self):

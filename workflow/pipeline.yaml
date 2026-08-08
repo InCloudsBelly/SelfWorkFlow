@@ -33,7 +33,7 @@ stages:
     slots:
       - id: implement.method
         cardinality: exactly-one
-        allowedInvocationKinds: [skill]
+        allowedInvocationKinds: [agent-native, skill]
         condition: {eq: [writeTask, true]}
       - id: implement.augmenters
         cardinality: zero-or-many

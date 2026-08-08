@@ -301,6 +301,16 @@ class RouterTests(unittest.TestCase):
             ("workflow-core", "workflow-protected-rules"),
         )
 
+        document = route_skills(
+            compiled.content,
+            self._request(
+                stage="implemented",
+                operation_type="document",
+                file_extensions=(".md",),
+            ),
+        )
+        self.assertIn("workflow-core", document.selected)
+
     def test_v2_routes_modules_by_slot_without_semantic_activation(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.router import ModuleRouteRequest, route_modules

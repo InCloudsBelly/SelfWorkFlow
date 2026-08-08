@@ -18,7 +18,7 @@ entries:
       - pure read-only lookup
     selectors:
       fileExtensions: []
-      operationTypes: [design, plan, implement, debug, review, verify, install, publish]
+      operationTypes: [design, plan, implement, debug, review, verify, document, install, publish]
       semanticTerms: [workflow execution, task lifecycle]
     stages:
       - discovered
@@ -40,7 +40,7 @@ entries:
       match: any
       scopes: []
       fileExtensions: []
-      operationTypes: [design, plan, implement, debug, review, verify, install, publish]
+      operationTypes: [design, plan, implement, debug, review, verify, document, install, publish]
     priority: 1000
     contextCost: 900
     supportStatus: supported

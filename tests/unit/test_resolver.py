@@ -75,6 +75,36 @@ class TaskResolverV2Tests(unittest.TestCase):
             ledger, plan, request["capabilityEvidenceSnapshot"]
         )["valid"])
 
+    def test_document_write_routes_implementation_review_and_verify(self):
+        from selfworkflow.resolver import resolve_task
+
+        result = resolve_task(
+            self.catalog,
+            self._request(operationType="document", writeTask=True),
+        )
+        selected = [
+            module_id
+            for stage in result["planGraph"]["stages"]
+            for slot in stage["slots"]
+            for module_id in slot["selectedModules"]
+        ]
+
+        self.assertEqual(result["status"], "active")
+        for module_id in (
+            "implement-documentation", "implement-result-gate",
+            "review-self", "verify-execution",
+        ):
+            self.assertIn(module_id, selected)
+
+    def test_document_operation_cannot_claim_read_only_execution(self):
+        from selfworkflow.resolver import ResolveError, resolve_task
+
+        with self.assertRaises(ResolveError):
+            resolve_task(
+                self.catalog,
+                self._request(operationType="document", writeTask=False),
+            )
+
     def test_plan_hash_is_stable_and_binds_capability_identity(self):
         from selfworkflow.resolver import resolve_task
 
