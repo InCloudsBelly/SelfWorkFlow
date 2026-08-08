@@ -341,19 +341,52 @@ def _validate_run_ledger(
         if document["capabilitySnapshotHash"] != plan["capabilitySnapshotHash"]:
             _raise_semantic("ledger-capability-binding-invalid", ("capabilitySnapshotHash",))
     plan_stages = {item["stageId"]: item for item in plan["stages"]} if plan else {}
+    if plan is not None:
+        expected_stage_ids = [item["stageId"] for item in plan["stages"]]
+        actual_stage_ids = [item["stageId"] for item in document["stages"]]
+        seen_stage_ids: set[str] = set()
+        for stage_index, stage_id in enumerate(actual_stage_ids):
+            if stage_id in seen_stage_ids:
+                _raise_semantic(
+                    "ledger-stage-id-duplicate",
+                    ("stages", stage_index, "stageId"),
+                )
+            seen_stage_ids.add(stage_id)
+            if stage_id not in plan_stages:
+                _raise_semantic(
+                    "ledger-stage-unknown",
+                    ("stages", stage_index, "stageId"),
+                )
+        if len(actual_stage_ids) != len(expected_stage_ids):
+            _raise_semantic("ledger-stage-list-mismatch", ("stages",))
+        if actual_stage_ids != expected_stage_ids:
+            _raise_semantic("ledger-stage-order-mismatch", ("stages",))
     stage_statuses = [stage["status"] for stage in document["stages"]]
     active_count = stage_statuses.count("active")
     if active_count > 1:
         second = [index for index, value in enumerate(stage_statuses) if value == "active"][1]
         _raise_semantic("multiple-active-stages", ("stages", second, "status"))
-    status_valid = {
-        "pending": active_count == 0,
-        "active": active_count == 1,
-        "paused": active_count == 0 and "paused" in stage_statuses,
-        "failed": active_count == 0 and "failed" in stage_statuses,
-        "completed": active_count == 0 and all(item in {"passed", "skipped"} for item in stage_statuses),
-        "superseded": active_count == 0,
-    }[status]
+    prefix_done = {"passed", "skipped"}
+    suffix_waiting = {"pending", "skipped"}
+    if status == "pending":
+        status_valid = all(item in suffix_waiting for item in stage_statuses)
+    elif status in {"active", "paused", "failed"}:
+        marker = status
+        marker_indexes = [
+            index for index, value in enumerate(stage_statuses)
+            if value == marker
+        ]
+        status_valid = len(marker_indexes) == 1
+        if status_valid:
+            marker_index = marker_indexes[0]
+            status_valid = (
+                all(item in prefix_done for item in stage_statuses[:marker_index])
+                and all(item in suffix_waiting for item in stage_statuses[marker_index + 1:])
+            )
+    elif status == "completed":
+        status_valid = all(item in prefix_done for item in stage_statuses)
+    else:
+        status_valid = active_count == 0
     if not status_valid:
         _raise_semantic(f"ledger-status-{status}-invalid", ("status",))
 
@@ -488,7 +521,14 @@ def validate_run_ledger(
     )
 
 
-def load_contract(schema_name: str, text: str) -> dict[str, Any]:
+def load_contract(
+    schema_name: str,
+    text: str,
+    *,
+    plan_graph: dict[str, Any] | None = None,
+    receipts: tuple[dict[str, Any], ...] = (),
+    expected_successor_plan_hash: str | None = None,
+) -> dict[str, Any]:
     """Load one registered V3 JSON contract."""
 
     if schema_name not in _SCHEMA_NAMES:
@@ -521,7 +561,14 @@ def load_contract(schema_name: str, text: str) -> dict[str, Any]:
     elif schema_name == "selection-receipt.schema.json":
         _validate_selection_receipt(document)
     elif schema_name == "run-ledger.schema.json":
-        _validate_run_ledger(document)
+        if plan_graph is None:
+            _raise_semantic("ledger-plan-required", ())
+        _validate_run_ledger(
+            document,
+            plan_graph,
+            receipts,
+            expected_successor_plan_hash,
+        )
     return document
 
 
