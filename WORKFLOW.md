@@ -48,6 +48,36 @@ Knowledge exposes only optional `knowledge.read`, `knowledge.propose`, and
 `knowledge.update` slots. This version does not implement or enable C7OpenWiki;
 its concrete MCP behavior is a later, separately tested extension.
 
+## Review and decision closure
+
+Every landed change requires post-landing Review before completion. A Review
+fix remains in the active Review stage and creates a new RunLedger v2 attempt;
+results from older attempts stay auditable but cannot satisfy the latest
+attempt. The final Review receipt binds the final document or complete diff
+hash. Only changed Request, capability, or other static PlanGraph inputs cause
+re-planning.
+
+Design and plan documents are intermediate artifacts. `design.gate` reviews a
+final design/specification hash and `plan.gate` reviews a final implementation
+plan hash before implementation continues. A document that is itself the final
+deliverable still lands through `document`, post-landing Review, and Verify.
+Writing a plan never completes an implementation request.
+
+Ask the user for every critical decision: scope or acceptance changes,
+public/API/Schema/compatibility or persistent-data changes, security or
+sensitive data, external or irreversible effects, protected defaults,
+user-owned changes, or material uncertainty. A minor decision is eligible for
+automatic recommendation only when it stays within the approved scope, affects
+one local component, has easy rollback, preserves compatibility and security,
+has no external side effects, and has low uncertainty. If an independent
+SubAgent is available, it may compare two to four valid alternatives. Adopt its
+recommendation and save a validated `decision-record`; automatic adoption
+requires `selectedId == recommendationId`. A structured self-review records
+independence as `unverified`. Any failed criterion or desired deviation becomes
+a critical decision and returns to the user. Store conclusions and evidence,
+never private model reasoning. Usage is `agent-policy`; only the record contract
+is mechanically validated.
+
 ## Phase capability contract
 
 Before classification or state-changing work, identify the capabilities the

@@ -43,6 +43,17 @@ class WorkflowMatrixTests(unittest.TestCase):
         review = route_modules(self.catalog, ModuleRouteRequest(slot_id="design.cross-review", cardinality="zero-or-one", **common))
         self.assertEqual(grill.selected_modules + review.selected_modules, ("design-grill-me", "design-cross-review"))
 
+    def test_core_policy_requires_reviewed_landing_and_bounded_decisions(self):
+        for relative in ("WORKFLOW.md", "workflow/core.md"):
+            content = (self.ROOT / relative).read_text(encoding="utf-8")
+            with self.subTest(relative=relative):
+                for phrase in (
+                    "design.gate", "plan.gate", "post-landing Review",
+                    "decision-record", "selectedId == recommendationId",
+                    "local component", "easy rollback", "critical decision",
+                ):
+                    self.assertIn(phrase, content)
+
 
 if __name__ == "__main__":
     unittest.main()

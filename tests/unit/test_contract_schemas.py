@@ -54,17 +54,37 @@ class ContractSchemaTests(unittest.TestCase):
     def test_run_ledger_rejects_two_active_stages(self):
         validator = self._validator("run-ledger.schema.json")
         ledger = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "planHash": "sha256:" + "1" * 64,
             "requestHash": "sha256:" + "2" * 64,
             "capabilitySnapshotHash": "sha256:" + "3" * 64,
             "status": "active",
             "stages": [
-                {"stageId": "designed", "status": "active", "attempts": [], "slotResults": [], "gateResults": [], "runtimeSkips": []},
-                {"stageId": "planned", "status": "active", "attempts": [], "slotResults": [], "gateResults": [], "runtimeSkips": []},
+                {
+                    "stageId": "designed", "status": "active",
+                    "attempts": [{"attemptRef": "attempt-1", "ordinal": 1, "previousAttemptRef": None}],
+                    "slotResults": [{"attemptRef": "attempt-1", "moduleId": "design-light", "resultRef": "result-1"}],
+                    "gateResults": [], "runtimeSkips": [],
+                },
+                {"stageId": "planned", "status": "pending", "attempts": [], "slotResults": [], "gateResults": [], "runtimeSkips": []},
             ],
         }
-        self.assertTrue(list(validator.iter_errors(ledger)))
+        self.assertEqual(list(validator.iter_errors(ledger)), [])
+
+        two_active = deepcopy(ledger)
+        two_active["stages"][1].update({
+            "status": "active",
+            "attempts": [{"attemptRef": "attempt-2", "ordinal": 1, "previousAttemptRef": None}],
+        })
+        self.assertTrue(list(validator.iter_errors(two_active)))
+
+        legacy = deepcopy(ledger)
+        legacy["schemaVersion"] = 1
+        self.assertTrue(list(validator.iter_errors(legacy)))
+
+        open_record = deepcopy(ledger)
+        open_record["stages"][0]["attempts"][0]["unexpected"] = True
+        self.assertTrue(list(validator.iter_errors(open_record)))
 
     @staticmethod
     def _decision_record(mode="independent-subagent", independence="independent"):

@@ -63,6 +63,13 @@ plan-bound RunLedger. Grill-me is explicit-only and is followed by independent
 Brainstorming cross-review. Knowledge persistence is optional and confirmation
 gated. C7OpenWiki execution is deliberately deferred to a later extension.
 
+Every landed change, including a document-only delivery, receives post-landing
+Review and verification. Intermediate design and plan documents are reviewed
+by their Gates and then continue into implementation. Strictly local,
+easy-to-rollback minor decisions may adopt an independent SubAgent recommendation
+through a validated `decision-record`; all critical decisions still return to
+the user.
+
 Runtime profiles are closed and deterministic:
 
 - `core` (default): compact workflow, code-quality sources, stage routing, and thin

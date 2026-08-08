@@ -1,4 +1,4 @@
-"""Pure, fail-closed Host RunLedger validation and transition helpers."""
+"""Pure, fail-closed Host RunLedger v2 validation and transition helpers."""
 
 from __future__ import annotations
 
@@ -58,12 +58,28 @@ def _plan_stage(plan: Mapping[str, object], stage_id: str) -> Mapping[str, objec
         raise LedgerError("plan-stage-unknown") from None
 
 
+def _attempt_ref(stage: Mapping[str, object]) -> str:
+    try:
+        return str(stage["attempts"][-1]["attemptRef"])
+    except (KeyError, IndexError, TypeError):
+        raise LedgerError("ledger-attempt-missing") from None
+
+
+def _new_attempt(stage: Mapping[str, object], attempt_ref: str) -> dict[str, object]:
+    attempts = stage["attempts"]
+    return {
+        "attemptRef": attempt_ref,
+        "ordinal": len(attempts) + 1,
+        "previousAttemptRef": attempts[-1]["attemptRef"] if attempts else None,
+    }
+
+
 def new_ledger(plan: Mapping[str, object]) -> dict[str, object]:
     reasons = _plan_reasons(plan)
     if reasons:
         raise LedgerError(sorted(reasons)[0])
     return {
-        "schemaVersion": 1, "planHash": plan["planHash"], "requestHash": plan["requestHash"],
+        "schemaVersion": 2, "planHash": plan["planHash"], "requestHash": plan["requestHash"],
         "capabilitySnapshotHash": plan["capabilitySnapshotHash"], "status": "pending",
         "stages": [
             {
@@ -76,11 +92,57 @@ def new_ledger(plan: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _result_binding_reasons(
+    ledger_stage: Mapping[str, object], plan_stage: Mapping[str, object]
+) -> set[str]:
+    reasons: set[str] = set()
+    attempts = ledger_stage["attempts"]
+    refs = [attempt["attemptRef"] for attempt in attempts]
+    for index, attempt in enumerate(attempts):
+        if (
+            attempt["ordinal"] != index + 1
+            or attempt["previousAttemptRef"] != (refs[index - 1] if index else None)
+        ):
+            reasons.add("ledger-attempt-chain-invalid")
+    allowed = set(refs)
+    modules = {
+        module for slot in plan_stage["slots"] for module in slot["selectedModules"]
+        if module not in slot["gates"]
+    }
+    gates = {gate for slot in plan_stage["slots"] for gate in slot["gates"]}
+    optional_slots = {
+        slot["slotId"] for slot in plan_stage["slots"]
+        if slot["cardinality"] in {"zero-or-one", "zero-or-many"}
+    }
+    seen: set[tuple[str, str, str]] = set()
+    for collection, identity_key, valid_ids in (
+        ("slotResults", "moduleId", modules),
+        ("gateResults", "gateId", gates),
+        ("runtimeSkips", "slotId", optional_slots),
+    ):
+        for item in ledger_stage[collection]:
+            if item["attemptRef"] not in allowed or item[identity_key] not in valid_ids:
+                reasons.add("ledger-result-binding-invalid")
+            key = (collection, item["attemptRef"], item[identity_key])
+            if key in seen:
+                reasons.add("ledger-result-duplicate")
+            seen.add(key)
+    if ledger_stage["status"] in {"active", "passed", "failed", "paused"} and not refs:
+        reasons.add("ledger-attempt-missing")
+    if ledger_stage["status"] in {"pending", "skipped"} and (
+        refs or ledger_stage["slotResults"] or ledger_stage["gateResults"] or ledger_stage["runtimeSkips"]
+    ):
+        reasons.add("ledger-attempt-state-invalid")
+    return reasons
+
+
 def validate_ledger(
     ledger: Mapping[str, object], plan: Mapping[str, object], capability_snapshot: Mapping[str, object]
 ) -> dict[str, object]:
     reasons = _plan_reasons(plan)
     try:
+        if ledger.get("schemaVersion") != 2:
+            reasons.add("ledger-schema-version-unsupported")
         if next(Draft202012Validator(_schema("run-ledger.schema.json")).iter_errors(ledger), None) is not None:
             reasons.add("ledger-schema-invalid")
         _, snapshot_hash, _, stale = normalize_capability_snapshot(capability_snapshot)
@@ -98,18 +160,22 @@ def validate_ledger(
         if active_count > 1:
             reasons.add("multiple-active-stages")
         plan_stages = {stage["stageId"]: stage for stage in plan["stages"]}
+        all_attempt_refs: list[str] = []
         for stage in ledger["stages"]:
             plan_stage = plan_stages.get(stage["stageId"])
             if plan_stage is None:
                 continue
+            reasons.update(_result_binding_reasons(stage, plan_stage))
+            all_attempt_refs.extend(item["attemptRef"] for item in stage["attempts"])
             if stage["status"] == "passed" and not _requirements_met(stage, plan_stage):
                 reasons.add("stage-results-incomplete")
             if (stage["status"] == "skipped") != (plan_stage["applicability"] == "not-applicable"):
                 reasons.add("stage-applicability-invalid")
+        if len(all_attempt_refs) != len(set(all_attempt_refs)):
+            reasons.add("ledger-attempt-duplicate")
         statuses = [stage["status"] for stage in ledger["stages"]]
         execution_statuses = [
-            stage["status"]
-            for stage in ledger["stages"]
+            stage["status"] for stage in ledger["stages"]
             if plan_stages[stage["stageId"]]["applicability"] == "applicable"
         ]
         non_prefix = next(
@@ -135,18 +201,22 @@ def validate_ledger(
 
 
 def _requirements_met(ledger_stage: Mapping[str, object], plan_stage: Mapping[str, object]) -> bool:
+    try:
+        current = _attempt_ref(ledger_stage)
+    except LedgerError:
+        return False
     slot_modules = {
-        module_id
-        for slot in plan_stage["slots"]
-        for module_id in slot["selectedModules"]
+        module_id for slot in plan_stage["slots"] for module_id in slot["selectedModules"]
         if module_id not in slot["gates"]
     }
-    completed_modules = {item.split(":", 1)[0] for item in ledger_stage["slotResults"]}
+    completed_modules = {
+        item["moduleId"] for item in ledger_stage["slotResults"]
+        if item["attemptRef"] == current
+    }
     required_gates = {gate for slot in plan_stage["slots"] for gate in slot["gates"]}
     passed_gates = {
-        parts[0]
-        for item in ledger_stage["gateResults"]
-        if len(parts := item.split(":", 2)) == 3 and parts[1] == "passed"
+        item["gateId"] for item in ledger_stage["gateResults"]
+        if item["attemptRef"] == current and item["outcome"] == "passed"
     }
     return slot_modules <= completed_modules and required_gates <= passed_gates
 
@@ -163,17 +233,19 @@ def transition_stage(
     plan_stage = _plan_stage(plan, stage_id)
     index = next(i for i, item in enumerate(result["stages"]) if item["stageId"] == stage_id)
     if target_status == "active":
+        existing_refs = {
+            attempt["attemptRef"] for item in result["stages"] for attempt in item["attempts"]
+        }
         if (
-            stage["status"] != "pending"
-            or plan_stage["applicability"] != "applicable"
-            or type(attempt_ref) is not str
-            or _REFERENCE.fullmatch(attempt_ref) is None
+            stage["status"] != "pending" or plan_stage["applicability"] != "applicable"
+            or type(attempt_ref) is not str or _REFERENCE.fullmatch(attempt_ref) is None
+            or attempt_ref in existing_refs
             or any(item["status"] not in {"passed", "skipped"} for item in result["stages"][:index])
             or any(item["status"] == "active" for item in result["stages"])
         ):
             raise LedgerError("ledger-transition-invalid")
         stage["status"] = "active"
-        stage["attempts"].append(attempt_ref)
+        stage["attempts"].append(_new_attempt(stage, attempt_ref))
         result["status"] = "active"
         return result
     if target_status not in {"passed", "failed", "paused"} or stage["status"] != "active":
@@ -192,16 +264,42 @@ def transition_stage(
     return result
 
 
-def _record(ledger, plan, stage_id, collection, value):
+def record_stage_attempt(
+    ledger: Mapping[str, object], plan: Mapping[str, object], stage_id: str,
+    attempt_ref: str, *, capability_snapshot: Mapping[str, object],
+) -> dict[str, object]:
+    validation = validate_ledger(ledger, plan, capability_snapshot)
+    if not validation["valid"]:
+        raise LedgerError(validation["reasonCodes"][0])
+    result = deepcopy(dict(ledger))
+    stage = _stage(result, stage_id)
+    all_refs = {attempt["attemptRef"] for item in result["stages"] for attempt in item["attempts"]}
+    if (
+        stage["status"] != "active" or type(attempt_ref) is not str
+        or _REFERENCE.fullmatch(attempt_ref) is None or attempt_ref in all_refs
+    ):
+        raise LedgerError("ledger-attempt-invalid")
+    stage["attempts"].append(_new_attempt(stage, attempt_ref))
+    return result
+
+
+def _record(ledger, plan, stage_id, collection, value, identity_key):
     if _plan_reasons(plan):
         raise LedgerError("plan-invalid")
     result = deepcopy(dict(ledger))
+    if result.get("schemaVersion") != 2:
+        raise LedgerError("ledger-schema-version-unsupported")
     if result.get("planHash") != plan.get("planHash"):
         raise LedgerError("ledger-plan-binding-invalid")
     stage = _stage(result, stage_id)
     if stage["status"] != "active":
         raise LedgerError("ledger-stage-not-active")
-    if value in stage[collection]:
+    current = _attempt_ref(stage)
+    value = {"attemptRef": current, **value}
+    if any(
+        item["attemptRef"] == current and item[identity_key] == value[identity_key]
+        for item in stage[collection]
+    ):
         raise LedgerError("ledger-result-duplicate")
     stage[collection].append(value)
     return result
@@ -212,7 +310,7 @@ def record_slot_result(ledger, plan, stage_id: str, module_id: str, result_ref: 
     modules = {module for slot in plan_stage["slots"] for module in slot["selectedModules"] if module not in slot["gates"]}
     if module_id not in modules or _REFERENCE.fullmatch(result_ref or "") is None:
         raise LedgerError("slot-result-invalid")
-    return _record(ledger, plan, stage_id, "slotResults", f"{module_id}:{result_ref}")
+    return _record(ledger, plan, stage_id, "slotResults", {"moduleId": module_id, "resultRef": result_ref}, "moduleId")
 
 
 def record_runtime_skip(ledger, plan, stage_id: str, slot_id: str, evidence_ref: str):
@@ -223,7 +321,7 @@ def record_runtime_skip(ledger, plan, stage_id: str, slot_id: str, evidence_ref:
         raise LedgerError("plan-slot-unknown") from None
     if slot["cardinality"] not in {"zero-or-one", "zero-or-many"} or _REFERENCE.fullmatch(evidence_ref or "") is None:
         raise LedgerError("runtime-skip-not-optional")
-    return _record(ledger, plan, stage_id, "runtimeSkips", f"{slot_id}:{evidence_ref}")
+    return _record(ledger, plan, stage_id, "runtimeSkips", {"slotId": slot_id, "evidenceRef": evidence_ref}, "slotId")
 
 
 def record_gate_result(ledger, plan, stage_id: str, gate_id: str, result_ref: str, *, outcome: str = "passed"):
@@ -231,7 +329,7 @@ def record_gate_result(ledger, plan, stage_id: str, gate_id: str, result_ref: st
     gates = {gate for slot in plan_stage["slots"] for gate in slot["gates"]}
     if gate_id not in gates or outcome not in {"passed", "failed", "paused"} or _REFERENCE.fullmatch(result_ref or "") is None:
         raise LedgerError("gate-result-invalid")
-    return _record(ledger, plan, stage_id, "gateResults", f"{gate_id}:{outcome}:{result_ref}")
+    return _record(ledger, plan, stage_id, "gateResults", {"gateId": gate_id, "outcome": outcome, "resultRef": result_ref}, "gateId")
 
 
 def failure_owner_for(plan: Mapping[str, object], failed_stage_id: str) -> str:

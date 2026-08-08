@@ -3,7 +3,8 @@
   "type": "object", "additionalProperties": false,
   "required": ["schemaVersion", "planHash", "requestHash", "capabilitySnapshotHash", "status", "stages"],
   "properties": {
-    "schemaVersion": {"const": 1}, "planHash": {"$ref": "#/$defs/hash"}, "requestHash": {"$ref": "#/$defs/hash"}, "capabilitySnapshotHash": {"$ref": "#/$defs/hash"},
+    "schemaVersion": {"const": 2},
+    "planHash": {"$ref": "#/$defs/hash"}, "requestHash": {"$ref": "#/$defs/hash"}, "capabilitySnapshotHash": {"$ref": "#/$defs/hash"},
     "status": {"enum": ["pending", "active", "paused", "failed", "completed", "superseded"]},
     "stages": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/stage"}, "contains": {"type": "object", "properties": {"status": {"const": "active"}}, "required": ["status"]}, "minContains": 0, "maxContains": 1},
     "supersededByPlanHash": {"$ref": "#/$defs/hash"}
@@ -12,6 +13,20 @@
   "$defs": {
     "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
-    "stage": {"type": "object", "additionalProperties": false, "required": ["stageId", "status", "attempts", "slotResults", "gateResults", "runtimeSkips"], "properties": {"stageId": {"$ref": "#/$defs/id"}, "status": {"enum": ["pending", "active", "passed", "failed", "paused", "skipped"]}, "attempts": {"type": "array", "uniqueItems": true, "maxItems": 1024, "items": {"$ref": "#/$defs/id"}}, "slotResults": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "gateResults": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "runtimeSkips": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/id"}}}}
+    "attempt": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "ordinal", "previousAttemptRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "ordinal": {"type": "integer", "minimum": 1, "maximum": 1024}, "previousAttemptRef": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]}}},
+    "slotResult": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "moduleId", "resultRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "moduleId": {"$ref": "#/$defs/id"}, "resultRef": {"$ref": "#/$defs/id"}}},
+    "gateResult": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "gateId", "outcome", "resultRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "gateId": {"$ref": "#/$defs/id"}, "outcome": {"enum": ["passed", "failed", "paused"]}, "resultRef": {"$ref": "#/$defs/id"}}},
+    "runtimeSkip": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "slotId", "evidenceRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "slotId": {"$ref": "#/$defs/id"}, "evidenceRef": {"$ref": "#/$defs/id"}}},
+    "stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stageId", "status", "attempts", "slotResults", "gateResults", "runtimeSkips"],
+      "properties": {
+        "stageId": {"$ref": "#/$defs/id"}, "status": {"enum": ["pending", "active", "passed", "failed", "paused", "skipped"]},
+        "attempts": {"type": "array", "uniqueItems": true, "maxItems": 1024, "items": {"$ref": "#/$defs/attempt"}},
+        "slotResults": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/slotResult"}},
+        "gateResults": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/gateResult"}},
+        "runtimeSkips": {"type": "array", "uniqueItems": true, "maxItems": 256, "items": {"$ref": "#/$defs/runtimeSkip"}}
+      }
+    }
   }
 }

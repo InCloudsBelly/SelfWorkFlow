@@ -53,6 +53,7 @@ class AdapterContractTests(unittest.TestCase):
                     "paused", "PlanGraph", "RunLedger", "current-stage",
                     "critical decisions", "agent-policy", "Knowledge",
                     "C7OpenWiki execution is deferred",
+                    "post-landing Review", "minor decisions", "decision-record",
                 ):
                     self.assertIn(phrase, content)
                 self.assertNotIn("is a conforming Host", content)
