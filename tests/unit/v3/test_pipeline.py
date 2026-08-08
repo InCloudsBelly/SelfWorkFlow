@@ -1,9 +1,11 @@
 import importlib.util
 import json
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 
 _STAGES = (
@@ -61,6 +63,27 @@ class V3PipelineLoaderTests(unittest.TestCase):
         self.assertRegex(loaded.pipeline_hash, r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(json.loads(loaded.content), loaded.document)
 
+    def test_pipeline_rejects_a_handle_for_a_different_path_snapshot(self):
+        PipelineError, load_pipeline = _loader()
+        original_open = Path.open
+        with _pipeline_workspace() as (_, _, path):
+            replacement = path.with_name("replacement.yaml")
+            replacement.write_bytes(path.read_bytes())
+
+            def swapped_open(candidate, *args, **kwargs):
+                if candidate == path:
+                    return original_open(replacement, *args, **kwargs)
+                return original_open(candidate, *args, **kwargs)
+
+            with patch.object(Path, "open", new=swapped_open):
+                try:
+                    load_pipeline(path)
+                except Exception as error:
+                    self.assertIsInstance(error, PipelineError)
+                    self.assertEqual(error.reason, "v3-yaml-path-changed")
+                else:
+                    self.fail("pipeline accepted bytes from a different path handle")
+
     def test_only_the_v3_pipeline_path_is_accepted(self):
         PipelineError, load_pipeline = _loader()
         with TemporaryDirectory() as directory:
@@ -104,6 +127,53 @@ class V3PipelineLoaderTests(unittest.TestCase):
             with self.assertRaises(PipelineError) as document_error:
                 load_pipeline(path)
             self.assertEqual(document_error.exception.reason, "v3-yaml-multiple-documents")
+
+    def test_rejects_non_json_yaml_scalars_and_complex_mapping_keys(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, path):
+            document = __import__("yaml").safe_load(path.read_text(encoding="utf-8"))
+            document["stages"][0]["slots"][0]["condition"] = {
+                "eq": ["operationType", date(2026, 8, 9)]
+            }
+            path.write_text(
+                __import__("yaml").safe_dump(document, sort_keys=False),
+                encoding="utf-8",
+            )
+            try:
+                load_pipeline(path)
+            except Exception as error:
+                self.assertIsInstance(error, PipelineError)
+                self.assertEqual(error.reason, "v3-yaml-non-json-compatible")
+            else:
+                self.fail("timestamp scalar was accepted")
+
+            path.write_text(
+                "schemaVersion: 3\nstages: []\n"
+                "? [complex, key]\n: rejected\n",
+                encoding="utf-8",
+            )
+            try:
+                load_pipeline(path)
+            except Exception as error:
+                self.assertIsInstance(error, PipelineError)
+                self.assertEqual(error.reason, "v3-yaml-non-json-compatible")
+            else:
+                self.fail("complex mapping key was accepted")
+
+    def test_pipeline_wraps_json_serialization_type_errors(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, path):
+            with patch(
+                "selfworkflow.v3.catalog.json.dumps",
+                side_effect=TypeError("injected serialization failure"),
+            ):
+                try:
+                    load_pipeline(path)
+                except Exception as error:
+                    self.assertIsInstance(error, PipelineError)
+                    self.assertEqual(error.reason, "v3-json-serialization-invalid")
+                else:
+                    self.fail("serialization failure escaped")
 
     def test_enforces_stage_order_slot_uniqueness_and_condition_contract(self):
         PipelineError, load_pipeline = _loader()

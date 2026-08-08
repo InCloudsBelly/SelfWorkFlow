@@ -1,9 +1,7 @@
 import hashlib
-import io
 import importlib.util
 import json
 from pathlib import Path
-import re
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -83,24 +81,137 @@ class V3CatalogCompilerTests(unittest.TestCase):
         payload = b"x" * (limit + 2)
         read_sizes = []
 
-        class TrackingStream(io.BytesIO):
+        class TrackingStream:
+            def __init__(self, source):
+                self.source = source
+
             def read(self, size=-1):
                 read_sizes.append(size)
-                return super().read(size)
+                return self.source.read(size)
+
+            def fileno(self):
+                return self.source.fileno()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.source.close()
 
         with TemporaryDirectory() as directory:
             path = Path(directory) / "changing.yaml"
             path.write_bytes(payload)
-            metadata = SimpleNamespace(st_size=limit, st_file_attributes=0)
+            actual = path.lstat()
+            metadata = SimpleNamespace(
+                st_dev=actual.st_dev,
+                st_file_attributes=getattr(actual, "st_file_attributes", 0),
+                st_ino=actual.st_ino,
+                st_mode=actual.st_mode,
+                st_size=limit,
+            )
+            source = path.open("rb")
             with (
                 patch.object(Path, "lstat", return_value=metadata),
-                patch.object(Path, "open", return_value=TrackingStream(payload)),
+                patch.object(Path, "open", return_value=TrackingStream(source)),
                 self.assertRaises(CatalogError) as raised,
             ):
                 _read_bytes(path, limit)
 
         self.assertEqual(raised.exception.reason, "v3-yaml-resource-limit")
         self.assertEqual(read_sizes, [limit + 1])
+
+    def test_catalog_hash_and_yaml_parse_share_one_source_snapshot(self):
+        from selfworkflow.v3 import catalog
+
+        with _workspace() as (_, root):
+            module_path = root / "catalog" / "v3" / "modules" / "review.yaml"
+            domain_path = root / "catalog" / "v3" / "domains" / "foundation.yaml"
+            original_module = module_path.read_bytes()
+            changed_module = yaml.safe_load(original_module)
+            changed_module["stage"] = "verified"
+            changed_module["slot"] = "verify.execution"
+            changed_module_bytes = yaml.safe_dump(
+                changed_module, sort_keys=False
+            ).encode("utf-8")
+            snapshots = {
+                module_path: (original_module, changed_module_bytes),
+                domain_path: (
+                    domain_path.read_bytes(),
+                    b"schemaVersion: 3\nid: foundation\nmodules: []\n",
+                ),
+            }
+            reads = {path: 0 for path in snapshots}
+            original_read = catalog._read_bytes
+
+            def changing_read(path, limit):
+                if path not in snapshots:
+                    return original_read(path, limit)
+                read_index = reads[path]
+                reads[path] += 1
+                return snapshots[path][min(read_index, 1)]
+
+            with patch.object(catalog, "_read_bytes", side_effect=changing_read):
+                compiled = catalog.compile_catalog(
+                    root / "catalog" / "v3" / "index.yaml"
+                )
+
+        self.assertEqual(reads, {module_path: 1, domain_path: 1})
+        module = compiled.document["catalog"]["modules"][0]
+        self.assertEqual((module["stage"], module["slot"]), ("reviewed", "review.primary"))
+
+    def test_rejects_non_json_yaml_scalars_and_complex_mapping_keys(self):
+        CatalogError, compile_catalog = _compiler()
+        with _workspace() as (_, root):
+            index_path = root / "catalog" / "v3" / "index.yaml"
+            module_path = root / "catalog" / "v3" / "modules" / "review.yaml"
+            module_path.write_text(
+                module_path.read_text(encoding="utf-8").replace(
+                    "sourceHash: sha256:", "sourceHash: 2026-08-09 # sha256:"
+                ),
+                encoding="utf-8",
+            )
+            index = yaml.safe_load(index_path.read_text(encoding="utf-8"))
+            index["modules"][0]["hash"] = _hash(module_path.read_bytes())
+            index_path.write_text(
+                yaml.safe_dump(index, sort_keys=False), encoding="utf-8"
+            )
+            try:
+                compile_catalog(index_path)
+            except Exception as error:
+                self.assertIsInstance(error, CatalogError)
+                self.assertEqual(error.reason, "v3-yaml-non-json-compatible")
+            else:
+                self.fail("timestamp scalar was accepted")
+
+        with _workspace() as (_, root):
+            index_path = root / "catalog" / "v3" / "index.yaml"
+            index_path.write_text(
+                "schemaVersion: 3\ndomains: []\nmodules: []\n"
+                "? [complex, key]\n: rejected\n",
+                encoding="utf-8",
+            )
+            try:
+                compile_catalog(index_path)
+            except Exception as error:
+                self.assertIsInstance(error, CatalogError)
+                self.assertEqual(error.reason, "v3-yaml-non-json-compatible")
+            else:
+                self.fail("complex mapping key was accepted")
+
+    def test_catalog_wraps_json_serialization_type_errors(self):
+        CatalogError, compile_catalog = _compiler()
+        with _workspace() as (_, root):
+            with patch(
+                "selfworkflow.v3.catalog.json.dumps",
+                side_effect=TypeError("injected serialization failure"),
+            ):
+                try:
+                    compile_catalog(root / "catalog" / "v3" / "index.yaml")
+                except Exception as error:
+                    self.assertIsInstance(error, CatalogError)
+                    self.assertEqual(error.reason, "v3-json-serialization-invalid")
+                else:
+                    self.fail("serialization failure escaped")
 
     def test_public_api_compiles_a_v3_envelope(self):
         CatalogError, compile_catalog = _compiler()

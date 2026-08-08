@@ -1,15 +1,16 @@
 """Strict, deterministic loading for the independent V3 pipeline."""
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any
 
 from selfworkflow.v3.catalog import (
+    CatalogError,
     _MAX_DOCUMENT_BYTES,
     _canonical_hash,
     _canonical_json,
     _is_reparse_point,
+    _json_text,
     _load_yaml_file,
 )
 from selfworkflow.v3.contracts import ContractError, load_contract
@@ -40,11 +41,10 @@ def load_pipeline(source: object = None) -> LoadedPipeline:
     path = _v3_pipeline_path(source)
     try:
         document = _load_yaml_file(path, _MAX_DOCUMENT_BYTES)
-    except Exception as error:
-        if isinstance(error, PipelineError):
-            raise
-        reason = getattr(error, "reason", "v3-yaml-invalid")
-        raise PipelineError(reason) from None
+    except CatalogError as error:
+        raise PipelineError(error.reason) from None
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        raise PipelineError("v3-yaml-invalid") from None
     if not isinstance(document, dict):
         raise PipelineError("v3-pipeline-schema-invalid")
     if document.get("schemaVersion") != 3:
@@ -52,10 +52,12 @@ def load_pipeline(source: object = None) -> LoadedPipeline:
     try:
         validated = load_contract(
             "pipeline.schema.json",
-            json.dumps(document, ensure_ascii=False),
+            _json_text(document),
         )
     except ContractError:
         raise PipelineError("v3-pipeline-schema-invalid") from None
+    except CatalogError as error:
+        raise PipelineError(error.reason) from None
     stage_ids = [stage["id"] for stage in validated["stages"]]
     if tuple(stage_ids) != _STAGE_ORDER:
         raise PipelineError("v3-pipeline-stage-order-invalid")
@@ -65,8 +67,12 @@ def load_pipeline(source: object = None) -> LoadedPipeline:
             if slot["id"] in slot_ids:
                 raise PipelineError("v3-pipeline-slot-duplicate")
             slot_ids.add(slot["id"])
-    content = _canonical_json(validated)
-    return LoadedPipeline(validated, content, _canonical_hash(validated))
+    try:
+        content = _canonical_json(validated)
+        pipeline_hash = _canonical_hash(validated)
+    except CatalogError as error:
+        raise PipelineError(error.reason) from None
+    return LoadedPipeline(validated, content, pipeline_hash)
 
 
 def _v3_pipeline_path(source: object) -> Path:

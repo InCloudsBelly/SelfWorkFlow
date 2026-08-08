@@ -3,8 +3,11 @@
 from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path, PurePosixPath, PureWindowsPath
+import math
+import os
+from pathlib import Path, PureWindowsPath
 import re
+import stat
 from typing import Any
 
 import yaml
@@ -26,6 +29,10 @@ class _DuplicateKeyError(ValueError):
 
 
 class _AliasError(ValueError):
+    pass
+
+
+class _NonJsonYamlError(ValueError):
     pass
 
 
@@ -61,6 +68,8 @@ def _construct_unique_mapping(
     result: dict[object, object] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
+        if type(key) is not str:
+            raise _NonJsonYamlError
         if key in result:
             raise _DuplicateKeyError
         result[key] = loader.construct_object(value_node, deep=deep)
@@ -101,14 +110,15 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
     if not isinstance(document.get("domains"), list) or not isinstance(document.get("modules"), list):
         raise CatalogError("v3-catalog-schema-invalid")
 
-    domain_declarations = _read_refs(document["domains"], "domains")
-    module_declarations = _read_refs(document["modules"], "modules")
+    domain_declarations = _read_refs(document["domains"])
+    module_declarations = _read_refs(document["modules"])
     domains: list[dict[str, Any]] = []
     domain_modules: dict[str, list[str]] = {}
     for declaration in domain_declarations:
         target = _safe_ref(catalog_root, declaration["ref"])
-        _verify_hash(target, declaration["hash"])
-        domain = _load_yaml_file(target, _MAX_SOURCE_BYTES)
+        source_bytes = _read_bytes(target, _MAX_SOURCE_BYTES)
+        _verify_hash(source_bytes, declaration["hash"])
+        domain = _load_yaml_bytes(source_bytes)
         _validate_domain(domain)
         if domain["id"] != declaration["id"]:
             raise CatalogError("v3-catalog-source-id-mismatch")
@@ -123,14 +133,15 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
     module_ids: set[str] = set()
     for declaration in module_declarations:
         target = _safe_ref(catalog_root, declaration["ref"])
-        _verify_hash(target, declaration["hash"])
+        source_bytes = _read_bytes(target, _MAX_SOURCE_BYTES)
+        _verify_hash(source_bytes, declaration["hash"])
         try:
-            source_document = _load_yaml_file(target, _MAX_SOURCE_BYTES)
+            source_document = _load_yaml_bytes(source_bytes)
             module = load_contract(
                 "module.schema.json",
-                json.dumps(source_document, ensure_ascii=False),
+                _json_text(source_document),
             )
-        except (ContractError, UnicodeError):
+        except ContractError:
             raise CatalogError("v3-module-schema-invalid") from None
         if module["id"] != declaration["id"]:
             raise CatalogError("v3-catalog-source-id-mismatch")
@@ -166,9 +177,25 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
 
 
 def _canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    return _json_text(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _json_text(
+    value: object,
+    *,
+    sort_keys: bool = False,
+    separators: tuple[str, str] | None = None,
+) -> str:
+    try:
+        return json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            sort_keys=sort_keys,
+            separators=separators,
+        )
+    except (OverflowError, RecursionError, TypeError, ValueError):
+        raise CatalogError("v3-json-serialization-invalid") from None
 
 
 def _canonical_hash(value: object) -> str:
@@ -177,11 +204,23 @@ def _canonical_hash(value: object) -> str:
 
 def _read_bytes(path: Path, limit: int) -> bytes:
     try:
-        metadata = path.lstat()
-        if _is_reparse_point(path) or metadata.st_size > limit:
-            raise CatalogError("v3-yaml-resource-limit" if metadata.st_size > limit else "v3-catalog-ref-reparse")
+        before = path.lstat()
+        if _metadata_is_reparse(before) or before.st_size > limit:
+            raise CatalogError("v3-yaml-resource-limit" if before.st_size > limit else "v3-catalog-ref-reparse")
         with path.open("rb") as source:
+            opened = os.fstat(source.fileno())
+            if not os.path.samestat(before, opened):
+                raise CatalogError("v3-yaml-path-changed")
             data = source.read(limit + 1)
+            after_read = os.fstat(source.fileno())
+            after_path = path.lstat()
+            if _metadata_is_reparse(after_path):
+                raise CatalogError("v3-catalog-ref-reparse")
+            if (
+                not os.path.samestat(opened, after_read)
+                or not os.path.samestat(after_read, after_path)
+            ):
+                raise CatalogError("v3-yaml-path-changed")
         if len(data) > limit:
             raise CatalogError("v3-yaml-resource-limit")
         return data
@@ -192,16 +231,24 @@ def _read_bytes(path: Path, limit: int) -> bytes:
 
 
 def _load_yaml_file(path: Path, limit: int) -> object:
+    return _load_yaml_bytes(_read_bytes(path, limit))
+
+
+def _load_yaml_bytes(data: bytes) -> object:
     try:
-        text = _read_bytes(path, limit).decode("utf-8")
+        text = data.decode("utf-8")
     except UnicodeError:
         raise CatalogError("v3-yaml-invalid") from None
     try:
-        return yaml.load(text, Loader=_StrictLoader)
+        document = yaml.load(text, Loader=_StrictLoader)
+        _validate_json_compatible(document)
+        return document
     except _DuplicateKeyError:
         raise CatalogError("v3-yaml-duplicate-key") from None
     except _AliasError:
         raise CatalogError("v3-yaml-alias-forbidden") from None
+    except (_NonJsonYamlError, TypeError):
+        raise CatalogError("v3-yaml-non-json-compatible") from None
     except yaml.composer.ComposerError as error:
         if "single document" in str(error).lower():
             raise CatalogError("v3-yaml-multiple-documents") from None
@@ -210,9 +257,33 @@ def _load_yaml_file(path: Path, limit: int) -> object:
         raise CatalogError("v3-yaml-invalid") from None
 
 
+def _validate_json_compatible(value: object) -> None:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if current is None or type(current) in {bool, int, str}:
+            continue
+        if type(current) is float:
+            if math.isfinite(current):
+                continue
+            raise _NonJsonYamlError
+        if type(current) is list:
+            pending.extend(current)
+            continue
+        if type(current) is dict:
+            if any(type(key) is not str for key in current):
+                raise _NonJsonYamlError
+            pending.extend(current.values())
+            continue
+        raise _NonJsonYamlError
+
+
 def _is_reparse_point(path: Path) -> bool:
-    metadata = path.lstat()
-    return path.is_symlink() or bool(
+    return _metadata_is_reparse(path.lstat())
+
+
+def _metadata_is_reparse(metadata: os.stat_result) -> bool:
+    return stat.S_ISLNK(metadata.st_mode) or bool(
         getattr(metadata, "st_file_attributes", 0) & _REPARSE_POINT
     )
 
@@ -274,10 +345,10 @@ def _safe_ref(catalog_root: Path, reference: object) -> Path:
     return target
 
 
-def _verify_hash(path: Path, expected: object) -> None:
+def _verify_hash(source_bytes: bytes, expected: object) -> None:
     if type(expected) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
         raise CatalogError("v3-catalog-source-hash-invalid")
-    actual = _hash_bytes(_read_bytes(path, _MAX_SOURCE_BYTES))
+    actual = _hash_bytes(source_bytes)
     if actual != expected:
         raise CatalogError("v3-catalog-source-hash-mismatch")
 
@@ -295,7 +366,7 @@ def _valid_id(value: object) -> bool:
     return type(value) is str and _IDENTIFIER.fullmatch(value) is not None
 
 
-def _read_refs(values: object, collection: str) -> list[dict[str, str]]:
+def _read_refs(values: object) -> list[dict[str, str]]:
     if not isinstance(values, list):
         raise CatalogError("v3-catalog-schema-invalid")
     result: list[dict[str, str]] = []
