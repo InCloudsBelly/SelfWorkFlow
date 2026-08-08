@@ -3,6 +3,9 @@ domains:
   - id: workflow
     ref: domains/workflow.yaml
     hash: sha256:e34621b32eca4828109dd674e1d48f551294c75b85b84ef83585537d4ba353c4
+  - id: test-quality
+    ref: domains/test-quality.yaml
+    hash: sha256:3f4fa0d84cd2bdf2bdd4dcefa988b347bc0712550be8f08f791956185a3017d2
 modules:
   - id: discover-context
     ref: modules/discover-context.yaml
@@ -31,3 +34,18 @@ modules:
   - id: complete-gate
     ref: modules/complete-gate.yaml
     hash: sha256:c47819570eac1f6b5c951488f6fcf6a0fd1fb751addb79a669baf2deebdd3dd3
+  - id: tea-test-design
+    ref: modules/tea-test-design.yaml
+    hash: sha256:870fb55f025f16619b909fb041b5c4b6d9acb3a0583b443ee540e9a1e591e120
+  - id: tea-atdd
+    ref: modules/tea-atdd.yaml
+    hash: sha256:b1634835d40dfeb01b4fde4234078ecb7e01fbaf48ce8e8af881c2d674afaf85
+  - id: tea-test-review
+    ref: modules/tea-test-review.yaml
+    hash: sha256:40f372b99753246205f018aefb286a7bdc5ac13619b990ecce54285e0f811351
+  - id: tea-trace
+    ref: modules/tea-trace.yaml
+    hash: sha256:b1e4141f459b9cdc4de02b750f6c37726d41f7db734247308563a111148c3876
+  - id: tea-nfr
+    ref: modules/tea-nfr.yaml
+    hash: sha256:efe47898d28898ccffd3ea6e209f45771c9502bfb9a33254fbc00b5296206317

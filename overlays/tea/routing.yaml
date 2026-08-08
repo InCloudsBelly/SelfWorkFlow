@@ -1,0 +1,13 @@
+schemaVersion: 3
+minimumLevelAfterGrillMe: T2
+rules:
+  - {stage: plan, minimumLevel: T2, workflowIds: [test-design]}
+  - {stage: review, minimumLevel: T2, workflowIds: [test-review]}
+  - {stage: implementation, minimumLevel: T2, workflowIds: [atdd], requiresAcceptanceRed: true}
+  - {stage: verify, minimumLevel: T3, workflowIds: [trace, nfr]}
+  - {stage: release, minimumLevel: T3, workflowIds: [trace, nfr]}
+jitKinds:
+  skill: SKILL.md
+  workflow: workflow.yaml
+  step: steps-c
+  resource: resources

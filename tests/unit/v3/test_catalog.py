@@ -431,7 +431,7 @@ class V3CatalogCompilerTests(unittest.TestCase):
         self.assertEqual(first.content, second.content)
         self.assertEqual([item["id"] for item in first.document["catalog"]["modules"]], ["alpha", "zeta"])
 
-    def test_checked_in_v3_catalog_is_the_small_supported_mainline(self):
+    def test_checked_in_v3_catalog_keeps_optional_tea_fail_closed(self):
         CatalogError, compile_catalog = _compiler()
         root = Path(__file__).resolve().parents[3]
         compiled = compile_catalog(root / "catalog" / "v3" / "index.yaml")
@@ -440,8 +440,15 @@ class V3CatalogCompilerTests(unittest.TestCase):
         self.assertTrue(all(module["schemaVersion"] == 3 for module in modules))
         serialized = compiled.content.decode("utf-8")
         self.assertNotIn("provider", serialized.lower())
-        self.assertNotIn("tea", serialized.lower())
         self.assertNotIn("c++", serialized.lower())
+        tea = [module for module in modules if module["id"].startswith("tea-")]
+        self.assertEqual(len(tea), 5)
+        self.assertTrue(all(module["selectionMode"] == "bounded-runtime" for module in tea))
+        self.assertTrue(all(module["invocation"]["kind"] == "skill" for module in tea))
+        self.assertTrue(all(
+            module["supportEvidence"]["runtimeCapability"] == "unverified"
+            for module in tea
+        ))
 
 
 if __name__ == "__main__":

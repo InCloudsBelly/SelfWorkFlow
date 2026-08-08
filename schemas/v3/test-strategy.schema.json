@@ -28,6 +28,7 @@
     "techniques": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/technique"}},
     "authorizationRequirements": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/authorizationRequirement"}},
     "coverageObligations": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/obligation"}},
+    "residualUnverified": {"$ref": "#/$defs/idList"},
     "strategyHash": {"$ref": "#/$defs/sha256"}
   },
   "allOf": [
@@ -59,6 +60,10 @@
       "properties": {
         "riskId": {"$ref": "#/$defs/stableId"},
         "priority": {"$ref": "#/$defs/priority"},
+        "probability": {"type": "integer", "minimum": 1, "maximum": 3},
+        "impact": {"type": "integer", "minimum": 1, "maximum": 3},
+        "score": {"type": "integer", "minimum": 1, "maximum": 9},
+        "residualStatus": {"enum": ["verified", "unverified"]},
         "acceptanceConditionIds": {"$ref": "#/$defs/idList"}
       }
     },

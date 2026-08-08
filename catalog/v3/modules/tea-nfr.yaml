@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: tea-nfr
+sourceHash: sha256:7eb397a9d17fa990ee37bd2f3bb7891899ee939a0e198c207d8afefefb76a315
+stage: verified
+slot: test.quality.verify
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: dependencies/upstream/tea/src/workflows/testarch/bmad-testarch-nfr/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 96, estimatedExecutionCost: 32}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

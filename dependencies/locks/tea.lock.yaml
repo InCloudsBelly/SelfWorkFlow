@@ -1,0 +1,22 @@
+schemaVersion: 3
+sourceId: tea
+canonicalUrl: https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise.git
+path: dependencies/upstream/tea
+gitlinkCommit: 2882e9c8972a94f48d5e848039eec435436f2459
+gitTree: 75cb110d9d631afee99edfd785d678505d641ee5
+inventoryHash: sha256:10ff4ddbce7595efad9ae377f74a7e15e0ef771462aac3dbbb4975a8dc7373bb
+license:
+  path: LICENSE
+  spdx: MIT
+  hash: sha256:baf7ec28127b3fd98c7311987f9a6234177acff0921a03f6c205c7f39b28bb01
+adapterFiles:
+  - path: overlays/tea/adapter.yaml
+    hash: sha256:7eb397a9d17fa990ee37bd2f3bb7891899ee939a0e198c207d8afefefb76a315
+  - path: overlays/tea/routing.yaml
+    hash: sha256:629443609b46d693905cb43422a04578a8d335b991737f01152571b81336260a
+adapterHash: sha256:674adda31d9182dce9be056f318da1111952093d5685281f363cc829a02fa228
+status:
+  sourceIntegrity: supported
+  adapterSupport: supported
+  runtimeCapability: unverified
+  behaviorEvidence: unverified

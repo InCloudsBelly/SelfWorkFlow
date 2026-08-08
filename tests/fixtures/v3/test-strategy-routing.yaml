@@ -1,0 +1,8 @@
+schemaVersion: 3
+cases:
+  - {stage: plan, testLevel: T1, expected: []}
+  - {stage: plan, testLevel: T2, expected: [test-design]}
+  - {stage: review, testLevel: T2, expected: [test-review]}
+  - {stage: implementation, testLevel: T2, acceptanceRed: true, expected: [atdd]}
+  - {stage: verify, testLevel: T2, expected: []}
+  - {stage: verify, testLevel: T3, expected: [trace, nfr]}

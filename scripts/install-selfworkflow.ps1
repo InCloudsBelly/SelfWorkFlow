@@ -273,6 +273,17 @@ try {
     }
     $script:PythonExecutable = Ensure-RepositoryEnvironment
 
+    Set-InstallStage "submodules" 25
+    Write-InstallLog "Preparing the path-limited normal submodule profile."
+    $submoduleExit = Invoke-NativeLogged $script:PythonExecutable @(
+        "-m", "selfworkflow.v3.submodule_profiles",
+        "--repository", $RepositoryRoot,
+        "--profile", "normal"
+    )
+    if ($submoduleExit -ne 0) {
+        Stop-Install "submodules" 25 "normal-submodule-profile-failed"
+    }
+
     Set-InstallStage "grill-selection" 30
     $grillTarget = Join-Path $AgentsRoot "skills\grill-me\SKILL.md"
     if ($GrillMeChoice -eq "Ask") {

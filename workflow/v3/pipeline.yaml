@@ -30,24 +30,44 @@ stages:
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native]
         selectionMode: static
+      - id: test.quality.plan
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+        condition: {gte: [testLevelFloor, T2]}
   - id: implemented
     slots:
       - id: implement.method
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native]
         selectionMode: static
+      - id: test.quality.implementation
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+        condition: {gte: [testLevelFloor, T2]}
   - id: reviewed
     slots:
       - id: review.self
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native]
         selectionMode: static
+      - id: test.quality.review
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+        condition: {gte: [testLevelFloor, T2]}
   - id: verified
     slots:
       - id: verify.execution
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native]
         selectionMode: static
+      - id: test.quality.verify
+        cardinality: zero-or-many
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+        condition: {gte: [testLevelFloor, T3]}
   - id: completed
     slots:
       - id: complete.gate
