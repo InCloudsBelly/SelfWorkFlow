@@ -1,0 +1,5 @@
+principles:
+  - stableId: internal-gateway
+    content: Use InternalProject gateway.
+quarantineTerms:
+  - InternalProject

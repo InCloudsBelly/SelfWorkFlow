@@ -1,0 +1,3 @@
+principles:
+  - stableId: owner-first
+    content: Repair the earliest layer that owns the invariant.
