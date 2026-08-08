@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "version", "artifactRoot", "agentsRoot", "codexRoot", "stateRoot", "artifactHash", "artifactFiles", "baselineHashes", "status", "issues", "securityStatus", "planHash"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "operation": {"const": "install"},
+    "version": {"type": "string", "minLength": 1},
+    "artifactRoot": {"type": "string", "minLength": 1},
+    "agentsRoot": {"type": "string", "minLength": 1},
+    "codexRoot": {"type": "string", "minLength": 1},
+    "stateRoot": {"type": "string", "minLength": 1},
+    "artifactHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifactFiles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "baselineHashes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["agentsRoot", "codexRoot"],
+      "properties": {"agentsRoot": {"type": "string"}, "codexRoot": {"type": "string"}}
+    },
+    "status": {"enum": ["ready", "paused", "already-installed"]},
+    "issues": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "securityStatus": {"enum": ["verified", "unverified"]},
+    "planHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

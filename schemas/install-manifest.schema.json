@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manifestPath", "transactionId", "transactionPath", "version", "artifactHash", "operations", "securityStatus"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "manifestPath": {"type": "string"},
+    "transactionId": {"type": "string"},
+    "transactionPath": {"type": "string"},
+    "version": {"type": "string"},
+    "artifactHash": {"type": "string"},
+    "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+    "securityStatus": {"enum": ["verified", "unverified"]}
+  },
+  "$defs": {
+    "operation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target", "beforeExists", "beforeHash", "afterHash", "backupPath"],
+      "properties": {
+        "target": {"type": "string"}, "beforeExists": {"type": "boolean"},
+        "beforeHash": {"type": ["string", "null"]}, "afterHash": {"type": "string"},
+        "backupPath": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
