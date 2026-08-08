@@ -1,0 +1,12 @@
+schemaVersion: 3
+id: workflow
+modules:
+  - discover-context
+  - capability-check
+  - classify-task
+  - design-precheck
+  - plan-primary
+  - implement-tdd
+  - review-self
+  - verify-execution
+  - complete-gate

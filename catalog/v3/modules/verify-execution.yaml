@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: verify-execution
+sourceHash: sha256:7777777777777777777777777777777777777777777777777777777777777777
+stage: verified
+slot: verify.execution
+selectionMode: static
+invocation: {kind: agent-native, ref: verify-execution}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

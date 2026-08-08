@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: complete-gate
+sourceHash: sha256:8888888888888888888888888888888888888888888888888888888888888888
+stage: completed
+slot: complete.gate
+selectionMode: static
+invocation: {kind: agent-native, ref: complete-gate}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: capability-check
+sourceHash: sha256:1111111111111111111111111111111111111111111111111111111111111111
+stage: capability-checked
+slot: capability.check
+selectionMode: static
+invocation: {kind: agent-native, ref: capability-check}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

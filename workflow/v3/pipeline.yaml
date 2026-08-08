@@ -1,0 +1,56 @@
+schemaVersion: 3
+stages:
+  - id: discovered
+    slots:
+      - id: discover.context
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: capability-checked
+    slots:
+      - id: capability.check
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: classified
+    slots:
+      - id: classify.task
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: designed
+    slots:
+      - id: design.precheck
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: planned
+    slots:
+      - id: plan.primary
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: implemented
+    slots:
+      - id: implement.method
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: reviewed
+    slots:
+      - id: review.self
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: verified
+    slots:
+      - id: verify.execution
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: completed
+    slots:
+      - id: complete.gate
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static

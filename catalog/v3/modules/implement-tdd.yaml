@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: implement-tdd
+sourceHash: sha256:5555555555555555555555555555555555555555555555555555555555555555
+stage: implemented
+slot: implement.method
+selectionMode: static
+invocation: {kind: agent-native, ref: implement-tdd}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

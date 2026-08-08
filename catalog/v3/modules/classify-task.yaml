@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: classify-task
+sourceHash: sha256:2222222222222222222222222222222222222222222222222222222222222222
+stage: classified
+slot: classify.task
+selectionMode: static
+invocation: {kind: agent-native, ref: classify-task}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

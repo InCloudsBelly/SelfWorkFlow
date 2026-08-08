@@ -1,0 +1,33 @@
+schemaVersion: 3
+domains:
+  - id: workflow
+    ref: domains/workflow.yaml
+    hash: sha256:e34621b32eca4828109dd674e1d48f551294c75b85b84ef83585537d4ba353c4
+modules:
+  - id: discover-context
+    ref: modules/discover-context.yaml
+    hash: sha256:c81d38476ca34578fc0b5e675cac2f148b79f17035cbf34f70ccd0a68ee0fbca
+  - id: capability-check
+    ref: modules/capability-check.yaml
+    hash: sha256:3fff2ff90b4943f73e959cd528ea07b7a9132bc2b6578fe46402207d764a695f
+  - id: classify-task
+    ref: modules/classify-task.yaml
+    hash: sha256:f42b6c26ddccdedeb3aab6c9de0ef13c0c1d51590514cf36d60f9ea461443066
+  - id: design-precheck
+    ref: modules/design-precheck.yaml
+    hash: sha256:cb06d4fd7eddd62a5bdc7856c8753d73bcf8a7359cbae5cee9e7a64de9712192
+  - id: plan-primary
+    ref: modules/plan-primary.yaml
+    hash: sha256:836178f203f560b587c774eb55e8a55b151138967a12a8d680cafa023287100a
+  - id: implement-tdd
+    ref: modules/implement-tdd.yaml
+    hash: sha256:a6ca1498fe7dff9f6a5fed144c83861f0d557d941d6f1375402744118d93c85b
+  - id: review-self
+    ref: modules/review-self.yaml
+    hash: sha256:71d7ca570cfc6be1ad797ced247eb7230acbba75063efeaa900c399d40bdd0bc
+  - id: verify-execution
+    ref: modules/verify-execution.yaml
+    hash: sha256:acca6b6d820844c078e51972bdc5cd92815c9d5de127d2f243afe4c0b013436d
+  - id: complete-gate
+    ref: modules/complete-gate.yaml
+    hash: sha256:c47819570eac1f6b5c951488f6fcf6a0fd1fb751addb79a669baf2deebdd3dd3

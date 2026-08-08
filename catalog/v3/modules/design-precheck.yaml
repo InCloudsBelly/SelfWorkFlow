@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: design-precheck
+sourceHash: sha256:3333333333333333333333333333333333333333333333333333333333333333
+stage: designed
+slot: design.precheck
+selectionMode: static
+invocation: {kind: agent-native, ref: design-precheck}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

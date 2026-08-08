@@ -1,0 +1,159 @@
+import importlib.util
+import json
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+
+_STAGES = (
+    "discovered", "capability-checked", "classified", "designed", "planned",
+    "implemented", "reviewed", "verified", "completed",
+)
+
+
+@contextmanager
+def _pipeline_workspace():
+    temporary = TemporaryDirectory()
+    root = Path(temporary.name)
+    stages = [
+        {
+            "id": stage_id,
+            "slots": [
+                {
+                    "id": f"{stage_id}.primary",
+                    "cardinality": "exactly-one",
+                    "allowedInvocationKinds": ["agent-native"],
+                    "selectionMode": "static",
+                }
+            ],
+        }
+        for stage_id in _STAGES
+    ]
+    pipeline = {"schemaVersion": 3, "stages": stages}
+    path = root / "workflow" / "v3" / "pipeline.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(__import__("yaml").safe_dump(pipeline, sort_keys=False), encoding="utf-8")
+    try:
+        yield temporary, root, path
+    finally:
+        temporary.cleanup()
+
+
+def _loader():
+    if importlib.util.find_spec("selfworkflow.v3.pipeline") is None:
+        raise AssertionError("v3-pipeline-loader-not-found")
+    from selfworkflow.v3.pipeline import PipelineError, load_pipeline
+
+    return PipelineError, load_pipeline
+
+
+class V3PipelineLoaderTests(unittest.TestCase):
+    def test_v3_pipeline_loader_module_exists(self):
+        spec = importlib.util.find_spec("selfworkflow.v3.pipeline")
+        self.assertIsNotNone(spec, "v3-pipeline-loader-not-found")
+
+    def test_public_api_loads_a_deterministic_v3_pipeline(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, path):
+            loaded = load_pipeline(path)
+        self.assertEqual(loaded.document["schemaVersion"], 3)
+        self.assertRegex(loaded.pipeline_hash, r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(json.loads(loaded.content), loaded.document)
+
+    def test_only_the_v3_pipeline_path_is_accepted(self):
+        PipelineError, load_pipeline = _loader()
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            v2 = root / "workflow" / "pipeline.yaml"
+            v2.parent.mkdir(parents=True)
+            v2.write_text("schemaVersion: 2\n", encoding="utf-8")
+            with self.assertRaises(PipelineError) as raised:
+                load_pipeline(v2)
+        self.assertEqual(raised.exception.reason, "v3-pipeline-path-invalid")
+        self.assertNotIn(str(root), str(raised.exception))
+
+    def test_rejects_version_mixing_unknown_fields_duplicate_keys_and_aliases(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, path):
+            path.write_text("schemaVersion: 2\nstages: []\n", encoding="utf-8")
+            with self.assertRaises(PipelineError) as version_error:
+                load_pipeline(path)
+            self.assertEqual(version_error.exception.reason, "v3-pipeline-version-mismatch")
+            path.write_text("schemaVersion: 3\nstages: []\nextra: true\n", encoding="utf-8")
+            with self.assertRaises(PipelineError) as field_error:
+                load_pipeline(path)
+            self.assertEqual(field_error.exception.reason, "v3-pipeline-schema-invalid")
+            path.write_text("schemaVersion: 3\nschemaVersion: 3\nstages: []\n", encoding="utf-8")
+            with self.assertRaises(PipelineError) as duplicate_error:
+                load_pipeline(path)
+            self.assertEqual(duplicate_error.exception.reason, "v3-yaml-duplicate-key")
+            path.write_text("schemaVersion: 3\nstages: &x []\nalias: *x\n", encoding="utf-8")
+            with self.assertRaises(PipelineError) as alias_error:
+                load_pipeline(path)
+            self.assertEqual(alias_error.exception.reason, "v3-yaml-alias-forbidden")
+
+    def test_rejects_non_utf8_and_multiple_documents(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, path):
+            path.write_bytes(b"\xff")
+            with self.assertRaises(PipelineError) as encoding_error:
+                load_pipeline(path)
+            self.assertEqual(encoding_error.exception.reason, "v3-yaml-invalid")
+            path.write_text("schemaVersion: 3\nstages: []\n---\n{}\n", encoding="utf-8")
+            with self.assertRaises(PipelineError) as document_error:
+                load_pipeline(path)
+            self.assertEqual(document_error.exception.reason, "v3-yaml-multiple-documents")
+
+    def test_enforces_stage_order_slot_uniqueness_and_condition_contract(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, path):
+            document = __import__("yaml").safe_load(path.read_text(encoding="utf-8"))
+            document["stages"][0], document["stages"][1] = document["stages"][1], document["stages"][0]
+            path.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaises(PipelineError) as order_error:
+                load_pipeline(path)
+            self.assertEqual(order_error.exception.reason, "v3-pipeline-stage-order-invalid")
+            document["stages"][0], document["stages"][1] = document["stages"][1], document["stages"][0]
+            document["stages"][1]["slots"][0]["id"] = document["stages"][0]["slots"][0]["id"]
+            path.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaises(PipelineError) as slot_error:
+                load_pipeline(path)
+            self.assertEqual(slot_error.exception.reason, "v3-pipeline-slot-duplicate")
+            document["stages"][1]["slots"][0]["id"] = "capability-checked.primary"
+            document["stages"][0]["slots"][0]["condition"] = {"regex": ["operationType", ".*"]}
+            path.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaises(PipelineError) as condition_error:
+                load_pipeline(path)
+            self.assertEqual(condition_error.exception.reason, "v3-pipeline-schema-invalid")
+
+    def test_hash_is_stable_for_mapping_order_but_pipeline_order_is_semantic(self):
+        PipelineError, load_pipeline = _loader()
+        with _pipeline_workspace() as (_, _, first_path):
+            first = load_pipeline(first_path)
+            document = __import__("yaml").safe_load(first_path.read_text(encoding="utf-8"))
+            reordered = {"stages": document["stages"], "schemaVersion": document["schemaVersion"]}
+            first_path.write_text(__import__("yaml").safe_dump(reordered, sort_keys=False), encoding="utf-8")
+            second = load_pipeline(first_path)
+            self.assertEqual(first.pipeline_hash, second.pipeline_hash)
+            document["stages"][0], document["stages"][1] = document["stages"][1], document["stages"][0]
+            first_path.write_text(__import__("yaml").safe_dump(document, sort_keys=False), encoding="utf-8")
+            with self.assertRaises(PipelineError):
+                load_pipeline(first_path)
+
+    def test_checked_in_v3_pipeline_is_the_small_supported_mainline(self):
+        PipelineError, load_pipeline = _loader()
+        root = Path(__file__).resolve().parents[3]
+        loaded = load_pipeline(root / "workflow" / "v3" / "pipeline.yaml")
+        self.assertEqual(
+            [stage["id"] for stage in loaded.document["stages"]],
+            list(_STAGES),
+        )
+        serialized = loaded.content.decode("utf-8")
+        self.assertNotIn("provider", serialized.lower())
+        self.assertNotIn("tea", serialized.lower())
+        self.assertNotIn("c++", serialized.lower())
+
+
+if __name__ == "__main__":
+    unittest.main()
