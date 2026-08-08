@@ -62,13 +62,17 @@ def _owner_invocation(**overrides):
         "argv": ("-File", "scripts/test.ps1", "-Test", "protected-rules"),
         "cwd": ".",
         "environment": {},
-        "input_content": {"suite": "protected-rules"},
+        "input_hash": "sha256:" + "0" * 64,
     }
     return ExecutionInvocation(**(values | overrides))
 
 
-def _trusted_owner_store(records):
-    from selfworkflow.evidence import ArtifactCollector
+def _invocation_envelope(invocation):
+    return dict(invocation.envelope)
+
+
+def _trusted_owner_store(records, *, behavioral_invocation=None):
+    from selfworkflow.evidence import ArtifactCollector, ExecutionInvocation
 
     collector = ArtifactCollector()
     for artifact in records.values():
@@ -98,6 +102,15 @@ def _trusted_owner_store(records):
                 scope=attributes.get("scope", ""),
             )
         elif artifact["kind"] == "behavioral-test":
+            envelope = attributes["invocation"]
+            invocation = behavioral_invocation or ExecutionInvocation(
+                executable=envelope["executable"],
+                module=envelope["module"],
+                argv=tuple(envelope["argv"]),
+                cwd=envelope["cwd"],
+                environment={},
+                input_hash=envelope["inputHash"],
+            )
             collector.record_execution(
                 kind="behavioral-test",
                 status=artifact["status"],
@@ -109,7 +122,7 @@ def _trusted_owner_store(records):
                 recorded_at=artifact["recordedAt"],
                 provider=attributes["provider"],
                 receipt_id=attributes["receiptId"],
-                invocation=_owner_invocation(),
+                invocation=invocation,
                 output_content={"status": artifact["status"]},
                 check_type=attributes["checkType"],
                 exit_code=attributes["exitCode"],
@@ -128,23 +141,45 @@ def _owner_case(
     operation_nonce="owner-operation-1",
     proposed_at="2026-08-08T07:30:00Z",
     valid_for_seconds=7200,
+    behavioral_invocation_overrides=None,
 ):
-    from selfworkflow.evidence import OwnerChangeRequest, canonical_content_hash
+    from selfworkflow.evidence import (
+        OwnerChangeRequest,
+        canonical_content_hash,
+        owner_change_proposal_hash,
+        owner_pre_test_subject_hash,
+    )
 
     protected = _protected_document()
     proposed = copy.deepcopy(protected["rules"] if proposed_rules is None else proposed_rules)
     base_hash = canonical_content_hash(protected["rules"])
     proposed_hash = canonical_content_hash(proposed)
-    proposal_hash = canonical_content_hash(
-        {
-            "baseRulesHash": base_hash,
-            "proposedRulesHash": proposed_hash,
-            "previousVersion": protected["policyVersion"],
-            "newVersion": new_version,
-            "operationNonce": operation_nonce,
-            "proposedAt": proposed_at,
-            "validForSeconds": valid_for_seconds,
-        }
+    pre_test_subject_hash = owner_pre_test_subject_hash(
+        base_rules_hash=base_hash,
+        proposed_rules_hash=proposed_hash,
+        previous_version=protected["policyVersion"],
+        new_version=new_version,
+        operation_nonce=operation_nonce,
+        proposed_at=datetime.strptime(proposed_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        ),
+        valid_for_seconds=valid_for_seconds,
+    )
+    invocation = _owner_invocation(
+        input_hash=pre_test_subject_hash,
+        **(behavioral_invocation_overrides or {}),
+    )
+    proposal_hash = owner_change_proposal_hash(
+        base_rules_hash=base_hash,
+        proposed_rules_hash=proposed_hash,
+        previous_version=protected["policyVersion"],
+        new_version=new_version,
+        operation_nonce=operation_nonce,
+        proposed_at=datetime.strptime(proposed_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        ),
+        valid_for_seconds=valid_for_seconds,
+        behavioral_test_invocation_hash=invocation.invocation_hash,
     )
     store = {}
     confirmation = {
@@ -206,7 +241,8 @@ def _owner_case(
             "receiptId": "behavioral-test-1",
             "inputHash": proposal_hash,
             "outputHash": canonical_content_hash({"status": "passed"}),
-            "invocationHash": _owner_invocation().invocation_hash,
+            "invocation": _invocation_envelope(invocation),
+            "invocationHash": invocation.invocation_hash,
             "checkType": "behavioral-test",
             "exitCode": 0,
             "suite": "protected-rules",
@@ -225,7 +261,7 @@ def _owner_case(
             tzinfo=timezone.utc
         ),
         valid_for_seconds=valid_for_seconds,
-        behavioral_test_invocation_hash=_owner_invocation().invocation_hash,
+        behavioral_test_invocation_hash=invocation.invocation_hash,
         confirmation_artifact_hash=_put(store, confirmation),
         review_artifact_hash=_put(store, review),
         behavioral_test_artifact_hash=_put(store, tests),
@@ -234,6 +270,137 @@ def _owner_case(
 
 
 class ProtectedRulesTests(unittest.TestCase):
+    def test_owner_change_request_rejects_oversized_direct_text(self):
+        from selfworkflow.evidence import OwnerChangeRequest, WorkflowEvidenceError
+
+        _, _, request, _ = _owner_case([])
+        values = {
+            field: getattr(request, field) for field in request.__dataclass_fields__
+        }
+        for field in ("owner_actor", "implementation_context", "operation_nonce"):
+            with self.subTest(field=field):
+                with self.assertRaises(WorkflowEvidenceError) as caught:
+                    OwnerChangeRequest(**(values | {field: "x" * (2 * 1024 * 1024)}))
+                self.assertEqual(
+                    caught.exception.code,
+                    "protected-rule-owner-authorization-required",
+                )
+
+    def test_owner_behavioral_invocation_input_binds_pretest_subject(self):
+        protected, proposed, request, records = _owner_case([])
+        del protected, proposed
+
+        behavioral = records[request.behavioral_test_artifact_hash]
+        self.assertRegex(
+            request.pre_test_subject_hash,
+            r"^sha256:[0-9a-f]{64}$",
+        )
+        self.assertEqual(
+            behavioral["attributes"]["invocation"]["inputHash"],
+            request.pre_test_subject_hash,
+        )
+
+    def test_owner_gate_rejects_behavioral_invocation_for_wrong_pretest_subject(self):
+        from selfworkflow.evidence import (
+            OwnerChangeRequest,
+            WorkflowEvidenceError,
+            merge_protected_rules,
+        )
+
+        protected, proposed, request, records = _owner_case([])
+        wrong_invocation = _owner_invocation(input_hash="sha256:" + "f" * 64)
+        behavioral = records.pop(request.behavioral_test_artifact_hash)
+        behavioral["attributes"]["invocation"] = _invocation_envelope(
+            wrong_invocation
+        )
+        behavioral["attributes"]["invocationHash"] = wrong_invocation.invocation_hash
+        behavioral_hash = _put(records, behavioral)
+        values = {
+            field: getattr(request, field) for field in request.__dataclass_fields__
+        }
+        candidate = OwnerChangeRequest(
+            **(
+                values
+                | {
+                    "behavioral_test_invocation_hash": wrong_invocation.invocation_hash,
+                    "behavioral_test_artifact_hash": behavioral_hash,
+                }
+            )
+        )
+
+        with self.assertRaises(WorkflowEvidenceError) as raised:
+            merge_protected_rules(
+                protected,
+                owner_rules=proposed,
+                owner_change=candidate,
+                artifact_store=_trusted_owner_store(
+                    records, behavioral_invocation=wrong_invocation
+                ),
+                now=OWNER_NOW,
+            )
+        self.assertEqual(
+            raised.exception.code,
+            "protected-rule-owner-authorization-required",
+        )
+
+    def test_owner_confirmation_and_review_cannot_replay_for_new_invocation(self):
+        from selfworkflow.evidence import (
+            OwnerChangeRequest,
+            WorkflowEvidenceError,
+            merge_protected_rules,
+        )
+
+        protected, proposed, old_request, old_records = _owner_case([])
+        _, _, fresh_request, fresh_records = _owner_case(
+            [],
+            behavioral_invocation_overrides={
+                "argv": (
+                    "-File",
+                    "scripts/test.ps1",
+                    "-Test",
+                    "protected-rules",
+                    "--isolated",
+                )
+            },
+        )
+        records = {
+            old_request.confirmation_artifact_hash: old_records[
+                old_request.confirmation_artifact_hash
+            ],
+            old_request.review_artifact_hash: old_records[
+                old_request.review_artifact_hash
+            ],
+            fresh_request.behavioral_test_artifact_hash: fresh_records[
+                fresh_request.behavioral_test_artifact_hash
+            ],
+        }
+        values = {
+            field: getattr(fresh_request, field)
+            for field in fresh_request.__dataclass_fields__
+        }
+        replay = OwnerChangeRequest(
+            **(
+                values
+                | {
+                    "confirmation_artifact_hash": old_request.confirmation_artifact_hash,
+                    "review_artifact_hash": old_request.review_artifact_hash,
+                }
+            )
+        )
+
+        with self.assertRaises(WorkflowEvidenceError) as raised:
+            merge_protected_rules(
+                protected,
+                owner_rules=proposed,
+                owner_change=replay,
+                artifact_store=_trusted_owner_store(records),
+                now=OWNER_NOW,
+            )
+        self.assertEqual(
+            raised.exception.code,
+            "protected-rule-owner-authorization-required",
+        )
+
     def test_owner_nonce_and_trusted_timeline_block_replay_future_and_stale_receipts(self):
         from selfworkflow.evidence import (
             OwnerChangeRequest,

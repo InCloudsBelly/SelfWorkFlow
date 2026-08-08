@@ -17,17 +17,19 @@ from ._evidence_values import (
     MAX_ACCEPTANCE_CRITERIA,
     MAX_CAPABILITIES,
     MAX_CHANGES,
+    MAX_IDENTIFIER_UTF8_BYTES,
     MAX_RESIDUAL_RISKS,
     MAX_SELECTED_SKILLS,
     MAX_SKIPPED,
+    MAX_TEXT_UTF8_BYTES,
     MAX_VERIFICATIONS,
+    bounded_text,
     WorkflowEvidenceError,
     canonical_content_hash,
     fail as _fail,
     manifest_hashes,
     parse_evidence_json,
     repository_path_identity,
-    require_collection_budget,
     review_level_at_least,
 )
 from .model import CapabilityState, Complexity, Risk
@@ -115,6 +117,9 @@ _DECISION_MESSAGES = MappingProxyType(
         "verification-invocation-mismatch": (
             "A verification used an invocation other than the trusted policy expectation."
         ),
+        "verification-invocation-input-mismatch": (
+            "A verification invocation is not bound to the current task input."
+        ),
         "capability-time-in-future": (
             "Capability evidence cannot be newer than the observation time."
         ),
@@ -135,6 +140,30 @@ _VERIFICATION_FAILURE_CODES = MappingProxyType(
 _OUTPUT_TOKEN = object()
 
 
+def _valid_policy_group(value: object, maximum: int) -> bool:
+    return (
+        type(value) is tuple
+        and 0 < len(value) <= maximum
+        and all(
+            bounded_text(item, maximum=MAX_IDENTIFIER_UTF8_BYTES)
+            for item in value
+        )
+        and len(set(value)) == len(value)
+    )
+
+
+def _require_direct_text_budget(
+    *values: object,
+    maximum: int = MAX_TEXT_UTF8_BYTES,
+) -> None:
+    if any(
+        type(value) is str
+        and not bounded_text(value, maximum=maximum, allow_empty=True)
+        for value in values
+    ):
+        _fail("evidence-budget-exceeded")
+
+
 @dataclass(frozen=True)
 class ReviewFallbackAuthorization:
     """Trusted explicit authorization for the L2-unavailable L1 path."""
@@ -147,7 +176,9 @@ class ReviewFallbackAuthorization:
 
     def __post_init__(self) -> None:
         if (
-            type(self.capability_name) is not str
+            not bounded_text(
+                self.capability_name, maximum=MAX_IDENTIFIER_UTF8_BYTES
+            )
             or self.capability_name != "independent-context"
             or type(self.capability_state) is not CapabilityState
             or self.capability_state
@@ -156,8 +187,9 @@ class ReviewFallbackAuthorization:
             or self.user_prompted is not True
             or type(self.user_authorized) is not bool
             or self.user_authorized is not True
-            or type(self.authorization_id) is not str
-            or not self.authorization_id
+            or not bounded_text(
+                self.authorization_id, maximum=MAX_IDENTIFIER_UTF8_BYTES
+            )
         ):
             _fail("review-fallback-authorization-invalid")
 
@@ -196,29 +228,26 @@ class CompletionPolicy:
         review_fallback: ReviewFallbackAuthorization | None = None,
     ) -> None:
         name_groups = (
-            required_capabilities,
-            required_criterion_ids,
-            required_verification_ids,
+            (required_capabilities, MAX_CAPABILITIES),
+            (required_criterion_ids, MAX_ACCEPTANCE_CRITERIA),
+            (required_verification_ids, MAX_VERIFICATIONS),
         )
         if (
-            type(task_kind) is not str
+            not bounded_text(task_kind, maximum=MAX_IDENTIFIER_UTF8_BYTES)
             or task_kind not in {"modification", "read-only"}
             or type(complexity) is not Complexity
             or type(risk) is not Risk
             or any(
-                type(group) is not tuple
-                or not group
-                or any(type(item) is not str or not item for item in group)
-                or len(set(group)) != len(group)
-                for group in name_groups
+                not _valid_policy_group(group, maximum)
+                for group, maximum in name_groups
             )
-            or type(implementation_actor) is not str
-            or not implementation_actor
-            or type(implementation_context) is not str
-            or not implementation_context
-            or type(task_nonce) is not str
-            or not task_nonce
-            or len(task_nonce.encode("utf-8")) > 256
+            or not bounded_text(
+                implementation_actor, maximum=MAX_IDENTIFIER_UTF8_BYTES
+            )
+            or not bounded_text(
+                implementation_context, maximum=MAX_IDENTIFIER_UTF8_BYTES
+            )
+            or not bounded_text(task_nonce, maximum=256)
             or type(artifact_freshness_seconds) is not int
             or not 1 <= artifact_freshness_seconds <= 86400
             or (
@@ -230,11 +259,12 @@ class CompletionPolicy:
                 and (complexity is Complexity.C0 or risk is Risk.R0)
             )
             or type(expected_verification_invocations) is not tuple
+            or len(expected_verification_invocations) > MAX_VERIFICATIONS
             or any(
                 type(item) is not tuple
                 or len(item) != 2
-                or type(item[0]) is not str
-                or not item[0]
+                or not bounded_text(item[0], maximum=MAX_IDENTIFIER_UTF8_BYTES)
+                or not bounded_text(item[1], maximum=MAX_IDENTIFIER_UTF8_BYTES)
                 or not _is_sha256(item[1])
                 for item in expected_verification_invocations
             )
@@ -310,6 +340,31 @@ class OwnerChangeRequest:
     review_artifact_hash: str
     behavioral_test_artifact_hash: str
 
+    @property
+    def pre_test_subject_hash(self) -> str:
+        return owner_pre_test_subject_hash(
+            base_rules_hash=self.base_rules_hash,
+            proposed_rules_hash=self.proposed_rules_hash,
+            previous_version=self.previous_version,
+            new_version=self.new_version,
+            operation_nonce=self.operation_nonce,
+            proposed_at=self.proposed_at,
+            valid_for_seconds=self.valid_for_seconds,
+        )
+
+    @property
+    def proposal_hash(self) -> str:
+        return owner_change_proposal_hash(
+            base_rules_hash=self.base_rules_hash,
+            proposed_rules_hash=self.proposed_rules_hash,
+            previous_version=self.previous_version,
+            new_version=self.new_version,
+            operation_nonce=self.operation_nonce,
+            proposed_at=self.proposed_at,
+            valid_for_seconds=self.valid_for_seconds,
+            behavioral_test_invocation_hash=self.behavioral_test_invocation_hash,
+        )
+
     def __init__(self, **values: object) -> None:
         fields = tuple(self.__dataclass_fields__)
         text_fields = tuple(
@@ -318,7 +373,8 @@ class OwnerChangeRequest:
             if field not in {"proposed_at", "valid_for_seconds"}
         )
         if set(values) != set(fields) or any(
-            type(values[field]) is not str or not values[field] for field in text_fields
+            not bounded_text(values[field], maximum=MAX_IDENTIFIER_UTF8_BYTES)
+            for field in text_fields
         ):
             _fail("protected-rule-owner-authorization-required")
         hash_fields = (
@@ -335,7 +391,7 @@ class OwnerChangeRequest:
             _fail("protected-rule-owner-authorization-required")
         if (
             any(not _is_sha256(values[field]) for field in hash_fields)
-            or len(values["operation_nonce"].encode("utf-8")) > 256
+            or not bounded_text(values["operation_nonce"], maximum=256)
             or type(values["valid_for_seconds"]) is not int
             or not 1 <= values["valid_for_seconds"] <= 86400
         ):
@@ -346,6 +402,96 @@ class OwnerChangeRequest:
                 field,
                 proposed_at if field == "proposed_at" else values[field],
             )
+
+
+def owner_pre_test_subject_hash(
+    *,
+    base_rules_hash: str,
+    proposed_rules_hash: str,
+    previous_version: str,
+    new_version: str,
+    operation_nonce: str,
+    proposed_at: datetime,
+    valid_for_seconds: int,
+) -> str:
+    """Bind a behavioral invocation to one owner-change operation."""
+
+    return canonical_content_hash(
+        _owner_change_subject_values(
+            base_rules_hash=base_rules_hash,
+            proposed_rules_hash=proposed_rules_hash,
+            previous_version=previous_version,
+            new_version=new_version,
+            operation_nonce=operation_nonce,
+            proposed_at=proposed_at,
+            valid_for_seconds=valid_for_seconds,
+        )
+    )
+
+
+def owner_change_proposal_hash(
+    *,
+    base_rules_hash: str,
+    proposed_rules_hash: str,
+    previous_version: str,
+    new_version: str,
+    operation_nonce: str,
+    proposed_at: datetime,
+    valid_for_seconds: int,
+    behavioral_test_invocation_hash: str,
+) -> str:
+    """Bind all owner attestations to the selected behavioral invocation."""
+
+    if not _is_sha256(behavioral_test_invocation_hash):
+        _fail("protected-rule-owner-authorization-required")
+    values = _owner_change_subject_values(
+        base_rules_hash=base_rules_hash,
+        proposed_rules_hash=proposed_rules_hash,
+        previous_version=previous_version,
+        new_version=new_version,
+        operation_nonce=operation_nonce,
+        proposed_at=proposed_at,
+        valid_for_seconds=valid_for_seconds,
+    )
+    values["behavioralTestInvocationHash"] = behavioral_test_invocation_hash
+    return canonical_content_hash(values)
+
+
+def _owner_change_subject_values(
+    *,
+    base_rules_hash: str,
+    proposed_rules_hash: str,
+    previous_version: str,
+    new_version: str,
+    operation_nonce: str,
+    proposed_at: datetime,
+    valid_for_seconds: int,
+) -> dict[str, object]:
+
+    code = "protected-rule-owner-authorization-required"
+    if (
+        not _is_sha256(base_rules_hash)
+        or not _is_sha256(proposed_rules_hash)
+        or not bounded_text(previous_version, maximum=MAX_IDENTIFIER_UTF8_BYTES)
+        or not bounded_text(new_version, maximum=MAX_IDENTIFIER_UTF8_BYTES)
+        or not bounded_text(operation_nonce, maximum=256)
+        or type(valid_for_seconds) is not int
+        or not 1 <= valid_for_seconds <= 86400
+    ):
+        _fail(code)
+    try:
+        normalized_proposed_at = _as_utc(proposed_at)
+    except WorkflowEvidenceError:
+        _fail(code)
+    return {
+        "baseRulesHash": base_rules_hash,
+        "proposedRulesHash": proposed_rules_hash,
+        "previousVersion": previous_version,
+        "newVersion": new_version,
+        "operationNonce": operation_nonce,
+        "proposedAt": _format_utc(normalized_proposed_at),
+        "validForSeconds": valid_for_seconds,
+    }
 
 
 def _initialize_output(instance: object, values: dict[str, object], token: object) -> None:
@@ -465,15 +611,28 @@ def _parse_acceptance_graph(
     value: object, policy: CompletionPolicy
 ) -> list[dict[str, object]]:
     criteria = []
-    values = _ordered_sequence(value, "evidence-invalid")
-    require_collection_budget(values, MAX_ACCEPTANCE_CRITERIA)
+    values = _ordered_sequence(
+        value, "evidence-invalid", maximum=MAX_ACCEPTANCE_CRITERIA
+    )
     for item in values:
         criterion = _closed_mapping(
             item,
             ("id", "description", "applicability", "reason", "verificationIds"),
             "evidence-invalid",
         )
-        references = _ordered_sequence(criterion["verificationIds"], "evidence-invalid")
+        references = _ordered_sequence(
+            criterion["verificationIds"],
+            "evidence-invalid",
+            maximum=MAX_VERIFICATIONS,
+        )
+        _require_direct_text_budget(
+            criterion["id"], *references, maximum=MAX_IDENTIFIER_UTF8_BYTES
+        )
+        _require_direct_text_budget(
+            criterion["description"],
+            criterion["applicability"],
+            criterion["reason"],
+        )
         if (
             type(criterion["id"]) is not str
             or not criterion["id"]
@@ -510,6 +669,36 @@ def _completion_subject_hash(
             "derivedChanges": changes,
             "acceptanceGraph": criteria,
             "resultContentHash": content_hash,
+        }
+    )
+
+
+def pre_verification_subject_hash(
+    *,
+    task_nonce: str,
+    base_manifest_hash: str,
+    final_manifest_hash: str,
+    derived_changes: object,
+    acceptance_graph: object,
+    result_content_hash: str,
+) -> str:
+    """Hash current verification inputs without policy/invocation cycles."""
+
+    if (
+        not bounded_text(task_nonce, maximum=256)
+        or not _is_sha256(base_manifest_hash)
+        or not _is_sha256(final_manifest_hash)
+        or not _is_sha256(result_content_hash)
+    ):
+        _fail("completion-policy-invalid")
+    return canonical_content_hash(
+        {
+            "taskNonce": task_nonce,
+            "baseManifestHash": base_manifest_hash,
+            "finalManifestHash": final_manifest_hash,
+            "derivedChanges": derived_changes,
+            "acceptanceGraph": acceptance_graph,
+            "resultContentHash": result_content_hash,
         }
     )
 
@@ -597,6 +786,9 @@ def _evaluate_completion(
         ("taskKind", "complexity", "risk", "policyHash"),
         "evidence-invalid",
     )
+    _require_direct_text_budget(
+        *classification.values(), maximum=MAX_IDENTIFIER_UTF8_BYTES
+    )
     expected_classification = {
         "taskKind": policy.task_kind,
         "complexity": policy.complexity.value,
@@ -606,20 +798,32 @@ def _evaluate_completion(
     if classification != expected_classification:
         return decision("completion-policy-mismatch")
 
-    selected_skills = _ordered_sequence(document["selectedSkills"], "evidence-invalid")
-    require_collection_budget(selected_skills, MAX_SELECTED_SKILLS)
+    selected_skills = _ordered_sequence(
+        document["selectedSkills"],
+        "evidence-invalid",
+        maximum=MAX_SELECTED_SKILLS,
+    )
+    _require_direct_text_budget(
+        *selected_skills, maximum=MAX_IDENTIFIER_UTF8_BYTES
+    )
     if (
         any(type(skill) is not str or not skill for skill in selected_skills)
         or len(set(selected_skills)) != len(selected_skills)
     ):
         _fail("evidence-invalid")
 
-    capability_values = _ordered_sequence(document["capabilities"], "evidence-invalid")
-    require_collection_budget(capability_values, MAX_CAPABILITIES)
+    capability_values = _ordered_sequence(
+        document["capabilities"],
+        "evidence-invalid",
+        maximum=MAX_CAPABILITIES,
+    )
     capabilities = []
     for value in capability_values:
         capability = _closed_mapping(
             value, ("name", "state", "artifactHash"), "evidence-invalid"
+        )
+        _require_direct_text_budget(
+            *capability.values(), maximum=MAX_IDENTIFIER_UTF8_BYTES
         )
         if (
             type(capability["name"]) is not str
@@ -681,6 +885,13 @@ def _evaluate_completion(
         ),
         "evidence-invalid",
     )
+    _require_direct_text_budget(
+        changes["taskKind"],
+        changes["resultContentHash"],
+        changes["baseManifestHash"],
+        changes["finalManifestHash"],
+        maximum=MAX_IDENTIFIER_UTF8_BYTES,
+    )
     if changes["taskKind"] != policy.task_kind:
         return decision("completion-policy-mismatch")
     if not all(
@@ -691,11 +902,15 @@ def _evaluate_completion(
     if changes["resultContentHash"] != content_hash:
         return decision("result-content-hash-mismatch")
     declared_changes = []
-    change_values = _ordered_sequence(changes["items"], "evidence-invalid")
-    require_collection_budget(change_values, MAX_CHANGES)
+    change_values = _ordered_sequence(
+        changes["items"], "evidence-invalid", maximum=MAX_CHANGES
+    )
     for value in change_values:
         item = _closed_mapping(
             value, ("path", "operation", "contentHash"), "evidence-invalid"
+        )
+        _require_direct_text_budget(
+            *item.values(), maximum=MAX_IDENTIFIER_UTF8_BYTES
         )
         if (
             type(item["path"]) is not str
@@ -720,6 +935,14 @@ def _evaluate_completion(
     criteria = _parse_acceptance_graph(document["acceptanceCriteria"], policy)
     if not criteria:
         return decision("acceptance-criterion-unverified")
+    pre_verification_subject = pre_verification_subject_hash(
+        task_nonce=policy.task_nonce,
+        base_manifest_hash=changes["baseManifestHash"],
+        final_manifest_hash=changes["finalManifestHash"],
+        derived_changes=derived_changes,
+        acceptance_graph=criteria,
+        result_content_hash=content_hash,
+    )
     completion_subject = _completion_subject_hash(
         policy,
         content_hash,
@@ -729,14 +952,22 @@ def _evaluate_completion(
         criteria,
     )
 
-    skipped_values = _ordered_sequence(document["skipped"], "evidence-invalid")
-    require_collection_budget(skipped_values, MAX_SKIPPED)
+    skipped_values = _ordered_sequence(
+        document["skipped"], "evidence-invalid", maximum=MAX_SKIPPED
+    )
     for value in skipped_values:
         skipped = _closed_mapping(
             value,
             ("targetType", "targetId", "applicability", "reason"),
             "evidence-invalid",
         )
+        _require_direct_text_budget(
+            skipped["targetType"],
+            skipped["targetId"],
+            skipped["applicability"],
+            maximum=MAX_IDENTIFIER_UTF8_BYTES,
+        )
+        _require_direct_text_budget(skipped["reason"])
         if (
             type(skipped["targetType"]) is not str
             or skipped["targetType"] not in {"review", "verification", "criterion", "skill"}
@@ -766,6 +997,14 @@ def _evaluate_completion(
         ("id", "status", "level", "artifactHash", "reason"),
         "evidence-invalid",
     )
+    _require_direct_text_budget(
+        review["id"],
+        review["status"],
+        review["level"],
+        review["artifactHash"],
+        maximum=MAX_IDENTIFIER_UTF8_BYTES,
+    )
+    _require_direct_text_budget(review["reason"])
     if (
         type(review["id"]) is not str
         or not review["id"]
@@ -835,8 +1074,11 @@ def _evaluate_completion(
         ):
             return decision("review-independence-required")
 
-    verification_values = _ordered_sequence(document["verification"], "evidence-invalid")
-    require_collection_budget(verification_values, MAX_VERIFICATIONS)
+    verification_values = _ordered_sequence(
+        document["verification"],
+        "evidence-invalid",
+        maximum=MAX_VERIFICATIONS,
+    )
     verifications = []
     for value in verification_values:
         verification = _closed_mapping(
@@ -844,6 +1086,14 @@ def _evaluate_completion(
             ("id", "status", "artifactHash", "verifiedAt", "validForSeconds", "reason"),
             "evidence-invalid",
         )
+        _require_direct_text_budget(
+            verification["id"],
+            verification["status"],
+            verification["artifactHash"],
+            verification["verifiedAt"],
+            maximum=MAX_IDENTIFIER_UTF8_BYTES,
+        )
+        _require_direct_text_budget(verification["reason"])
         if (
             type(verification["id"]) is not str
             or not verification["id"]
@@ -882,6 +1132,11 @@ def _evaluate_completion(
             return decision("artifact-unresolved")
         if artifact["subjectHash"] != completion_subject:
             return decision("verification-content-hash-mismatch")
+        if (
+            artifact["attributes"]["invocation"]["inputHash"]
+            != pre_verification_subject
+        ):
+            return decision("verification-invocation-input-mismatch")
         if (
             artifact["attributes"].get("invocationHash")
             != expected_invocations[verification["id"]]
@@ -930,10 +1185,14 @@ def _evaluate_completion(
         if any(statuses.get(item) != expected for item in criterion["verificationIds"]):
             return decision("acceptance-criterion-unverified")
 
-    residual_risks = _ordered_sequence(document["residualRisks"], "evidence-invalid")
-    require_collection_budget(residual_risks, MAX_RESIDUAL_RISKS)
+    residual_risks = _ordered_sequence(
+        document["residualRisks"],
+        "evidence-invalid",
+        maximum=MAX_RESIDUAL_RISKS,
+    )
     for value in residual_risks:
         risk = _closed_mapping(value, ("risk", "disposition"), "evidence-invalid")
+        _require_direct_text_budget(risk["risk"], risk["disposition"])
         if any(type(item) is not str or not item.strip() for item in risk.values()):
             _fail("evidence-invalid")
     return decision("completion-eligible", True)
@@ -956,15 +1215,24 @@ def _closed_mapping(
     keys: tuple[str, ...],
     code: str,
 ) -> dict[str, object]:
+    if type(value) not in (dict, _MAPPING_PROXY_TYPE) or len(value) != len(keys):
+        _fail(code)
     entries = _mapping_entries(value, code)
-    if len(entries) != len(keys) or {key for key, _ in entries} != set(keys):
+    if {key for key, _ in entries} != set(keys):
         _fail(code)
     return {key: item for key, item in entries}
 
 
-def _ordered_sequence(value: object, code: str) -> tuple[object, ...]:
+def _ordered_sequence(
+    value: object,
+    code: str,
+    *,
+    maximum: int | None = None,
+) -> tuple[object, ...]:
     if type(value) not in (list, tuple):
         _fail(code)
+    if maximum is not None and len(value) > maximum:
+        _fail("evidence-budget-exceeded")
     return tuple(value)
 
 
@@ -1000,11 +1268,14 @@ def _parse_rule(
 
 
 def _is_sha256(value: object) -> bool:
-    return type(value) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+    return (
+        bounded_text(value, maximum=71)
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+    )
 
 
 def _parse_semver(value: object) -> tuple[int, int, int] | None:
-    if type(value) is not str:
+    if not bounded_text(value, maximum=MAX_IDENTIFIER_UTF8_BYTES):
         return None
     match = re.fullmatch(
         r"(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})",
@@ -1095,17 +1366,7 @@ def _validate_owner_change(
         _fail(code)
     base_hash = canonical_content_hash(document["rules"])
     proposed_hash = canonical_content_hash(selected_rules)
-    proposal_hash = canonical_content_hash(
-        {
-            "baseRulesHash": base_hash,
-            "proposedRulesHash": proposed_hash,
-            "previousVersion": request.previous_version,
-            "newVersion": request.new_version,
-            "operationNonce": request.operation_nonce,
-            "proposedAt": _format_utc(request.proposed_at),
-            "validForSeconds": request.valid_for_seconds,
-        }
-    )
+    proposal_hash = request.proposal_hash
     try:
         observed_at = _as_utc(now)
     except WorkflowEvidenceError:
@@ -1173,6 +1434,8 @@ def _validate_owner_change(
         or tests["attributes"]["suite"] != "protected-rules"
         or tests["attributes"]["invocationHash"]
         != request.behavioral_test_invocation_hash
+        or tests["attributes"]["invocation"]["inputHash"]
+        != request.pre_test_subject_hash
     ):
         _fail(code)
     for artifact in (confirmation, review, tests):

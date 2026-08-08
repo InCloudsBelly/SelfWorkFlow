@@ -48,9 +48,11 @@ Repository-owner changes to protected rules require all four gates together:
 an explicit confirmation attestation, an actual SemVer major increase, an
 independent Review attestation, and a passed behavioral-test execution receipt.
 All three receipts bind the canonical proposal hash over the base and proposed
-rule hashes, both policy versions, an operation nonce, proposal time, and
-validity window. The trusted owner request also fixes the expected behavioral
-test invocation. The proposal must precede all three receipts; receipts cannot
+rule hashes, both policy versions, an operation nonce, proposal time, validity
+window, and expected behavioral-test invocation hash. Before collection, the
+behavioral invocation input binds a pre-test subject containing those operation
+fields without the invocation, avoiding a hash cycle. The proposal must precede
+all three receipts; receipts cannot
 be future-dated or outlive the proposal window. Owner Review accepts L2 or L3
 through the same review-level comparator used by completion. Every referenced
 artifact is resolved from a collector-sealed store and its canonical hash is recomputed. The exact
@@ -94,7 +96,11 @@ input and output hashes, decision, level, and identities; the collector derives
 the input hash from the completion subject and the output hash from the actual
 provided receipt content. Verification execution receipts additionally bind a
 frozen invocation containing executable/module identity, argv, repository cwd,
-controlled environment keys and digest, and input digest. They record finite
+controlled environment keys and digest, and input digest. The canonical
+envelope is retained with its hash for audit; its cwd is `.` or a canonical
+Windows-safe repository-relative directory. The input digest binds the current
+task nonce, manifests, derived changes, complete acceptance graph, and result
+content before the policy adds the expected invocation hash. Receipts record finite
 check type, exit code, timestamps, and criterion links. The trusted policy—not
 the evidence—fixes the expected invocation hash. Every acceptance criterion and
 verification artifact links in both directions. Every skipped or
@@ -113,10 +119,13 @@ validity window. `failed`,
 evidence cannot complete. `not-applicable` is eligible only for a pure
 `read-only` task with no change items.
 
-Inputs are bounded before expensive normalization: evidence JSON is limited to
-1 MiB by characters and UTF-8 bytes; canonical values to 50,000 nodes, 1 MiB
-per string, and 8 MiB total; artifact stores to 2,048 records and receipt output
-to 8 MiB. Evidence collections are capped at 64 capabilities, 256 skills, 512
+Inputs use character/count checks before sequence materialization or UTF-8
+encoding where the shape permits, followed by exact UTF-8 accounting. Evidence
+JSON is limited to 1 MiB by characters and UTF-8 bytes; ordinary direct text is
+limited to 64 KiB and identifiers to 1 KiB; canonical values are limited to
+50,000 nodes, 1 MiB per string, and 8 MiB total. Artifact stores are capped at
+2,048 records and receipt output at 8 MiB. Evidence collections are capped at
+64 capabilities, 256 skills, 512
 criteria/verifications/skips, 256 residual risks, and 10,000 changes. Manifests
 are capped at 20,000 paths, 8 MiB per file, and 64 MiB total. Repository paths
 are canonical Windows-safe relative paths with a 1,024-character path and
@@ -140,7 +149,11 @@ enforcement.
 The stable field list and status policy remain in
 [the evidence source](workflow/evidence.yaml). The concrete immutable JSON
 fixture contract and completion checks are exercised by
-[the evidence tests](tests/unit/test_evidence.py).
+[the evidence tests](tests/unit/test_evidence.py). Shared bounded-value,
+canonicalization, and manifest checks are in
+[the value helper](src/selfworkflow/_evidence_values.py); the typed invocation,
+collector, receipt, and trusted-store boundary is in
+[the artifact helper](src/selfworkflow/_evidence_artifacts.py).
 
 ## On-demand loading
 

@@ -69,6 +69,8 @@ MAX_MANIFEST_FILE_BYTES = 8 * 1024 * 1024
 MAX_MANIFEST_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_ARTIFACT_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_RECORDS = 2048
+MAX_TEXT_UTF8_BYTES = 64 * 1024
+MAX_IDENTIFIER_UTF8_BYTES = 1024
 MAX_REPOSITORY_PATH_CHARS = 1024
 MAX_REPOSITORY_SEGMENT_CHARS = 255
 _MAPPING_PROXY_TYPE = type(MappingProxyType({}))
@@ -103,6 +105,28 @@ def fail(code: str) -> None:
 def require_collection_budget(value: tuple[object, ...], maximum: int) -> None:
     if len(value) > maximum:
         fail("evidence-budget-exceeded")
+
+
+def bounded_text(
+    value: object,
+    *,
+    maximum: int = MAX_TEXT_UTF8_BYTES,
+    allow_empty: bool = False,
+) -> bool:
+    """Check exact text against a character-first and UTF-8 byte budget."""
+
+    if (
+        type(value) is not str
+        or type(maximum) is not int
+        or maximum < 0
+        or (not allow_empty and not value)
+        or len(value) > maximum
+    ):
+        return False
+    try:
+        return len(value.encode("utf-8")) <= maximum
+    except Exception:
+        return False
 
 
 def review_level_at_least(actual: object, minimum: object) -> bool:
@@ -315,19 +339,26 @@ def manifest_hashes(value: object) -> tuple[dict[str, str], dict[str, str]]:
 
     if type(value) not in (dict, _MAPPING_PROXY_TYPE):
         fail("manifest-invalid")
+    if len(value) > MAX_MANIFEST_ENTRIES:
+        fail("manifest-budget-exceeded")
     try:
         entries = tuple(value.items())
     except Exception:
         fail("manifest-invalid")
-    if len(entries) > MAX_MANIFEST_ENTRIES:
-        fail("manifest-budget-exceeded")
     result: dict[str, str] = {}
     identities: dict[str, str] = {}
     total_bytes = 0
+    total_characters = 0
     for path, content in entries:
         identity = repository_path_identity(path)
         if type(content) is not str or path in result or identity in identities:
             fail("manifest-invalid")
+        total_characters += len(content)
+        if (
+            len(content) > MAX_MANIFEST_FILE_BYTES
+            or total_characters > MAX_MANIFEST_TOTAL_BYTES
+        ):
+            fail("manifest-budget-exceeded")
         try:
             encoded = content.encode("utf-8")
         except Exception:

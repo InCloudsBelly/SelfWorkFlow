@@ -9,10 +9,12 @@ from types import MappingProxyType
 from ._evidence_values import (
     MAX_ARTIFACT_OUTPUT_BYTES,
     MAX_ARTIFACT_RECORDS,
+    bounded_text,
     WorkflowEvidenceError,
     canonical_content_hash,
     fail,
     freeze_json,
+    repository_path_identity,
 )
 from .model import CapabilityState
 
@@ -31,8 +33,9 @@ _ARTIFACT_ATTRIBUTE_KEYS = MappingProxyType(
             "level", "implementationActor", "implementationContext",
         ),
         "verification": (
-            "provider", "receiptId", "inputHash", "outputHash", "invocationHash",
-            "checkType", "exitCode", "verificationId", "validForSeconds",
+            "provider", "receiptId", "inputHash", "outputHash", "invocation",
+            "invocationHash", "checkType", "exitCode", "verificationId",
+            "validForSeconds",
         ),
         "owner-confirmation": (
             "provider", "receiptId", "inputHash", "outputHash", "decision", "scope",
@@ -42,20 +45,19 @@ _ARTIFACT_ATTRIBUTE_KEYS = MappingProxyType(
             "level", "implementationActor", "implementationContext",
         ),
         "behavioral-test": (
-            "provider", "receiptId", "inputHash", "outputHash", "invocationHash",
-            "checkType", "exitCode", "suite",
+            "provider", "receiptId", "inputHash", "outputHash", "invocation",
+            "invocationHash", "checkType", "exitCode", "suite",
         ),
     }
 )
 
 
 def _bounded_text(value: object, *, optional: bool = False) -> bool:
-    if type(value) is not str or (not optional and not value):
-        return False
-    try:
-        return len(value.encode("utf-8")) <= _MAX_INVOCATION_FIELD_BYTES
-    except Exception:
-        return False
+    return bounded_text(
+        value,
+        maximum=_MAX_INVOCATION_FIELD_BYTES,
+        allow_empty=optional,
+    )
 
 
 @dataclass(frozen=True, init=False)
@@ -70,6 +72,7 @@ class ExecutionInvocation:
     environment_hash: str
     input_hash: str
     invocation_hash: str
+    envelope: MappingProxyType
 
     def __init__(
         self,
@@ -79,7 +82,7 @@ class ExecutionInvocation:
         argv: tuple[str, ...],
         cwd: str,
         environment: dict[str, str],
-        input_content: object,
+        input_hash: str,
     ) -> None:
         try:
             valid_module = module is None or _bounded_text(module)
@@ -103,18 +106,22 @@ class ExecutionInvocation:
                 or not valid_argv
                 or not _bounded_text(cwd)
                 or not valid_environment
+                or type(input_hash) is not str
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", input_hash) is None
             ):
                 fail("artifact-collector-invalid")
+            normalized_cwd = (
+                "." if cwd == "." else repository_path_identity(cwd)
+            )
             environment_keys = tuple(sorted(environment))
             environment_hash = canonical_content_hash(
                 {key: environment[key] for key in environment_keys}
             )
-            input_hash = canonical_content_hash(input_content)
             payload = {
                 "executable": executable,
                 "module": module,
                 "argv": argv,
-                "cwd": cwd,
+                "cwd": normalized_cwd,
                 "environmentKeys": environment_keys,
                 "environmentHash": environment_hash,
                 "inputHash": input_hash,
@@ -127,11 +134,12 @@ class ExecutionInvocation:
         object.__setattr__(self, "executable", executable)
         object.__setattr__(self, "module", module)
         object.__setattr__(self, "argv", argv)
-        object.__setattr__(self, "cwd", cwd)
+        object.__setattr__(self, "cwd", normalized_cwd)
         object.__setattr__(self, "environment_keys", environment_keys)
         object.__setattr__(self, "environment_hash", environment_hash)
         object.__setattr__(self, "input_hash", input_hash)
         object.__setattr__(self, "invocation_hash", invocation_hash)
+        object.__setattr__(self, "envelope", MappingProxyType(payload))
 
 
 def output_content_hash(content: object) -> str:
@@ -154,8 +162,15 @@ def output_content_hash(content: object) -> str:
         fail("artifact-collector-invalid")
 
 
-def _mapping_entries(value: object, code: str) -> tuple[tuple[str, object], ...]:
+def _mapping_entries(
+    value: object,
+    code: str,
+    *,
+    maximum: int | None = None,
+) -> tuple[tuple[str, object], ...]:
     if type(value) not in (dict, _MAPPING_PROXY_TYPE):
+        fail(code)
+    if maximum is not None and len(value) > maximum:
         fail(code)
     try:
         entries = tuple(value.items())
@@ -167,31 +182,94 @@ def _mapping_entries(value: object, code: str) -> tuple[tuple[str, object], ...]
 
 
 def _closed_mapping(value: object, keys: tuple[str, ...], code: str) -> dict[str, object]:
+    if type(value) not in (dict, _MAPPING_PROXY_TYPE) or len(value) != len(keys):
+        fail(code)
     entries = _mapping_entries(value, code)
-    if len(entries) != len(keys) or {key for key, _ in entries} != set(keys):
+    if {key for key, _ in entries} != set(keys):
         fail(code)
     return {key: item for key, item in entries}
 
 
-def _ordered_sequence(value: object, code: str) -> tuple[object, ...]:
+def _ordered_sequence(
+    value: object,
+    code: str,
+    *,
+    maximum: int | None = None,
+) -> tuple[object, ...]:
     if type(value) not in (list, tuple):
+        fail(code)
+    if maximum is not None and len(value) > maximum:
         fail(code)
     return tuple(value)
 
 
 def _is_sha256(value: object) -> bool:
-    return type(value) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+    return (
+        bounded_text(value, maximum=71)
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+    )
 
 
 def _parse_timestamp(value: object, code: str) -> datetime:
-    if type(value) is not str or re.fullmatch(
+    if not _bounded_text(value) or re.fullmatch(
         r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value
     ) is None:
         fail(code)
     try:
-        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
     except Exception:
         fail(code)
+
+
+def _parse_invocation_envelope(value: object, code: str) -> dict[str, object]:
+    envelope = _closed_mapping(
+        value,
+        (
+            "executable",
+            "module",
+            "argv",
+            "cwd",
+            "environmentKeys",
+            "environmentHash",
+            "inputHash",
+        ),
+        code,
+    )
+    argv = _ordered_sequence(
+        envelope["argv"], code, maximum=_MAX_INVOCATION_ARGUMENTS
+    )
+    environment_keys = _ordered_sequence(
+        envelope["environmentKeys"],
+        code,
+        maximum=_MAX_INVOCATION_ENVIRONMENT_KEYS,
+    )
+    cwd = envelope["cwd"]
+    try:
+        canonical_cwd = "." if cwd == "." else repository_path_identity(cwd)
+    except WorkflowEvidenceError:
+        fail(code)
+    if (
+        not _bounded_text(envelope["executable"])
+        or not (
+            envelope["module"] is None or _bounded_text(envelope["module"])
+        )
+        or len(argv) > _MAX_INVOCATION_ARGUMENTS
+        or any(not _bounded_text(item, optional=True) for item in argv)
+        or type(cwd) is not str
+        or cwd != canonical_cwd
+        or len(environment_keys) > _MAX_INVOCATION_ENVIRONMENT_KEYS
+        or any(not _bounded_text(item) for item in environment_keys)
+        or tuple(sorted(environment_keys)) != environment_keys
+        or len(set(environment_keys)) != len(environment_keys)
+        or not _is_sha256(envelope["environmentHash"])
+        or not _is_sha256(envelope["inputHash"])
+    ):
+        fail(code)
+    envelope["argv"] = argv
+    envelope["environmentKeys"] = environment_keys
+    return envelope
 
 
 @dataclass(frozen=True, init=False)
@@ -314,7 +392,10 @@ class ArtifactCollector:
             if (
                 type(output_content) is not dict
                 or set(output_content) != set(expected_output)
-                or any(type(item) is not str for item in output_content.values())
+                or any(
+                    not _bounded_text(item, optional=True)
+                    for item in output_content.values()
+                )
                 or output_content != expected_output
             ):
                 fail("artifact-collector-invalid")
@@ -375,7 +456,8 @@ class ArtifactCollector:
         try:
             if (
                 type(related_ids) is not tuple
-                or any(type(item) is not str or not item for item in related_ids)
+                or len(related_ids) > MAX_ARTIFACT_RECORDS
+                or any(not _bounded_text(item) for item in related_ids)
                 or len(set(related_ids)) != len(related_ids)
                 or type(invocation) is not ExecutionInvocation
             ):
@@ -385,6 +467,11 @@ class ArtifactCollector:
                 "receiptId": receipt_id,
                 "inputHash": subject_hash,
                 "outputHash": output_content_hash(output_content),
+                "invocation": {
+                    **dict(invocation.envelope),
+                    "argv": list(invocation.argv),
+                    "environmentKeys": list(invocation.environment_keys),
+                },
                 "invocationHash": invocation.invocation_hash,
                 "checkType": check_type,
                 "exitCode": exit_code,
@@ -433,32 +520,34 @@ def _parse_artifact(value: object, code: str) -> dict[str, object]:
         code,
     )
     kind = record["kind"]
-    if type(kind) is not str or kind not in _ARTIFACT_ATTRIBUTE_KEYS:
+    if not _bounded_text(kind) or kind not in _ARTIFACT_ATTRIBUTE_KEYS:
         fail(code)
     attributes = _closed_mapping(record["attributes"], _ARTIFACT_ATTRIBUTE_KEYS[kind], code)
-    related = _ordered_sequence(record["relatedIds"], code)
+    related = _ordered_sequence(
+        record["relatedIds"], code, maximum=MAX_ARTIFACT_RECORDS
+    )
     if (
-        type(record["status"]) is not str
+        not _bounded_text(record["status"])
         or record["status"] not in _ARTIFACT_STATUSES
         or any(
-            type(record[field]) is not str or not record[field]
+            not _bounded_text(record[field])
             for field in ("subjectId", "actorId", "contextId")
         )
         or not _is_sha256(record["subjectHash"])
-        or any(type(item) is not str or not item for item in related)
+        or any(not _bounded_text(item) for item in related)
         or len(set(related)) != len(related)
     ):
         fail(code)
     _parse_timestamp(record["recordedAt"], code)
     if any(
-        type(attributes[field]) is not str or not attributes[field]
+        not _bounded_text(attributes[field])
         for field in ("provider", "receiptId")
     ):
         fail(code)
     if kind == "capability":
         if (
             any(
-                type(attributes[field]) is not str or not attributes[field]
+                not _bounded_text(attributes[field])
                 for field in ("name", "state", "policyHash")
             )
             or attributes["state"] not in {"supported", "unsupported", "unverified"}
@@ -473,29 +562,34 @@ def _parse_artifact(value: object, code: str) -> dict[str, object]:
         fail(code)
     if kind in {"review", "owner-review"}:
         if (
-            type(attributes["decision"]) is not str
+            not _bounded_text(attributes["decision"])
             or attributes["decision"] != "passed"
-            or type(attributes["level"]) is not str
+            or not _bounded_text(attributes["level"])
             or attributes["level"] not in {"L0", "L1", "L2", "L3"}
             or any(
-                type(attributes[field]) is not str or not attributes[field]
+                not _bounded_text(attributes[field])
                 for field in ("implementationActor", "implementationContext")
             )
         ):
             fail(code)
     elif kind == "owner-confirmation":
         if (
-            type(attributes["decision"]) is not str
+            not _bounded_text(attributes["decision"])
             or attributes["decision"] != "authorized"
-            or type(attributes["scope"]) is not str
+            or not _bounded_text(attributes["scope"])
             or attributes["scope"] != "replace-protected-rules"
         ):
             fail(code)
     elif kind in {"verification", "behavioral-test"}:
         exit_code = attributes["exitCode"]
+        attributes["invocation"] = _parse_invocation_envelope(
+            attributes["invocation"], code
+        )
         if (
             not _is_sha256(attributes["invocationHash"])
-            or type(attributes["checkType"]) is not str
+            or canonical_content_hash(attributes["invocation"])
+            != attributes["invocationHash"]
+            or not _bounded_text(attributes["checkType"])
             or attributes["checkType"]
             not in {
                 "unit-test",
@@ -514,14 +608,13 @@ def _parse_artifact(value: object, code: str) -> dict[str, object]:
             fail(code)
     if kind == "verification":
         if (
-            type(attributes["verificationId"]) is not str
-            or not attributes["verificationId"]
+            not _bounded_text(attributes["verificationId"])
             or type(attributes["validForSeconds"]) is not int
             or not 1 <= attributes["validForSeconds"] <= 86400
         ):
             fail(code)
     elif kind == "behavioral-test" and (
-        type(attributes["suite"]) is not str or not attributes["suite"]
+        not _bounded_text(attributes["suite"])
     ):
         fail(code)
     record["relatedIds"] = related
@@ -538,9 +631,11 @@ def prepare_artifacts(store: object) -> tuple[dict[str, dict[str, object]], str 
         or type(getattr(store, "_records", None)) is not _MAPPING_PROXY_TYPE
     ):
         fail("trusted-artifact-store-required")
-    entries = _mapping_entries(store._records, "artifact-store-invalid")
-    if len(entries) > MAX_ARTIFACT_RECORDS:
-        fail("artifact-store-invalid")
+    entries = _mapping_entries(
+        store._records,
+        "artifact-store-invalid",
+        maximum=MAX_ARTIFACT_RECORDS,
+    )
     parsed: dict[str, dict[str, object]] = {}
     identities: set[tuple[object, object]] = set()
     receipts: set[tuple[object, object]] = set()
