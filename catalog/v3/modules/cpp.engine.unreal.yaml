@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.engine.unreal
+sourceHash: sha256:0658c426af84d1e6a9d9b48ef5b8f2b36d722bb45223d2e84f41c88eeb3b1048
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/unreal.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 240, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

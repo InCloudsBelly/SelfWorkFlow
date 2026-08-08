@@ -6,3 +6,9 @@ sources:
     repositoryDirty: true
     selectedFilesDirty: false
     supportStatus: reference-only
+  - id: user-provided-codegraph-reference
+    sourceType: local-git-reference
+    revision: e9b170aa0c4c2bfdd10b8db6d4054e4c9dc47867
+    repositoryDirty: true
+    selectedFilesDirty: false
+    supportStatus: reference-only

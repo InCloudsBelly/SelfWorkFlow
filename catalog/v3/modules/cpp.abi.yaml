@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.abi
+sourceHash: sha256:3e861a312532a4bbb0075520f4a5baa4cd3b3304aa196b12655fe30a3435d97b
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/abi.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 210, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

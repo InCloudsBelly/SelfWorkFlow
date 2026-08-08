@@ -1,0 +1,8 @@
+schemaVersion: 1
+id: cpp.safety
+reasoningStatus: supported
+runtimeValidationStatus: unverified
+entrypoint: skills/cpp-core/references/safety.md
+positiveSignals: [undefined-behavior, integer-overflow, bounds, aliasing, iterator, exception-safety]
+falseSignals: [formatting-only]
+testObligations: [empty-min-max, hostile-length, invalid-enum, failure-invariant]

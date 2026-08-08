@@ -1,0 +1,13 @@
+schemaVersion: 3
+id: code
+modules:
+  - cpp-core
+  - cpp.ownership
+  - cpp.type-system
+  - cpp.concurrency
+  - cpp.abi
+  - cpp.performance
+  - cpp.safety
+  - cpp.build
+  - cpp.debugging
+  - cpp.engine.unreal

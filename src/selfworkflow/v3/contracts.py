@@ -19,6 +19,7 @@ _SCHEMA_NAMES = (
     "pipeline.schema.json",
     "resolve-request.schema.json",
     "resolve-result.schema.json",
+    "capability-route.schema.json",
     "plan-graph.schema.json",
     "selection-receipt.schema.json",
     "run-ledger.schema.json",
@@ -953,11 +954,34 @@ def _plan_is_executable(plan: dict[str, Any]) -> bool:
 
 
 def _validate_resolve_result(document: dict[str, Any]) -> None:
+    route = document.get("capabilityRoute")
+    if route is not None:
+        if route["routeHash"] != _canonical_hash(route, "routeHash"):
+            _raise_semantic("capability-route-hash-invalid", ("capabilityRoute", "routeHash"))
+        if "debug.execute" in route["capabilityIds"]:
+            _raise_semantic(
+                "capability-route-execution-forbidden",
+                ("capabilityRoute", "capabilityIds"),
+            )
+        trace_ids = [item["moduleId"] for item in route["moduleLoadTrace"]]
+        if trace_ids != route["selectedModuleIds"]:
+            _raise_semantic("capability-route-trace-mismatch", ("capabilityRoute", "moduleLoadTrace"))
+        if route["contextCost"] != sum(
+            item["estimatedContextCost"] for item in route["moduleLoadTrace"]
+        ):
+            _raise_semantic("capability-route-context-cost-invalid", ("capabilityRoute", "contextCost"))
     if document["status"] == "active":
         plan = document["planGraph"]
         if plan is None:
             _raise_semantic("resolve-active-plan-missing", ("planGraph",))
         _validate_plan_graph(plan)
+        if route is not None and not set(route["selectedModuleIds"]) <= {
+            item["moduleId"] for item in plan["moduleConstraints"]
+        }:
+            _raise_semantic(
+                "capability-route-module-not-planned",
+                ("capabilityRoute", "selectedModuleIds"),
+            )
         if not _plan_is_executable(plan):
             _raise_semantic("resolve-active-plan-not-executable", ("planGraph",))
 

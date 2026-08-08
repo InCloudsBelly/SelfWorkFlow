@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.debugging
+sourceHash: sha256:ff41b959abf902f5aecb2d2b16b681cd7dff00bb570332f5eae4beafdac36d7b
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/debugging.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 210, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

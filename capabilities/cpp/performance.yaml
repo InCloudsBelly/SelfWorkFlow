@@ -1,0 +1,8 @@
+schemaVersion: 1
+id: cpp.performance
+reasoningStatus: supported
+profilerValidationStatus: unverified
+entrypoint: skills/cpp-core/references/performance.md
+positiveSignals: [performance, allocation, cache, copy, simd, complexity, hot-path]
+falseSignals: [unmeasured-micro-optimization]
+testObligations: [correctness, representative-input, repeated-samples, profiler-binding]

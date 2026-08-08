@@ -1,5 +1,8 @@
 schemaVersion: 3
 domains:
+  - id: code
+    ref: domains/code.yaml
+    hash: sha256:53aa8c0af43e386fff2facec0dee006759f8e785424b928c7121cf28b50bc275
   - id: workflow
     ref: domains/workflow.yaml
     hash: sha256:e34621b32eca4828109dd674e1d48f551294c75b85b84ef83585537d4ba353c4
@@ -7,6 +10,36 @@ domains:
     ref: domains/test-quality.yaml
     hash: sha256:3f4fa0d84cd2bdf2bdd4dcefa988b347bc0712550be8f08f791956185a3017d2
 modules:
+  - id: cpp-core
+    ref: modules/cpp-core.yaml
+    hash: sha256:714c58a1df82c30e4fc8586a4414981eeb6d6f16d2bfb9339355e0615f943ac6
+  - id: cpp.ownership
+    ref: modules/cpp.ownership.yaml
+    hash: sha256:808e549e26498e21fd7c2f1cdfe2bdac247b492cb6fda516bd95097e3d12bd53
+  - id: cpp.type-system
+    ref: modules/cpp.type-system.yaml
+    hash: sha256:d3a7ff88d58cb7e6a9d450e206fd5da703a8f9a09c5cc6983316102265688a9d
+  - id: cpp.concurrency
+    ref: modules/cpp.concurrency.yaml
+    hash: sha256:2564cb34d13a6a34c8b1d07c82a3cda1e6769227859411801a00e18774488209
+  - id: cpp.abi
+    ref: modules/cpp.abi.yaml
+    hash: sha256:357d29fb8bddfb2b858cdf515ffb2f39004085aacc1430acec6d323803018632
+  - id: cpp.performance
+    ref: modules/cpp.performance.yaml
+    hash: sha256:39f89d48acb171c1c6f6ab5c1627f92be7cd10b5f95e506f864af9d3879bcdaf
+  - id: cpp.safety
+    ref: modules/cpp.safety.yaml
+    hash: sha256:5b733d94fffc643100333eeaa8c189481438a3dcdb6f93bc4058c147b8b37d42
+  - id: cpp.build
+    ref: modules/cpp.build.yaml
+    hash: sha256:9a01ad6af1d299a44d4af24177f25b38669ad69e67a4b9ddaf046b250be81c2f
+  - id: cpp.debugging
+    ref: modules/cpp.debugging.yaml
+    hash: sha256:6184bdcf04bf76053e3483b475ca8013c8689d87c50272aad56a3a63819abf23
+  - id: cpp.engine.unreal
+    ref: modules/cpp.engine.unreal.yaml
+    hash: sha256:19071b0275c1454f9a07ce5fd50f179d7310fe782145d6b7f9dd637fbeccac2c
   - id: discover-context
     ref: modules/discover-context.yaml
     hash: sha256:c81d38476ca34578fc0b5e675cac2f148b79f17035cbf34f70ccd0a68ee0fbca

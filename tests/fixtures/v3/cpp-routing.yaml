@@ -1,0 +1,18 @@
+schemaVersion: 1
+cases:
+  - id: cpp-basic
+    category: positive
+    signal: cpp
+    expected: [cpp-core]
+  - id: markdown-near-miss
+    category: false-trigger
+    signal: markdown-with-cpp-snippet
+    expected: []
+  - id: duplicate-specialist
+    category: conflict
+    signal: duplicate-cpp-abi
+    expectedError: cpp-route-explicit-module-duplicate
+  - id: concurrent-abi
+    category: composition
+    signal: atomics-and-binary-compatibility
+    expected: [cpp-core, cpp.concurrency, cpp.abi]

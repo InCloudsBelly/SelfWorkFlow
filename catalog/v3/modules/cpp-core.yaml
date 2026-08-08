@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp-core
+sourceHash: sha256:95288c3435151fcf5905a0498d1bff2689d9c8e32d4491ef915d7762540b7e6a
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 420, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

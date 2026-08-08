@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.performance
+sourceHash: sha256:3d186a998abe10ce9d79fed37b84404a4f36760585c2b62e65bd7711bd5b88dc
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/performance.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 190, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

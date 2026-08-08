@@ -1,0 +1,9 @@
+schemaVersion: 1
+id: cpp.debugging
+reasoningStatus: supported
+debugExecutionStatus: unsupported
+entrypoint: skills/cpp-core/references/debugging.md
+positiveSignals: [native-crash, stack-trace, core-dump, sanitizer, symbols]
+falseSignals: [frontend-console-error]
+testObligations: [original-red, fixed-green, adjacent-failure, state-invariant]
+executionBoundary: debug.execute-requires-separate-authorization

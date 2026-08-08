@@ -6,6 +6,10 @@ selectedFiles:
     sha256: b83c178305474de5ff75e01e2df39800b6275d9592ba6b96625315121097b5d1
   - path: skills/kg-scene-export-workflow/references/development-guidance.md
     sha256: a673d72f767da9492a0273b10361ef288b1462f2740afa755078db5220e2983e
+  - path: skills/performance-analysis/SKILL.md
+    sha256: 11725f26372d822bf3f939f0752bee4b7f2554675589d3ef6f6e4b97458f187b
+  - path: skills/ue-debug-optimization/SKILL.md
+    sha256: 63fc788086d72ede27f3b17fc45d384668d676713701cbeed94784c6300e316d
   - path: skills/wiki-creator/SKILL.md
     sha256: b4bf64b497c1368263f245708fc2513254e6e9de2293bf47b0dfc95ffdd1d18c
   - path: skills/wiki-session/SKILL.md
@@ -17,4 +21,7 @@ generalizedPrinciples:
   - persisted-state-and-invalidation
   - minimal-intrusion-and-shared-regression
   - evidence-linked-deduplicated-knowledge
+  - cpp-ownership-lifetime-and-boundary-first
+  - profiler-evidence-before-performance-claims
+  - reversible-marked-local-debug-instrumentation
 publicationStatus: candidate

@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.ownership
+sourceHash: sha256:c1d9857af4fd19814484efca793914e65edc55cebd382e13c418fc4b5ad47208
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/ownership.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 180, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

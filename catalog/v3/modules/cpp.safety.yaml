@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.safety
+sourceHash: sha256:eaf871020e8af5d98da15cc9ad624e8f062256c0326d627ec9c22783a92ef2e5
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/safety.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 200, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

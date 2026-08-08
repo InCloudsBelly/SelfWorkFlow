@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.type-system
+sourceHash: sha256:2e739e6a1d37f4d0928ceb663cbbdfd9ee0ace9d1f689a77d6058d030c904bed
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/type-system.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 190, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

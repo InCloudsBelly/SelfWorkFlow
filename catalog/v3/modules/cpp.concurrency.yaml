@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.concurrency
+sourceHash: sha256:2e872db207a9d4c12014793281063111908c806847eec8473d09b5c8cca2130c
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/concurrency.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 220, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

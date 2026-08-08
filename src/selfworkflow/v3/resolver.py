@@ -9,6 +9,11 @@ from selfworkflow.v3.catalog import CompiledCatalog, CatalogError, compile_catal
 from selfworkflow.v3.contracts import ContractError, load_contract, validate_resolve_result
 from selfworkflow.v3.pipeline import LoadedPipeline, PipelineError, load_pipeline
 from selfworkflow.v3.plan_graph import PlanGraphError, build_plan_graph
+from selfworkflow.v3.cpp_router import (
+    CppRouteError,
+    request_from_code_signals,
+    route_cpp_capabilities,
+)
 
 
 class ResolveError(ValueError):
@@ -63,6 +68,14 @@ def resolve_request(
     """Return a schema-valid V3 ResolveResult containing only its PlanGraph."""
 
     normalized = _load_request(request)
+    capability_route = None
+    if "codeSignals" in normalized:
+        try:
+            capability_route = route_cpp_capabilities(
+                request_from_code_signals(normalized, normalized["codeSignals"])
+            ).as_dict()
+        except CppRouteError as error:
+            raise ResolveError(str(error)) from None
     catalog = _artifact_or_compile_catalog(catalog_source)
     pipeline = _artifact_or_load_pipeline(pipeline_source)
     try:
@@ -88,6 +101,8 @@ def resolve_request(
             }],
             "planGraph": None,
         }
+        if capability_route is not None:
+            result["capabilityRoute"] = capability_route
         try:
             validate_resolve_result(result)
         except ContractError as contract_error:
@@ -100,6 +115,8 @@ def resolve_request(
         "diagnostics": [],
         "planGraph": plan.as_dict(),
     }
+    if capability_route is not None:
+        result["capabilityRoute"] = capability_route
     try:
         validate_resolve_result(result)
     except ContractError as error:

@@ -1,0 +1,13 @@
+schemaVersion: 1
+id: codegraph-routing-v1
+source: user-provided-codegraph-reference
+selectedFiles:
+  - path: docs/design/agent-codegraph-adoption.md
+    sha256: bce54c9780d22fda507993282424e69643e9212ed81892b85d4b03c566d1c81a
+generalizedPrinciples:
+  - provider-output-must-be-sufficient-and-current
+  - do-not-force-tool-use-when-native-path-is-cheaper
+  - query-results-bind-source-and-blast-radius
+  - startup-availability-is-distinct-from-adapter-support
+  - behavioral-claims-require-ab-evidence
+publicationStatus: candidate

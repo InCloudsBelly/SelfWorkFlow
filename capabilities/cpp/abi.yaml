@@ -1,0 +1,8 @@
+schemaVersion: 1
+id: cpp.abi
+reasoningStatus: supported
+nativeValidationStatus: unverified
+entrypoint: skills/cpp-core/references/abi.md
+positiveSignals: [abi, odr, layout, vtable, export, serialization-compatibility]
+falseSignals: [source-only-private-refactor]
+testObligations: [producer-consumer, layout-baseline, old-data, old-binary]

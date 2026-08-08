@@ -20,6 +20,17 @@ def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
     )
 
 
+def _file_transport_runner(command, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Test-only runner for the local bare remotes created by this fixture."""
+
+    env = dict(os.environ)
+    env["GIT_ALLOW_PROTOCOL"] = "file"
+    return subprocess.run(
+        list(command), cwd=cwd, check=False, capture_output=True,
+        text=True, encoding="utf-8", errors="strict", env=env,
+    )
+
+
 def _commit_file(repository: Path, value: str) -> str:
     (repository / "content.txt").write_text(value, encoding="utf-8")
     _git(repository, "add", "content.txt")
@@ -71,18 +82,27 @@ class SubmoduleProfileTests(unittest.TestCase):
 
             clone = root / "clone"
             _git(root, "clone", str(parent_remote), str(clone))
-            first_result = apply_submodule_profile(clone, "normal")
+            first_result = apply_submodule_profile(
+                clone, "normal", runner=_file_transport_runner,
+            )
             self.assertEqual(first_result["status"], "ready")
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
-            self.assertEqual(apply_submodule_profile(clone, "normal")["status"], "ready")
+            self.assertEqual(
+                apply_submodule_profile(
+                    clone, "normal", runner=_file_transport_runner,
+                )["status"],
+                "ready",
+            )
 
             _git(parent / "dependencies/upstream/tea", "checkout", "--detach", second)
             _git(parent, "add", "dependencies/upstream/tea")
             _git(parent, "commit", "-m", "pin second")
             _git(parent, "push", str(parent_remote), "HEAD")
             _git(clone, "pull", "--ff-only", "--recurse-submodules=no")
-            apply_submodule_profile(clone, "normal")
+            apply_submodule_profile(
+                clone, "normal", runner=_file_transport_runner,
+            )
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
 
             third = _commit_file(tea_source, "offline-only")
@@ -94,7 +114,9 @@ class SubmoduleProfileTests(unittest.TestCase):
             pulled = _git(clone, "pull", "--ff-only", "--recurse-submodules=no", check=False)
             self.assertEqual(pulled.returncode, 0, pulled.stderr)
             with self.assertRaisesRegex(SubmoduleProfileError, "submodule-update-failed"):
-                apply_submodule_profile(clone, "normal")
+                apply_submodule_profile(
+                    clone, "normal", runner=_file_transport_runner,
+                )
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
             self.assertFalse((clone / "dependencies/heavy").exists())
 

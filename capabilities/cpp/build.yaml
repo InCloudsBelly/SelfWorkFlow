@@ -1,0 +1,8 @@
+schemaVersion: 1
+id: cpp.build
+reasoningStatus: supported
+nativeBuildStatus: unverified
+entrypoint: skills/cpp-core/references/build.md
+positiveSignals: [compile, link, macro, preprocessor, toolchain, cmake, pch, unity-build]
+falseSignals: [read-only-code-explanation]
+testObligations: [target-build, non-unity-boundary, generated-code, critical-macro]

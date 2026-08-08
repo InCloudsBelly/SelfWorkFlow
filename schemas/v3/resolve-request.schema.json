@@ -65,7 +65,8 @@
       "maxItems": 256,
       "items": {"$ref": "#/$defs/classificationEvidence"}
     },
-    "testLevelFloor": {"enum": ["T0", "T1", "T2", "T3"]}
+    "testLevelFloor": {"enum": ["T0", "T1", "T2", "T3"]},
+    "codeSignals": {"$ref": "#/$defs/codeSignals"}
   },
   "$defs": {
     "sha256": {
@@ -190,6 +191,39 @@
         "evidenceHash": {"$ref": "#/$defs/sha256"},
         "classifierVersion": {"$ref": "#/$defs/nonEmptyString"},
         "classifierHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "codeSignals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "languages",
+        "fileExtensions",
+        "taskSignals",
+        "explicitCppModuleIds",
+        "userConfirmedHeavy",
+        "projectAllowsExecution"
+      ],
+      "properties": {
+        "languages": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "fileExtensions": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^\\.[A-Za-z0-9][A-Za-z0-9+_-]{0,15}$"
+          }
+        },
+        "taskSignals": {"$ref": "#/$defs/idList"},
+        "explicitCppModuleIds": {"$ref": "#/$defs/idList"},
+        "userConfirmedHeavy": {"type": "boolean"},
+        "projectAllowsExecution": {"type": "boolean"}
       }
     }
   }

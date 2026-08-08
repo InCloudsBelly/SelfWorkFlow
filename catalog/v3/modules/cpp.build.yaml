@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: cpp.build
+sourceHash: sha256:7daad00d397802f47fe4f96c7d042c3f4c3a5f9e28f1d940b2f9fd3fbb608c3a
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/cpp-core/references/build.md}
+dependencies: [cpp-core]
+conflicts: []
+contextCost: {estimatedContextCost: 180, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}

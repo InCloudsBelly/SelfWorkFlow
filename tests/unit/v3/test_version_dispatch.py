@@ -36,6 +36,37 @@ class VersionDispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported-contract-version"):
             _resolve_by_version(b"catalog", {"schemaVersion": 99})
 
+    def test_v3_dispatch_preserves_content_addressed_cpp_route(self):
+        from copy import deepcopy
+        from selfworkflow.cli import _resolve_by_version
+        from tests.unit.v3.test_cpp_router import _v3_request
+
+        request = _v3_request()
+        request["codeSignals"] = {
+            "languages": ["cpp"],
+            "fileExtensions": [".cpp"],
+            "taskSignals": ["concurrency"],
+            "explicitCppModuleIds": [],
+            "userConfirmedHeavy": False,
+            "projectAllowsExecution": False,
+        }
+        result = _resolve_by_version(
+            b"ignored",
+            deepcopy(request),
+            catalog_source=self.ROOT / "catalog/v3/index.yaml",
+            pipeline_source=self.ROOT / "workflow/v3/pipeline.yaml",
+        )
+
+        self.assertEqual(result["schemaVersion"], 3)
+        self.assertEqual(
+            result["capabilityRoute"]["selectedModuleIds"],
+            ["cpp-core", "cpp.concurrency"],
+        )
+        self.assertRegex(
+            result["capabilityRoute"]["routeHash"],
+            r"^sha256:[0-9a-f]{64}$",
+        )
+
     def test_v2_cli_end_to_end_preserves_output_and_error_text(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.cli import main

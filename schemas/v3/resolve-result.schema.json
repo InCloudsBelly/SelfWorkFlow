@@ -24,6 +24,9 @@
         {"type": "null"},
         {"$ref": "https://selfworkflow.local/schemas/v3/plan-graph.schema.json"}
       ]
+    },
+    "capabilityRoute": {
+      "$ref": "https://selfworkflow.local/schemas/v3/capability-route.schema.json"
     }
   },
   "allOf": [
