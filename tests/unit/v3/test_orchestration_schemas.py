@@ -51,6 +51,36 @@ class OrchestrationSchemaTests(unittest.TestCase):
             }
         ],
     }
+    RESOLVE_REQUEST = {
+        "schemaVersion": 3,
+        "operationType": "implement",
+        "complexity": "C1",
+        "risk": "R1",
+        "writeTask": True,
+        "ambiguity": False,
+        "explicitModuleIds": [],
+        "projectDefaultModuleIds": [],
+        "projectMinimums": {"strength": "Light"},
+        "capabilityEvidenceSnapshot": {
+            "schemaVersion": 1,
+            "capturedAt": "2026-08-09T00:00:00Z",
+            "evidence": [],
+        },
+        "taskArchetype": "bounded-feature",
+        "requirementsMaturity": "defined",
+        "scopeShape": "single-module",
+        "durableSpec": True,
+        "classificationConfidence": 0.9,
+        "classificationEvidence": [
+            {
+                "evidenceRef": "classification-1",
+                "evidenceHash": "sha256:" + "d" * 64,
+                "classifierVersion": "classifier-v1",
+                "classifierHash": "sha256:" + "e" * 64,
+            }
+        ],
+        "testLevelFloor": "T1",
+    }
 
     def _validator(self, filename):
         schema_path = self.ROOT / "schemas" / "v3" / filename
@@ -62,6 +92,47 @@ class OrchestrationSchemaTests(unittest.TestCase):
         schema_path = self.ROOT / "schemas" / "v3" / "resolve-request.schema.json"
 
         self.assertTrue(schema_path.is_file(), "v3-schema-not-found")
+
+    def test_resolve_request_schema_accepts_minimal_request(self):
+        errors = list(
+            self._validator("resolve-request.schema.json").iter_errors(self.RESOLVE_REQUEST)
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_resolve_request_schema_rejects_only_unknown_field(self):
+        invalid = {**self.RESOLVE_REQUEST, "unexpected": True}
+
+        errors = list(
+            self._validator("resolve-request.schema.json").iter_errors(invalid)
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].validator, "additionalProperties")
+        self.assertIn("'unexpected'", errors[0].message)
+        self.assertNotIn("'operationType'", errors[0].message)
+
+    def test_resolve_request_schema_rejects_only_wrong_version(self):
+        invalid = {**self.RESOLVE_REQUEST, "schemaVersion": 2}
+
+        errors = list(
+            self._validator("resolve-request.schema.json").iter_errors(invalid)
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(list(errors[0].absolute_path), ["schemaVersion"])
+        self.assertEqual(errors[0].validator, "const")
+
+    def test_resolve_request_schema_rejects_confidence_above_one(self):
+        invalid = {**self.RESOLVE_REQUEST, "classificationConfidence": 1.01}
+
+        errors = list(
+            self._validator("resolve-request.schema.json").iter_errors(invalid)
+        )
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(list(errors[0].absolute_path), ["classificationConfidence"])
+        self.assertEqual(errors[0].validator, "maximum")
 
     def test_v3_module_schema_is_available(self):
         schema_path = self.ROOT / "schemas" / "v3" / "module.schema.json"
