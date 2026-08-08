@@ -925,6 +925,12 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
         _validate_plan_graph(plan)
         if not _plan_is_executable(plan):
             _raise_semantic("resolve-active-plan-not-executable", ("planGraph",))
+        ledger = document.get("runLedger")
+        if ledger is not None:
+            _validate_schema("run-ledger.schema.json", ledger)
+            _validate_run_ledger(ledger, plan)
+    elif document.get("runLedger") is not None:
+        _raise_semantic("resolve-paused-ledger-without-plan", ("runLedger",))
 
 
 def _validate_receipt_coverage(document: dict[str, Any]) -> set[str]:
@@ -1131,7 +1137,27 @@ def _validate_run_ledger(
     prefix_done = {"passed", "skipped"}
     suffix_waiting = {"pending", "skipped"}
     if status == "pending":
-        status_valid = all(item in suffix_waiting for item in stage_statuses)
+        # ``pending`` also represents a deterministic handoff point: a
+        # completed prefix with no stage activated yet.  An active stage is
+        # still rejected, so callers cannot skip the explicit activation
+        # transition or create two active stages.
+        first_waiting = next(
+            (index for index, value in enumerate(stage_statuses)
+             if value == "pending"),
+            len(stage_statuses),
+        )
+        status_valid = (
+            active_count == 0
+            and first_waiting < len(stage_statuses)
+            and all(item in prefix_done for item in stage_statuses[:first_waiting])
+            and all(item in suffix_waiting for item in stage_statuses[first_waiting:])
+            and all(
+                "completedAt" in attempt
+                for stage in document["stages"]
+                if stage["status"] == "passed"
+                for attempt in stage["attempts"]
+            )
+        )
     elif status in {"active", "paused", "failed"}:
         marker = status
         marker_indexes = [
@@ -1288,6 +1314,13 @@ def validate_run_ledger(
         document, plan, receipts,
         expected_successor_plan_hash,
     )
+
+
+def validate_resolve_result(document: dict[str, Any]) -> None:
+    """Validate a V3 ResolveResult and its optional matching RunLedger."""
+
+    _validate_schema("resolve-result.schema.json", document)
+    _validate_resolve_result(document)
 
 
 def validate_diff_signal_set(

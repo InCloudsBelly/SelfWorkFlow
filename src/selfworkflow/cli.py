@@ -128,6 +128,29 @@ def _publish_catalog(source_value: str, output_value: str) -> str:
     return compiled.catalog_hash
 
 
+def _resolve_by_version(
+    catalog_content: bytes,
+    request: dict[str, object],
+    *,
+    catalog_source: object = None,
+    pipeline_source: object = None,
+) -> dict[str, object]:
+    """Dispatch only on an explicit request version; never downgrade unknown input."""
+
+    version = request.get("schemaVersion")
+    if version == 3:
+        from selfworkflow.v3.resolver import resolve_request
+
+        return resolve_request(
+            request,
+            catalog_source=catalog_source if catalog_source is not None else catalog_content,
+            pipeline_source=pipeline_source,
+        )
+    if version in {1, 2}:
+        return resolve_task(catalog_content, request)
+    raise ValueError("unsupported-contract-version")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="selfworkflow")
     parser.add_argument("--version", action="version", version=__version__)
@@ -212,9 +235,10 @@ def main(argv: list[str] | None = None) -> int:
                 or catalog_path.stat().st_size > 16 * 1024 * 1024
             ):
                 raise ValueError("catalog-input-invalid")
-            result = resolve_task(
-                catalog_path.read_bytes(),
-                _read_json(arguments.request, reject_duplicates=True),
+            request = _read_json(arguments.request, reject_duplicates=True)
+            result = _resolve_by_version(
+                catalog_path.read_bytes(), request,
+                catalog_source=catalog_path,
             )
         except Exception:
             print("SelfWorkFlow: resolve-failed", file=sys.stderr)

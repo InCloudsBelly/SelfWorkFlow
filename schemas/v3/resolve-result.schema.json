@@ -24,6 +24,12 @@
         {"type": "null"},
         {"$ref": "https://selfworkflow.local/schemas/v3/plan-graph.schema.json"}
       ]
+    },
+    "runLedger": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "https://selfworkflow.local/schemas/v3/run-ledger.schema.json"}
+      ]
     }
   },
   "allOf": [
