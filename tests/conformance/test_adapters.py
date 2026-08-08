@@ -38,6 +38,18 @@ class AdapterContractTests(unittest.TestCase):
         self.assertEqual(codex["supportStatus"], "experimental-unverified")
         self.assertEqual(codex["overrideBehavior"], "pause-and-confirm-target")
 
+    def test_vendor_entries_expose_the_optional_stateless_resolver(self):
+        adapters = load_adapters(
+            self.ROOT / "adapters",
+            self.ROOT / "schemas/adapter.schema.json",
+        )
+        for adapter in adapters:
+            with self.subTest(adapter=adapter["id"]):
+                content = (
+                    self.ROOT / "adapters" / adapter["id"] / adapter["entryFile"]
+                ).read_text(encoding="utf-8")
+                self.assertIn("selfworkflow resolve", content)
+
 
 if __name__ == "__main__":
     unittest.main()

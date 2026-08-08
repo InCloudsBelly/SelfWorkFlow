@@ -1,1 +1,1 @@
-Use the installed SelfWorkFlow `WORKFLOW.md` as the vendor-neutral process contract. Do not claim Skill execution, Review independence, tests, or side effects that the current host cannot verify.
+Use the installed SelfWorkFlow `WORKFLOW.md` as the vendor-neutral process contract and use `selfworkflow resolve` when available. Do not claim Skill execution, Review independence, tests, or side effects that the current host cannot verify.

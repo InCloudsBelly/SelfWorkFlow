@@ -35,6 +35,7 @@ def decide_overlay(
     explicit_grill: bool,
     source_status: str,
     write_task: bool,
+    grill_available: bool = True,
 ) -> dict[str, object]:
     """Select only current-stage Skills and fail closed for modifying work."""
 
@@ -60,6 +61,15 @@ def decide_overlay(
             "grillRecommended": grill_recommended,
             "postGrillReview": None,
             "issues": ("superpowers",),
+        }
+    if explicit_grill and not grill_available:
+        return {
+            "status": "paused",
+            "allowedMode": "none",
+            "selectedSkills": (),
+            "grillRecommended": grill_recommended,
+            "postGrillReview": None,
+            "issues": ("grill-me-unavailable",),
         }
     selected = list(_STAGE_MAP.get((stage, operation), ()))
     post_review = None

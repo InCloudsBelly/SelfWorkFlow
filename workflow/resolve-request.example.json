@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "stage": "implemented",
+  "operationType": "implement",
+  "complexity": "C1",
+  "risk": "R1",
+  "writeTask": true,
+  "ambiguity": false,
+  "explicitGrill": false,
+  "superpowersSourceStatus": "unselected",
+  "capabilityStates": {
+    "filesystem-read": "unverified",
+    "filesystem-write": "unverified"
+  },
+  "fileExtensions": [],
+  "semanticTerms": [],
+  "explicitSkills": [],
+  "contextBudget": 4096
+}

@@ -19,10 +19,27 @@ from selfworkflow.installer import (
     doctor,
     verify_install,
 )
+from selfworkflow.resolver import resolve_task
+from selfworkflow.sources import (
+    SourceSelectionError,
+    inspect_superpowers_source,
+    stage_superpowers_source,
+)
 from selfworkflow.transactions import write_json_atomic
 
 
 _REPARSE_POINT = 0x400
+
+
+def _reject_duplicate_json_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("json-input-invalid")
+        result[key] = value
+    return result
 
 
 def _absolute_path(value: str) -> Path:
@@ -131,6 +148,20 @@ def main(argv: list[str] | None = None) -> int:
         choices=("core", "knowledge", "maintainer"),
         default="core",
     )
+    build_parser.add_argument("--without-grill-me", action="store_true")
+    resolve_parser = commands.add_parser("resolve")
+    resolve_parser.add_argument("--catalog", required=True)
+    resolve_parser.add_argument("--request", required=True)
+    source_parser = commands.add_parser("source")
+    source_commands = source_parser.add_subparsers(
+        dest="source_command", required=True
+    )
+    source_inspect = source_commands.add_parser("inspect")
+    source_inspect.add_argument("--path", required=True)
+    source_stage = source_commands.add_parser("stage")
+    source_stage.add_argument("--path", required=True)
+    source_stage.add_argument("--target", required=True)
+    source_stage.add_argument("--expected-inventory-hash", required=True)
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -160,6 +191,64 @@ def main(argv: list[str] | None = None) -> int:
             return 20
         print(catalog_hash)
         return 0
+    if arguments.command == "resolve":
+        try:
+            catalog_path = _absolute_path(arguments.catalog)
+            if (
+                not catalog_path.is_file()
+                or catalog_path.stat().st_size > 16 * 1024 * 1024
+            ):
+                raise ValueError("catalog-input-invalid")
+            result = resolve_task(
+                catalog_path.read_bytes(),
+                _read_json(arguments.request, reject_duplicates=True),
+            )
+        except Exception:
+            print("SelfWorkFlow: resolve-failed", file=sys.stderr)
+            return 50
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    if arguments.command == "source" and arguments.source_command == "inspect":
+        try:
+            result = inspect_superpowers_source(arguments.path)
+        except SourceSelectionError as error:
+            print(f"SelfWorkFlow: source-inspect-failed:{error}", file=sys.stderr)
+            return 60
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    if arguments.command == "source" and arguments.source_command == "stage":
+        try:
+            result = stage_superpowers_source(
+                arguments.path,
+                arguments.target,
+                arguments.expected_inventory_hash,
+            )
+        except SourceSelectionError as error:
+            print(f"SelfWorkFlow: source-stage-failed:{error}", file=sys.stderr)
+            return 61
+        print(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
     try:
         if arguments.command == "doctor":
             result = doctor(
@@ -171,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.output,
                 arguments.version,
                 profile=arguments.profile,
+                include_grill_me=not arguments.without_grill_me,
             )
         elif arguments.command == "install" and arguments.install_command == "plan":
             result = create_install_plan(
@@ -202,11 +292,16 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _read_json(value: str) -> dict[str, object]:
+def _read_json(value: str, *, reject_duplicates: bool = False) -> dict[str, object]:
     path = _absolute_path(value)
     if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
         raise ValueError("json-input-invalid")
-    result = json.loads(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    result = (
+        json.loads(text, object_pairs_hook=_reject_duplicate_json_keys)
+        if reject_duplicates
+        else json.loads(text)
+    )
     if not isinstance(result, dict):
         raise ValueError("json-input-invalid")
     return result

@@ -4,6 +4,43 @@ SelfWorkFlow is a code-first, vendor-neutral Agent workflow. Its default product
 a compact operational core, not the repository's complete maintenance and release
 machinery.
 
+## Windows one-click installation
+
+After cloning the repository, run this from Explorer or a terminal:
+
+```bat
+Install_SelfWorkFlow.bat
+```
+
+The installer checks or prepares the repository Python environment, asks which
+Superpowers Git source to use, and asks whether to install the bundled Grill-me
+Skill when it is missing. Grill-me remains explicit-only after installation. If
+it is skipped, ordinary workflow installation continues but later explicit
+Grill-me requests must pause and report the missing capability.
+
+Installing the official Superpowers dependency has its own earlier authorization;
+the clone is inspected before the final plan and its commit and inventory hash are
+shown in the confirmation summary. Before publishing workflow files, the installer
+shows the generated plan and requires the exact confirmation `APPLY`. It uses the
+existing transactional installer, verifies the manifest, and rolls back the current
+publication if a later verification step fails. Detailed diagnostics and machine-readable artifacts are written under
+`%LOCALAPPDATA%\SelfWorkFlow\logs\install-<timestamp>`. Logs do not include an
+environment dump or credential values.
+
+Superpowers may come from an explicitly selected local Git checkout (including an
+authorized dirty checkout) or, after a separate prompt, the official repository.
+Codex receives a hash-bound copy of Git-tracked `skills/**` files plus a source
+lock. It deliberately does not receive a junction because reparse points would
+invalidate the transaction doctor's full-tree safety check. Restart Codex after a
+successful install. The restart and native Skill activation remain `unverified`
+until exercised in the real host.
+
+For unattended sandboxing or diagnostics, inspect all parameters first:
+
+```powershell
+.\scripts\install-selfworkflow.ps1 -Help
+```
+
 ## Default workflow
 
 Ordinary work loads only `workflow/core.md` and the capability needed for the
@@ -33,7 +70,8 @@ Runtime profiles are closed and deterministic:
 
 ## Current capability status
 
-- Deterministic workflow, evidence, Catalog, routing, Skill absorption, adapters,
+- Deterministic workflow, evidence, Catalog, routing, stateless task resolution,
+  Skill absorption, adapters,
   optional knowledge contract, C7OpenWiki contract mapping, runtime build, and
   sandbox transaction install/verify/rollback are implemented and automated-tested.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
@@ -55,6 +93,19 @@ Runtime profiles are closed and deterministic:
 
 Use `--profile knowledge` or `--profile maintainer` only when the requested task
 actually needs those boundaries.
+
+Resolve one current workflow stage without starting a long-lived orchestrator:
+
+```powershell
+Copy-Item build\runtime\workflow\resolve-request.example.json build\request.json
+# Update the copied request with observed C/R, capabilities, and Superpowers status.
+.venv\Scripts\python.exe -m selfworkflow.cli resolve --catalog build\runtime\catalog.json --request build\request.json
+```
+
+The result composes the capability gate, Catalog route, current-stage
+Superpowers Skills, and minimum Review/verification requirements. Input capability
+and source statuses are explicit reports from the calling Agent, not authentication
+or native-host proof. `paused` must not be silently promoted to `active`.
 
 Review the complete plan and its `planHash`, then pass that exact hash to
 `install apply`. Use the returned manifest for `install verify`; use the returned

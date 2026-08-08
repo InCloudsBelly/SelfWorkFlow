@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import tempfile
 import unittest
+from unittest import mock
 
 from jsonschema import Draft202012Validator
 
@@ -83,6 +84,43 @@ class InstallApplyTests(unittest.TestCase):
                         (artifact / "WORKFLOW.md").write_text("drift\n", encoding="utf-8")
                     with self.assertRaises(InstallerError):
                         apply_install_plan(plan, plan["planHash"])
+
+    def test_apply_failure_after_first_write_automatically_restores_targets(self):
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            codex.mkdir()
+            agents_file = codex / "AGENTS.md"
+            agents_file.write_text("user content\n", encoding="utf-8")
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            real_operation = installer._operation
+            calls = 0
+
+            def fail_second_operation(*arguments, **keywords):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise OSError("injected-operation-failure")
+                return real_operation(*arguments, **keywords)
+
+            with mock.patch(
+                "selfworkflow.installer._operation",
+                side_effect=fail_second_operation,
+            ):
+                with self.assertRaises(InstallerError):
+                    apply_install_plan(plan, plan["planHash"])
+
+            self.assertEqual(
+                agents_file.read_text(encoding="utf-8"), "user content\n"
+            )
+            self.assertFalse((agents / "skills/sample-skill/SKILL.md").exists())
+            transactions = list((state / "transactions").glob("*.json"))
+            self.assertEqual(len(transactions), 1)
+            transaction = json.loads(transactions[0].read_text(encoding="utf-8"))
+            self.assertEqual(transaction["state"], "rolled-back")
 
 
 if __name__ == "__main__":

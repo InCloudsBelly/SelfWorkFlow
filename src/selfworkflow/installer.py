@@ -154,6 +154,19 @@ def _artifact_profile(artifact: Path) -> str:
     return profile
 
 
+def _managed_instruction(snapshot: Path) -> str:
+    workflow = snapshot / "WORKFLOW.md"
+    catalog = snapshot / "catalog.json"
+    example = snapshot / "workflow/resolve-request.example.json"
+    return (
+        f"Read the vendor-neutral workflow at `{workflow}`. "
+        "When deterministic stage resolution is needed, copy and update "
+        f"`{example}`, then run `selfworkflow resolve --catalog \"{catalog}\" "
+        "--request <request.json>`. If the resolver is unavailable, follow the "
+        "workflow directly and report automatic resolution as unverified."
+    )
+
+
 def _snapshot_root(
     agents: Path,
     version: str,
@@ -217,7 +230,7 @@ def create_install_plan(
     try:
         render_managed_block(
             _read_text(agents_file),
-            f"Read the vendor-neutral workflow at `{snapshot / 'WORKFLOW.md'}`.",
+            _managed_instruction(snapshot),
         )
     except (ManagedBlockError, UnicodeError):
         issues.append("managed-block-invalid")
@@ -306,6 +319,20 @@ def _operation(target: Path, content: bytes, backup_root: Path) -> dict[str, obj
     }
 
 
+def _restore_operations(operations: list[dict[str, object]]) -> None:
+    for item in reversed(operations):
+        target = Path(item["target"])
+        if not target.is_file() or _path_hash(target) != item["afterHash"]:
+            raise InstallerError("automatic-rollback-target-drift")
+        if item["beforeExists"]:
+            backup = Path(item["backupPath"])
+            if not backup.is_file() or _path_hash(backup) != item["beforeHash"]:
+                raise InstallerError("automatic-rollback-backup-invalid")
+            _atomic_write(target, backup.read_bytes())
+        else:
+            target.unlink()
+
+
 def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
     if not isinstance(plan, dict):
         raise InstallerError("plan-invalid")
@@ -384,64 +411,76 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 "stateRoot": str(state),
                 "operations": operations,
             }
-            write_json_atomic(transaction_path, transaction)
-
-            def record(target: Path, content: bytes) -> None:
-                operations.append(_operation(target, content, backup_root))
-                transaction["operations"] = operations
+            try:
                 write_json_atomic(transaction_path, transaction)
 
-            snapshot = _snapshot_root(agents, plan["version"], plan["artifactHash"])
-            for item in _manifest(artifact):
-                source = artifact / Path(*PurePosixPath(item["path"]).parts)
-                record(snapshot / item["path"], source.read_bytes())
-            for item in _manifest(artifact):
-                if item["path"].startswith("skills/"):
+                def record(target: Path, content: bytes) -> None:
+                    operations.append(_operation(target, content, backup_root))
+                    transaction["operations"] = operations
+                    write_json_atomic(transaction_path, transaction)
+
+                snapshot = _snapshot_root(agents, plan["version"], plan["artifactHash"])
+                for item in _manifest(artifact):
                     source = artifact / Path(*PurePosixPath(item["path"]).parts)
-                    record(agents / item["path"], source.read_bytes())
-            agents_path = codex / "AGENTS.md"
-            agents_content = render_managed_block(
-                _read_text(agents_path),
-                f"Read the vendor-neutral workflow at `{snapshot / 'WORKFLOW.md'}`.",
-            ).encode("utf-8")
-            record(agents_path, agents_content)
-            pointer = (json.dumps(
-                {
+                    record(snapshot / item["path"], source.read_bytes())
+                for item in _manifest(artifact):
+                    if item["path"].startswith("skills/"):
+                        source = artifact / Path(*PurePosixPath(item["path"]).parts)
+                        record(agents / item["path"], source.read_bytes())
+                agents_path = codex / "AGENTS.md"
+                agents_content = render_managed_block(
+                    _read_text(agents_path),
+                    _managed_instruction(snapshot),
+                ).encode("utf-8")
+                record(agents_path, agents_content)
+                pointer = (json.dumps(
+                    {
+                        "version": plan["version"],
+                        "profile": plan["profile"],
+                        "artifactHash": plan["artifactHash"],
+                        "snapshot": str(snapshot),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ) + "\n").encode("utf-8")
+                record(agents / "selfworkflow/current.json", pointer)
+                current_manifest_content = (
+                    json.dumps(
+                        {"manifestPath": str(manifest_path)},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode("utf-8")
+                record(state / "current-manifest.json", current_manifest_content)
+                manifest = {
+                    "schemaVersion": 1,
+                    "manifestPath": str(manifest_path),
+                    "transactionId": transaction_id,
+                    "transactionPath": str(transaction_path),
                     "version": plan["version"],
                     "profile": plan["profile"],
                     "artifactHash": plan["artifactHash"],
-                    "snapshot": str(snapshot),
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ) + "\n").encode("utf-8")
-            record(agents / "selfworkflow/current.json", pointer)
-            current_manifest_content = (
-                json.dumps(
-                    {"manifestPath": str(manifest_path)},
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                + "\n"
-            ).encode("utf-8")
-            record(state / "current-manifest.json", current_manifest_content)
-            manifest = {
-                "schemaVersion": 1,
-                "manifestPath": str(manifest_path),
-                "transactionId": transaction_id,
-                "transactionPath": str(transaction_path),
-                "version": plan["version"],
-                "profile": plan["profile"],
-                "artifactHash": plan["artifactHash"],
-                "agentsRoot": str(agents),
-                "codexRoot": str(codex),
-                "stateRoot": str(state),
-                "operations": operations,
-                "securityStatus": "unverified",
-            }
-            write_json_atomic(manifest_path, manifest)
-            transaction.update({"state": "completed", "operations": operations, "manifestPath": str(manifest_path)})
-            write_json_atomic(transaction_path, transaction)
+                    "agentsRoot": str(agents),
+                    "codexRoot": str(codex),
+                    "stateRoot": str(state),
+                    "operations": operations,
+                    "securityStatus": "unverified",
+                }
+                write_json_atomic(manifest_path, manifest)
+                transaction.update({"state": "completed", "operations": operations, "manifestPath": str(manifest_path)})
+                write_json_atomic(transaction_path, transaction)
+            except Exception:
+                try:
+                    _restore_operations(operations)
+                    manifest_path.unlink(missing_ok=True)
+                    transaction.update({"state": "rolled-back", "operations": operations})
+                    write_json_atomic(transaction_path, transaction)
+                except Exception:
+                    raise InstallerError("automatic-rollback-failed") from None
+                raise InstallerError("apply-failed") from None
+    except InstallerError:
+        raise
     except (ManagedBlockError, TransactionError) as error:
         raise InstallerError(str(error)) from None
     return {

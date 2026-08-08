@@ -28,9 +28,9 @@ _CORE_CATALOG_IDS = {
 }
 _CORE_PATHS = (
     "workflow/core.md",
+    "workflow/resolve-request.example.json",
     "skills/code-quality",
     "skills/workflow-quality",
-    "skills/grill-me",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
     "overlays/superpowers",
@@ -84,18 +84,27 @@ def _copy_runtime_path(source: Path, destination: Path, relative: str) -> None:
         raise AdapterError("runtime-source-invalid")
 
 
-def _profile_catalog(source: Path, profile: str) -> bytes:
+def _profile_catalog(
+    source: Path, profile: str, *, include_grill_me: bool
+) -> bytes:
     compiled = compile_catalog(source / "catalog")
-    if profile == "maintainer":
+    if profile == "maintainer" and include_grill_me:
         return compiled.content
     envelope = json.loads(compiled.content)
-    allowed = set(_CORE_CATALOG_IDS)
-    if profile == "knowledge":
-        allowed.add("knowledge-on-demand-loading")
     catalog = envelope["catalog"]
-    catalog["entries"] = [
-        entry for entry in catalog["entries"] if entry["id"] in allowed
-    ]
+    if profile == "maintainer":
+        catalog["entries"] = [
+            entry for entry in catalog["entries"] if entry["id"] != "grill-me"
+        ]
+    else:
+        allowed = set(_CORE_CATALOG_IDS)
+        if not include_grill_me:
+            allowed.remove("grill-me")
+        if profile == "knowledge":
+            allowed.add("knowledge-on-demand-loading")
+        catalog["entries"] = [
+            entry for entry in catalog["entries"] if entry["id"] in allowed
+        ]
     selected_ids = {entry["id"] for entry in catalog["entries"]}
     if any(
         dependency not in selected_ids
@@ -140,6 +149,7 @@ def build_runtime(
     version: str,
     *,
     profile: str = "core",
+    include_grill_me: bool = True,
 ) -> dict[str, object]:
     if profile not in _RUNTIME_PROFILES:
         raise AdapterError("runtime-profile-invalid")
@@ -159,14 +169,22 @@ def build_runtime(
                 candidate = source / directory
                 if candidate.is_dir():
                     _copy_tree(candidate, temporary / directory)
+            if not include_grill_me:
+                shutil.rmtree(temporary / "skills/grill-me")
         else:
             shutil.copyfile(source / "workflow/core.md", temporary / "WORKFLOW.md")
             for relative in _CORE_PATHS:
                 _copy_runtime_path(source, temporary, relative)
+            if include_grill_me:
+                _copy_runtime_path(source, temporary, "skills/grill-me")
             if profile == "knowledge":
                 _copy_runtime_path(source, temporary, "extensions/knowledge")
         catalog_output = temporary / "catalog.json"
-        catalog_output.write_bytes(_profile_catalog(source, profile))
+        catalog_output.write_bytes(
+            _profile_catalog(
+                source, profile, include_grill_me=include_grill_me
+            )
+        )
         files = _runtime_manifest(temporary)
         runtime_hash = "sha256:" + hashlib.sha256(
             json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -175,6 +193,7 @@ def build_runtime(
             "schemaVersion": 1,
             "version": version,
             "profile": profile,
+            "features": {"grillMe": include_grill_me},
             "runtimeHash": runtime_hash,
             "files": files,
         }

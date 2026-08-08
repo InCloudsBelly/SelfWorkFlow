@@ -4,12 +4,15 @@
 
 - [x] 精简、厂商无关的 `workflow/core.md`
 - [x] 普通修改只路由 `workflow-core`
-- [x] Brainstorming、Plan、TDD、Debug、Review、Verification 按阶段加载
+- [x] 无状态解析器组合 C/R、能力门禁、Catalog 和当前阶段 Superpowers 选择
 - [x] Grill-me 仅由用户显式触发
 - [x] 责任层优先、最小侵入、完整 diff Review 和最窄充分验证
 - [x] `core` 为默认运行时，确定性排除安装、发布和知识扩展正文
 - [x] `knowledge` 与 `maintainer` 必须显式选择
 - [x] Catalog、路由和 profile 聚焦测试
+
+解析器只生成执行计划，不伪称已经执行 Skill、Review 或测试。真实宿主是否按
+计划发现并调用对应 Skill，仍由下方原生 Agent 验收确认。
 
 默认代码工作流的可用性不再依赖原生 Agent 发布验收。未执行的宿主/模型测试
 仍按事实标记 `unverified`，但不会让普通代码流程加载发布治理。

@@ -1,13 +1,18 @@
 from pathlib import Path
+import io
+import json
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from selfworkflow.sources import (
     SourceSelectionError,
     inspect_superpowers_source,
     lock_superpowers_source,
+    stage_superpowers_source,
 )
+from selfworkflow.cli import main
 
 
 def _commit(root: Path):
@@ -102,6 +107,108 @@ class SuperpowersSourceTests(unittest.TestCase):
                 "reason": "superpowers-unavailable-or-declined",
             },
         )
+
+    def test_cli_source_inspect_emits_the_read_only_report(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            (root / "skills/brainstorming").mkdir(parents=True)
+            (root / "skills/brainstorming/SKILL.md").write_text(
+                "brainstorm\n", encoding="utf-8"
+            )
+            _commit(root)
+            output = io.StringIO()
+            with mock.patch("sys.stdout", output):
+                result = main(["source", "inspect", "--path", str(root)])
+        self.assertEqual(result, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["supportStatus"], "supported")
+        self.assertEqual(report["sourceLocator"], str(root.resolve()))
+
+    def test_stage_copies_only_hash_bound_tracked_skills_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            (source / "README.md").write_text("not staged\n", encoding="utf-8")
+            _commit(source)
+            (source / "skills/untracked.txt").write_text("ignore\n", encoding="utf-8")
+            report = inspect_superpowers_source(source)
+            target = root / "agents/skills/superpowers"
+
+            first = stage_superpowers_source(
+                source, target, report["inventoryHash"]
+            )
+            second = stage_superpowers_source(
+                source, target, report["inventoryHash"]
+            )
+
+            self.assertEqual(first["status"], "staged")
+            self.assertEqual(second["status"], "already-staged")
+            self.assertTrue((target / "brainstorming/SKILL.md").is_file())
+            self.assertFalse((target / "untracked.txt").exists())
+            self.assertFalse((target / "README.md").exists())
+            lock = json.loads(
+                (target / ".selfworkflow-source.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(lock["inventoryHash"], report["inventoryHash"])
+
+    def test_stage_rejects_source_drift_and_unmanaged_target(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("v1\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            skill.write_text("v2\n", encoding="utf-8")
+            with self.assertRaisesRegex(SourceSelectionError, "source-drift"):
+                stage_superpowers_source(
+                    source, root / "drift-target", report["inventoryHash"]
+                )
+
+            conflict = root / "agents/skills/superpowers"
+            conflict.mkdir(parents=True)
+            (conflict / "foreign.txt").write_text("keep\n", encoding="utf-8")
+            current = inspect_superpowers_source(source)
+            with self.assertRaisesRegex(SourceSelectionError, "target-conflict"):
+                stage_superpowers_source(
+                    source, conflict, current["inventoryHash"]
+                )
+            self.assertEqual(
+                (conflict / "foreign.txt").read_text(encoding="utf-8"), "keep\n"
+            )
+
+    def test_stage_rejects_source_change_during_copy_without_publication(self):
+        import shutil
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("v1\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            target = root / "agents/skills/superpowers"
+            real_copy = shutil.copyfile
+
+            def copy_then_mutate(source_path, target_path):
+                result = real_copy(source_path, target_path)
+                Path(source_path).write_text("v2\n", encoding="utf-8")
+                return result
+
+            with mock.patch(
+                "selfworkflow.sources.shutil.copyfile",
+                side_effect=copy_then_mutate,
+            ):
+                with self.assertRaisesRegex(SourceSelectionError, "source-drift"):
+                    stage_superpowers_source(
+                        source, target, report["inventoryHash"]
+                    )
+            self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":

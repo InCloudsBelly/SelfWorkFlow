@@ -19,6 +19,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
             second = build_runtime(self.ROOT, root / "second", "0.1.0.dev0")
             self.assertEqual(first["runtimeHash"], second["runtimeHash"])
             self.assertEqual(first["profile"], "core")
+            self.assertEqual(first["features"], {"grillMe": True})
             self.assertTrue((root / "first/WORKFLOW.md").is_file())
             self.assertTrue((root / "first/skills/code-quality/SKILL.md").is_file())
             self.assertEqual(
@@ -43,6 +44,24 @@ class RuntimeSnapshotTests(unittest.TestCase):
             ).lower()
             self.assertNotIn(b"e:\\", content)
             self.assertNotIn(b"d:\\openwikic7", content)
+
+    def test_runtime_can_explicitly_exclude_grill_me_without_stale_catalog_metadata(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            manifest = build_runtime(
+                self.ROOT,
+                root / "runtime",
+                "0.1.0.dev0",
+                include_grill_me=False,
+            )
+
+            self.assertEqual(manifest["features"], {"grillMe": False})
+            self.assertFalse((root / "runtime/skills/grill-me").exists())
+            catalog = json.loads((root / "runtime/catalog.json").read_text())
+            self.assertNotIn(
+                "grill-me",
+                {entry["id"] for entry in catalog["catalog"]["entries"]},
+            )
 
     def test_explicit_profiles_add_only_their_intended_boundaries(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
@@ -127,6 +146,18 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertEqual(result, 0)
             manifest = json.loads((output / "artifact-manifest.json").read_text())
             self.assertEqual(manifest["profile"], "knowledge")
+
+    def test_cli_build_can_exclude_grill_me(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            output = Path(temporary) / "runtime"
+            with mock.patch("sys.stdout"):
+                result = main([
+                    "build", "--repository", str(self.ROOT), "--output", str(output),
+                    "--version", "0.1.0.dev0", "--without-grill-me",
+                ])
+            self.assertEqual(result, 0)
+            manifest = json.loads((output / "artifact-manifest.json").read_text())
+            self.assertEqual(manifest["features"], {"grillMe": False})
 
 
 if __name__ == "__main__":
