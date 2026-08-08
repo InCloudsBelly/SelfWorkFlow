@@ -19,6 +19,14 @@ _EVIDENCE_REF = re.compile(
     r"(?:sha256:[0-9a-f]{64}|ref:[a-z0-9][a-z0-9._/-]{0,255})"
 )
 _SUPPORT_SEAL = object()
+_TEST_EVIDENCE_PREFIXES = (
+    "ref:test/",
+    "ref:tests/",
+    "ref:fixture/",
+    "ref:fixtures/",
+    "ref:test-fixture/",
+    "ref:test-fixtures/",
+)
 
 
 class SupportMatrixError(ValueError):
@@ -142,6 +150,11 @@ def _validate_entry(provider_id: str, entry: Mapping[str, Any]) -> None:
             raise SupportMatrixError(reason)
         if provider_id == "fake" or provider_id.startswith(("fake.", "test.fake.")):
             raise SupportMatrixError("provider-fake-supported-production")
+        if any(
+            value.startswith(_TEST_EVIDENCE_PREFIXES)
+            for value in evidence.values()
+        ):
+            raise SupportMatrixError("provider-test-evidence-production")
 
 
 def _issue_entry(

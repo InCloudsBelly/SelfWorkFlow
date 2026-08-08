@@ -87,6 +87,18 @@ class SupportMatrixTests(unittest.TestCase):
             build_support_matrix("codegraph", [_entry(evidence=bad)])
         self.assertEqual(error.exception.reason, "provider-support-evidence-invalid")
 
+    def test_test_fixture_evidence_cannot_support_a_production_provider(self):
+        fixture_evidence = {
+            key: "ref:test-fixture/evidence"
+            for key in EVIDENCE
+        }
+        with self.assertRaises(SupportMatrixError) as error:
+            build_support_matrix("codegraph", [_entry(evidence=fixture_evidence)])
+        self.assertEqual(
+            error.exception.reason,
+            "provider-test-evidence-production",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,4 +30,3 @@ Replay 采用 `reserve → commit/abort`：只有 EffectPort 明确抛出 `Effec
 仓库内只提供 Fake CAS、Fake Effect 和 Fake evidence，用于机械验证互斥、失败路径和契约。
 这些 Fake 证据不能把任何真实 Provider、lease backend 或 Effect backend 升级为
 `supported`。真实 Provider 只有完成独立 native validation 后才能改变支持状态。
-
