@@ -41,6 +41,7 @@ _SCHEMA_NAMES = (
     "provider-mutation-evidence.schema.json",
     "workspace-fingerprint.schema.json",
     "provider-fallback-receipt.schema.json",
+    "provider-project-lease.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
@@ -1467,6 +1468,9 @@ def _validate_provider_time_semantics(
         "provider-operation-receipt.schema.json": (
             "startedAt", "completedAt", "provider-operation-time-invalid",
         ),
+        "provider-project-lease.schema.json": (
+            "issuedAt", "expiresAt", "provider-lease-time-invalid",
+        ),
     }
     time_range = ranges.get(schema_name)
     if time_range is None:
@@ -1543,6 +1547,10 @@ def validate_workspace_fingerprint(document: dict[str, Any]) -> None:
 def validate_provider_fallback_receipt(document: dict[str, Any]) -> None:
     from selfworkflow.v3.provider_config import validate_fallback_receipt
     validate_fallback_receipt(document)
+
+
+def validate_provider_project_lease(document: dict[str, Any]) -> None:
+    _validate_provider_document("provider-project-lease.schema.json", document)
 
 
 def load_contract(

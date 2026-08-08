@@ -17,7 +17,7 @@
     "parseFailures": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/id"}},
     "returnedFiles": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/file"}},
     "truncated": {"type": "boolean"}, "heuristicProvenance": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}},
-    "preQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"},
+    "preQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "preQueryWorkspaceIdentityHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceIdentityHash": {"$ref": "#/$defs/hash"}, "approvalReceiptRef": {"$ref": "#/$defs/id"},
     "actualSideEffects": {"enum": ["none", "local-write", "network", "unknown"]},
     "mutationEvidenceRefs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
   },
