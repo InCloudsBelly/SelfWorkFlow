@@ -1266,6 +1266,11 @@ def _validate_run_ledger(
                 if item["moduleId"] not in allowed:
                     reason = "ledger-module-not-selected" if slot["selectionMode"] == "static" else "ledger-module-selection-receipt-missing"
                     _raise_semantic(reason, base + ("moduleId",))
+            if item["artifactHash"] not in stage_artifact_hashes:
+                _raise_semantic(
+                    "ledger-slot-result-artifact-unregistered",
+                    base + ("artifactHash",),
+                )
         gates = {gate for slot in slots.values() for gate in slot["gates"]}
         seen_gate_results: set[tuple[str, str]] = set()
         for item_index, item in enumerate(stage["gateResults"]):
@@ -1278,6 +1283,11 @@ def _validate_run_ledger(
             seen_gate_results.add(gate_key)
             if plan is not None and item["gateId"] not in gates:
                 _raise_semantic("ledger-gate-unknown", ("stages", stage_index, "gateResults", item_index, "gateId"))
+            if item["artifactHash"] not in stage_artifact_hashes:
+                _raise_semantic(
+                    "ledger-gate-result-artifact-unregistered",
+                    ("stages", stage_index, "gateResults", item_index, "artifactHash"),
+                )
         for item_index, item in enumerate(stage["runtimeSkips"]):
             slot = slots.get(item["slotId"])
             if plan is not None and (slot is None or slot["cardinality"] not in {"zero-or-one", "zero-or-many"}):

@@ -39,15 +39,19 @@ class VersionDispatchTests(unittest.TestCase):
     def test_v2_cli_end_to_end_preserves_output_and_error_text(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.cli import main
+        from selfworkflow.resolver import resolve_task
         from tests.unit.test_resolver import TaskResolverV2Tests
 
         with TemporaryDirectory() as directory:
             root = Path(directory)
             catalog_path = root / "catalog.json"
             request_path = root / "request.json"
-            catalog_path.write_bytes(compile_catalog(self.ROOT / "catalog").content)
+            catalog_content = compile_catalog(self.ROOT / "catalog").content
+            request = TaskResolverV2Tests._request()
+            expected = resolve_task(catalog_content, request)
+            catalog_path.write_bytes(catalog_content)
             request_path.write_text(
-                json.dumps(TaskResolverV2Tests._request()), encoding="utf-8"
+                json.dumps(request), encoding="utf-8"
             )
             stdout, stderr = StringIO(), StringIO()
             with redirect_stdout(stdout), redirect_stderr(stderr):
@@ -56,7 +60,7 @@ class VersionDispatchTests(unittest.TestCase):
                     "--request", str(request_path),
                 ])
             self.assertEqual(code, 0)
-            self.assertEqual(json.loads(stdout.getvalue())["schemaVersion"], 2)
+            self.assertEqual(json.loads(stdout.getvalue()), expected)
             self.assertEqual(stderr.getvalue(), "")
 
             request_path.write_text('{"schemaVersion":99}', encoding="utf-8")

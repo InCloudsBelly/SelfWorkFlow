@@ -583,6 +583,7 @@ class ExecutionSchemaTests(unittest.TestCase):
                 "moduleId": "module-a", "artifactHash": self.HASH_A,
             }
         ]
+        stage["artifactHashes"] = [self.HASH_A]
         ledger["stages"][1]["status"] = "skipped"
         from selfworkflow.v3.contracts import ContractError, validate_run_ledger
 
@@ -602,6 +603,102 @@ class ExecutionSchemaTests(unittest.TestCase):
             ),
             ledger,
         )
+
+    def test_run_ledger_loader_rejects_accepted_unregistered_result_artifacts(self):
+        from selfworkflow.v3.contracts import ContractError, load_contract
+
+        slot_plan = self._plan()
+        accepted_unregistered_slot_artifact = self._ledger(slot_plan)
+        accepted_unregistered_slot_artifact["stages"][0]["slotResults"] = [{
+            "attemptRef": "attempt-a-1", "slotId": "slot-a",
+            "moduleId": "module-a", "artifactHash": self.HASH_A,
+        }]
+
+        gate_plan = self._plan()
+        gate_plan["stages"][0]["slots"][0]["gates"] = ["gate-a"]
+        gate_plan["planHash"] = self._hash_document(gate_plan, "planHash")
+        unregistered_gate_artifact = self._ledger(gate_plan)
+        unregistered_gate_artifact["stages"][0]["gateResults"] = [{
+            "attemptRef": "attempt-a-1", "gateId": "gate-a",
+            "outcome": "passed", "artifactHash": self.HASH_A,
+        }]
+
+        cases = (
+            (
+                accepted_unregistered_slot_artifact, slot_plan,
+                "ledger-slot-result-artifact-unregistered",
+                ("stages", 0, "slotResults", 0, "artifactHash"),
+            ),
+            (
+                unregistered_gate_artifact, gate_plan,
+                "ledger-gate-result-artifact-unregistered",
+                ("stages", 0, "gateResults", 0, "artifactHash"),
+            ),
+        )
+        for ledger, plan, reason, path in cases:
+            with self.subTest(reason=reason), self.assertRaises(ContractError) as raised:
+                load_contract(
+                    "run-ledger.schema.json", json.dumps(ledger),
+                    plan_graph=plan,
+                )
+            self.assertEqual(raised.exception.reason, reason)
+            self.assertEqual(raised.exception.path, path)
+
+    def test_run_ledger_loader_rejects_duplicate_result_identities(self):
+        from selfworkflow.v3.contracts import ContractError, load_contract
+
+        slot_plan = self._plan()
+        duplicate_slot = self._ledger(slot_plan)
+        duplicate_slot["stages"][0]["artifactHashes"] = [
+            self.HASH_A, self.HASH_B,
+        ]
+        duplicate_slot["stages"][0]["slotResults"] = [
+            {
+                "attemptRef": "attempt-a-1", "slotId": "slot-a",
+                "moduleId": "module-a", "artifactHash": self.HASH_A,
+            },
+            {
+                "attemptRef": "attempt-a-1", "slotId": "slot-a",
+                "moduleId": "module-a", "artifactHash": self.HASH_B,
+            },
+        ]
+
+        gate_plan = self._plan()
+        gate_plan["stages"][0]["slots"][0]["gates"] = ["gate-a"]
+        gate_plan["planHash"] = self._hash_document(gate_plan, "planHash")
+        duplicate_gate = self._ledger(gate_plan)
+        duplicate_gate["stages"][0]["artifactHashes"] = [
+            self.HASH_A, self.HASH_B,
+        ]
+        duplicate_gate["stages"][0]["gateResults"] = [
+            {
+                "attemptRef": "attempt-a-1", "gateId": "gate-a",
+                "outcome": "passed", "artifactHash": self.HASH_A,
+            },
+            {
+                "attemptRef": "attempt-a-1", "gateId": "gate-a",
+                "outcome": "failed", "artifactHash": self.HASH_B,
+            },
+        ]
+
+        cases = (
+            (
+                duplicate_slot, slot_plan, "ledger-slot-result-duplicate",
+                ("stages", 0, "slotResults", 1),
+            ),
+            (
+                duplicate_gate, gate_plan, "ledger-gate-result-duplicate",
+                ("stages", 0, "gateResults", 1),
+            ),
+        )
+        for ledger, plan, reason, path in cases:
+            with self.subTest(reason=reason), self.assertRaises(ContractError) as raised:
+                load_contract(
+                    "run-ledger.schema.json", json.dumps(ledger),
+                    plan_graph=plan,
+                )
+            self.assertEqual(raised.exception.reason, reason)
+            self.assertEqual(raised.exception.path, path)
 
     def test_run_ledger_registered_reference_path_validates_receipt(self):
         from selfworkflow.v3.contracts import load_contract, validate_run_ledger
