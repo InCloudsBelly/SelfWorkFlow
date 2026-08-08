@@ -512,6 +512,68 @@ class QualityArtifactSchemaTests(unittest.TestCase):
                 }
                 self._assert_contract_error(name, broken, reasons[field], (field,))
 
+    def test_canonical_hash_matches_independent_constant_vector(self):
+        from selfworkflow.v3.contracts import load_contract
+
+        plan = self._plan()
+        plan_hash = "sha256:11baad281ac205e68ee64bbe068b0b30676f34089da3b82c2ef45879b2e4e058"
+        self.assertEqual(plan["planHash"], plan_hash)
+
+        # Precomputed independently from compact UTF-8 JSON with recursively
+        # sorted keys and the final strategyHash member omitted. The source key
+        # order is deliberately different and includes Unicode, a bool, and arrays.
+        expected = "sha256:fb3482278cc6807ed40142b7bd7c850f6181ea9a00a6017d2c1658c7d8634211"
+        vector = {
+            "strategyHash": expected,
+            "coverageObligations": [{
+                "authorizationRequired": False,
+                "acceptanceConditionIds": ["accept-vector"],
+                "techniqueIds": ["tech-vector"],
+                "dimension": "boundary",
+                "riskId": "risk-vector",
+                "obligationId": "obligation-vector",
+            }],
+            "authorizationRequirements": [],
+            "techniques": [{
+                "rationale": "覆盖数组边界✓",
+                "name": "unit",
+                "techniqueId": "tech-vector",
+            }],
+            "dimensions": [
+                {"obligationIds": [], "dimensionId": "state"},
+                {"obligationIds": [], "dimensionId": "nfr"},
+                {"obligationIds": [], "dimensionId": "direct"},
+                {"obligationIds": [], "dimensionId": "failure"},
+                {"obligationIds": ["obligation-vector"], "dimensionId": "boundary"},
+            ],
+            "acceptanceConditions": [{
+                "description": "拒绝空值输入",
+                "conditionId": "accept-vector",
+            }],
+            "risks": [{
+                "acceptanceConditionIds": ["accept-vector"],
+                "priority": "P2",
+                "riskId": "risk-vector",
+            }],
+            "grillMeImplementation": False,
+            "source": "builtin",
+            "testLevelFloor": "T1",
+            "testLevel": "T1",
+            "basisKind": "plan",
+            "createdAt": "2026-08-09T02:03:04Z",
+            "attemptRef": "attempt-a-1",
+            "planHash": plan_hash,
+            "schemaVersion": 3,
+        }
+
+        loaded = load_contract(
+            self.SCHEMA_NAMES[3],
+            json.dumps(vector, ensure_ascii=False),
+            plan_graph=plan,
+            run_ledger=self._ledger(plan),
+        )
+        self.assertEqual(loaded["strategyHash"], expected)
+
     def test_grill_me_implementation_requires_t2_floor(self):
         diff = self._diff()
         strategy = self._strategy(diff)
