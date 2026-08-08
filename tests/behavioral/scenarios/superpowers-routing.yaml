@@ -4,18 +4,18 @@ scenarios:
     stage: designed
     operation: design
     explicitGrill: false
-    expectedSkills: [brainstorming]
+    expectedModules: [design-brainstorming]
   - id: explicit-grill-cross-review
     stage: designed
     operation: design
     explicitGrill: true
-    expectedSkills: [grill-me, brainstorming]
+    expectedModules: [design-grill-me, design-cross-review]
     independentPostReview: true
   - id: implementation-tdd-only
     stage: implemented
     operation: implement
     explicitGrill: false
-    expectedSkills: [test-driven-development]
+    expectedModules: [implement-tdd]
   - id: missing-source-write-pause
     stage: implemented
     operation: implement

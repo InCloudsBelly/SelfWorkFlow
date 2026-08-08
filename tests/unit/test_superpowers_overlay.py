@@ -5,7 +5,7 @@ import unittest
 
 import yaml
 
-from selfworkflow.superpowers import decide_overlay, stage_selected_skills
+from selfworkflow.superpowers import stage_selected_skills
 from selfworkflow.catalog import compile_catalog
 
 
@@ -46,80 +46,15 @@ class SuperpowersOverlayTests(unittest.TestCase):
             self.assertEqual(entries[skill_id]["source"]["kind"], "skill")
             self.assertEqual(entries[skill_id]["supportStatus"], "unverified")
 
-    def test_stage_mapping_loads_only_current_phase_skills(self):
-        cases = {
-            ("designed", "design"): ("brainstorming",),
-            ("planned", "plan"): ("writing-plans",),
-            ("implemented", "implement"): ("test-driven-development",),
-            ("implemented", "debug"): ("systematic-debugging",),
-            ("reviewed", "review"): (
-                "requesting-code-review", "receiving-code-review"
-            ),
-            ("verified", "verify"): ("verification-before-completion",),
-        }
-        for (stage, operation), expected in cases.items():
-            with self.subTest(stage=stage, operation=operation):
-                decision = decide_overlay(
-                    stage=stage,
-                    operation=operation,
-                    complexity=1,
-                    risk=1,
-                    explicit_grill=False,
-                    source_status="supported",
-                    write_task=True,
-                )
-                self.assertEqual(decision["selectedSkills"], expected)
-
-    def test_grill_is_explicit_and_requires_independent_brainstorm_review(self):
-        ordinary = decide_overlay(
-            stage="designed", operation="design", complexity=3, risk=3,
-            explicit_grill=False, source_status="supported", write_task=True,
-        )
-        self.assertNotIn("grill-me", ordinary["selectedSkills"])
-        self.assertTrue(ordinary["grillRecommended"])
-
-        grilled = decide_overlay(
-            stage="designed", operation="design", complexity=2, risk=2,
-            explicit_grill=True, source_status="supported", write_task=True,
-        )
-        self.assertEqual(grilled["selectedSkills"], ("grill-me", "brainstorming"))
-        self.assertEqual(
-            grilled["postGrillReview"],
-            {"skill": "brainstorming", "independentContextRequired": True},
-        )
-
-    def test_missing_superpowers_pauses_writes_without_silent_downgrade(self):
-        paused = decide_overlay(
-            stage="implemented", operation="implement", complexity=1, risk=1,
-            explicit_grill=False, source_status="unsupported", write_task=True,
-        )
-        self.assertEqual(paused["status"], "paused")
-        self.assertEqual(paused["selectedSkills"], ())
-        self.assertIn("superpowers", paused["issues"])
-
-        readonly = decide_overlay(
-            stage="discovered", operation="analyze", complexity=1, risk=1,
-            explicit_grill=False, source_status="unsupported", write_task=False,
-        )
-        self.assertEqual(readonly["status"], "active")
-        self.assertEqual(readonly["allowedMode"], "read-only-analysis")
-        self.assertIn("superpowers", readonly["issues"])
-
-    def test_explicit_grill_pauses_even_for_read_only_design_without_superpowers(self):
-        decision = decide_overlay(
-            stage="designed",
-            operation="design",
-            complexity=1,
-            risk=1,
-            explicit_grill=True,
-            source_status="unsupported",
-            write_task=False,
-            grill_available=True,
-        )
-
-        self.assertEqual(decision["status"], "paused")
-        self.assertEqual(decision["selectedSkills"], ())
-        self.assertIn("superpowers", decision["issues"])
+    def test_catalog_is_the_only_runtime_stage_mapping(self):
+        source = (self.ROOT / "src/selfworkflow/superpowers.py").read_text(encoding="utf-8")
+        self.assertNotIn("_STAGE_MAP", source)
+        envelope = json.loads(compile_catalog(self.ROOT / "catalog").content)
+        modules = {module["id"]: module for module in envelope["catalog"]["modules"]}
+        self.assertEqual(modules["design-brainstorming"]["slot"], "design.primary")
+        self.assertEqual(modules["plan-writing-plans"]["slot"], "plan.primary")
+        self.assertEqual(modules["implement-tdd"]["slot"], "implement.method")
+        self.assertEqual(modules["verify-execution"]["slot"], "verify.execution")
 
     def test_staging_copies_only_selected_skills_and_never_mutates_source(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

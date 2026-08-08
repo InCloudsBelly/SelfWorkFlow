@@ -1,33 +1,47 @@
+from pathlib import Path
 import unittest
 
-from selfworkflow.classifier import classify_task
-from selfworkflow.superpowers import decide_overlay
+from selfworkflow.catalog import compile_catalog
+from selfworkflow.classifier import classify_task, workflow_strength
+from selfworkflow.router import ModuleRouteRequest, route_modules
 
 
 class WorkflowMatrixTests(unittest.TestCase):
-    def test_all_complexity_risk_cells_preserve_design_and_grill_semantics(self):
+    ROOT = Path(__file__).resolve().parents[2]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.catalog = compile_catalog(cls.ROOT / "catalog").content
+
+    def test_all_complexity_risk_cells_choose_design_without_implicit_grill(self):
         for complexity in range(4):
             for risk in range(4):
                 with self.subTest(complexity=complexity, risk=risk):
                     classification = classify_task(f"C{complexity}", f"R{risk}")
-                    self.assertEqual(classification.complexity.value, f"C{complexity}")
-                    self.assertEqual(classification.risk.value, f"R{risk}")
-                    decision = decide_overlay(
-                        stage="designed", operation="design",
-                        complexity=complexity, risk=risk, explicit_grill=False,
-                        source_status="supported", write_task=True,
+                    strength = workflow_strength(classification.complexity, classification.risk)
+                    route = route_modules(
+                        self.catalog,
+                        ModuleRouteRequest(
+                            slot_id="design.primary", cardinality="exactly-one",
+                            operation_type="implement", strength=strength, write_task=True,
+                            capability_states={"skill-discovery": "supported"},
+                        ),
                     )
-                    self.assertIn("brainstorming", decision["selectedSkills"])
-                    self.assertNotIn("grill-me", decision["selectedSkills"])
-                    expected_recommendation = max(complexity, risk) >= 3 or (complexity >= 2 and risk >= 2)
-                    self.assertEqual(decision["grillRecommended"], expected_recommendation)
+                    expected = "design-light" if strength == "Light" else "design-brainstorming"
+                    self.assertEqual(route.selected_modules, (expected,))
+                    self.assertNotIn("design-grill-me", route.selected_modules)
+                    self.assertEqual(classification.suggest_grill_me, max(complexity, risk) >= 3 or (complexity >= 2 and risk >= 2))
 
-    def test_explicit_grill_requires_independent_brainstorming_review(self):
-        decision = decide_overlay(
-            stage="designed", operation="design", complexity=1, risk=1,
-            explicit_grill=True, source_status="supported", write_task=True,
+    def test_explicit_grill_adds_independent_brainstorming_after_it(self):
+        explicit = ("design-grill-me",)
+        common = dict(
+            operation_type="implement", strength="Deep", write_task=True,
+            explicit_module_ids=explicit,
+            capability_states={"skill-discovery": "supported", "independent-context": "supported", "user-confirmation": "supported"},
         )
-        self.assertEqual(decision["postGrillReview"]["independentContextRequired"], True)
+        grill = route_modules(self.catalog, ModuleRouteRequest(slot_id="design.specialists", cardinality="zero-or-many", **common))
+        review = route_modules(self.catalog, ModuleRouteRequest(slot_id="design.cross-review", cardinality="zero-or-one", **common))
+        self.assertEqual(grill.selected_modules + review.selected_modules, ("design-grill-me", "design-cross-review"))
 
 
 if __name__ == "__main__":
