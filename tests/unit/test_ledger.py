@@ -10,11 +10,11 @@ import unittest
 HASHES = ["sha256:" + str(index) * 64 for index in range(1, 6)]
 
 
-def _plan():
+def _plan(snapshot=None):
     from selfworkflow.capability_snapshot import normalize_capability_snapshot
     from selfworkflow.pipeline import canonical_hash
 
-    snapshot = _snapshot()
+    snapshot = snapshot or _snapshot()
     snapshot_hash = normalize_capability_snapshot(snapshot)[1]
     plan = {
         "schemaVersion": 2, "requestHash": HASHES[0], "capabilitySnapshotHash": snapshot_hash,
@@ -34,14 +34,14 @@ def _plan():
     return plan
 
 
-def _snapshot():
+def _snapshot(evidence_ref="fixture:filesystem-read"):
     return {
         "schemaVersion": 1, "capturedAt": "2026-08-08T00:00:00Z",
         "evidence": [{
             "name": "filesystem-read", "provider": "test-host",
             "subject": {"kind": "host", "id": "fixture", "version": "1", "build": "1", "sourceLock": HASHES[0]},
             "state": "supported", "observedAt": "2020-01-01T00:00:00Z", "validUntil": "2099-01-01T00:00:00Z",
-            "evidenceRef": "fixture", "evidenceHash": HASHES[1],
+            "evidenceRef": evidence_ref, "evidenceHash": HASHES[1],
         }],
     }
 
@@ -120,16 +120,18 @@ class LedgerTests(unittest.TestCase):
         ledger = new_ledger(plan)
         active_design = transition_stage(ledger, plan, "designed", "active", capability_snapshot=_snapshot(), attempt_ref="attempt-1")
         skipped = record_runtime_skip(
-            active_design, plan, "designed", "design.specialists", "fixture",
+            active_design, plan, "designed", "design.specialists",
+            "fixture:filesystem-read",
             capability_snapshot=_snapshot(),
         )
         self.assertEqual(skipped["stages"][0]["runtimeSkips"], [{
             "attemptRef": "attempt-1", "slotId": "design.specialists",
-            "evidenceRef": "fixture",
+            "evidenceRef": "fixture:filesystem-read",
         }])
         with self.assertRaises(LedgerError):
             record_runtime_skip(
-                active_design, plan, "designed", "design.primary", "fixture",
+                active_design, plan, "designed", "design.primary",
+                "fixture:filesystem-read",
                 capability_snapshot=_snapshot(),
             )
         with self.assertRaises(LedgerError):
@@ -345,6 +347,67 @@ class LedgerTests(unittest.TestCase):
             record_slot_result(
                 result_limit, plan, "designed", "design-light", "result-257"
             )
+
+    def test_runtime_skip_accepts_full_capability_and_same_attempt_gate_refs(self):
+        from selfworkflow.capability_snapshot import (
+            CapabilitySnapshotError, normalize_capability_snapshot,
+        )
+        from selfworkflow.ledger import (
+            LedgerError, new_ledger, record_gate_result, record_runtime_skip,
+            record_slot_result, record_stage_attempt, transition_stage,
+            validate_ledger,
+        )
+        from selfworkflow.pipeline import canonical_hash
+
+        maximum_ref = "e:" + "x" * 254
+        snapshot = _snapshot(maximum_ref)
+        plan = _plan(snapshot)
+        optional = plan["stages"][0]["slots"][1]
+        optional["selectedModules"] = ["design-grill-me", "design-skip-gate"]
+        optional["gates"] = ["design-skip-gate"]
+        plan.pop("planHash")
+        plan["planHash"] = canonical_hash(plan)
+        active = transition_stage(
+            new_ledger(plan), plan, "designed", "active",
+            capability_snapshot=snapshot, attempt_ref="attempt:1",
+        )
+
+        capability_skip = record_runtime_skip(
+            active, plan, "designed", "design.specialists", maximum_ref,
+            capability_snapshot=snapshot,
+        )
+        self.assertTrue(validate_ledger(capability_skip, plan, snapshot)["valid"])
+
+        gated = record_gate_result(
+            active, plan, "designed", "design-skip-gate", "gate:evidence"
+        )
+        gate_skip = record_runtime_skip(
+            gated, plan, "designed", "design.specialists", "gate:evidence",
+            capability_snapshot=snapshot,
+        )
+        gate_skip = record_slot_result(
+            gate_skip, plan, "designed", "design-light", "design:result"
+        )
+        passed = transition_stage(
+            gate_skip, plan, "designed", "passed",
+            capability_snapshot=snapshot,
+        )
+        self.assertEqual(passed["stages"][0]["status"], "passed")
+
+        retry = record_stage_attempt(
+            gated, plan, "designed", "attempt:2", capability_snapshot=snapshot
+        )
+        with self.assertRaisesRegex(LedgerError, "runtime-skip-evidence-invalid"):
+            record_runtime_skip(
+                retry, plan, "designed", "design.specialists", "gate:evidence",
+                capability_snapshot=snapshot,
+            )
+
+        for invalid_ref in ("", "x" * 257, 7):
+            invalid_snapshot = _snapshot(invalid_ref)
+            with self.subTest(invalid_ref=repr(invalid_ref)):
+                with self.assertRaises(CapabilitySnapshotError):
+                    normalize_capability_snapshot(invalid_snapshot)
 
 
 if __name__ == "__main__":

@@ -64,7 +64,11 @@ class ContractSchemaTests(unittest.TestCase):
                     "stageId": "designed", "status": "active",
                     "attempts": [{"attemptRef": "attempt-1", "ordinal": 1, "previousAttemptRef": None}],
                     "slotResults": [{"attemptRef": "attempt-1", "moduleId": "design-light", "resultRef": "result-1"}],
-                    "gateResults": [], "runtimeSkips": [],
+                    "gateResults": [],
+                    "runtimeSkips": [{
+                        "attemptRef": "attempt-1", "slotId": "design.specialists",
+                        "evidenceRef": "e:" + "x" * 254,
+                    }],
                 },
                 {"stageId": "planned", "status": "pending", "attempts": [], "slotResults": [], "gateResults": [], "runtimeSkips": []},
             ],

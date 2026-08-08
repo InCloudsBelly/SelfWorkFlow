@@ -13,10 +13,11 @@
   "$defs": {
     "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "evidenceRef": {"type": "string", "minLength": 1, "maxLength": 256},
     "attempt": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "ordinal", "previousAttemptRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "ordinal": {"type": "integer", "minimum": 1, "maximum": 1024}, "previousAttemptRef": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]}}},
     "slotResult": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "moduleId", "resultRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "moduleId": {"$ref": "#/$defs/id"}, "resultRef": {"$ref": "#/$defs/id"}}},
     "gateResult": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "gateId", "outcome", "resultRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "gateId": {"$ref": "#/$defs/id"}, "outcome": {"enum": ["passed", "failed", "paused"]}, "resultRef": {"$ref": "#/$defs/id"}}},
-    "runtimeSkip": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "slotId", "evidenceRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "slotId": {"$ref": "#/$defs/id"}, "evidenceRef": {"$ref": "#/$defs/id"}}},
+    "runtimeSkip": {"type": "object", "additionalProperties": false, "required": ["attemptRef", "slotId", "evidenceRef"], "properties": {"attemptRef": {"$ref": "#/$defs/id"}, "slotId": {"$ref": "#/$defs/id"}, "evidenceRef": {"$ref": "#/$defs/evidenceRef"}}},
     "stage": {
       "type": "object", "additionalProperties": false,
       "required": ["stageId", "status", "attempts", "slotResults", "gateResults", "runtimeSkips"],

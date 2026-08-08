@@ -220,6 +220,10 @@ supersededByPlanHash?
 回流。请求或能力证据变化时，旧 Ledger 标为 superseded 并绑定新 planHash，不能在
 旧 Ledger 中继续。
 
+`runtimeSkip.evidenceRef` 保留 capability evidence 的独立契约（非空、最多 256
+字符），不得错误套用普通 Ledger ID 的字符集或 128 字符上限。普通 Ledger ID 与
+写入 helper 则使用同一套含冒号的 128 字符契约。
+
 attemptRef 在整个 Ledger 内唯一。首个 attempt 固定 `ordinal=1` 且 previous 为 null；
 后续 ordinal 严格加一并引用紧邻前一个 attemptRef，形成可验证连续链。结构化结果的
 attemptRef 必须属于同一 stage 的 attempts，未知、跨 stage、重复、删除、插入或重排

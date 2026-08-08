@@ -14,7 +14,11 @@ from selfworkflow.capability_snapshot import normalize_capability_snapshot
 from selfworkflow.pipeline import canonical_hash
 
 
-_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+
+
+def _valid_evidence_reference(value: object) -> bool:
+    return type(value) is str and 1 <= len(value) <= 256
 
 
 class LedgerError(ValueError):
@@ -378,7 +382,10 @@ def record_runtime_skip(
         slot = next(slot for slot in plan_stage["slots"] if slot["slotId"] == slot_id)
     except StopIteration:
         raise LedgerError("plan-slot-unknown") from None
-    if slot["cardinality"] not in {"zero-or-one", "zero-or-many"} or _REFERENCE.fullmatch(evidence_ref or "") is None:
+    if (
+        slot["cardinality"] not in {"zero-or-one", "zero-or-many"}
+        or not _valid_evidence_reference(evidence_ref)
+    ):
         raise LedgerError("runtime-skip-not-optional")
     normalized_snapshot, _, _, _ = normalize_capability_snapshot(capability_snapshot)
     stage = _stage(dict(ledger), stage_id)

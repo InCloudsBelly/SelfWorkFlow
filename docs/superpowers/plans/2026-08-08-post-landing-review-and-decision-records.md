@@ -86,6 +86,7 @@
 - [ ] Upgrade RunLedger to schemaVersion 2. Store attempts as `{attemptRef,ordinal,previousAttemptRef}` and results as `{attemptRef,moduleId,resultRef}`, `{attemptRef,gateId,outcome,resultRef}`, and `{attemptRef,slotId,evidenceRef}`; make `_requirements_met` consider only the latest attempt.
 - [ ] Validate ordinal continuity and exact previous links, plus global attemptRef uniqueness and same-stage result ownership.
 - [ ] Reject slot/Gate `resultRef` replay across attempts, validate runtime-skip evidence against the current capability snapshot or same-attempt Gate result, and let a valid optional-slot skip waive only that slot's current-attempt module results.
+- [ ] Keep `runtimeSkip.evidenceRef` compatible with the capability contract (1–256 characters), align ordinary helper IDs with the Schema's colon-aware ID pattern, and test real colon, maximum-length, and same-attempt Gate references.
 - [ ] Reject attempt/result writes before they exceed RunLedger Schema collection limits.
 - [ ] Reject legacy v1 with `ledger-schema-version-unsupported`; do not infer or migrate missing attempt ownership.
 - [ ] Run adapter, Ledger, and contract-Schema tests GREEN. Run the existing `test_completion_subject_blocks_manifest_and_acceptance_graph_replay` to prove a final diff/hash change invalidates the old Review receipt.

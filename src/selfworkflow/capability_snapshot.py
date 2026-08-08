@@ -41,7 +41,13 @@ def normalize_capability_snapshot(
         if type(item) is not dict or set(item) != required:
             raise CapabilitySnapshotError("capability-snapshot-invalid")
         name = item["name"]
-        if type(name) is not str or not name or name in states or item["state"] not in {"supported", "unsupported", "unverified"}:
+        evidence_ref = item["evidenceRef"]
+        if (
+            type(name) is not str or not name or name in states
+            or item["state"] not in {"supported", "unsupported", "unverified"}
+            or type(evidence_ref) is not str
+            or not 1 <= len(evidence_ref) <= 256
+        ):
             raise CapabilitySnapshotError("capability-snapshot-invalid")
         observed, valid_until = _time(item["observedAt"]), _time(item["validUntil"])
         state = item["state"]
@@ -60,7 +66,7 @@ def normalize_capability_snapshot(
             "state": state,
             "observedAt": item["observedAt"],
             "validUntil": item["validUntil"],
-            "evidenceRef": item["evidenceRef"],
+            "evidenceRef": evidence_ref,
             "evidenceHash": item["evidenceHash"],
         }
         normalized.append(normalized_item)
