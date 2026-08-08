@@ -100,6 +100,7 @@ class ExecutionSchemaTests(unittest.TestCase):
             "selectorSourceHash": cls.HASH_A,
             "inputArtifactId": "artifact-input-b",
             "inputArtifactHash": cls.HASH_B,
+            "selectionPolicyHash": cls.HASH_B,
             "eligibleModuleIds": ["module-b"],
             "selectedModuleIds": ["module-b"],
             "selectionReasons": ["diff-signal"],
@@ -410,6 +411,7 @@ class ExecutionSchemaTests(unittest.TestCase):
         receipt = self._receipt(plan)
         receipt.update({
             "stageId": "stage-a", "slotId": "slot-a", "attemptRef": "attempt-a-1",
+            "selectionPolicyHash": self.HASH_A,
             "eligibleModuleIds": ["module-a"], "selectedModuleIds": [],
         })
         receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
@@ -458,6 +460,7 @@ class ExecutionSchemaTests(unittest.TestCase):
         receipt = self._receipt(plan)
         receipt["stageId"] = "stage-a"
         receipt["slotId"] = "slot-a"
+        receipt["selectionPolicyHash"] = self.HASH_A
         receipt["attemptRef"] = "attempt-a-1"
         receipt["eligibleModuleIds"] = ["module-a"]
         receipt["selectedModuleIds"] = ["module-a"]
@@ -484,6 +487,7 @@ class ExecutionSchemaTests(unittest.TestCase):
             receipt = self._receipt(plan)
             receipt.update({
                 "stageId": "stage-a", "slotId": "slot-a", "attemptRef": "attempt-a-1",
+                "selectionPolicyHash": self.HASH_A,
                 "eligibleModuleIds": ["module-a"], "selectedModuleIds": ["module-a"],
             })
             if kind == "plan":
@@ -551,6 +555,7 @@ class ExecutionSchemaTests(unittest.TestCase):
         receipt = self._receipt(plan)
         receipt.update({
             "stageId": "stage-a", "slotId": "slot-a",
+            "selectionPolicyHash": self.HASH_A,
             "attemptRef": "attempt-a-1", "eligibleModuleIds": ["module-a"],
             "selectedModuleIds": ["module-a"],
         })
@@ -564,6 +569,58 @@ class ExecutionSchemaTests(unittest.TestCase):
             receipts=(receipt,),
         )
         self.assertIsNone(validate_run_ledger(loaded, plan, (receipt,)))
+
+    def test_selection_receipt_rejects_policy_hash_tamper(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        receipt = self._receipt(plan)
+        receipt["selectionPolicyHash"] = self.HASH_A
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt, plan)
+        self.assertEqual(
+            raised.exception.reason, "selection-receipt-policy-mismatch",
+        )
+        self.assertEqual(raised.exception.path, ("selectionPolicyHash",))
+
+    def test_selection_receipt_metadata_enforces_dependency_and_conflict(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        slot = plan["stages"][1]["slots"][0]
+        slot["cardinality"] = "zero-or-many"
+        slot["eligibleModules"] = ["module-b", "module-dependency"]
+        plan["planHash"] = self._hash_document(plan, "planHash")
+        receipt = self._receipt(plan)
+        receipt["eligibleModuleIds"] = ["module-b", "module-dependency"]
+        receipt["selectedModuleIds"] = ["module-b"]
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        metadata = {
+            "module-b": {
+                "stage": "stage-b", "slot": "slot-b",
+                "dependencies": ["module-dependency"], "conflicts": [],
+            },
+            "module-dependency": {
+                "stage": "stage-b", "slot": "slot-b",
+                "dependencies": [], "conflicts": [],
+            },
+        }
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt, plan, metadata)
+        self.assertEqual(
+            raised.exception.reason,
+            "selection-receipt-selected-dependency-open",
+        )
+
+        receipt["selectedModuleIds"] = ["module-b", "module-dependency"]
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        metadata["module-b"]["conflicts"] = ["module-dependency"]
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt, plan, metadata)
+        self.assertEqual(
+            raised.exception.reason, "selection-receipt-selected-conflict",
+        )
 
     def test_run_ledger_rejects_fake_stage_slot_module_gate_and_skip(self):
         plan = self._plan()

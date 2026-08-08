@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schemaVersion", "planHash", "stageId", "slotId", "attemptRef",
+    "selectionPolicyHash",
     "selectorModuleId", "selectorSourceHash", "inputArtifactId", "inputArtifactHash",
     "eligibleModuleIds", "selectedModuleIds", "selectionReasons", "signalEvidenceRefs",
     "estimatedContextCost", "estimatedExecutionCost", "coverageDecisions", "receiptHash"
@@ -16,6 +17,7 @@
     "stageId": {"$ref": "#/$defs/stableId"},
     "slotId": {"$ref": "#/$defs/stableId"},
     "attemptRef": {"$ref": "#/$defs/stableId"},
+    "selectionPolicyHash": {"$ref": "#/$defs/sha256"},
     "selectorModuleId": {"$ref": "#/$defs/stableId"},
     "selectorSourceHash": {"$ref": "#/$defs/sha256"},
     "inputArtifactId": {"$ref": "#/$defs/stableId"},

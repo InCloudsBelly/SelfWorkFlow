@@ -6,12 +6,18 @@ import unittest
 from selfworkflow.v3.catalog import CompiledCatalog
 from selfworkflow.v3.contracts import ContractError, validate_plan_graph
 from selfworkflow.v3.pipeline import LoadedPipeline
-from selfworkflow.v3.plan_graph import PlanGraphError, build_plan_graph
+from selfworkflow.v3.plan_graph import PlanGraphArtifact, PlanGraphError, build_plan_graph
 
 
 def _hash(value):
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _canonical(value):
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
 
 
 def _module(module_id, *, slot="review.primary", mode="bounded-runtime",
@@ -85,11 +91,16 @@ class PlanGraphTests(unittest.TestCase):
                 **({"condition": condition} if condition else {}),
             }]}],
         }
+        envelope = {
+            "schemaVersion": 3,
+            "catalog": catalog,
+            "catalogHash": catalog["catalogHash"],
+        }
         return CompiledCatalog(
-            {"schemaVersion": 3, "catalog": catalog, "catalogHash": catalog["catalogHash"]},
-            b"catalog",
+            envelope,
+            _canonical(envelope),
             catalog["catalogHash"],
-        ), LoadedPipeline(pipeline, b"pipeline", _hash(pipeline))
+        ), LoadedPipeline(pipeline, _canonical(pipeline), _hash(pipeline))
 
     def test_builds_schema_valid_deterministic_plan_with_all_snapshot_hashes(self):
         catalog, pipeline = self._artifacts([
@@ -97,14 +108,14 @@ class PlanGraphTests(unittest.TestCase):
         ])
         first = build_plan_graph(
             self.REQUEST, catalog, pipeline,
-            capability_snapshot={"capturedAt": "2026-08-09T00:00:00Z", "states": ["supported"]},
+            capability_snapshot=copy.deepcopy(self.REQUEST["capabilityEvidenceSnapshot"]),
             provider_preference_snapshot={"providers": ["builtin"]},
             provider_binding_snapshot={"bindings": []},
             execution_policy_snapshot={"network": "deny"},
         )
         second = build_plan_graph(
             copy.deepcopy(self.REQUEST), catalog, pipeline,
-            capability_snapshot={"capturedAt": "2026-08-09T00:00:00Z", "states": ["supported"]},
+            capability_snapshot=copy.deepcopy(self.REQUEST["capabilityEvidenceSnapshot"]),
             provider_preference_snapshot={"providers": ["builtin"]},
             provider_binding_snapshot={"bindings": []},
             execution_policy_snapshot={"network": "deny"},
@@ -195,6 +206,121 @@ class PlanGraphTests(unittest.TestCase):
         ])
         with self.assertRaisesRegex(PlanGraphError, "required-module"):
             build_plan_graph(self.REQUEST, catalog, pipeline)
+
+    def test_rejects_mapping_and_forged_compiled_artifacts(self):
+        catalog, pipeline = self._artifacts([_module("review-a")])
+        with self.assertRaisesRegex(PlanGraphError, "compiled"):
+            build_plan_graph(self.REQUEST, catalog.document, pipeline)
+        with self.assertRaisesRegex(PlanGraphError, "loaded"):
+            build_plan_graph(self.REQUEST, catalog, pipeline.document)
+
+        forged_catalog = CompiledCatalog(
+            copy.deepcopy(catalog.document), b"forged", catalog.catalog_hash,
+        )
+        with self.assertRaisesRegex(PlanGraphError, "content"):
+            build_plan_graph(self.REQUEST, forged_catalog, pipeline)
+        forged_pipeline = LoadedPipeline(
+            copy.deepcopy(pipeline.document), b"forged", pipeline.pipeline_hash,
+        )
+        with self.assertRaisesRegex(PlanGraphError, "content"):
+            build_plan_graph(self.REQUEST, catalog, forged_pipeline)
+
+    def test_capability_snapshot_parameter_must_equal_request_snapshot(self):
+        catalog, pipeline = self._artifacts([_module("review-a")])
+        matching = copy.deepcopy(self.REQUEST["capabilityEvidenceSnapshot"])
+        build_plan_graph(
+            self.REQUEST, catalog, pipeline, capability_snapshot=matching,
+        )
+        mismatched = copy.deepcopy(matching)
+        mismatched["capturedAt"] = "2026-08-09T00:00:01Z"
+        with self.assertRaisesRegex(PlanGraphError, "capability-snapshot-mismatch"):
+            build_plan_graph(
+                self.REQUEST, catalog, pipeline,
+                capability_snapshot=mismatched,
+            )
+
+    def test_plan_artifact_is_builder_only_and_document_access_is_a_copy(self):
+        with self.assertRaises(TypeError):
+            PlanGraphArtifact({}, ())
+        catalog, pipeline = self._artifacts([_module("review-a")])
+        graph = build_plan_graph(self.REQUEST, catalog, pipeline)
+        exposed = graph.document
+        exposed["stages"][0]["slots"][0]["eligibleModules"].clear()
+        self.assertEqual(
+            graph.document["stages"][0]["slots"][0]["eligibleModules"],
+            ["review-a"],
+        )
+
+    def test_cross_slot_dependency_fails_closed(self):
+        catalog, pipeline = self._artifacts([
+            _module("review-a", dependencies=("review-dependency",)),
+            _module(
+                "review-dependency", stage="planned", slot="plan.primary",
+            ),
+        ])
+        pipeline_document = {
+            "schemaVersion": 3,
+            "stages": [
+                {"id": "planned", "slots": [{
+                    "id": "plan.primary", "cardinality": "zero-or-many",
+                    "allowedInvocationKinds": ["agent-native"],
+                    "selectionMode": "bounded-runtime",
+                }]},
+                *pipeline.document["stages"],
+            ],
+        }
+        loaded = LoadedPipeline(
+            pipeline_document, _canonical(pipeline_document), _hash(pipeline_document),
+        )
+        with self.assertRaisesRegex(PlanGraphError, "cross-slot-dependency"):
+            build_plan_graph(self.REQUEST, catalog, loaded)
+
+    def test_static_selection_closes_dependencies_or_fails_cardinality(self):
+        catalog, pipeline = self._artifacts(
+            [
+                _module(
+                    "review-a", mode="static",
+                    dependencies=("review-dependency",),
+                ),
+                _module("review-dependency", mode="static"),
+            ],
+            cardinality="zero-or-many",
+            mode="static",
+        )
+        request = copy.deepcopy(self.REQUEST)
+        request["explicitModuleIds"] = ["review-a"]
+        graph = build_plan_graph(request, catalog, pipeline)
+        self.assertEqual(
+            graph.document["stages"][0]["slots"][0]["selectedModules"],
+            ["review-a", "review-dependency"],
+        )
+
+        exactly_one_catalog, exactly_one_pipeline = self._artifacts(
+            [
+                _module(
+                    "review-a", mode="static",
+                    dependencies=("review-dependency",),
+                ),
+                _module("review-dependency", mode="static"),
+            ],
+            cardinality="exactly-one",
+            mode="static",
+        )
+        with self.assertRaisesRegex(PlanGraphError, "static-selection"):
+            build_plan_graph(request, exactly_one_catalog, exactly_one_pipeline)
+
+    def test_dependency_closure_internal_conflict_fails_explicit_module(self):
+        catalog, pipeline = self._artifacts([
+            _module(
+                "review-a", dependencies=("review-dependency",),
+                conflicts=("review-dependency",),
+            ),
+            _module("review-dependency", conflicts=("review-a",)),
+        ])
+        request = copy.deepcopy(self.REQUEST)
+        request["explicitModuleIds"] = ["review-a"]
+        with self.assertRaisesRegex(PlanGraphError, "dependency-unavailable"):
+            build_plan_graph(request, catalog, pipeline)
 
 
 if __name__ == "__main__":

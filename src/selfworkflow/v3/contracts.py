@@ -813,6 +813,7 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
 def _validate_selection_receipt(
     document: dict[str, Any],
     plan: dict[str, Any] | None = None,
+    module_metadata: dict[str, Any] | None = None,
 ) -> None:
     if document["receiptHash"] != _canonical_hash(document, "receiptHash"):
         _raise_semantic("selection-receipt-hash-invalid", ("receiptHash",))
@@ -839,6 +840,11 @@ def _validate_selection_receipt(
     )
     if slot is None:
         _raise_semantic("selection-receipt-slot-mismatch", ("slotId",))
+    if document["selectionPolicyHash"] != slot["selectionPolicyHash"]:
+        _raise_semantic(
+            "selection-receipt-policy-mismatch",
+            ("selectionPolicyHash",),
+        )
     if document["eligibleModuleIds"] != slot["eligibleModules"]:
         _raise_semantic(
             "selection-receipt-eligible-set-mismatch",
@@ -861,6 +867,56 @@ def _validate_selection_receipt(
             "selection-receipt-cardinality-invalid",
             ("selectedModuleIds",),
         )
+    if module_metadata is not None:
+        _validate_selection_module_metadata(document, module_metadata)
+
+
+def _metadata_value(metadata: Any, field: str) -> Any:
+    if isinstance(metadata, dict):
+        return metadata.get(field)
+    return getattr(metadata, field, None)
+
+
+def _validate_selection_module_metadata(
+    document: dict[str, Any], module_metadata: dict[str, Any],
+) -> None:
+    eligible = set(document["eligibleModuleIds"])
+    selected = set(document["selectedModuleIds"])
+    for module_id in eligible:
+        metadata = module_metadata.get(module_id)
+        if metadata is None:
+            _raise_semantic(
+                "selection-receipt-module-metadata-missing",
+                ("eligibleModuleIds",),
+            )
+        if (
+            _metadata_value(metadata, "stage") != document["stageId"]
+            or _metadata_value(metadata, "slot") != document["slotId"]
+        ):
+            _raise_semantic(
+                "selection-receipt-module-boundary-mismatch",
+                ("eligibleModuleIds",),
+            )
+        dependencies = set(_metadata_value(metadata, "dependencies") or ())
+        if not dependencies <= eligible:
+            _raise_semantic(
+                "selection-receipt-eligible-dependency-open",
+                ("eligibleModuleIds",),
+            )
+    for module_id in selected:
+        metadata = module_metadata[module_id]
+        dependencies = set(_metadata_value(metadata, "dependencies") or ())
+        if not dependencies <= selected:
+            _raise_semantic(
+                "selection-receipt-selected-dependency-open",
+                ("selectedModuleIds",),
+            )
+        conflicts = set(_metadata_value(metadata, "conflicts") or ())
+        if conflicts & selected:
+            _raise_semantic(
+                "selection-receipt-selected-conflict",
+                ("selectedModuleIds",),
+            )
 
 
 def _validate_run_ledger(
@@ -1045,12 +1101,14 @@ def validate_plan_graph(document: dict[str, Any]) -> None:
 
 
 def validate_selection_receipt(
-    document: dict[str, Any], plan: dict[str, Any] | None = None
+    document: dict[str, Any],
+    plan: dict[str, Any] | None = None,
+    module_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Validate a V3 SelectionReceipt, optionally against its PlanGraph."""
 
     _validate_schema("selection-receipt.schema.json", document)
-    _validate_selection_receipt(document, plan)
+    _validate_selection_receipt(document, plan, module_metadata)
 
 
 def validate_run_ledger(
@@ -1177,7 +1235,7 @@ def load_contract(
     elif schema_name == "plan-graph.schema.json":
         _validate_plan_graph(document)
     elif schema_name == "selection-receipt.schema.json":
-        _validate_selection_receipt(document)
+        _validate_selection_receipt(document, plan_graph)
     elif schema_name == "run-ledger.schema.json":
         if plan_graph is None:
             _raise_semantic("ledger-plan-required", ())

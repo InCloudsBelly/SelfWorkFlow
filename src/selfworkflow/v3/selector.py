@@ -1,36 +1,37 @@
-"""Pure, bounded V3 runtime selection.
+"""Effect-free bounded selection over a provenance-bound PlanGraph."""
 
-The selector accepts only a PlanGraph artifact and a typed SelectionInput.  It
-does not have effect ports and intentionally has no process, network, clock,
-filesystem, or subprocess dependencies.
-"""
-
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import copy
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+import re
 from typing import Any
 
 from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
-from selfworkflow.v3.plan_graph import PlanGraphArtifact, ModuleSpec
+from selfworkflow.v3.plan_graph import (
+    ModuleSpec,
+    PlanGraphArtifact,
+    PlanGraphError,
+)
 
 
+_STABLE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _DEFAULT_SELECTOR_SOURCE_HASH = "sha256:" + hashlib.sha256(
-    b"selfworkflow.v3.bounded-selector"
+    b"selfworkflow.v3.bounded-selector.v2"
 ).hexdigest()
+_RECEIPT_TOKEN = object()
+_RESULT_TOKEN = object()
 
 
 class SelectorError(ValueError):
-    """Stable fail-closed selector input or invariant error."""
-
     def __init__(self, reason: str = "v3-selector-invalid") -> None:
         self.reason = reason
         super().__init__(reason)
 
 
 class SelectionPaused(SelectorError):
-    """Compatibility error type for callers that choose exception handling."""
+    """Compatibility error type for exception-oriented hosts."""
 
 
 @dataclass(frozen=True)
@@ -43,15 +44,32 @@ class SelectionInput:
     context_budget: int | None = None
     execution_budget: int | None = None
     requested_module_ids: tuple[str, ...] = ()
-    coverage_by_module: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    coverage_evidence_by_obligation: tuple[
+        tuple[str, tuple[str, ...]], ...
+    ] = ()
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "SelectionInput":
         if not isinstance(value, Mapping):
             raise SelectorError("v3-selection-input-not-typed")
-        coverage = value.get("coverageByModule", {})
+        allowed = {
+            "artifactId", "artifactHash", "candidateModuleIds",
+            "preferredModuleIds", "signalEvidenceRefs", "contextBudget",
+            "executionBudget", "requestedModuleIds",
+            "coverageEvidenceByObligation",
+        }
+        if set(value) - allowed:
+            if "coverageByModule" in value:
+                raise SelectorError("v3-legacy-coverage-binding-forbidden")
+            raise SelectorError("v3-selection-input-unknown-field")
+        coverage = value.get("coverageEvidenceByObligation", {})
         if not isinstance(coverage, Mapping):
             raise SelectorError("v3-selection-coverage-invalid")
+        normalized_coverage = []
+        for obligation, evidence in sorted(coverage.items()):
+            if not isinstance(obligation, str):
+                raise SelectorError("v3-selection-coverage-invalid")
+            normalized_coverage.append((obligation, _tuple(evidence)))
         return cls(
             artifact_id=value.get("artifactId", ""),
             artifact_hash=value.get("artifactHash", ""),
@@ -61,233 +79,511 @@ class SelectionInput:
             context_budget=value.get("contextBudget"),
             execution_budget=value.get("executionBudget"),
             requested_module_ids=_tuple(value.get("requestedModuleIds", ())),
-            coverage_by_module=tuple(
-                (str(module_id), tuple(values))
-                for module_id, values in sorted(coverage.items())
-            ),
+            coverage_evidence_by_obligation=tuple(normalized_coverage),
         )
 
 
-@dataclass(frozen=True)
 class SelectionReceiptArtifact:
-    document: dict[str, Any]
-    selection_policy_hash: str
+    __slots__ = ("__document", "__token")
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "document", copy.deepcopy(self.document))
+    def __init__(self, token: object, document: dict[str, Any]) -> None:
+        if token is not _RECEIPT_TOKEN:
+            raise TypeError("SelectionReceiptArtifact is selector-only")
+        self.__document = copy.deepcopy(document)
+        self.__token = token
+
+    @classmethod
+    def _create(cls, document: dict[str, Any]) -> "SelectionReceiptArtifact":
+        return cls(_RECEIPT_TOKEN, document)
+
+    @property
+    def document(self) -> dict[str, Any]:
+        return copy.deepcopy(self.__document)
+
+    @property
+    def selection_policy_hash(self) -> str:
+        return self.__document["selectionPolicyHash"]
 
     @property
     def receipt_hash(self) -> str:
-        return self.document["receiptHash"]
+        return self.__document["receiptHash"]
 
     def as_dict(self) -> dict[str, Any]:
-        return copy.deepcopy(self.document)
+        return copy.deepcopy(self.__document)
 
 
-@dataclass(frozen=True)
 class SelectionResult:
-    status: str
-    receipt: SelectionReceiptArtifact | None = None
-    reason: str | None = None
-    next_stage_request: dict[str, Any] | None = None
+    """Immutable, content-addressed selector outcome."""
+
+    __slots__ = ("__document", "__receipt", "__token")
+
+    def __init__(
+        self, token: object, document: dict[str, Any],
+        receipt: SelectionReceiptArtifact | None,
+    ) -> None:
+        if token is not _RESULT_TOKEN:
+            raise TypeError("SelectionResult is selector-only")
+        _validate_result_document(document)
+        self.__document = copy.deepcopy(document)
+        self.__receipt = receipt
+        self.__token = token
+
+    @classmethod
+    def _create(
+        cls, document: dict[str, Any],
+        receipt: SelectionReceiptArtifact | None = None,
+    ) -> "SelectionResult":
+        return cls(_RESULT_TOKEN, document, receipt)
+
+    @property
+    def status(self) -> str:
+        return self.__document["status"]
+
+    @property
+    def reason(self) -> str | None:
+        return self.__document.get("reason")
+
+    @property
+    def receipt(self) -> SelectionReceiptArtifact | None:
+        return self.__receipt
+
+    @property
+    def next_stage_request(self) -> dict[str, Any] | None:
+        return self.as_dict() if self.status == "next-stage-request" else None
+
+    @property
+    def result_hash(self) -> str:
+        return self.__document["resultHash"]
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "status": self.status,
-            "reason": self.reason,
-            "receipt": self.receipt.as_dict() if self.receipt else None,
-            "nextStageRequest": copy.deepcopy(self.next_stage_request),
-        }
+        return copy.deepcopy(self.__document)
 
 
 def select_modules(
-    plan_graph: PlanGraphArtifact | Mapping[str, Any],
+    plan_graph: PlanGraphArtifact,
     stage_id: str,
     slot_id: str,
     attempt_ref: str,
-    selection_input: SelectionInput | Mapping[str, Any],
+    selection_input: SelectionInput,
     *,
     selector_module_id: str = "bounded-selector",
     selector_source_hash: str = _DEFAULT_SELECTOR_SOURCE_HASH,
 ) -> SelectionResult:
-    """Select a bounded subset and emit a schema-valid SelectionReceipt."""
+    """Select only within one immutable slot using typed in-memory values."""
 
-    graph = _coerce_graph(plan_graph)
-    typed_input = _coerce_input(selection_input)
-    stage, slot = _find_slot(graph.document, stage_id, slot_id)
-    _validate_stable_text(attempt_ref, "v3-selection-attempt-invalid")
-    _validate_stable_text(selector_module_id, "v3-selector-module-invalid")
+    if type(plan_graph) is not PlanGraphArtifact:
+        raise SelectorError("v3-plan-graph-not-typed")
+    if type(selection_input) is not SelectionInput:
+        raise SelectorError("v3-selection-input-not-typed")
+    try:
+        plan, specs = plan_graph._trusted_snapshot()
+    except PlanGraphError as error:
+        raise SelectorError(error.reason) from None
+    # Revalidation is intentional even though the artifact provenance check
+    # already includes the document.  This keeps the selector entry fail closed
+    # if contract semantics change independently.
+    try:
+        from selfworkflow.v3.contracts import validate_plan_graph
+        validate_plan_graph(plan)
+    except ContractError as error:
+        raise SelectorError(error.reason) from None
+
+    _, slot = _find_slot(plan, stage_id, slot_id)
+    _validate_stable_id(attempt_ref, "v3-selection-attempt-invalid")
+    _validate_stable_id(selector_module_id, "v3-selector-module-invalid")
     _validate_hash(selector_source_hash, "v3-selector-source-hash-invalid")
-    _validate_input(typed_input)
+    _validate_input(selection_input, slot)
 
     eligible = list(slot["eligibleModules"])
     _validate_unique(eligible, "v3-plan-eligible-duplicate")
-    requested = list(typed_input.requested_module_ids)
+    _validate_eligible_closure(eligible, stage_id, slot_id, specs)
+    requested = list(selection_input.requested_module_ids)
     _validate_unique(requested, "v3-requested-module-duplicate")
     outside_requested = sorted(set(requested) - set(eligible))
     if outside_requested:
-        known_module_ids = set(graph.spec_by_id())
-        if known_module_ids and not set(outside_requested) <= known_module_ids:
+        if not set(outside_requested) <= set(specs):
             raise SelectorError("v3-selector-requested-module-unknown")
-        return SelectionResult(
-            status="next-stage-request",
-            reason="outside-eligible-set",
-            next_stage_request={
-                "schemaVersion": 3,
-                "kind": "nextStageRequest",
-                "planHash": graph.plan_hash,
-                "stageId": stage_id,
-                "slotId": slot_id,
-                "requestedModuleIds": outside_requested,
-                "reason": "outside-eligible-set",
-            },
+        return _outcome(
+            "next-stage-request", plan, slot, attempt_ref, selection_input,
+            "outside-eligible-set", outside_requested,
         )
 
-    candidates = eligible if typed_input.candidate_module_ids is None else list(typed_input.candidate_module_ids)
+    candidates = (
+        eligible if selection_input.candidate_module_ids is None
+        else list(selection_input.candidate_module_ids)
+    )
     _validate_unique(candidates, "v3-selector-candidate-duplicate")
-    outside = sorted(set(candidates) - set(eligible))
-    if outside:
+    if not set(candidates) <= set(eligible):
         raise SelectorError("v3-selector-candidate-outside-eligible")
-    preferred = list(typed_input.preferred_module_ids)
+    preferred = list(selection_input.preferred_module_ids)
     _validate_unique(preferred, "v3-selector-preferred-duplicate")
     if not set(preferred) <= set(candidates):
         raise SelectorError("v3-selector-preferred-outside-candidates")
 
     if slot["selectionMode"] == "static":
         selected = list(slot["selectedModules"])
-        if selected and not set(selected) <= set(candidates):
+        if not set(selected) <= set(candidates):
             raise SelectorError("v3-static-selection-not-candidate")
     else:
         selected = _choose(
-            slot, candidates, preferred, graph.spec_by_id(),
-            typed_input.context_budget, typed_input.execution_budget,
+            slot, candidates, preferred, specs,
+            selection_input.context_budget,
+            selection_input.execution_budget,
+        )
+    _validate_selected_set(slot, selected, candidates, specs)
+
+    context_cost, execution_cost = _costs(selected, specs)
+    if (
+        selection_input.context_budget is not None
+        and context_cost > selection_input.context_budget
+    ):
+        if slot["cardinality"] in {"exactly-one", "gate"}:
+            return _outcome(
+                "paused", plan, slot, attempt_ref, selection_input,
+                "context-budget-exceeded", (),
+            )
+        selected = []
+        context_cost, execution_cost = 0, 0
+    if (
+        selection_input.execution_budget is not None
+        and execution_cost > selection_input.execution_budget
+    ):
+        if slot["cardinality"] in {"exactly-one", "gate"}:
+            return _outcome(
+                "paused", plan, slot, attempt_ref, selection_input,
+                "execution-budget-exceeded", (),
+            )
+        selected = []
+        context_cost, execution_cost = 0, 0
+
+    if slot["cardinality"] in {"exactly-one", "gate"} and not selected:
+        reason = _unavailable_reason(
+            candidates, specs, selection_input.context_budget,
+            selection_input.execution_budget,
+        )
+        return _outcome(
+            "paused", plan, slot, attempt_ref, selection_input, reason, (),
         )
 
-    reason_ids = ["selection.deterministic-order", f"selection.cardinality.{slot['cardinality']}"]
-    context_cost, execution_cost = _costs(selected, graph.spec_by_id())
-    if typed_input.context_budget is not None and context_cost > typed_input.context_budget:
-        if slot["cardinality"] in {"exactly-one", "gate"}:
-            return SelectionResult(status="paused", reason="context-budget-exceeded")
-        selected = []
-        context_cost, execution_cost = 0, 0
-        reason_ids.append("selection.optional-budget-pruned")
-    if typed_input.execution_budget is not None and execution_cost > typed_input.execution_budget:
-        if slot["cardinality"] in {"exactly-one", "gate"}:
-            return SelectionResult(status="paused", reason="execution-budget-exceeded")
-        selected = []
-        context_cost, execution_cost = 0, 0
-        reason_ids.append("selection.optional-budget-pruned")
-
-    cardinality = slot["cardinality"]
-    if cardinality in {"exactly-one", "gate"} and not selected:
-        if _any_candidate_exceeds_budget(
-            candidates, graph.spec_by_id(), typed_input.context_budget,
-            typed_input.execution_budget,
-        ):
-            reason = (
-                "context-budget-exceeded"
-                if typed_input.context_budget is not None
-                and any(
-                    graph.spec_by_id().get(item, ModuleSpec(item, (), (), 0, 0)).context_cost
-                    > typed_input.context_budget for item in candidates
-                )
-                else "execution-budget-exceeded"
-            )
-            return SelectionResult(status="paused", reason=reason)
-        return SelectionResult(status="paused", reason="required-module-unavailable")
-    coverage = _coverage_decisions(slot, selected, typed_input, reason_ids)
-    document_without_hash = {
+    reasons = [
+        "selection.deterministic-order",
+        f"selection.cardinality.{slot['cardinality']}",
+    ]
+    coverage = _coverage_decisions(
+        slot, selected, selection_input, reasons,
+    )
+    receipt_without_hash = {
         "schemaVersion": 3,
-        "planHash": graph.plan_hash,
+        "planHash": plan["planHash"],
         "stageId": stage_id,
         "slotId": slot_id,
         "attemptRef": attempt_ref,
+        "selectionPolicyHash": slot["selectionPolicyHash"],
         "selectorModuleId": selector_module_id,
         "selectorSourceHash": selector_source_hash,
-        "inputArtifactId": typed_input.artifact_id,
-        "inputArtifactHash": typed_input.artifact_hash,
+        "inputArtifactId": selection_input.artifact_id,
+        "inputArtifactHash": selection_input.artifact_hash,
         "eligibleModuleIds": eligible,
         "selectedModuleIds": selected,
-        "selectionReasons": sorted(set(reason_ids)),
-        "signalEvidenceRefs": list(typed_input.signal_evidence_refs),
+        "selectionReasons": sorted(set(reasons)),
+        "signalEvidenceRefs": list(selection_input.signal_evidence_refs),
         "estimatedContextCost": context_cost,
         "estimatedExecutionCost": execution_cost,
         "coverageDecisions": coverage,
     }
-    document = {
-        **document_without_hash,
-        "receiptHash": _value_hash(document_without_hash),
+    receipt_document = {
+        **receipt_without_hash,
+        "receiptHash": _value_hash(receipt_without_hash),
     }
     try:
-        validate_selection_receipt(document, graph.document)
+        validate_selection_receipt(receipt_document, plan, specs)
     except ContractError as error:
         raise SelectorError(error.reason) from None
-    return SelectionResult(
-        status="selected",
-        receipt=SelectionReceiptArtifact(document, slot["selectionPolicyHash"]),
+    receipt = SelectionReceiptArtifact._create(receipt_document)
+    selected_result = _result_document(
+        status="selected", plan=plan, slot=slot, attempt_ref=attempt_ref,
+        selection_input=selection_input, reason="selection-complete",
+        requested_module_ids=(), receipt_hash=receipt.receipt_hash,
     )
+    return SelectionResult._create(selected_result, receipt)
 
 
-def _coerce_graph(value: PlanGraphArtifact | Mapping[str, Any]) -> PlanGraphArtifact:
-    if isinstance(value, PlanGraphArtifact):
-        return value
-    if isinstance(value, Mapping):
-        return PlanGraphArtifact(dict(value))
-    raise SelectorError("v3-plan-graph-not-typed")
+def _outcome(
+    status: str,
+    plan: Mapping[str, Any],
+    slot: Mapping[str, Any],
+    attempt_ref: str,
+    selection_input: SelectionInput,
+    reason: str,
+    requested_module_ids: Sequence[str],
+) -> SelectionResult:
+    document = _result_document(
+        status=status, plan=plan, slot=slot, attempt_ref=attempt_ref,
+        selection_input=selection_input, reason=reason,
+        requested_module_ids=requested_module_ids, receipt_hash=None,
+    )
+    return SelectionResult._create(document)
 
 
-def _coerce_input(value: SelectionInput | Mapping[str, Any]) -> SelectionInput:
-    if isinstance(value, SelectionInput):
-        return value
-    if isinstance(value, Mapping):
-        return SelectionInput.from_mapping(value)
-    raise SelectorError("v3-selection-input-not-typed")
+def _result_document(
+    *,
+    status: str,
+    plan: Mapping[str, Any],
+    slot: Mapping[str, Any],
+    attempt_ref: str,
+    selection_input: SelectionInput,
+    reason: str,
+    requested_module_ids: Sequence[str],
+    receipt_hash: str | None,
+) -> dict[str, Any]:
+    material = {
+        "schemaVersion": 3,
+        "status": status,
+        "planHash": plan["planHash"],
+        "stageId": next(
+            stage["stageId"] for stage in plan["stages"]
+            if any(item is slot for item in stage["slots"])
+        ),
+        "slotId": slot["slotId"],
+        "attemptRef": attempt_ref,
+        "inputArtifactHash": selection_input.artifact_hash,
+        "selectionPolicyHash": slot["selectionPolicyHash"],
+        "reason": reason,
+        "requestedModuleIds": sorted(requested_module_ids),
+        "receiptHash": receipt_hash,
+    }
+    return {**material, "resultHash": _value_hash(material)}
+
+
+def _validate_result_document(document: Mapping[str, Any]) -> None:
+    required = {
+        "schemaVersion", "status", "planHash", "stageId", "slotId",
+        "attemptRef", "inputArtifactHash", "selectionPolicyHash", "reason",
+        "requestedModuleIds", "receiptHash", "resultHash",
+    }
+    if set(document) != required or document.get("schemaVersion") != 3:
+        raise SelectorError("v3-selection-result-invalid")
+    if document.get("status") not in {
+        "selected", "paused", "next-stage-request",
+    }:
+        raise SelectorError("v3-selection-result-invalid")
+    for field in (
+        "planHash", "inputArtifactHash", "selectionPolicyHash", "resultHash",
+    ):
+        _validate_hash(document.get(field), "v3-selection-result-invalid")
+    if document["receiptHash"] is not None:
+        _validate_hash(document["receiptHash"], "v3-selection-result-invalid")
+    expected = dict(document)
+    expected.pop("resultHash")
+    if document["resultHash"] != _value_hash(expected):
+        raise SelectorError("v3-selection-result-hash-invalid")
+    _validate_unique(
+        document["requestedModuleIds"], "v3-selection-result-invalid",
+    )
 
 
 def _find_slot(
     document: Mapping[str, Any], stage_id: str, slot_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    for stage in document.get("stages", ()):
-        if stage.get("stageId") != stage_id:
+    for stage in document["stages"]:
+        if stage["stageId"] != stage_id:
             continue
-        for slot in stage.get("slots", ()):
-            if slot.get("slotId") == slot_id:
-                if slot.get("applicability") != "applicable":
+        for slot in stage["slots"]:
+            if slot["slotId"] == slot_id:
+                if slot["applicability"] != "applicable":
                     raise SelectorError("v3-selector-slot-not-applicable")
                 return stage, slot
         raise SelectorError("v3-selector-slot-unknown")
     raise SelectorError("v3-selector-stage-unknown")
 
 
-def _validate_input(value: SelectionInput) -> None:
-    _validate_stable_text(value.artifact_id, "v3-selection-artifact-id-invalid")
+def _validate_input(value: SelectionInput, slot: Mapping[str, Any]) -> None:
+    _validate_stable_id(value.artifact_id, "v3-selection-artifact-id-invalid")
     _validate_hash(value.artifact_hash, "v3-selection-artifact-hash-invalid")
-    for ref in value.signal_evidence_refs:
-        _validate_stable_text(ref, "v3-selection-signal-ref-invalid")
-    for ids in (
-        value.candidate_module_ids or (),
-        value.preferred_module_ids,
-        value.requested_module_ids,
-    ):
-        if any(not isinstance(module_id, str) for module_id in ids):
-            raise SelectorError("v3-selection-module-id-invalid")
+    id_lists = (
+        value.candidate_module_ids or (), value.preferred_module_ids,
+        value.signal_evidence_refs, value.requested_module_ids,
+    )
+    for values in id_lists:
+        for item in values:
+            _validate_stable_id(item, "v3-selection-id-invalid")
+        _validate_unique(values, "v3-selection-id-duplicate")
     for budget in (value.context_budget, value.execution_budget):
         if budget is not None and (type(budget) is not int or budget < 0):
             raise SelectorError("v3-selection-budget-invalid")
 
+    obligations = set(slot["coverageObligations"])
+    seen_obligations: set[str] = set()
+    seen_evidence: set[str] = set()
+    signal_evidence = set(value.signal_evidence_refs)
+    for obligation, evidence_refs in value.coverage_evidence_by_obligation:
+        if obligation in seen_obligations or obligation not in obligations:
+            raise SelectorError("v3-selection-coverage-obligation-invalid")
+        seen_obligations.add(obligation)
+        _validate_unique(evidence_refs, "v3-selection-coverage-evidence-duplicate")
+        if not set(evidence_refs) <= signal_evidence:
+            raise SelectorError("v3-selection-coverage-evidence-invalid")
+        if seen_evidence & set(evidence_refs):
+            raise SelectorError("v3-selection-coverage-evidence-reused")
+        seen_evidence.update(evidence_refs)
 
-def _validate_stable_text(value: Any, reason: str) -> None:
-    if not isinstance(value, str) or not value or len(value) > 128:
+
+def _validate_eligible_closure(
+    eligible: Sequence[str], stage_id: str, slot_id: str,
+    specs: Mapping[str, ModuleSpec],
+) -> None:
+    eligible_set = set(eligible)
+    for module_id in eligible:
+        spec = specs.get(module_id)
+        if spec is None:
+            raise SelectorError("v3-selector-module-metadata-missing")
+        if spec.stage != stage_id or spec.slot != slot_id:
+            raise SelectorError("v3-selector-module-boundary-mismatch")
+        if not set(spec.dependencies) <= eligible_set:
+            raise SelectorError("v3-selector-eligible-dependency-open")
+
+
+def _choose(
+    slot: Mapping[str, Any], candidates: Sequence[str], preferred: Sequence[str],
+    specs: Mapping[str, ModuleSpec], context_budget: int | None,
+    execution_budget: int | None,
+) -> list[str]:
+    order = list(preferred) + sorted(set(candidates) - set(preferred))
+    selected: set[str] = set()
+    for module_id in order:
+        closure = _dependency_closure(module_id, specs, set(candidates))
+        if closure is None or _has_conflict(closure, specs):
+            continue
+        candidate_selection = selected | closure
+        if _has_conflict(candidate_selection, specs):
+            continue
+        if (
+            slot["cardinality"] in {"exactly-one", "zero-or-one"}
+            and len(candidate_selection) > 1
+        ):
+            continue
+        context_cost, execution_cost = _costs(candidate_selection, specs)
+        if context_budget is not None and context_cost > context_budget:
+            continue
+        if execution_budget is not None and execution_cost > execution_budget:
+            continue
+        selected = candidate_selection
+        if slot["cardinality"] in {"exactly-one", "zero-or-one"}:
+            break
+    return sorted(selected)
+
+
+def _dependency_closure(
+    module_id: str, specs: Mapping[str, ModuleSpec], candidates: set[str],
+) -> set[str] | None:
+    result: set[str] = set()
+    visiting: set[str] = set()
+
+    def visit(current: str) -> bool:
+        if current in result:
+            return True
+        if current in visiting or current not in candidates or current not in specs:
+            return False
+        visiting.add(current)
+        if not all(visit(item) for item in specs[current].dependencies):
+            return False
+        visiting.remove(current)
+        result.add(current)
+        return True
+
+    return result if visit(module_id) else None
+
+
+def _has_conflict(
+    selected: set[str], specs: Mapping[str, ModuleSpec],
+) -> bool:
+    return any(
+        set(specs[module_id].conflicts) & (selected - {module_id})
+        for module_id in selected
+    )
+
+
+def _validate_selected_set(
+    slot: Mapping[str, Any], selected: Sequence[str], candidates: Sequence[str],
+    specs: Mapping[str, ModuleSpec],
+) -> None:
+    selected_set = set(selected)
+    if len(selected_set) != len(selected) or not selected_set <= set(candidates):
+        raise SelectorError("v3-selector-selected-set-invalid")
+    for module_id in selected:
+        if not set(specs[module_id].dependencies) <= selected_set:
+            raise SelectorError("v3-selector-selected-dependency-open")
+    if _has_conflict(selected_set, specs):
+        raise SelectorError("v3-selector-selected-conflict")
+    cardinality_valid = {
+        "exactly-one": len(selected) == 1,
+        "zero-or-one": len(selected) <= 1,
+        "zero-or-many": True,
+        "gate": len(selected) >= 1,
+    }[slot["cardinality"]]
+    if not cardinality_valid and selected:
+        raise SelectorError("v3-selector-cardinality-invalid")
+
+
+def _costs(
+    selected: Sequence[str] | set[str], specs: Mapping[str, ModuleSpec],
+) -> tuple[int, int]:
+    return (
+        sum(specs[item].context_cost for item in selected),
+        sum(specs[item].execution_cost for item in selected),
+    )
+
+
+def _unavailable_reason(
+    candidates: Sequence[str], specs: Mapping[str, ModuleSpec],
+    context_budget: int | None, execution_budget: int | None,
+) -> str:
+    for module_id in candidates:
+        closure = _dependency_closure(module_id, specs, set(candidates))
+        if closure is None or _has_conflict(closure, specs):
+            continue
+        context_cost, execution_cost = _costs(closure, specs)
+        if context_budget is not None and context_cost > context_budget:
+            return "context-budget-exceeded"
+        if execution_budget is not None and execution_cost > execution_budget:
+            return "execution-budget-exceeded"
+    return "required-module-unavailable"
+
+
+def _coverage_decisions(
+    slot: Mapping[str, Any], selected: Sequence[str], value: SelectionInput,
+    reasons: list[str],
+) -> list[dict[str, Any]]:
+    bindings = dict(value.coverage_evidence_by_obligation)
+    decisions = []
+    for obligation in slot["coverageObligations"]:
+        evidence = list(bindings.get(obligation, ()))
+        if selected and evidence:
+            decision = "fulfilled"
+            reasons.append("coverage.fulfilled")
+        elif selected:
+            decision = "unverified"
+        else:
+            decision = "blocked"
+        decisions.append({
+            "obligationId": obligation,
+            "decision": decision,
+            "evidenceRefs": evidence,
+        })
+    return decisions
+
+
+def _validate_stable_id(value: Any, reason: str) -> None:
+    if not isinstance(value, str) or _STABLE_ID.fullmatch(value) is None:
         raise SelectorError(reason)
 
 
 def _validate_hash(value: Any, reason: str) -> None:
-    if not isinstance(value, str) or len(value) != 71 or not value.startswith("sha256:"):
+    if (
+        not isinstance(value, str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", value)
+    ):
         raise SelectorError(reason)
-    try:
-        int(value[7:], 16)
-    except ValueError:
-        raise SelectorError(reason) from None
 
 
 def _tuple(value: Any) -> tuple[str, ...]:
@@ -307,125 +603,12 @@ def _validate_unique(values: Sequence[str], reason: str) -> None:
         raise SelectorError(reason)
 
 
-def _choose(
-    slot: Mapping[str, Any], candidates: Sequence[str], preferred: Sequence[str],
-    specs: Mapping[str, ModuleSpec], context_budget: int | None,
-    execution_budget: int | None,
-) -> list[str]:
-    order = list(preferred) + sorted(set(candidates) - set(preferred))
-    selected: list[str] = []
-    for module_id in order:
-        if module_id not in specs:
-            spec = ModuleSpec(module_id, (), (), 0, 0)
-        else:
-            spec = specs[module_id]
-        closure = _dependency_closure(module_id, specs, set(candidates))
-        if closure is None:
-            continue
-        additions = [item for item in closure if item not in selected]
-        if any(_conflicts(item, selected, specs) for item in additions):
-            continue
-        candidate_selection = selected + additions
-        context_cost, execution_cost = _costs(candidate_selection, specs)
-        if context_budget is not None and context_cost > context_budget:
-            continue
-        if execution_budget is not None and execution_cost > execution_budget:
-            continue
-        selected = candidate_selection
-        if slot["cardinality"] in {"exactly-one", "zero-or-one"}:
-            break
-    if slot["cardinality"] in {"exactly-one", "gate"} and not selected:
-        return []
-    return sorted(selected)
-
-
-def _dependency_closure(
-    module_id: str, specs: Mapping[str, ModuleSpec], candidates: set[str],
-) -> list[str] | None:
-    result: list[str] = []
-    visiting: set[str] = set()
-
-    def visit(current: str) -> bool:
-        if current in result:
-            return True
-        if current in visiting:
-            return False
-        visiting.add(current)
-        spec = specs.get(current, ModuleSpec(current, (), (), 0, 0))
-        for dependency in spec.dependencies:
-            if dependency not in candidates:
-                return False
-            if not visit(dependency):
-                return False
-        visiting.remove(current)
-        result.append(current)
-        return True
-
-    return result if visit(module_id) else None
-
-
-def _conflicts(
-    module_id: str, selected: Sequence[str], specs: Mapping[str, ModuleSpec],
-) -> bool:
-    spec = specs.get(module_id, ModuleSpec(module_id, (), (), 0, 0))
-    return any(
-        module_id in specs.get(item, ModuleSpec(item, (), (), 0, 0)).conflicts
-        or item in spec.conflicts
-        for item in selected
-    )
-
-
-def _costs(selected: Sequence[str], specs: Mapping[str, ModuleSpec]) -> tuple[int, int]:
-    context = execution = 0
-    for module_id in selected:
-        spec = specs.get(module_id, ModuleSpec(module_id, (), (), 0, 0))
-        context += spec.context_cost
-        execution += spec.execution_cost
-    return context, execution
-
-
-def _any_candidate_exceeds_budget(
-    candidates: Sequence[str], specs: Mapping[str, ModuleSpec],
-    context_budget: int | None, execution_budget: int | None,
-) -> bool:
-    for module_id in candidates:
-        spec = specs.get(module_id, ModuleSpec(module_id, (), (), 0, 0))
-        if context_budget is not None and spec.context_cost > context_budget:
-            return True
-        if execution_budget is not None and spec.execution_cost > execution_budget:
-            return True
-    return False
-
-
-def _coverage_decisions(
-    slot: Mapping[str, Any], selected: Sequence[str], value: SelectionInput,
-    reasons: list[str],
-) -> list[dict[str, Any]]:
-    decisions: list[dict[str, Any]] = []
-    coverage = dict(value.coverage_by_module)
-    for obligation in slot.get("coverageObligations", ()):
-        evidence = sorted({
-            ref for module_id in selected for ref in coverage.get(module_id, ())
-        })
-        if selected and (not coverage or evidence):
-            decisions.append({
-                "obligationId": obligation,
-                "decision": "fulfilled",
-                "evidenceRefs": evidence,
-            })
-            reasons.append("coverage.fulfilled")
-        else:
-            decisions.append({
-                "obligationId": obligation,
-                "decision": "blocked",
-                "evidenceRefs": evidence,
-            })
-    return decisions
-
-
 def _value_hash(value: Any) -> str:
-    payload = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    try:
+        payload = json.dumps(
+            value, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise SelectorError("v3-selector-canonical-value-invalid") from None
     return "sha256:" + hashlib.sha256(payload).hexdigest()
