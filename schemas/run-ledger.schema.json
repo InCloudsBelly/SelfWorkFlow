@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "planHash", "requestHash", "capabilitySnapshotHash", "status", "stages"],
+  "properties": {
+    "schemaVersion": {"const": 1}, "planHash": {"$ref": "#/$defs/hash"}, "requestHash": {"$ref": "#/$defs/hash"}, "capabilitySnapshotHash": {"$ref": "#/$defs/hash"},
+    "status": {"enum": ["pending", "active", "paused", "failed", "completed", "superseded"]},
+    "stages": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/stage"}, "contains": {"type": "object", "properties": {"status": {"const": "active"}}, "required": ["status"]}, "minContains": 0, "maxContains": 1},
+    "supersededByPlanHash": {"$ref": "#/$defs/hash"}
+  },
+  "allOf": [{"if": {"properties": {"status": {"const": "superseded"}}, "required": ["status"]}, "then": {"required": ["supersededByPlanHash"]}}],
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "stage": {"type": "object", "additionalProperties": false, "required": ["stageId", "status", "attempts", "slotResults", "gateResults", "runtimeSkips"], "properties": {"stageId": {"$ref": "#/$defs/id"}, "status": {"enum": ["pending", "active", "passed", "failed", "paused", "skipped"]}, "attempts": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/id"}}, "slotResults": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "gateResults": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "runtimeSkips": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}}}
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "stages"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "stages": {"type": "array", "minItems": 9, "maxItems": 9, "items": {"$ref": "#/$defs/stage"}}
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$"},
+    "stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "failureOwner", "slots"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "failureOwner": {"$ref": "#/$defs/identifier"},
+        "slots": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/slot"}}
+      }
+    },
+    "slot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "cardinality", "allowedInvocationKinds"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "cardinality": {"enum": ["exactly-one", "zero-or-one", "zero-or-many", "gate"]},
+        "allowedInvocationKinds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["agent-native", "skill", "mcp"]}},
+        "condition": {"$ref": "#/$defs/condition"}
+      }
+    },
+    "field": {"enum": ["writeTask", "operationType", "complexity", "risk", "explicitModuleIds", "projectMinimums", "capabilityStates"]},
+    "scalar": {"type": ["string", "boolean", "integer", "null"]},
+    "binaryCondition": {
+      "type": "array", "prefixItems": [{"$ref": "#/$defs/field"}, {"$ref": "#/$defs/scalar"}], "items": false, "minItems": 2, "maxItems": 2
+    },
+    "condition": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["all"], "properties": {"all": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/condition"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["any"], "properties": {"any": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/condition"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["not"], "properties": {"not": {"$ref": "#/$defs/condition"}}},
+        {"type": "object", "additionalProperties": false, "required": ["eq"], "properties": {"eq": {"$ref": "#/$defs/binaryCondition"}}},
+        {"type": "object", "additionalProperties": false, "required": ["gte"], "properties": {"gte": {"$ref": "#/$defs/binaryCondition"}}},
+        {"type": "object", "additionalProperties": false, "required": ["contains"], "properties": {"contains": {"$ref": "#/$defs/binaryCondition"}}}
+      ]
+    }
+  }
+}
