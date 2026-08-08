@@ -5,9 +5,9 @@ entries:
     displayName: Core workflow contract
     source:
       kind: workflow
-      path: WORKFLOW.md
-      revision: git:786f19d4902c4d4e17c0e25a2cc6e53384cb1040
-      contentHash: sha256:2889933a50b94a77009d57b9a7ee66c79fa1de4a5658b27c4b603f8b26b8903c
+      path: workflow/core.md
+      revision: git:9741c88041cf98ce41eb9577b7d35644374a86c7
+      contentHash: sha256:00314f11c8f13bd6f643498c98ad33cc30a5cd3e7185c6f6a9a793884afd4881
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -35,14 +35,14 @@ entries:
     dependencies: []
     conflicts: []
     composition: standalone
-    mandatory: true
+    mandatory: false
     mandatoryWhen:
       match: any
-      scopes: [global]
+      scopes: []
       fileExtensions: []
-      operationTypes: []
+      operationTypes: [design, plan, implement, debug, review, verify, install, publish]
     priority: 1000
-    contextCost: 512
+    contextCost: 1024
     supportStatus: supported
     protectedRuleOperations: []
   - id: workflow-quality
@@ -124,7 +124,7 @@ entries:
       - unrelated content generation
     selectors:
       fileExtensions: []
-      operationTypes: [implement, review, verify, install, publish]
+      operationTypes: [install, publish]
       semanticTerms: [rule merge, protected rule change]
     stages:
       - capability-checked
@@ -136,12 +136,12 @@ entries:
       - workflow-core
     conflicts: []
     composition: augment
-    mandatory: true
+    mandatory: false
     mandatoryWhen:
       match: any
-      scopes: [safety]
+      scopes: []
       fileExtensions: []
-      operationTypes: []
+      operationTypes: [install, publish]
     priority: 900
     contextCost: 256
     supportStatus: supported

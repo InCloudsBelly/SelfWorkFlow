@@ -259,7 +259,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(result.status, "routed")
         self.assertEqual(
             result.selected,
-            ("workflow-core", "workflow-protected-rules"),
+            ("workflow-core",),
         )
         self.assertEqual(result.catalog_hash, compiled.catalog_hash)
         self.assertEqual(

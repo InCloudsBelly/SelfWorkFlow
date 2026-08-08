@@ -21,7 +21,7 @@
 - [ ] Add a test proving default `build_runtime` records profile `core`, installs the compact workflow, and excludes `extensions`, detailed governance YAML, and maintainer-only modules.
 - [ ] Add profile tests proving `knowledge` adds knowledge files and `maintainer` retains the complete source set.
 - [ ] Add CLI coverage proving `--profile` defaults to `core` and rejects unknown values.
-- [ ] Change checked-in Catalog routing expectation so an ordinary C1 code implementation selects only `workflow-core`, `workflow-quality`, and `code-quality`.
+- [ ] Change checked-in Catalog routing expectation so an ordinary C1 code implementation selects only `workflow-core`; the compact core already contains the essential code-quality rules.
 - [ ] Run `python -m unittest tests.conformance.test_runtime_snapshot tests.unit.test_router -v`; expect the new assertions to fail before implementation.
 
 ### Task 2: Add the compact workflow and profile-aware runtime builder
@@ -51,8 +51,8 @@
 
 - [ ] Point `workflow-core` at `workflow/core.md` and bind its exact content hash.
 - [ ] Stop making the verbose protected-rule document mandatory for ordinary tasks; keep it selectable for rule changes, install, and publish operations.
-- [ ] Mark the already implemented workflow/code-quality Skills supported only after their existing behavioral tests pass.
-- [ ] Remove the ordinary code-quality dependency on the verbose protected-rule source.
+- [ ] Keep the full workflow/code-quality Skills `unverified` until a real Agent evaluation succeeds; do not promote them merely to make routing convenient.
+- [ ] Keep the full quality Skills as optional candidates and remove the verbose protected-rule source from ordinary routing.
 - [ ] Refresh source revision/hash metadata in a separate provenance commit after source changes are committed.
 - [ ] Run Catalog, router, code-quality, and Superpowers-routing tests until Green.
 - [ ] Commit the routing change and provenance refresh separately.
