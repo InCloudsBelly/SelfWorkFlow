@@ -1,11 +1,14 @@
 import hashlib
+import io
 import importlib.util
 import json
 from pathlib import Path
 import re
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from contextlib import contextmanager
+from unittest.mock import patch
 
 import yaml
 
@@ -72,6 +75,32 @@ class V3CatalogCompilerTests(unittest.TestCase):
     def test_v3_catalog_compiler_module_exists(self):
         spec = importlib.util.find_spec("selfworkflow.v3.catalog")
         self.assertIsNotNone(spec, "v3-catalog-compiler-not-found")
+
+    def test_yaml_read_is_bounded_and_rechecks_bytes_after_lstat(self):
+        from selfworkflow.v3.catalog import CatalogError, _read_bytes
+
+        limit = 8
+        payload = b"x" * (limit + 2)
+        read_sizes = []
+
+        class TrackingStream(io.BytesIO):
+            def read(self, size=-1):
+                read_sizes.append(size)
+                return super().read(size)
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "changing.yaml"
+            path.write_bytes(payload)
+            metadata = SimpleNamespace(st_size=limit, st_file_attributes=0)
+            with (
+                patch.object(Path, "lstat", return_value=metadata),
+                patch.object(Path, "open", return_value=TrackingStream(payload)),
+                self.assertRaises(CatalogError) as raised,
+            ):
+                _read_bytes(path, limit)
+
+        self.assertEqual(raised.exception.reason, "v3-yaml-resource-limit")
+        self.assertEqual(read_sizes, [limit + 1])
 
     def test_public_api_compiles_a_v3_envelope(self):
         CatalogError, compile_catalog = _compiler()

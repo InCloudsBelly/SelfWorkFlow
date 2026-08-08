@@ -180,7 +180,11 @@ def _read_bytes(path: Path, limit: int) -> bytes:
         metadata = path.lstat()
         if _is_reparse_point(path) or metadata.st_size > limit:
             raise CatalogError("v3-yaml-resource-limit" if metadata.st_size > limit else "v3-catalog-ref-reparse")
-        return path.read_bytes()
+        with path.open("rb") as source:
+            data = source.read(limit + 1)
+        if len(data) > limit:
+            raise CatalogError("v3-yaml-resource-limit")
+        return data
     except CatalogError:
         raise
     except (OSError, ValueError):
