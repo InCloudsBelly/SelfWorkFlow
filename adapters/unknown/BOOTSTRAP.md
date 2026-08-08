@@ -1,0 +1,1 @@
+Read `WORKFLOW.md`, report the capabilities this host actually supports, and stop modifying work if a required capability is unsupported or unverified. Load only the catalog entries selected for the current stage. Never weaken protected invariants or fabricate verification.

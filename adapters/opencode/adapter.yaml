@@ -1,0 +1,7 @@
+schemaVersion: 1
+id: opencode
+supportStatus: experimental-unverified
+entryFile: OPENCODE.managed.md
+capabilities: [project-instructions, skill-discovery]
+coreOverride: forbidden
+overrideBehavior: managed-file

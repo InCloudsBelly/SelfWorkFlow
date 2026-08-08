@@ -1,0 +1,7 @@
+schemaVersion: 1
+id: unknown
+supportStatus: bootstrap-only
+entryFile: BOOTSTRAP.md
+capabilities: [bootstrap-instructions]
+coreOverride: forbidden
+overrideBehavior: bootstrap-only

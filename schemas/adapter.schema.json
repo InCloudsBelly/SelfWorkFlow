@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "supportStatus", "entryFile", "capabilities", "coreOverride", "overrideBehavior"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"enum": ["codex", "claude-code", "cursor", "opencode", "copilot", "unknown"]},
+    "supportStatus": {"enum": ["experimental-unverified", "instructions-only", "bootstrap-only"]},
+    "entryFile": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"}},
+    "coreOverride": {"const": "forbidden"},
+    "overrideBehavior": {"enum": ["pause-and-confirm-target", "managed-file", "instructions-only", "bootstrap-only"]}
+  }
+}

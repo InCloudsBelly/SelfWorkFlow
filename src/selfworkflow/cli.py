@@ -10,6 +10,7 @@ import unicodedata
 
 from selfworkflow import __version__
 from selfworkflow.catalog import compile_catalog
+from selfworkflow.adapters import build_runtime
 from selfworkflow.installer import (
     apply_install_plan,
     apply_rollback_plan,
@@ -121,6 +122,10 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser.add_argument("--agents-root", required=True)
     doctor_parser.add_argument("--codex-root", required=True)
     doctor_parser.add_argument("--state-root", required=True)
+    build_parser = commands.add_parser("build")
+    build_parser.add_argument("--repository", default=str(Path.cwd()))
+    build_parser.add_argument("--output", required=True)
+    build_parser.add_argument("--version", default=__version__)
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -154,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
         if arguments.command == "doctor":
             result = doctor(
                 arguments.agents_root, arguments.codex_root, arguments.state_root
+            )
+        elif arguments.command == "build":
+            result = build_runtime(
+                arguments.repository, arguments.output, arguments.version
             )
         elif arguments.command == "install" and arguments.install_command == "plan":
             result = create_install_plan(

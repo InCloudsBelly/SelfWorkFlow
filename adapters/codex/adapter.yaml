@@ -1,0 +1,7 @@
+schemaVersion: 1
+id: codex
+supportStatus: experimental-unverified
+entryFile: AGENTS.managed.md
+capabilities: [global-instructions, skill-discovery, independent-context, command-execution]
+coreOverride: forbidden
+overrideBehavior: pause-and-confirm-target

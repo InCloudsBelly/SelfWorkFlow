@@ -1,0 +1,7 @@
+schemaVersion: 1
+id: claude-code
+supportStatus: experimental-unverified
+entryFile: CLAUDE.managed.md
+capabilities: [global-instructions, skill-discovery, independent-context]
+coreOverride: forbidden
+overrideBehavior: managed-file

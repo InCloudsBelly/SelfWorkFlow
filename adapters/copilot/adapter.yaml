@@ -1,0 +1,7 @@
+schemaVersion: 1
+id: copilot
+supportStatus: instructions-only
+entryFile: copilot-instructions.md
+capabilities: [project-instructions]
+coreOverride: forbidden
+overrideBehavior: instructions-only

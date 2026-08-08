@@ -1,0 +1,7 @@
+schemaVersion: 1
+id: cursor
+supportStatus: experimental-unverified
+entryFile: CURSOR.managed.md
+capabilities: [project-instructions, skill-discovery]
+coreOverride: forbidden
+overrideBehavior: managed-file
