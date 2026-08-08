@@ -5,7 +5,7 @@ from functools import lru_cache
 import hashlib
 import json
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, Callable, Protocol
 
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError
@@ -53,6 +53,25 @@ class ContractError(ValueError):
         self.path = path
         self.validator = validator
         super().__init__(reason)
+
+
+class VerificationReceiptPort(Protocol):
+    """Host collector trust boundary for immutable verification receipts.
+
+    Contract validation authenticates receipt structure and bindings; it does not
+    independently attest that an operating-system process actually ran.
+    """
+
+    def resolve_verification_receipt(
+        self, reference: str,
+    ) -> dict[str, Any] | None:
+        """Return the collector receipt identified by ``reference``."""
+
+
+VerificationReceiptResolver = (
+    VerificationReceiptPort
+    | Callable[[str], dict[str, Any] | None]
+)
 
 
 class _DuplicateKeyError(ValueError):
@@ -133,6 +152,24 @@ def _validate_schema(schema_name: str, document: dict[str, Any]) -> None:
         )
 
 
+def _validate_schema_definition(
+    schema_name: str,
+    definition_name: str,
+    document: dict[str, Any],
+    reason: str,
+    path: tuple[str | int, ...],
+) -> None:
+    schemas, registry = _schema_bundle()
+    reference = f"{schemas[schema_name]['$id']}#/$defs/{definition_name}"
+    validator = Draft202012Validator(
+        {"$ref": reference},
+        registry=registry,
+        format_checker=_FORMAT_CHECKER,
+    )
+    if next(validator.iter_errors(document), None) is not None:
+        _raise_semantic(reason, path)
+
+
 def _utc_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value[:-1] + "+00:00")
 
@@ -165,6 +202,11 @@ def _canonical_hash(document: dict[str, Any], field: str) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _canonical_value_hash(value: Any) -> str:
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _raise_semantic(reason: str, path: tuple[str | int, ...]) -> None:
     raise ContractError(reason, path, "semantic")
 
@@ -192,7 +234,7 @@ def _validate_artifact_binding(
         )
 
 
-def _validate_diff_signal_set(document: dict[str, Any]) -> None:
+def _validate_diff_signal_set_core(document: dict[str, Any]) -> None:
     if document["signalSetHash"] != _canonical_hash(document, "signalSetHash"):
         _raise_semantic("diff-signal-set-hash-invalid", ("signalSetHash",))
     paths: set[str] = set()
@@ -205,25 +247,95 @@ def _validate_diff_signal_set(document: dict[str, Any]) -> None:
             _raise_semantic("diff-signal-set-language-missing", ("files", index, "language"))
 
 
+def _current_ledger_attempt(run_ledger: dict[str, Any]) -> str | None:
+    current: str | None = None
+    for stage in run_ledger["stages"]:
+        if stage["attempts"]:
+            current = stage["attempts"][-1]["attemptRef"]
+    return current
+
+
+def _validate_quality_run_context(
+    document: dict[str, Any],
+    run_ledger: dict[str, Any] | None,
+    artifact_name: str,
+) -> None:
+    if run_ledger is None:
+        _raise_semantic(f"{artifact_name}-run-ledger-required", ())
+    _validate_schema("run-ledger.schema.json", run_ledger)
+    _validate_run_ledger(run_ledger)
+    if document["planHash"] != run_ledger["planHash"]:
+        _raise_semantic(f"{artifact_name}-ledger-plan-mismatch", ("planHash",))
+    if document["attemptRef"] != _current_ledger_attempt(run_ledger):
+        _raise_semantic(f"{artifact_name}-attempt-not-current", ("attemptRef",))
+
+
+def _validate_plan_quality_context(
+    document: dict[str, Any],
+    plan_graph: dict[str, Any] | None,
+    run_ledger: dict[str, Any] | None,
+    artifact_name: str,
+) -> None:
+    if plan_graph is None:
+        _raise_semantic(f"{artifact_name}-plan-required", ())
+    if run_ledger is None:
+        _raise_semantic(f"{artifact_name}-run-ledger-required", ())
+    _validate_schema("plan-graph.schema.json", plan_graph)
+    _validate_plan_graph(plan_graph)
+    _validate_schema("run-ledger.schema.json", run_ledger)
+    _validate_run_ledger(run_ledger, plan_graph)
+    if document["planHash"] != plan_graph["planHash"]:
+        _raise_semantic(f"{artifact_name}-plan-mismatch", ("planHash",))
+    if document["attemptRef"] != _current_ledger_attempt(run_ledger):
+        _raise_semantic(f"{artifact_name}-attempt-not-current", ("attemptRef",))
+
+
+def _validate_current_diff(
+    diff_signal_set: dict[str, Any],
+    run_ledger: dict[str, Any] | None,
+    artifact_name: str,
+) -> None:
+    _validate_schema("diff-signal-set.schema.json", diff_signal_set)
+    _validate_diff_signal_set_core(diff_signal_set)
+    _validate_quality_run_context(diff_signal_set, run_ledger, artifact_name)
+
+
+def _validate_diff_signal_set(
+    document: dict[str, Any],
+    plan_graph: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
+) -> None:
+    _validate_diff_signal_set_core(document)
+    _validate_plan_quality_context(
+        document, plan_graph, run_ledger, "diff-signal-set",
+    )
+
+
 def _validate_review_finding(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
 ) -> None:
     if document["findingHash"] != _canonical_hash(document, "findingHash"):
         _raise_semantic("review-finding-hash-invalid", ("findingHash",))
-    if diff_signal_set is not None:
-        _validate_artifact_binding(document, diff_signal_set, "review-finding")
+    if diff_signal_set is None:
+        _raise_semantic("review-finding-diff-required", ())
+    _validate_artifact_binding(document, diff_signal_set, "review-finding")
+    _validate_current_diff(diff_signal_set, run_ledger, "review-finding")
 
 
 def _validate_review_aggregate(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
     findings: tuple[dict[str, Any], ...] = (),
+    run_ledger: dict[str, Any] | None = None,
 ) -> None:
     if document["aggregateHash"] != _canonical_hash(document, "aggregateHash"):
         _raise_semantic("review-aggregate-hash-invalid", ("aggregateHash",))
-    if diff_signal_set is not None:
-        _validate_artifact_binding(document, diff_signal_set, "review-aggregate")
+    if diff_signal_set is None:
+        _raise_semantic("review-aggregate-diff-required", ())
+    _validate_artifact_binding(document, diff_signal_set, "review-aggregate")
+    _validate_current_diff(diff_signal_set, run_ledger, "review-aggregate")
     if document["findingHashes"] and not findings:
         _raise_semantic("review-aggregate-findings-required", ("findingHashes",))
     finding_by_hash: dict[str, dict[str, Any]] = {}
@@ -241,7 +353,8 @@ def _validate_review_aggregate(
                         "review-aggregate-finding-binding-mismatch",
                         ("findingHashes", index),
                     )
-            _validate_review_finding(finding, diff_signal_set)
+            _validate_schema("review-finding.schema.json", finding)
+            _validate_review_finding(finding, diff_signal_set, run_ledger)
     finding_hashes = set(document["findingHashes"])
     dedup_assignments: set[str] = set()
     dedup_fingerprints: set[str] = set()
@@ -316,13 +429,13 @@ def _validate_review_aggregate(
 _TEST_LEVEL_ORDER = {"T0": 0, "T1": 1, "T2": 2, "T3": 3}
 
 
-def _validate_test_strategy(
+def _validate_test_strategy_core(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
 ) -> None:
     if document["strategyHash"] != _canonical_hash(document, "strategyHash"):
         _raise_semantic("test-strategy-hash-invalid", ("strategyHash",))
-    if diff_signal_set is not None:
+    if document["basisKind"] == "diff" and diff_signal_set is not None:
         _validate_artifact_binding(document, diff_signal_set, "test-strategy")
     if _TEST_LEVEL_ORDER[document["testLevelFloor"]] > _TEST_LEVEL_ORDER[document["testLevel"]]:
         _raise_semantic("test-strategy-floor-invalid", ("testLevelFloor",))
@@ -341,10 +454,16 @@ def _validate_test_strategy(
             _raise_semantic("test-strategy-risk-duplicate", ("risks", risk_index, "riskId"))
         if not set(risk["acceptanceConditionIds"]) <= condition_ids:
             _raise_semantic("test-strategy-acceptance-condition-unknown", ("risks", risk_index))
-    dimension_ids = {
-        dimension: set(values)
-        for dimension, values in document["dimensions"].items()
-    }
+    authorization_ids: set[str] = set()
+    for authorization_index, requirement in enumerate(document["authorizationRequirements"]):
+        authorization_id = requirement["authorizationId"]
+        if authorization_id in authorization_ids:
+            _raise_semantic(
+                "test-strategy-authorization-requirement-duplicate",
+                ("authorizationRequirements", authorization_index, "authorizationId"),
+            )
+        authorization_ids.add(authorization_id)
+    used_authorization_ids: set[str] = set()
     for obligation_index, obligation in enumerate(document["coverageObligations"]):
         if obligation["obligationId"] in obligation_ids:
             _raise_semantic("test-strategy-obligation-duplicate", ("coverageObligations", obligation_index, "obligationId"))
@@ -355,22 +474,163 @@ def _validate_test_strategy(
             _raise_semantic("test-strategy-technique-unknown", ("coverageObligations", obligation_index))
         if not set(obligation["acceptanceConditionIds"]) <= condition_ids:
             _raise_semantic("test-strategy-acceptance-condition-unknown", ("coverageObligations", obligation_index))
-        if obligation["obligationId"] not in dimension_ids[obligation["dimension"]]:
+        for authorization_index, authorization_id in enumerate(
+            obligation.get("authorizationRequirementIds", ())
+        ):
+            if authorization_id not in authorization_ids:
+                _raise_semantic(
+                    "test-strategy-authorization-requirement-unknown",
+                    (
+                        "coverageObligations", obligation_index,
+                        "authorizationRequirementIds", authorization_index,
+                    ),
+                )
+            used_authorization_ids.add(authorization_id)
+
+    expected_dimensions = {"direct", "failure", "boundary", "state", "nfr"}
+    dimensions: dict[str, set[str]] = {}
+    for dimension_index, dimension in enumerate(document["dimensions"]):
+        dimension_id = dimension["dimensionId"]
+        if dimension_id in dimensions:
+            _raise_semantic(
+                "test-strategy-dimension-id-duplicate",
+                ("dimensions", dimension_index, "dimensionId"),
+            )
+        dimensions[dimension_id] = set(dimension["obligationIds"])
+    if set(dimensions) != expected_dimensions:
+        _raise_semantic("test-strategy-dimension-set-mismatch", ("dimensions",))
+
+    assignments: set[str] = set()
+    for dimension_index, dimension in enumerate(document["dimensions"]):
+        for obligation_index, obligation_id in enumerate(dimension["obligationIds"]):
+            path = ("dimensions", dimension_index, "obligationIds", obligation_index)
+            if obligation_id not in obligation_ids:
+                _raise_semantic("test-strategy-dimension-obligation-unknown", path)
+            if obligation_id in assignments:
+                _raise_semantic("test-strategy-dimension-overlap", path)
+            assignments.add(obligation_id)
+    if assignments != obligation_ids:
+        _raise_semantic("test-strategy-dimension-incomplete", ("dimensions",))
+
+    for obligation_index, obligation in enumerate(document["coverageObligations"]):
+        if obligation["obligationId"] not in dimensions[obligation["dimension"]]:
             _raise_semantic("test-strategy-dimension-mismatch", ("coverageObligations", obligation_index, "dimension"))
+
+    if used_authorization_ids != authorization_ids:
+        for authorization_index, requirement in enumerate(document["authorizationRequirements"]):
+            if requirement["authorizationId"] not in used_authorization_ids:
+                _raise_semantic(
+                    "test-strategy-authorization-requirement-unused",
+                    ("authorizationRequirements", authorization_index, "authorizationId"),
+                )
+
+
+def _validate_test_strategy(
+    document: dict[str, Any],
+    plan_graph: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
+    diff_signal_set: dict[str, Any] | None = None,
+) -> None:
+    _validate_test_strategy_core(document, diff_signal_set)
+    _validate_plan_quality_context(
+        document, plan_graph, run_ledger, "test-strategy",
+    )
+    if document["basisKind"] == "diff":
+        if diff_signal_set is None:
+            _raise_semantic("test-strategy-diff-required", ())
+        _validate_artifact_binding(document, diff_signal_set, "test-strategy")
+        _validate_current_diff(diff_signal_set, run_ledger, "test-strategy")
+
+
+def _resolve_verification_receipt(
+    resolver: VerificationReceiptResolver | None,
+    reference: str,
+    path: tuple[str | int, ...],
+) -> dict[str, Any]:
+    if resolver is None:
+        _raise_semantic("coverage-verification-resolver-required", ())
+    try:
+        method = getattr(resolver, "resolve_verification_receipt", None)
+        receipt = method(reference) if callable(method) else resolver(reference)
+    except Exception:
+        _raise_semantic("coverage-execution-receipt-unavailable", path)
+    if receipt is None:
+        _raise_semantic("coverage-execution-receipt-unknown", path)
+    if not isinstance(receipt, dict):
+        _raise_semantic("coverage-execution-receipt-schema-invalid", path)
+    return receipt
+
+
+def _validate_execution_receipt(
+    receipt: dict[str, Any],
+    item: dict[str, Any],
+    document: dict[str, Any],
+    test_strategy: dict[str, Any],
+    path: tuple[str | int, ...],
+) -> None:
+    _validate_schema_definition(
+        "coverage-result.schema.json",
+        "verificationReceipt",
+        receipt,
+        "coverage-execution-receipt-schema-invalid",
+        path,
+    )
+    if receipt["receiptHash"] != _canonical_hash(receipt, "receiptHash"):
+        _raise_semantic("coverage-execution-receipt-hash-invalid", path)
+    if item["executionReceiptHash"] != receipt["receiptHash"]:
+        _raise_semantic("coverage-execution-receipt-reference-hash-mismatch", path)
+    if receipt["invocationHash"] != _canonical_value_hash(receipt["invocationEnvelope"]):
+        _raise_semantic("coverage-execution-receipt-invocation-hash-invalid", path)
+    if receipt["resultHash"] != _canonical_value_hash(receipt["resultEnvelope"]):
+        _raise_semantic("coverage-execution-receipt-result-hash-invalid", path)
+    bindings = (
+        ("planHash", document["planHash"], "plan-mismatch"),
+        ("attemptRef", document["attemptRef"], "attempt-mismatch"),
+        ("strategyHash", test_strategy["strategyHash"], "strategy-mismatch"),
+        ("diffSignalSetHash", document["diffSignalSetHash"], "diff-mismatch"),
+    )
+    for field, expected, suffix in bindings:
+        if receipt[field] != expected:
+            _raise_semantic(f"coverage-execution-receipt-{suffix}", path)
+    if item["obligationId"] not in receipt["obligationIds"]:
+        _raise_semantic("coverage-execution-receipt-obligation-mismatch", path)
+    invocation = receipt["invocationEnvelope"]
+    result = receipt["resultEnvelope"]
+    if result["invocationHash"] != receipt["invocationHash"]:
+        _raise_semantic("coverage-execution-receipt-invocation-mismatch", path)
+    if invocation["inputHash"] != test_strategy["strategyHash"]:
+        _raise_semantic("coverage-execution-receipt-input-mismatch", path)
+    if _utc_datetime(result["completedAt"]) < _utc_datetime(invocation["startedAt"]):
+        _raise_semantic("coverage-execution-receipt-time-invalid", path)
+    if result["exitCode"] != 0:
+        _raise_semantic("coverage-execution-receipt-exit-unsuccessful", path)
+    if result["status"] != "passed":
+        _raise_semantic("coverage-execution-receipt-status-unsuccessful", path)
+    if "invocationHash" in item and item["invocationHash"] != receipt["invocationHash"]:
+        _raise_semantic("coverage-display-invocation-hash-mismatch", path)
+    if "resultHash" in item and item["resultHash"] != receipt["resultHash"]:
+        _raise_semantic("coverage-display-result-hash-mismatch", path)
 
 
 def _validate_coverage_result(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
     test_strategy: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
+    verification_receipt_resolver: VerificationReceiptResolver | None = None,
 ) -> None:
     if document["resultHash"] != _canonical_hash(document, "resultHash"):
         _raise_semantic("coverage-result-hash-invalid", ("resultHash",))
-    if diff_signal_set is not None:
-        _validate_artifact_binding(document, diff_signal_set, "coverage-result")
     if test_strategy is None:
         _raise_semantic("coverage-strategy-required", ())
-    _validate_test_strategy(test_strategy, diff_signal_set)
+    if diff_signal_set is None:
+        _raise_semantic("coverage-diff-required", ())
+    _validate_artifact_binding(document, diff_signal_set, "coverage-result")
+    _validate_schema("test-strategy.schema.json", test_strategy)
+    _validate_test_strategy_core(test_strategy, diff_signal_set)
+    if test_strategy["basisKind"] != "diff":
+        _raise_semantic("coverage-strategy-basis-invalid", ("basisKind",))
+    _validate_current_diff(diff_signal_set, run_ledger, "coverage-result")
     for field in ("planHash", "attemptRef", "finalDiffHash", "diffSignalSetHash"):
         if document[field] != test_strategy[field]:
             _raise_semantic("coverage-strategy-binding-mismatch", (field,))
@@ -390,40 +650,30 @@ def _validate_coverage_result(
         actual.append(obligation_id)
     if set(actual) != expected:
         _raise_semantic("coverage-obligations-mismatch", ("obligations",))
+    receipts_by_ref: dict[str, dict[str, Any]] = {}
+    referenced_obligations: dict[str, set[str]] = {}
+    first_paths: dict[str, tuple[str | int, ...]] = {}
     for index, item in enumerate(document["obligations"]):
         if item["status"] != "fulfilled":
             continue
-        invocation = item["invocationEvidence"]
-        result = item["resultEvidence"]
-        if invocation["invocationHash"] != _canonical_hash(invocation, "invocationHash"):
-            _raise_semantic(
-                "coverage-invocation-hash-invalid",
-                ("obligations", index, "invocationEvidence", "invocationHash"),
+        path = ("obligations", index, "executionReceiptRef")
+        reference = item["executionReceiptRef"]
+        receipt = receipts_by_ref.get(reference)
+        if receipt is None:
+            receipt = _resolve_verification_receipt(
+                verification_receipt_resolver, reference, path,
             )
-        if result["resultHash"] != _canonical_hash(result, "resultHash"):
+            receipts_by_ref[reference] = receipt
+            first_paths[reference] = path
+        _validate_execution_receipt(
+            receipt, item, document, test_strategy, path,
+        )
+        referenced_obligations.setdefault(reference, set()).add(item["obligationId"])
+    for reference, receipt in receipts_by_ref.items():
+        if set(receipt["obligationIds"]) != referenced_obligations[reference]:
             _raise_semantic(
-                "coverage-execution-result-hash-invalid",
-                ("obligations", index, "resultEvidence", "resultHash"),
-            )
-        if result["invocationHash"] != invocation["invocationHash"]:
-            _raise_semantic(
-                "coverage-result-invocation-mismatch",
-                ("obligations", index, "resultEvidence", "invocationHash"),
-            )
-        if invocation["inputHash"] != test_strategy["strategyHash"]:
-            _raise_semantic(
-                "coverage-invocation-input-mismatch",
-                ("obligations", index, "invocationEvidence", "inputHash"),
-            )
-        if _utc_datetime(result["completedAt"]) < _utc_datetime(invocation["startedAt"]):
-            _raise_semantic(
-                "coverage-result-time-invalid",
-                ("obligations", index, "resultEvidence", "completedAt"),
-            )
-        if result["exitCode"] != 0:
-            _raise_semantic(
-                "coverage-result-exit-unsuccessful",
-                ("obligations", index, "resultEvidence", "exitCode"),
+                "coverage-execution-receipt-obligations-mismatch",
+                first_paths[reference],
             )
     if document["passed"] and any(item["status"] != "fulfilled" for item in document["obligations"]):
         _raise_semantic("coverage-passed-with-unfulfilled", ("passed",))
@@ -786,53 +1036,69 @@ def validate_run_ledger(
     )
 
 
-def validate_diff_signal_set(document: dict[str, Any]) -> None:
-    """Validate a V3 DiffSignalSet and its content hash."""
+def validate_diff_signal_set(
+    document: dict[str, Any],
+    plan_graph: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
+) -> None:
+    """Validate a V3 DiffSignalSet against its current plan and ledger."""
 
     _validate_schema("diff-signal-set.schema.json", document)
-    _validate_diff_signal_set(document)
+    _validate_diff_signal_set(document, plan_graph, run_ledger)
 
 
 def validate_review_finding(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
 ) -> None:
-    """Validate a V3 ReviewFinding, optionally against its current diff."""
+    """Validate a V3 ReviewFinding against its current diff and ledger."""
 
     _validate_schema("review-finding.schema.json", document)
-    _validate_review_finding(document, diff_signal_set)
+    _validate_review_finding(document, diff_signal_set, run_ledger)
 
 
 def validate_review_aggregate(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
     findings: tuple[dict[str, Any], ...] = (),
+    run_ledger: dict[str, Any] | None = None,
 ) -> None:
     """Validate a V3 ReviewAggregate and its finding set."""
 
     _validate_schema("review-aggregate.schema.json", document)
-    _validate_review_aggregate(document, diff_signal_set, findings)
+    _validate_review_aggregate(document, diff_signal_set, findings, run_ledger)
 
 
 def validate_test_strategy(
     document: dict[str, Any],
+    plan_graph: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
     diff_signal_set: dict[str, Any] | None = None,
 ) -> None:
     """Validate a V3 TestStrategy and its T-level semantics."""
 
     _validate_schema("test-strategy.schema.json", document)
-    _validate_test_strategy(document, diff_signal_set)
+    _validate_test_strategy(document, plan_graph, run_ledger, diff_signal_set)
 
 
 def validate_coverage_result(
     document: dict[str, Any],
     diff_signal_set: dict[str, Any] | None = None,
     test_strategy: dict[str, Any] | None = None,
+    run_ledger: dict[str, Any] | None = None,
+    verification_receipt_resolver: VerificationReceiptResolver | None = None,
 ) -> None:
-    """Validate a V3 CoverageResult against the exact TestStrategy obligations."""
+    """Validate coverage using Host-collected receipts as the trust boundary."""
 
     _validate_schema("coverage-result.schema.json", document)
-    _validate_coverage_result(document, diff_signal_set, test_strategy)
+    _validate_coverage_result(
+        document,
+        diff_signal_set,
+        test_strategy,
+        run_ledger,
+        verification_receipt_resolver,
+    )
 
 
 def load_contract(
@@ -842,9 +1108,11 @@ def load_contract(
     plan_graph: dict[str, Any] | None = None,
     receipts: tuple[dict[str, Any], ...] = (),
     expected_successor_plan_hash: str | None = None,
+    run_ledger: dict[str, Any] | None = None,
     diff_signal_set: dict[str, Any] | None = None,
     findings: tuple[dict[str, Any], ...] = (),
     test_strategy: dict[str, Any] | None = None,
+    verification_receipt_resolver: VerificationReceiptResolver | None = None,
 ) -> dict[str, Any]:
     """Load one registered V3 JSON contract."""
 
@@ -887,15 +1155,21 @@ def load_contract(
             expected_successor_plan_hash,
         )
     elif schema_name == "diff-signal-set.schema.json":
-        _validate_diff_signal_set(document)
+        _validate_diff_signal_set(document, plan_graph, run_ledger)
     elif schema_name == "review-finding.schema.json":
-        _validate_review_finding(document, diff_signal_set)
+        _validate_review_finding(document, diff_signal_set, run_ledger)
     elif schema_name == "review-aggregate.schema.json":
-        _validate_review_aggregate(document, diff_signal_set, findings)
+        _validate_review_aggregate(document, diff_signal_set, findings, run_ledger)
     elif schema_name == "test-strategy.schema.json":
-        _validate_test_strategy(document, diff_signal_set)
+        _validate_test_strategy(document, plan_graph, run_ledger, diff_signal_set)
     elif schema_name == "coverage-result.schema.json":
-        _validate_coverage_result(document, diff_signal_set, test_strategy)
+        _validate_coverage_result(
+            document,
+            diff_signal_set,
+            test_strategy,
+            run_ledger,
+            verification_receipt_resolver,
+        )
     return document
 
 

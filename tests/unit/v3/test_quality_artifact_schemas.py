@@ -28,11 +28,88 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     @classmethod
-    def _diff(cls, final_diff_hash=None):
+    def _hash_value(cls, value):
+        payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _plan(cls):
         document = {
             "schemaVersion": 3,
             "planHash": cls.HASH_A,
-            "attemptRef": "attempt-1",
+            "requestHash": cls.HASH_B,
+            "capabilitySnapshotHash": cls.HASH_C,
+            "pipelineHash": cls.HASH_A,
+            "policyHash": cls.HASH_B,
+            "catalogHash": cls.HASH_C,
+            "providerPreferenceHash": cls.HASH_A,
+            "providerBindingHash": cls.HASH_B,
+            "executionPolicyHash": cls.HASH_C,
+            "stages": [
+                {
+                    "stageId": "stage-a",
+                    "ordinal": 1,
+                    "applicability": "applicable",
+                    "slots": [
+                        {
+                            "slotId": "slot-a",
+                            "ordinal": 1,
+                            "cardinality": "exactly-one",
+                            "selectionMode": "static",
+                            "selectedModules": ["module-a"],
+                            "eligibleModules": ["module-a"],
+                            "selectionPolicyRef": "policy-a",
+                            "selectionPolicyHash": cls.HASH_A,
+                            "coverageObligations": ["coverage-a"],
+                            "gates": [],
+                            "applicability": "applicable",
+                        }
+                    ],
+                }
+            ],
+        }
+        document["planHash"] = cls._hash_document(document, "planHash")
+        return document
+
+    @classmethod
+    def _ledger(cls, plan=None):
+        plan = plan or cls._plan()
+        return {
+            "schemaVersion": 3,
+            "planHash": plan["planHash"],
+            "requestHash": plan["requestHash"],
+            "capabilitySnapshotHash": plan["capabilitySnapshotHash"],
+            "status": "active",
+            "stages": [
+                {
+                    "stageId": "stage-a",
+                    "status": "active",
+                    "attempts": [
+                        {
+                            "attemptRef": "attempt-a-1",
+                            "ordinal": 1,
+                            "previousAttemptRef": None,
+                            "startedAt": "2026-08-09T00:00:00Z",
+                        }
+                    ],
+                    "slotResults": [],
+                    "gateResults": [],
+                    "runtimeSkips": [],
+                    "selectionReceiptRefs": [],
+                    "reviewAggregateHashes": [],
+                    "coverageResultHashes": [],
+                    "artifactHashes": [],
+                }
+            ],
+        }
+
+    @classmethod
+    def _diff(cls, final_diff_hash=None):
+        plan = cls._plan()
+        document = {
+            "schemaVersion": 3,
+            "planHash": plan["planHash"],
+            "attemptRef": "attempt-a-1",
             "createdAt": "2026-08-09T01:02:03Z",
             "finalDiffHash": final_diff_hash or cls.HASH_B,
             "files": [
@@ -116,15 +193,14 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         return document
 
     @classmethod
-    def _strategy(cls, diff=None):
+    def _strategy(cls, diff=None, basis_kind="diff"):
         diff = diff or cls._diff()
         document = {
             "schemaVersion": 3,
             "planHash": diff["planHash"],
             "attemptRef": diff["attemptRef"],
             "createdAt": "2026-08-09T01:05:03Z",
-            "finalDiffHash": diff["finalDiffHash"],
-            "diffSignalSetHash": diff["signalSetHash"],
+            "basisKind": basis_kind,
             "testLevel": "T2",
             "testLevelFloor": "T2",
             "source": "builtin",
@@ -135,13 +211,13 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             "acceptanceConditions": [
                 {"conditionId": "accept-null", "description": "null input is rejected"}
             ],
-            "dimensions": {
-                "direct": ["obligation-direct"],
-                "failure": [],
-                "boundary": [],
-                "state": [],
-                "nfr": [],
-            },
+            "dimensions": [
+                {"dimensionId": "direct", "obligationIds": ["obligation-direct"]},
+                {"dimensionId": "failure", "obligationIds": []},
+                {"dimensionId": "boundary", "obligationIds": []},
+                {"dimensionId": "state", "obligationIds": []},
+                {"dimensionId": "nfr", "obligationIds": []},
+            ],
             "techniques": [
                 {"techniqueId": "tech-unit", "name": "unit", "rationale": "direct behavior"}
             ],
@@ -158,36 +234,51 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             ],
             "strategyHash": cls.HASH_B,
         }
+        if basis_kind == "diff":
+            document["finalDiffHash"] = diff["finalDiffHash"]
+            document["diffSignalSetHash"] = diff["signalSetHash"]
         document["strategyHash"] = cls._hash_document(document, "strategyHash")
         return document
 
     @classmethod
-    def _invocation_evidence(cls, input_hash=None):
-        evidence = {
+    def _execution_receipt(cls, diff=None, strategy=None, obligation_ids=None):
+        diff = diff or cls._diff()
+        strategy = strategy or cls._strategy(diff)
+        invocation = {
             "executable": ".venv/Scripts/python.exe",
             "moduleId": "tests.unit.v3.test-quality-artifact-schemas",
             "argvHash": cls.HASH_A,
             "cwdHash": cls.HASH_B,
             "environmentHash": cls.HASH_C,
-            "inputHash": input_hash or cls.HASH_D,
+            "inputHash": strategy["strategyHash"],
             "startedAt": "2026-08-09T01:05:30Z",
-            "invocationHash": cls.HASH_A,
         }
-        evidence["invocationHash"] = cls._hash_document(evidence, "invocationHash")
-        return evidence
-
-    @classmethod
-    def _result_evidence(cls, invocation):
-        evidence = {
-            "invocationHash": invocation["invocationHash"],
+        invocation_hash = cls._hash_value(invocation)
+        result = {
+            "invocationHash": invocation_hash,
             "exitCode": 0,
+            "status": "passed",
             "stdoutHash": cls.HASH_A,
             "stderrHash": cls.HASH_B,
             "completedAt": "2026-08-09T01:05:45Z",
-            "resultHash": cls.HASH_C,
         }
-        evidence["resultHash"] = cls._hash_document(evidence, "resultHash")
-        return evidence
+        receipt = {
+            "schemaVersion": 3,
+            "planHash": diff["planHash"],
+            "attemptRef": diff["attemptRef"],
+            "strategyHash": strategy["strategyHash"],
+            "diffSignalSetHash": diff["signalSetHash"],
+            "verificationId": "verification-1",
+            "obligationIds": obligation_ids or ["obligation-direct"],
+            "invocationEnvelope": invocation,
+            "invocationHash": invocation_hash,
+            "resultEnvelope": result,
+            "resultHash": cls._hash_value(result),
+            "collectorAttestationHash": cls.HASH_D,
+            "receiptHash": cls.HASH_A,
+        }
+        receipt["receiptHash"] = cls._hash_document(receipt, "receiptHash")
+        return receipt
 
     @classmethod
     def _coverage(cls, diff=None, strategy=None, status="fulfilled"):
@@ -195,10 +286,10 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         strategy = strategy or cls._strategy(diff)
         item = {"obligationId": "obligation-direct", "status": status}
         if status == "fulfilled":
-            invocation = cls._invocation_evidence(strategy["strategyHash"])
+            receipt = cls._execution_receipt(diff, strategy)
             item.update({
-                "invocationEvidence": invocation,
-                "resultEvidence": cls._result_evidence(invocation),
+                "executionReceiptRef": "collector-receipt-1",
+                "executionReceiptHash": receipt["receiptHash"],
             })
         else:
             item["reason"] = "not executed"
@@ -220,6 +311,18 @@ class QualityArtifactSchemaTests(unittest.TestCase):
     def _load(self, name, document, **kwargs):
         from selfworkflow.v3.contracts import load_contract
 
+        plan = self._plan()
+        kwargs.setdefault("plan_graph", plan)
+        kwargs.setdefault("run_ledger", self._ledger(plan))
+        if name == self.SCHEMA_NAMES[4] and "verification_receipt_resolver" not in kwargs:
+            diff = kwargs.get("diff_signal_set")
+            strategy = kwargs.get("test_strategy")
+            if diff is not None and strategy is not None:
+                receipt = self._execution_receipt(diff, strategy)
+                kwargs["verification_receipt_resolver"] = (
+                    lambda reference, value=receipt:
+                    deepcopy(value) if reference == "collector-receipt-1" else None
+                )
         return load_contract(name, json.dumps(document), **kwargs)
 
     def _assert_contract_error(self, name, document, reason, path, **kwargs):
@@ -229,6 +332,96 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             self._load(name, document, **kwargs)
         self.assertEqual(raised.exception.reason, reason)
         self.assertEqual(raised.exception.path, path)
+
+    def test_quality_loads_fail_closed_without_required_context(self):
+        from selfworkflow.v3.contracts import ContractError, load_contract
+
+        diff = self._diff()
+        finding = self._finding(diff)
+        aggregate = self._aggregate(diff, [finding])
+        strategy = self._strategy(diff)
+        coverage = self._coverage(diff, strategy)
+        cases = (
+            (self.SCHEMA_NAMES[0], diff, {}, "diff-signal-set-plan-required"),
+            (self.SCHEMA_NAMES[1], finding, {}, "review-finding-diff-required"),
+            (self.SCHEMA_NAMES[2], aggregate, {}, "review-aggregate-diff-required"),
+            (self.SCHEMA_NAMES[3], strategy, {}, "test-strategy-plan-required"),
+            (self.SCHEMA_NAMES[4], coverage, {}, "coverage-strategy-required"),
+        )
+        for name, document, kwargs, reason in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(ContractError) as raised:
+                    load_contract(name, json.dumps(document), **kwargs)
+                self.assertEqual(raised.exception.reason, reason)
+
+    def test_dedicated_quality_validators_fail_closed_without_context(self):
+        from selfworkflow.v3.contracts import (
+            ContractError,
+            validate_coverage_result,
+            validate_diff_signal_set,
+            validate_review_aggregate,
+            validate_review_finding,
+            validate_test_strategy,
+        )
+
+        diff = self._diff()
+        finding = self._finding(diff)
+        aggregate = self._aggregate(diff, [finding])
+        strategy = self._strategy(diff)
+        coverage = self._coverage(diff, strategy)
+        cases = (
+            (validate_diff_signal_set, diff, "diff-signal-set-plan-required"),
+            (validate_review_finding, finding, "review-finding-diff-required"),
+            (validate_review_aggregate, aggregate, "review-aggregate-diff-required"),
+            (validate_test_strategy, strategy, "test-strategy-plan-required"),
+            (validate_coverage_result, coverage, "coverage-strategy-required"),
+        )
+        for validator, document, reason in cases:
+            with self.subTest(validator=validator.__name__):
+                with self.assertRaises(ContractError) as raised:
+                    validator(document)
+                self.assertEqual(raised.exception.reason, reason)
+
+    def test_diff_signal_set_rejects_stale_and_non_current_attempt(self):
+        plan = self._plan()
+        ledger = self._ledger(plan)
+        ledger["stages"][0]["attempts"][0]["completedAt"] = "2026-08-09T00:01:00Z"
+        ledger["stages"][0]["attempts"].append({
+            "attemptRef": "attempt-a-2",
+            "ordinal": 2,
+            "previousAttemptRef": "attempt-a-1",
+            "startedAt": "2026-08-09T00:02:00Z",
+        })
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[0], self._diff(),
+            "diff-signal-set-attempt-not-current", ("attemptRef",),
+            plan_graph=plan, run_ledger=ledger,
+        )
+
+    def test_test_strategy_plan_and_diff_basis_require_exact_context(self):
+        plan = self._plan()
+        ledger = self._ledger(plan)
+        diff = self._diff()
+        plan_strategy = self._strategy(diff, basis_kind="plan")
+        self._load(
+            self.SCHEMA_NAMES[3], plan_strategy,
+            plan_graph=plan, run_ledger=ledger,
+        )
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], self._strategy(diff),
+            "test-strategy-diff-required", (),
+            plan_graph=plan, run_ledger=ledger, diff_signal_set=None,
+        )
+
+    def test_coverage_only_accepts_diff_basis_strategy(self):
+        diff = self._diff()
+        plan_strategy = self._strategy(diff, basis_kind="plan")
+        coverage = self._coverage(diff, plan_strategy)
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage,
+            "coverage-strategy-basis-invalid", ("basisKind",),
+            diff_signal_set=diff, test_strategy=plan_strategy,
+        )
 
     def test_each_minimal_quality_schema_is_valid_through_contract_entrypoint(self):
         diff = self._diff()
@@ -329,6 +522,126 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             self.SCHEMA_NAMES[3], strategy, "test-strategy-grill-me-floor-invalid", ("testLevel",),
             diff_signal_set=diff,
         )
+
+    def test_test_strategy_dimensions_are_a_closed_unique_complete_partition(self):
+        diff = self._diff()
+        cases = []
+
+        unknown = self._strategy(diff)
+        unknown["dimensions"][0]["dimensionId"] = "security"
+        cases.append((unknown, "contract-schema-invalid", ("dimensions", 0, "dimensionId")))
+
+        duplicate = self._strategy(diff)
+        duplicate["dimensions"][1]["dimensionId"] = "direct"
+        duplicate["strategyHash"] = self._hash_document(duplicate, "strategyHash")
+        cases.append((duplicate, "test-strategy-dimension-id-duplicate", ("dimensions", 1, "dimensionId")))
+
+        missing_dimension = self._strategy(diff)
+        missing_dimension["dimensions"].pop()
+        missing_dimension["strategyHash"] = self._hash_document(missing_dimension, "strategyHash")
+        cases.append((missing_dimension, "test-strategy-dimension-set-mismatch", ("dimensions",)))
+
+        missing_obligation = self._strategy(diff)
+        missing_obligation["dimensions"][0]["obligationIds"] = []
+        missing_obligation["strategyHash"] = self._hash_document(missing_obligation, "strategyHash")
+        cases.append((missing_obligation, "test-strategy-dimension-incomplete", ("dimensions",)))
+
+        overlap = self._strategy(diff)
+        overlap["dimensions"][1]["obligationIds"] = ["obligation-direct"]
+        overlap["strategyHash"] = self._hash_document(overlap, "strategyHash")
+        cases.append((overlap, "test-strategy-dimension-overlap", ("dimensions", 1, "obligationIds", 0)))
+
+        for strategy, reason, path in cases:
+            with self.subTest(reason=reason):
+                self._assert_contract_error(
+                    self.SCHEMA_NAMES[3], strategy, reason, path,
+                    diff_signal_set=diff,
+                )
+
+    def test_test_strategy_obligations_require_technique_and_acceptance(self):
+        diff = self._diff()
+        for field in ("techniqueIds", "acceptanceConditionIds"):
+            strategy = self._strategy(diff)
+            strategy["coverageObligations"][0][field] = []
+            strategy["strategyHash"] = self._hash_document(strategy, "strategyHash")
+            with self.subTest(field=field):
+                self._assert_contract_error(
+                    self.SCHEMA_NAMES[3], strategy,
+                    "contract-schema-invalid", ("coverageObligations", 0, field),
+                    diff_signal_set=diff,
+                )
+
+    def test_test_strategy_authorization_references_are_exact(self):
+        diff = self._diff()
+
+        missing = self._strategy(diff)
+        missing["coverageObligations"][0]["authorizationRequired"] = True
+        missing["strategyHash"] = self._hash_document(missing, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], missing, "contract-schema-invalid",
+            ("coverageObligations", 0), diff_signal_set=diff,
+        )
+
+        forbidden = self._strategy(diff)
+        forbidden["coverageObligations"][0]["authorizationRequirementIds"] = ["auth-1"]
+        forbidden["strategyHash"] = self._hash_document(forbidden, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], forbidden, "contract-schema-invalid",
+            ("coverageObligations", 0), diff_signal_set=diff,
+        )
+
+        unknown = self._strategy(diff)
+        unknown["coverageObligations"][0].update({
+            "authorizationRequired": True,
+            "authorizationRequirementIds": ["auth-missing"],
+        })
+        unknown["strategyHash"] = self._hash_document(unknown, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], unknown,
+            "test-strategy-authorization-requirement-unknown",
+            ("coverageObligations", 0, "authorizationRequirementIds", 0),
+            diff_signal_set=diff,
+        )
+
+        unused = self._strategy(diff)
+        unused["authorizationRequirements"] = [{
+            "authorizationId": "auth-1", "required": True, "reason": "network access",
+        }]
+        unused["strategyHash"] = self._hash_document(unused, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], unused,
+            "test-strategy-authorization-requirement-unused",
+            ("authorizationRequirements", 0, "authorizationId"),
+            diff_signal_set=diff,
+        )
+
+        duplicate = self._strategy(diff)
+        duplicate["authorizationRequirements"] = [
+            {"authorizationId": "auth-1", "required": True, "reason": "network access"},
+            {"authorizationId": "auth-1", "required": True, "reason": "network access"},
+        ]
+        duplicate["coverageObligations"][0].update({
+            "authorizationRequired": True,
+            "authorizationRequirementIds": ["auth-1"],
+        })
+        duplicate["strategyHash"] = self._hash_document(duplicate, "strategyHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[3], duplicate,
+            "test-strategy-authorization-requirement-duplicate",
+            ("authorizationRequirements", 1, "authorizationId"),
+            diff_signal_set=diff,
+        )
+
+        valid = self._strategy(diff)
+        valid["authorizationRequirements"] = [{
+            "authorizationId": "auth-1", "required": True, "reason": "network access",
+        }]
+        valid["coverageObligations"][0].update({
+            "authorizationRequired": True,
+            "authorizationRequirementIds": ["auth-1"],
+        })
+        valid["strategyHash"] = self._hash_document(valid, "strategyHash")
+        self._load(self.SCHEMA_NAMES[3], valid, diff_signal_set=diff)
 
     def test_review_finding_rejects_stale_diff(self):
         diff = self._diff()
@@ -534,89 +847,189 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             diff_signal_set=diff, test_strategy=strategy,
         )
         invalid = self._coverage(diff, strategy)
-        del invalid["obligations"][0]["invocationEvidence"]
+        del invalid["obligations"][0]["executionReceiptRef"]
         invalid["resultHash"] = self._hash_document(invalid, "resultHash")
         self._assert_contract_error(
             self.SCHEMA_NAMES[4], invalid, "contract-schema-invalid", ("obligations", 0),
             diff_signal_set=diff, test_strategy=strategy,
         )
 
-    def test_coverage_fulfilled_requires_closed_canonical_execution_evidence(self):
+    def test_coverage_fulfilled_requires_trusted_receipt_resolver(self):
         diff = self._diff()
         strategy = self._strategy(diff)
+        coverage = self._coverage(diff, strategy)
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage,
+            "coverage-verification-resolver-required", (),
+            diff_signal_set=diff, test_strategy=strategy,
+            verification_receipt_resolver=None,
+        )
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage,
+            "coverage-execution-receipt-unknown", ("obligations", 0, "executionReceiptRef"),
+            diff_signal_set=diff, test_strategy=strategy,
+            verification_receipt_resolver=lambda reference: None,
+        )
 
-        naked = self._coverage(diff, strategy)
-        naked["obligations"][0] = {
-            "obligationId": "obligation-direct", "status": "fulfilled",
-            "invocationHash": self.HASH_A, "resultHash": self.HASH_B,
+    def test_coverage_recomputes_receipt_invocation_and_result_hashes(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        coverage = self._coverage(diff, strategy)
+        receipt = self._execution_receipt(diff, strategy)
+        receipt["receiptHash"] = self.HASH_A
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage,
+            "coverage-execution-receipt-hash-invalid", ("obligations", 0, "executionReceiptRef"),
+            diff_signal_set=diff, test_strategy=strategy,
+            verification_receipt_resolver=lambda reference: receipt,
+        )
+
+        for field, reason in (
+            ("invocationHash", "coverage-execution-receipt-invocation-hash-invalid"),
+            ("resultHash", "coverage-execution-receipt-result-hash-invalid"),
+        ):
+            receipt = self._execution_receipt(diff, strategy)
+            receipt[field] = self.HASH_A
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            coverage["obligations"][0]["executionReceiptHash"] = receipt["receiptHash"]
+            coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+            with self.subTest(field=field):
+                self._assert_contract_error(
+                    self.SCHEMA_NAMES[4], coverage, reason,
+                    ("obligations", 0, "executionReceiptRef"),
+                    diff_signal_set=diff, test_strategy=strategy,
+                    verification_receipt_resolver=lambda reference, value=receipt: value,
+                )
+
+    def test_coverage_receipt_binds_plan_attempt_strategy_diff_and_obligation(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        cases = (
+            ("planHash", self.HASH_A, "coverage-execution-receipt-plan-mismatch"),
+            ("attemptRef", "attempt-a-2", "coverage-execution-receipt-attempt-mismatch"),
+            ("strategyHash", self.HASH_A, "coverage-execution-receipt-strategy-mismatch"),
+            ("diffSignalSetHash", self.HASH_A, "coverage-execution-receipt-diff-mismatch"),
+        )
+        for field, value, reason in cases:
+            receipt = self._execution_receipt(diff, strategy)
+            receipt[field] = value
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            coverage = self._coverage(diff, strategy)
+            coverage["obligations"][0]["executionReceiptHash"] = receipt["receiptHash"]
+            coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+            with self.subTest(field=field):
+                self._assert_contract_error(
+                    self.SCHEMA_NAMES[4], coverage, reason,
+                    ("obligations", 0, "executionReceiptRef"),
+                    diff_signal_set=diff, test_strategy=strategy,
+                    verification_receipt_resolver=lambda reference, item=receipt: item,
+                )
+
+        receipt = self._execution_receipt(diff, strategy, ["obligation-other"])
+        coverage = self._coverage(diff, strategy)
+        coverage["obligations"][0]["executionReceiptHash"] = receipt["receiptHash"]
+        coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+        self._assert_contract_error(
+            self.SCHEMA_NAMES[4], coverage,
+            "coverage-execution-receipt-obligation-mismatch",
+            ("obligations", 0, "executionReceiptRef"),
+            diff_signal_set=diff, test_strategy=strategy,
+            verification_receipt_resolver=lambda reference: receipt,
+        )
+
+    def test_coverage_receipt_binds_invocation_time_and_success_status(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        mutations = (
+            (
+                lambda receipt: receipt["resultEnvelope"].update(invocationHash=self.HASH_A),
+                "coverage-execution-receipt-invocation-mismatch",
+            ),
+            (
+                lambda receipt: receipt["invocationEnvelope"].update(inputHash=self.HASH_A),
+                "coverage-execution-receipt-input-mismatch",
+            ),
+            (
+                lambda receipt: receipt["resultEnvelope"].update(completedAt="2026-08-09T01:05:29Z"),
+                "coverage-execution-receipt-time-invalid",
+            ),
+            (
+                lambda receipt: receipt["resultEnvelope"].update(exitCode=1),
+                "coverage-execution-receipt-exit-unsuccessful",
+            ),
+            (
+                lambda receipt: receipt["resultEnvelope"].update(status="failed"),
+                "coverage-execution-receipt-status-unsuccessful",
+            ),
+        )
+        for mutate, reason in mutations:
+            receipt = self._execution_receipt(diff, strategy)
+            mutate(receipt)
+            receipt["invocationHash"] = self._hash_value(receipt["invocationEnvelope"])
+            if reason != "coverage-execution-receipt-invocation-mismatch":
+                receipt["resultEnvelope"]["invocationHash"] = receipt["invocationHash"]
+            receipt["resultHash"] = self._hash_value(receipt["resultEnvelope"])
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            coverage = self._coverage(diff, strategy)
+            coverage["obligations"][0]["executionReceiptHash"] = receipt["receiptHash"]
+            coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+            with self.subTest(reason=reason):
+                self._assert_contract_error(
+                    self.SCHEMA_NAMES[4], coverage, reason,
+                    ("obligations", 0, "executionReceiptRef"),
+                    diff_signal_set=diff, test_strategy=strategy,
+                    verification_receipt_resolver=lambda reference, item=receipt: item,
+                )
+
+    def test_coverage_shared_receipt_declaration_exactly_matches_references(self):
+        diff = self._diff()
+        strategy = self._strategy(diff)
+        strategy["dimensions"][1]["obligationIds"] = ["obligation-failure"]
+        strategy["coverageObligations"].append({
+            "obligationId": "obligation-failure",
+            "riskId": "risk-null",
+            "dimension": "failure",
+            "techniqueIds": ["tech-unit"],
+            "acceptanceConditionIds": ["accept-null"],
+            "authorizationRequired": False,
+        })
+        strategy["strategyHash"] = self._hash_document(strategy, "strategyHash")
+        receipt = self._execution_receipt(
+            diff, strategy, ["obligation-direct", "obligation-failure"],
+        )
+        coverage = self._coverage(diff, strategy)
+        coverage["obligations"][0]["executionReceiptHash"] = receipt["receiptHash"]
+        coverage["obligations"].append({
+            "obligationId": "obligation-failure",
+            "status": "fulfilled",
+            "executionReceiptRef": "collector-receipt-1",
+            "executionReceiptHash": receipt["receiptHash"],
+        })
+        coverage["resultHash"] = self._hash_document(coverage, "resultHash")
+
+        class Resolver:
+            def resolve_verification_receipt(self, reference):
+                return deepcopy(receipt) if reference == "collector-receipt-1" else None
+
+        self._load(
+            self.SCHEMA_NAMES[4], coverage,
+            diff_signal_set=diff, test_strategy=strategy,
+            verification_receipt_resolver=Resolver(),
+        )
+
+        coverage["obligations"][1] = {
+            "obligationId": "obligation-failure",
+            "status": "blocked",
+            "reason": "not executed",
         }
-        naked["resultHash"] = self._hash_document(naked, "resultHash")
+        coverage["passed"] = False
+        coverage["resultHash"] = self._hash_document(coverage, "resultHash")
         self._assert_contract_error(
-            self.SCHEMA_NAMES[4], naked, "contract-schema-invalid", ("obligations", 0, "invocationHash"),
+            self.SCHEMA_NAMES[4], coverage,
+            "coverage-execution-receipt-obligations-mismatch",
+            ("obligations", 0, "executionReceiptRef"),
             diff_signal_set=diff, test_strategy=strategy,
-        )
-
-        invalid = self._coverage(diff, strategy)
-        invalid["obligations"][0]["invocationEvidence"]["invocationHash"] = self.HASH_A
-        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[4], invalid, "coverage-invocation-hash-invalid", ("obligations", 0, "invocationEvidence", "invocationHash"),
-            diff_signal_set=diff, test_strategy=strategy,
-        )
-
-        invalid = self._coverage(diff, strategy)
-        invalid["obligations"][0]["resultEvidence"]["resultHash"] = self.HASH_A
-        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[4], invalid, "coverage-execution-result-hash-invalid", ("obligations", 0, "resultEvidence", "resultHash"),
-            diff_signal_set=diff, test_strategy=strategy,
-        )
-
-    def test_coverage_execution_result_binds_invocation_time_and_success(self):
-        diff = self._diff()
-        strategy = self._strategy(diff)
-
-        invalid = self._coverage(diff, strategy)
-        result = invalid["obligations"][0]["resultEvidence"]
-        result["invocationHash"] = self.HASH_A
-        result["resultHash"] = self._hash_document(result, "resultHash")
-        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[4], invalid, "coverage-result-invocation-mismatch", ("obligations", 0, "resultEvidence", "invocationHash"),
-            diff_signal_set=diff, test_strategy=strategy,
-        )
-
-        invalid = self._coverage(diff, strategy)
-        invocation = invalid["obligations"][0]["invocationEvidence"]
-        invocation["inputHash"] = self.HASH_A
-        invocation["invocationHash"] = self._hash_document(invocation, "invocationHash")
-        result = invalid["obligations"][0]["resultEvidence"]
-        result["invocationHash"] = invocation["invocationHash"]
-        result["resultHash"] = self._hash_document(result, "resultHash")
-        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[4], invalid, "coverage-invocation-input-mismatch", ("obligations", 0, "invocationEvidence", "inputHash"),
-            diff_signal_set=diff, test_strategy=strategy,
-        )
-
-        invalid = self._coverage(diff, strategy)
-        result = invalid["obligations"][0]["resultEvidence"]
-        result["completedAt"] = "2026-08-09T01:05:29Z"
-        result["resultHash"] = self._hash_document(result, "resultHash")
-        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[4], invalid, "coverage-result-time-invalid", ("obligations", 0, "resultEvidence", "completedAt"),
-            diff_signal_set=diff, test_strategy=strategy,
-        )
-
-        invalid = self._coverage(diff, strategy)
-        result = invalid["obligations"][0]["resultEvidence"]
-        result["exitCode"] = 1
-        result["resultHash"] = self._hash_document(result, "resultHash")
-        invalid["resultHash"] = self._hash_document(invalid, "resultHash")
-        self._assert_contract_error(
-            self.SCHEMA_NAMES[4], invalid, "coverage-result-exit-unsuccessful", ("obligations", 0, "resultEvidence", "exitCode"),
-            diff_signal_set=diff, test_strategy=strategy,
+            verification_receipt_resolver=Resolver(),
         )
 
     def test_coverage_nonfulfilled_rejects_execution_evidence(self):
@@ -624,9 +1037,9 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         strategy = self._strategy(diff)
         for status in ("unverified", "blocked"):
             invalid = self._coverage(diff, strategy, status=status)
-            invocation = self._invocation_evidence()
-            invalid["obligations"][0]["invocationEvidence"] = invocation
-            invalid["obligations"][0]["resultEvidence"] = self._result_evidence(invocation)
+            receipt = self._execution_receipt(diff, strategy)
+            invalid["obligations"][0]["executionReceiptRef"] = "collector-receipt-1"
+            invalid["obligations"][0]["executionReceiptHash"] = receipt["receiptHash"]
             invalid["resultHash"] = self._hash_document(invalid, "resultHash")
             with self.subTest(status=status):
                 self._assert_contract_error(
@@ -645,8 +1058,8 @@ class QualityArtifactSchemaTests(unittest.TestCase):
 
         duplicate = deepcopy(coverage["obligations"][0])
         duplicate["status"] = "blocked"
-        duplicate.pop("invocationEvidence")
-        duplicate.pop("resultEvidence")
+        duplicate.pop("executionReceiptRef")
+        duplicate.pop("executionReceiptHash")
         duplicate["reason"] = "duplicate result"
         coverage["obligations"].append(duplicate)
         coverage["passed"] = False
@@ -663,8 +1076,8 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         coverage["planHash"] = self.HASH_D
         coverage["resultHash"] = self._hash_document(coverage, "resultHash")
         self._assert_contract_error(
-            self.SCHEMA_NAMES[4], coverage, "coverage-strategy-binding-mismatch", ("planHash",),
-            test_strategy=strategy,
+            self.SCHEMA_NAMES[4], coverage, "coverage-result-plan-mismatch", ("planHash",),
+            diff_signal_set=diff, test_strategy=strategy,
         )
 
     def test_quality_artifacts_reject_plan_attempt_and_diff_hash_drift(self):

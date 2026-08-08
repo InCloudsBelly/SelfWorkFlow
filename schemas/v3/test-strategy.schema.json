@@ -5,8 +5,8 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion", "planHash", "attemptRef", "createdAt", "finalDiffHash",
-    "diffSignalSetHash", "testLevel", "testLevelFloor", "source", "grillMeImplementation",
+    "schemaVersion", "planHash", "attemptRef", "createdAt", "basisKind",
+    "testLevel", "testLevelFloor", "source", "grillMeImplementation",
     "risks", "acceptanceConditions", "dimensions", "techniques", "authorizationRequirements",
     "coverageObligations", "strategyHash"
   ],
@@ -15,6 +15,7 @@
     "planHash": {"$ref": "#/$defs/sha256"},
     "attemptRef": {"$ref": "#/$defs/stableId"},
     "createdAt": {"$ref": "#/$defs/utcTimestamp"},
+    "basisKind": {"enum": ["plan", "diff"]},
     "finalDiffHash": {"$ref": "#/$defs/sha256"},
     "diffSignalSetHash": {"$ref": "#/$defs/sha256"},
     "testLevel": {"$ref": "#/$defs/testLevel"},
@@ -29,6 +30,18 @@
     "coverageObligations": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/obligation"}},
     "strategyHash": {"$ref": "#/$defs/sha256"}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"basisKind": {"const": "diff"}}, "required": ["basisKind"]},
+      "then": {"required": ["finalDiffHash", "diffSignalSetHash"]},
+      "else": {
+        "allOf": [
+          {"not": {"required": ["finalDiffHash"]}},
+          {"not": {"required": ["diffSignalSetHash"]}}
+        ]
+      }
+    }
+  ],
   "$defs": {
     "stableId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"},
     "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
@@ -39,6 +52,7 @@
     "testLevel": {"enum": ["T0", "T1", "T2", "T3"]},
     "priority": {"enum": ["P0", "P1", "P2", "P3"]},
     "idList": {"type": "array", "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/stableId"}},
+    "nonEmptyIdList": {"type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/stableId"}},
     "risk": {
       "type": "object", "additionalProperties": false,
       "required": ["riskId", "priority", "acceptanceConditionIds"],
@@ -54,11 +68,15 @@
       "properties": {"conditionId": {"$ref": "#/$defs/stableId"}, "description": {"type": "string", "minLength": 1, "maxLength": 4096}}
     },
     "dimensions": {
+      "type": "array", "minItems": 1, "maxItems": 5,
+      "items": {"$ref": "#/$defs/dimension"}
+    },
+    "dimension": {
       "type": "object", "additionalProperties": false,
-      "required": ["direct", "failure", "boundary", "state", "nfr"],
+      "required": ["dimensionId", "obligationIds"],
       "properties": {
-        "direct": {"$ref": "#/$defs/idList"}, "failure": {"$ref": "#/$defs/idList"},
-        "boundary": {"$ref": "#/$defs/idList"}, "state": {"$ref": "#/$defs/idList"}, "nfr": {"$ref": "#/$defs/idList"}
+        "dimensionId": {"enum": ["direct", "failure", "boundary", "state", "nfr"]},
+        "obligationIds": {"$ref": "#/$defs/idList"}
       }
     },
     "technique": {
@@ -86,10 +104,21 @@
         "obligationId": {"$ref": "#/$defs/stableId"},
         "riskId": {"$ref": "#/$defs/stableId"},
         "dimension": {"enum": ["direct", "failure", "boundary", "state", "nfr"]},
-        "techniqueIds": {"$ref": "#/$defs/idList"},
-        "acceptanceConditionIds": {"$ref": "#/$defs/idList"},
-        "authorizationRequired": {"type": "boolean"}
-      }
+        "techniqueIds": {"$ref": "#/$defs/nonEmptyIdList"},
+        "acceptanceConditionIds": {"$ref": "#/$defs/nonEmptyIdList"},
+        "authorizationRequired": {"type": "boolean"},
+        "authorizationRequirementIds": {"$ref": "#/$defs/nonEmptyIdList"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"authorizationRequired": {"const": true}},
+            "required": ["authorizationRequired"]
+          },
+          "then": {"required": ["authorizationRequirementIds"]},
+          "else": {"not": {"required": ["authorizationRequirementIds"]}}
+        }
+      ]
     }
   }
 }

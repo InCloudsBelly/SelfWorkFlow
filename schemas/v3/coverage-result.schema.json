@@ -27,11 +27,11 @@
       "type": "string", "format": "date-time",
       "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$"
     },
-    "invocationEvidence": {
+    "invocationEnvelope": {
       "type": "object", "additionalProperties": false,
       "required": [
         "executable", "moduleId", "argvHash", "cwdHash", "environmentHash",
-        "inputHash", "startedAt", "invocationHash"
+        "inputHash", "startedAt"
       ],
       "properties": {
         "executable": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$"},
@@ -40,22 +40,47 @@
         "cwdHash": {"$ref": "#/$defs/sha256"},
         "environmentHash": {"$ref": "#/$defs/sha256"},
         "inputHash": {"$ref": "#/$defs/sha256"},
-        "startedAt": {"$ref": "#/$defs/utcTimestamp"},
-        "invocationHash": {"$ref": "#/$defs/sha256"}
+        "startedAt": {"$ref": "#/$defs/utcTimestamp"}
       }
     },
-    "resultEvidence": {
+    "resultEnvelope": {
       "type": "object", "additionalProperties": false,
       "required": [
-        "invocationHash", "exitCode", "stdoutHash", "stderrHash", "completedAt", "resultHash"
+        "invocationHash", "exitCode", "status", "stdoutHash", "stderrHash", "completedAt"
       ],
       "properties": {
         "invocationHash": {"$ref": "#/$defs/sha256"},
         "exitCode": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+        "status": {"enum": ["passed", "failed", "blocked"]},
         "stdoutHash": {"$ref": "#/$defs/sha256"},
         "stderrHash": {"$ref": "#/$defs/sha256"},
-        "completedAt": {"$ref": "#/$defs/utcTimestamp"},
-        "resultHash": {"$ref": "#/$defs/sha256"}
+        "completedAt": {"$ref": "#/$defs/utcTimestamp"}
+      }
+    },
+    "verificationReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schemaVersion", "planHash", "attemptRef", "strategyHash", "diffSignalSetHash",
+        "verificationId", "obligationIds", "invocationEnvelope", "invocationHash",
+        "resultEnvelope", "resultHash", "collectorAttestationHash", "receiptHash"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 3},
+        "planHash": {"$ref": "#/$defs/sha256"},
+        "attemptRef": {"$ref": "#/$defs/stableId"},
+        "strategyHash": {"$ref": "#/$defs/sha256"},
+        "diffSignalSetHash": {"$ref": "#/$defs/sha256"},
+        "verificationId": {"$ref": "#/$defs/stableId"},
+        "obligationIds": {
+          "type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stableId"}
+        },
+        "invocationEnvelope": {"$ref": "#/$defs/invocationEnvelope"},
+        "invocationHash": {"$ref": "#/$defs/sha256"},
+        "resultEnvelope": {"$ref": "#/$defs/resultEnvelope"},
+        "resultHash": {"$ref": "#/$defs/sha256"},
+        "collectorAttestationHash": {"$ref": "#/$defs/sha256"},
+        "receiptHash": {"$ref": "#/$defs/sha256"}
       }
     },
     "obligationResult": {
@@ -64,22 +89,26 @@
       "properties": {
         "obligationId": {"$ref": "#/$defs/stableId"},
         "status": {"enum": ["fulfilled", "unverified", "blocked"]},
-        "invocationEvidence": {"$ref": "#/$defs/invocationEvidence"},
-        "resultEvidence": {"$ref": "#/$defs/resultEvidence"},
+        "executionReceiptRef": {"$ref": "#/$defs/stableId"},
+        "executionReceiptHash": {"$ref": "#/$defs/sha256"},
+        "invocationHash": {"$ref": "#/$defs/sha256"},
+        "resultHash": {"$ref": "#/$defs/sha256"},
         "reason": {"type": "string", "minLength": 1, "maxLength": 4096}
       },
       "allOf": [
         {
           "if": {"properties": {"status": {"const": "fulfilled"}}, "required": ["status"]},
           "then": {
-            "required": ["invocationEvidence", "resultEvidence"],
+            "required": ["executionReceiptRef", "executionReceiptHash"],
             "not": {"required": ["reason"]}
           },
           "else": {
             "required": ["reason"],
             "allOf": [
-              {"not": {"required": ["invocationEvidence"]}},
-              {"not": {"required": ["resultEvidence"]}}
+              {"not": {"required": ["executionReceiptRef"]}},
+              {"not": {"required": ["executionReceiptHash"]}},
+              {"not": {"required": ["invocationHash"]}},
+              {"not": {"required": ["resultHash"]}}
             ]
           }
         }
