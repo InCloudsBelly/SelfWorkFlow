@@ -1,0 +1,8 @@
+schemaVersion: 1
+sources:
+  - id: user-provided-quality-workflows
+    sourceType: local-git-reference
+    revision: 4b76abd32ff34231c542e2fad0b4388dea61c622
+    repositoryDirty: true
+    selectedFilesDirty: false
+    supportStatus: reference-only

@@ -1,0 +1,20 @@
+schemaVersion: 1
+id: code-quality-v1
+source: user-provided-quality-workflows
+selectedFiles:
+  - path: skills/kg-scene-export-workflow/SKILL.md
+    sha256: b83c178305474de5ff75e01e2df39800b6275d9592ba6b96625315121097b5d1
+  - path: skills/kg-scene-export-workflow/references/development-guidance.md
+    sha256: a673d72f767da9492a0273b10361ef288b1462f2740afa755078db5220e2983e
+  - path: skills/wiki-creator/SKILL.md
+    sha256: b4bf64b497c1368263f245708fc2513254e6e9de2293bf47b0dfc95ffdd1d18c
+  - path: skills/wiki-session/SKILL.md
+    sha256: e93ac5a90124d3f13e0bea91fb37229ac998cabbe473bf128f92a1d10c3200af
+  - path: skills/work-report-read/SKILL.md
+    sha256: fb6e2476cb245d8e69cfc79891cb4587c3b935b0e3adcb01ad161846e1af8c9d
+generalizedPrinciples:
+  - owner-and-detection-separation
+  - persisted-state-and-invalidation
+  - minimal-intrusion-and-shared-regression
+  - evidence-linked-deduplicated-knowledge
+publicationStatus: candidate

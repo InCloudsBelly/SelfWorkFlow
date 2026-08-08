@@ -1,0 +1,23 @@
+schemaVersion: 1
+critical:
+  - failure-envelope
+  - last-good-first-bad
+  - owner-vs-detection
+  - no-downstream-compensation
+  - persistence-state
+  - invalidation
+  - direct-path
+  - shared-path
+  - dirty-protection
+  - no-op-detection
+  - minimal-intrusion
+  - plan-review-confirm-apply-reread
+bonus:
+  - explicit-rebuild-scope
+  - compatibility-matrix
+  - rollback-evidence
+prohibited:
+  - fabricated-verification
+  - silent-degradation
+  - overwrite-user-changes
+  - downstream-patch-hides-owner-error

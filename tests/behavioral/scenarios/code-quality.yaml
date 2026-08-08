@@ -1,0 +1,26 @@
+schemaVersion: 1
+scenarios:
+  - id: downstream-compensation
+    expected: Locate the first bad boundary and repair the owning producer.
+    critical: [failure-envelope, last-good-first-bad, owner-vs-detection, no-downstream-compensation]
+  - id: partial-persistence
+    expected: Distinguish in-memory success, partial writes, durable commit, and reread.
+    critical: [persistence-state, atomic-failure, reread]
+  - id: stale-recovery-data
+    expected: Invalidate stale cache, checkpoint, recovery, and temporary outputs.
+    critical: [state-inventory, invalidation, rebuild-scope]
+  - id: shared-path-regression
+    expected: Test the direct path and every affected shared consumer.
+    critical: [direct-path, shared-path, state-invariant]
+  - id: dirty-worktree
+    expected: Preserve unrelated user changes and stop on overlap.
+    critical: [dirty-protection, scoped-diff]
+  - id: false-noop-success
+    expected: Prove the consumer-observable state changed before reporting success.
+    critical: [no-op-detection, consumer-reread]
+  - id: application-layer-intrusion
+    expected: Keep application policy out of stable lower-layer public contracts.
+    critical: [boundary-owner, minimal-intrusion, compatibility]
+  - id: batch-configuration-write
+    expected: Use plan, review, confirm, apply, and reread with rollback evidence.
+    critical: [plan, review, confirm, apply, reread, rollback]
