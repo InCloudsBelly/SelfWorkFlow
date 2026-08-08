@@ -5,5 +5,21 @@
   "type": "object", "additionalProperties": false,
   "required": ["schemaVersion", "bindingSnapshotHash", "bindings"],
   "properties": {"schemaVersion": {"const": 3}, "bindingSnapshotHash": {"$ref": "#/$defs/hash"}, "bindings": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/binding"}}},
-  "$defs": {"id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}, "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "binding": {"type": "object", "additionalProperties": false, "required": ["moduleId", "providerId", "capabilityId", "operationId", "adapterHash", "sourceIdentityHash", "supportMatrixEntryRef", "supportMatrixEntryHash", "requirementMode"], "properties": {"moduleId": {"$ref": "#/$defs/id"}, "providerId": {"$ref": "#/$defs/id"}, "capabilityId": {"$ref": "#/$defs/id"}, "operationId": {"$ref": "#/$defs/id"}, "adapterHash": {"$ref": "#/$defs/hash"}, "sourceIdentityHash": {"$ref": "#/$defs/hash"}, "supportMatrixEntryRef": {"$ref": "#/$defs/id"}, "supportMatrixEntryHash": {"$ref": "#/$defs/hash"}, "requirementMode": {"enum": ["required", "preferred"]}}}}
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "layer": {"enum": ["task-explicit", "project", "user-machine", "pinned-public", "reportable-builtin"]},
+    "binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bindingHash", "moduleId", "providerId", "capabilityId", "operationId", "configurationLayer", "adapterHash", "sourceIdentityHash", "supportMatrixHash", "supportMatrixEntryRef", "supportMatrixEntryHash", "requirementMode"],
+      "properties": {
+        "bindingHash": {"$ref": "#/$defs/hash"}, "moduleId": {"$ref": "#/$defs/id"},
+        "providerId": {"$ref": "#/$defs/id"}, "capabilityId": {"$ref": "#/$defs/id"},
+        "operationId": {"$ref": "#/$defs/id"}, "configurationLayer": {"$ref": "#/$defs/layer"},
+        "adapterHash": {"$ref": "#/$defs/hash"}, "sourceIdentityHash": {"$ref": "#/$defs/hash"},
+        "supportMatrixHash": {"$ref": "#/$defs/hash"}, "supportMatrixEntryRef": {"$ref": "#/$defs/id"},
+        "supportMatrixEntryHash": {"$ref": "#/$defs/hash"}, "requirementMode": {"enum": ["required", "preferred"]}
+      }
+    }
+  }
 }

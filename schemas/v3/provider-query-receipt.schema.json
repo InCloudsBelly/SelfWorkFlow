@@ -4,6 +4,27 @@
   "title": "SelfWorkFlow V3 provider query receipt",
   "type": "object", "additionalProperties": false,
   "required": ["schemaVersion", "receiptHash", "queryPlanHash", "executionNonce", "attemptRef", "providerId", "adapterHash", "sourceIdentityHash", "projectStateReceiptHash", "workspaceFingerprintHash", "indexRevision", "indexCompleteness", "returnedFiles", "truncated", "preQueryWorkspaceFingerprintHash", "postQueryWorkspaceFingerprintHash", "actualSideEffects", "mutationEvidenceRefs"],
-  "properties": {"schemaVersion": {"const": 3}, "receiptHash": {"$ref": "#/$defs/hash"}, "queryPlanHash": {"$ref": "#/$defs/hash"}, "executionNonce": {"$ref": "#/$defs/id"}, "attemptRef": {"$ref": "#/$defs/id"}, "providerId": {"$ref": "#/$defs/id"}, "adapterHash": {"$ref": "#/$defs/hash"}, "sourceIdentityHash": {"$ref": "#/$defs/hash"}, "projectStateReceiptHash": {"$ref": "#/$defs/hash"}, "workspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "indexRevision": {"type": "string", "minLength": 1, "maxLength": 256}, "extractionVersion": {"type": "string", "maxLength": 128}, "indexCompleteness": {"enum": ["complete", "partial", "unknown"]}, "pendingFiles": {"type": "array", "maxItems": 200000, "items": {"type": "string", "maxLength": 32767}}, "parseFailures": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/id"}}, "returnedFiles": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/file"}}, "truncated": {"type": "boolean"}, "heuristicProvenance": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}}, "preQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "actualSideEffects": {"enum": ["none", "local-write", "network", "unknown"]}, "mutationEvidenceRefs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}},
-  "$defs": {"id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}, "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "file": {"type": "object", "additionalProperties": false, "required": ["path", "byteRange", "contentHash"], "properties": {"path": {"type": "string", "maxLength": 32767}, "byteRange": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0}}, "contentHash": {"$ref": "#/$defs/hash"}}}}
+  "properties": {
+    "schemaVersion": {"const": 3}, "receiptHash": {"$ref": "#/$defs/hash"},
+    "queryPlanHash": {"$ref": "#/$defs/hash"}, "executionNonce": {"$ref": "#/$defs/id"},
+    "attemptRef": {"$ref": "#/$defs/id"}, "providerId": {"$ref": "#/$defs/id"},
+    "adapterHash": {"$ref": "#/$defs/hash"}, "sourceIdentityHash": {"$ref": "#/$defs/hash"},
+    "projectStateReceiptHash": {"$ref": "#/$defs/hash"}, "workspaceFingerprintHash": {"$ref": "#/$defs/hash"},
+    "indexRevision": {"type": "string", "minLength": 1, "maxLength": 256},
+    "extractionVersion": {"type": "string", "maxLength": 128},
+    "indexCompleteness": {"enum": ["complete", "partial", "unknown"]},
+    "pendingFiles": {"type": "array", "maxItems": 200000, "uniqueItems": true, "items": {"$ref": "#/$defs/projectPath"}},
+    "parseFailures": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/id"}},
+    "returnedFiles": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/file"}},
+    "truncated": {"type": "boolean"}, "heuristicProvenance": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}},
+    "preQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"},
+    "actualSideEffects": {"enum": ["none", "local-write", "network", "unknown"]},
+    "mutationEvidenceRefs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "projectPath": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*[ .](?:/|$))[^\\u0000-\\u001f<>:\"|?*]+$"},
+    "file": {"type": "object", "additionalProperties": false, "required": ["path", "byteRange", "contentHash"], "properties": {"path": {"$ref": "#/$defs/projectPath"}, "byteRange": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0}}, "contentHash": {"$ref": "#/$defs/hash"}}}
+  }
 }

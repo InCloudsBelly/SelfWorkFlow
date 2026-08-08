@@ -20,7 +20,7 @@ class ProviderSchemaTests(unittest.TestCase):
             "provider-operation-plan.schema.json", "provider-approval-receipt.schema.json",
             "provider-operation-receipt.schema.json", "provider-query-plan.schema.json",
             "provider-query-receipt.schema.json", "provider-mutation-evidence.schema.json",
-            "workspace-fingerprint.schema.json",
+            "workspace-fingerprint.schema.json", "provider-fallback-receipt.schema.json",
         )
         for name in names:
             with self.subTest(name=name):
@@ -76,6 +76,74 @@ class ProviderSchemaTests(unittest.TestCase):
         _load("provider-descriptor.schema.json", descriptor)
         with self.assertRaises(ContractError):
             _load("provider-descriptor.schema.json", dict(descriptor, secret="nope"))
+
+    def test_provider_timestamp_requires_rfc3339_utc_z(self):
+        evidence = {
+            "schemaVersion": 3, "evidenceHash": HASH, "subjectKind": "operation-plan",
+            "subjectPlanHash": HASH, "executionNonce": "nonce", "attemptRef": "attempt",
+            "providerBindingHash": HASH, "canonicalProjectRootHash": HASH,
+            "observedAt": "2026-08-09T08:00:00+08:00", "preStateIdentity": HASH,
+            "postStateIdentity": HASH, "mutationTargetHash": HASH, "payloadHash": HASH,
+            "evidenceKind": "filesystem-manifest", "before": [], "after": [],
+        }
+        with self.assertRaises(ContractError):
+            _load("provider-mutation-evidence.schema.json", evidence)
+        evidence["observedAt"] = "2026-08-09T00:00:00Z"
+        _load("provider-mutation-evidence.schema.json", evidence)
+
+    def test_provider_timestamp_ranges_are_monotonic(self):
+        project_state = {
+            "schemaVersion": 3, "receiptHash": HASH, "providerId": "provider",
+            "sourceIdentityHash": HASH, "canonicalProjectRootHash": HASH,
+            "workspaceFingerprintHash": HASH, "indexRevision": "1",
+            "health": "ready", "sourceContentFresh": "fresh",
+            "relationshipFresh": "fresh", "capturedAt": "2026-08-09T00:00:01Z",
+            "validUntil": "2026-08-09T00:00:00Z", "pendingFiles": [],
+            "parseFailures": [],
+        }
+        approval = {
+            "schemaVersion": 3, "receiptHash": HASH, "subjectKind": "operation-plan",
+            "authorizationSubjectHash": HASH, "decision": "approved",
+            "confirmationSource": "user-confirmation", "scope": "one operation",
+            "targetHashes": [HASH], "issuedAt": "2026-08-09T00:00:01Z",
+            "expiresAt": "2026-08-09T00:00:00Z", "nonce": "nonce",
+            "revocationState": "active",
+        }
+        operation = {
+            "schemaVersion": 3, "receiptHash": HASH, "operationPlanHash": HASH,
+            "executionNonce": "nonce", "attemptRef": "attempt", "providerId": "provider",
+            "bindingSnapshotHash": HASH, "startedAt": "2026-08-09T00:00:01Z",
+            "completedAt": "2026-08-09T00:00:00Z", "outcome": "failed",
+            "mutationEvidenceRefs": [],
+        }
+        for schema, document in (
+            ("provider-project-state-receipt.schema.json", project_state),
+            ("provider-approval-receipt.schema.json", approval),
+            ("provider-operation-receipt.schema.json", operation),
+        ):
+            with self.subTest(schema=schema):
+                with self.assertRaises(ContractError) as error:
+                    _load(schema, document)
+                self.assertEqual(error.exception.validator, "semantic")
+
+    def test_query_and_mutation_paths_are_normalized_project_relative(self):
+        receipt = {
+            "schemaVersion": 3, "receiptHash": HASH, "queryPlanHash": HASH,
+            "executionNonce": "nonce", "attemptRef": "attempt", "providerId": "provider",
+            "adapterHash": HASH, "sourceIdentityHash": HASH, "projectStateReceiptHash": HASH,
+            "workspaceFingerprintHash": HASH, "indexRevision": "1", "indexCompleteness": "complete",
+            "pendingFiles": [], "parseFailures": [], "returnedFiles": [{
+                "path": "Source/main.cpp", "byteRange": [0, 1], "contentHash": HASH,
+            }], "truncated": False, "preQueryWorkspaceFingerprintHash": HASH,
+            "postQueryWorkspaceFingerprintHash": HASH, "actualSideEffects": "none",
+            "mutationEvidenceRefs": [],
+        }
+        _load("provider-query-receipt.schema.json", receipt)
+        for invalid in ("../secret", "/absolute", "C:/secret", "Source\\secret.cpp"):
+            changed = json.loads(json.dumps(receipt))
+            changed["returnedFiles"][0]["path"] = invalid
+            with self.subTest(path=invalid), self.assertRaises(ContractError):
+                _load("provider-query-receipt.schema.json", changed)
 
 
 if __name__ == "__main__":

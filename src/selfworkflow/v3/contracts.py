@@ -1,9 +1,10 @@
 """Strict loading and semantic validation for V3 orchestration contracts."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
 import json
+import re
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Protocol
 
@@ -39,6 +40,7 @@ _SCHEMA_NAMES = (
     "provider-query-receipt.schema.json",
     "provider-mutation-evidence.schema.json",
     "workspace-fingerprint.schema.json",
+    "provider-fallback-receipt.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
@@ -50,6 +52,21 @@ def _is_calendar_datetime(value: object) -> bool:
     if not isinstance(value, str):
         return True
     datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return True
+
+
+@_FORMAT_CHECKER.checks("utc-date-time", raises=ValueError)
+def _is_utc_datetime(value: object) -> bool:
+    if not isinstance(value, str):
+        return True
+    if re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z",
+        value,
+    ) is None:
+        raise ValueError
+    parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    if parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+        raise ValueError
     return True
 
 
@@ -1433,6 +1450,30 @@ def _validate_provider_document(schema_name: str, document: dict[str, Any]) -> N
     """Validate a Provider envelope through the same closed registry as V3 core."""
 
     _validate_schema(schema_name, document)
+    _validate_provider_time_semantics(schema_name, document)
+
+
+def _validate_provider_time_semantics(
+    schema_name: str,
+    document: dict[str, Any],
+) -> None:
+    ranges = {
+        "provider-project-state-receipt.schema.json": (
+            "capturedAt", "validUntil", "provider-project-state-time-invalid",
+        ),
+        "provider-approval-receipt.schema.json": (
+            "issuedAt", "expiresAt", "provider-approval-time-invalid",
+        ),
+        "provider-operation-receipt.schema.json": (
+            "startedAt", "completedAt", "provider-operation-time-invalid",
+        ),
+    }
+    time_range = ranges.get(schema_name)
+    if time_range is None:
+        return
+    start_field, end_field, reason = time_range
+    if _utc_datetime(document[end_field]) < _utc_datetime(document[start_field]):
+        _raise_semantic(reason, (end_field,))
 
 
 def validate_provider_descriptor(document: dict[str, Any]) -> None:
@@ -1488,6 +1529,11 @@ def validate_provider_mutation_evidence(document: dict[str, Any]) -> None:
 
 def validate_workspace_fingerprint(document: dict[str, Any]) -> None:
     _validate_provider_document("workspace-fingerprint.schema.json", document)
+
+
+def validate_provider_fallback_receipt(document: dict[str, Any]) -> None:
+    from selfworkflow.v3.provider_config import validate_fallback_receipt
+    validate_fallback_receipt(document)
 
 
 def load_contract(
@@ -1564,6 +1610,8 @@ def load_contract(
             run_ledger,
             verification_receipt_resolver,
         )
+    else:
+        _validate_provider_time_semantics(schema_name, document)
     return document
 
 

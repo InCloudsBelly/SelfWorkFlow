@@ -10,7 +10,7 @@
     "subjectKind": {"enum": ["operation-plan", "query-plan"]}, "subjectPlanHash": {"$ref": "#/$defs/hash"},
     "executionNonce": {"$ref": "#/$defs/id"}, "attemptRef": {"$ref": "#/$defs/id"},
     "providerBindingHash": {"$ref": "#/$defs/hash"}, "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
-    "observedAt": {"type": "string", "format": "date-time"}, "preStateIdentity": {"$ref": "#/$defs/hash"},
+    "observedAt": {"type": "string", "format": "utc-date-time"}, "preStateIdentity": {"$ref": "#/$defs/hash"},
     "postStateIdentity": {"$ref": "#/$defs/hash"}, "mutationTargetHash": {"$ref": "#/$defs/hash"},
     "payloadHash": {"$ref": "#/$defs/hash"},
     "evidenceKind": {"enum": ["filesystem-manifest", "managed-state-manifest", "process-state-delta", "service-state-delta"]},
@@ -23,7 +23,8 @@
   "$defs": {
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
     "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "manifest": {"type": "array", "maxItems": 200000, "items": {"type": "object", "additionalProperties": false, "required": ["path", "type", "size", "contentHash", "reparseIdentityHash"], "properties": {"path": {"type": "string", "maxLength": 32767}, "type": {"enum": ["file", "directory", "reparse"]}, "size": {"type": "integer", "minimum": 0}, "contentHash": {"$ref": "#/$defs/hash"}, "reparseIdentityHash": {"$ref": "#/$defs/hash"}}}},
+    "projectPath": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*[ .](?:/|$))[^\\u0000-\\u001f<>:\"|?*]+$"},
+    "manifest": {"type": "array", "maxItems": 200000, "items": {"type": "object", "additionalProperties": false, "required": ["path", "type", "size", "contentHash", "reparseIdentityHash"], "properties": {"path": {"$ref": "#/$defs/projectPath"}, "type": {"enum": ["file", "directory", "reparse"]}, "size": {"type": "integer", "minimum": 0}, "contentHash": {"$ref": "#/$defs/hash"}, "reparseIdentityHash": {"$ref": "#/$defs/hash"}}}},
     "state": {"type": "object", "additionalProperties": false, "required": ["identityHash", "revision"], "properties": {"identityHash": {"$ref": "#/$defs/hash"}, "revision": {"type": "string", "minLength": 1, "maxLength": 256}}}
   }
 }
