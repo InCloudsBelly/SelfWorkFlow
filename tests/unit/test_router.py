@@ -301,6 +301,67 @@ class RouterTests(unittest.TestCase):
             ("workflow-core", "workflow-protected-rules"),
         )
 
+    def test_v2_routes_modules_by_slot_without_semantic_activation(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import ModuleRouteRequest, route_modules
+
+        compiled = compile_catalog(REPOSITORY_ROOT / "catalog")
+        design = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="design.primary",
+                cardinality="exactly-one",
+                operation_type="implement",
+                strength="Full",
+                write_task=True,
+                capability_states={"skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(design.status, "routed")
+        self.assertEqual(design.selected_modules, ("design-brainstorming",))
+
+        knowledge = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="knowledge.update",
+                cardinality="zero-or-one",
+                operation_type="knowledge-write",
+                strength="Full",
+                write_task=False,
+                explicit_module_ids=(),
+                capability_states={"knowledge-write": "supported", "user-confirmation": "supported"},
+            ),
+        )
+        self.assertEqual(knowledge.status, "routed")
+        self.assertEqual(knowledge.selected_modules, ())
+
+    def test_explicit_grill_deterministically_adds_cross_review(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import ModuleRouteRequest, route_modules
+
+        compiled = compile_catalog(REPOSITORY_ROOT / "catalog")
+        common = dict(
+            operation_type="design",
+            strength="Deep",
+            write_task=False,
+            explicit_module_ids=("design-grill-me",),
+            capability_states={
+                "skill-discovery": "supported",
+                "independent-context": "supported",
+                "user-confirmation": "supported",
+            },
+        )
+        grill = route_modules(
+            compiled.content,
+            ModuleRouteRequest(slot_id="design.specialists", cardinality="zero-or-many", **common),
+        )
+        cross_review = route_modules(
+            compiled.content,
+            ModuleRouteRequest(slot_id="design.cross-review", cardinality="zero-or-one", **common),
+        )
+        self.assertEqual(grill.selected_modules, ("design-grill-me",))
+        self.assertEqual(cross_review.selected_modules, ("design-cross-review",))
+
 
 if __name__ == "__main__":
     unittest.main()

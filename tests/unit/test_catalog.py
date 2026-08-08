@@ -345,6 +345,21 @@ class CatalogCliTests(unittest.TestCase):
 
 
 class CatalogCompilationTests(unittest.TestCase):
+    def test_checked_in_v2_catalog_registers_unique_pipeline_modules(self):
+        from selfworkflow.catalog import compile_catalog
+
+        envelope = json.loads(compile_catalog(REPOSITORY_ROOT / "catalog").content)
+        self.assertEqual(envelope["schemaVersion"], 2)
+        modules = envelope["catalog"]["modules"]
+        self.assertEqual(len(modules), len({module["id"] for module in modules}))
+        self.assertTrue(all(module["contractVersion"] == 2 for module in modules))
+        self.assertTrue(all(set(module["supportEvidence"]) == {
+            "sourceIntegrity", "adapterSupport", "runtimeCapability", "behaviorEvidence"
+        } for module in modules))
+        knowledge = next(module for module in modules if module["id"] == "knowledge-update")
+        self.assertEqual(knowledge["activation"], "explicit")
+        self.assertEqual(knowledge["supportEvidence"]["adapterSupport"], "unverified")
+
     def test_checked_in_three_domain_catalog_compiles_from_real_sources(self):
         from selfworkflow.catalog import compile_catalog
 

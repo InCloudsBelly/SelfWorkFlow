@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "catalog", "catalogHash"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"enum": [1, 2]},
     "catalog": {"$ref": "#/$defs/catalog"},
     "catalogHash": {
       "type": "string",
@@ -161,6 +161,45 @@
         "constraint": {"$ref": "#/$defs/constraint"}
       }
     },
+    "supportEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceIntegrity", "adapterSupport", "runtimeCapability", "behaviorEvidence"],
+      "properties": {
+        "sourceIntegrity": {"enum": ["supported", "unverified", "unsupported"]},
+        "adapterSupport": {"enum": ["supported", "unverified", "unsupported"]},
+        "runtimeCapability": {"enum": ["supported", "unverified", "unsupported"]},
+        "behaviorEvidence": {"enum": ["supported", "unverified", "unsupported"]}
+      }
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "sourceEntryId", "contractVersion", "stage", "slot", "activation", "invocation", "inputContract", "outputContract", "requiredCapabilities", "sideEffects", "dependencies", "conflicts", "priority", "supportEvidence", "when"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "sourceEntryId": {"$ref": "#/$defs/identifier"},
+        "contractVersion": {"const": 2},
+        "stage": {"enum": ["discovered", "capability-checked", "classified", "designed", "planned", "implemented", "reviewed", "verified", "completed"]},
+        "slot": {"$ref": "#/$defs/identifier"},
+        "activation": {"enum": ["mandatory", "default", "explicit", "deterministic"]},
+        "invocation": {"type": "object", "additionalProperties": false, "required": ["kind", "ref"], "properties": {"kind": {"enum": ["agent-native", "skill", "mcp"]}, "ref": {"type": "string", "minLength": 1, "maxLength": 512}}},
+        "inputContract": {"type": "string", "minLength": 1, "maxLength": 256},
+        "outputContract": {"type": "string", "minLength": 1, "maxLength": 256},
+        "requiredCapabilities": {"$ref": "#/$defs/identifierList"},
+        "sideEffects": {"type": "object", "additionalProperties": false, "required": ["level", "requiresConfirmation"], "properties": {"level": {"enum": ["none", "read", "local-write", "external-write"]}, "requiresConfirmation": {"type": "boolean"}}},
+        "dependencies": {"$ref": "#/$defs/identifierList"},
+        "conflicts": {"$ref": "#/$defs/identifierList"},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "supportEvidence": {"$ref": "#/$defs/supportEvidence"},
+        "when": {"type": "object", "additionalProperties": false, "required": ["operationTypes", "strengths", "writeTask"], "properties": {"operationTypes": {"$ref": "#/$defs/operationTypeList"}, "strengths": {"type": "array", "uniqueItems": true, "items": {"enum": ["Light", "Full", "Deep"]}}, "writeTask": {"enum": [true, false, "any"]}}}
+      }
+    },
+    "moduleRegistry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "modules"],
+      "properties": {"schemaVersion": {"const": 2}, "modules": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/module"}}}
+    },
     "entry": {
       "type": "object",
       "additionalProperties": false,
@@ -312,7 +351,7 @@
     "catalog": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["domains", "entries", "standardCapabilities"],
+      "required": ["domains", "entries", "modules", "standardCapabilities"],
       "properties": {
         "domains": {
           "type": "array",
@@ -325,6 +364,7 @@
           "maxItems": 4096,
           "items": {"$ref": "#/$defs/entry"}
         },
+        "modules": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/module"}},
         "standardCapabilities": {
           "type": "array",
           "maxItems": 256,
@@ -336,9 +376,9 @@
     "index": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "domains", "standardCapabilities"],
+      "required": ["schemaVersion", "domains", "modules", "standardCapabilities"],
       "properties": {
-        "schemaVersion": {"const": 1},
+        "schemaVersion": {"enum": [1, 2]},
         "domains": {
           "type": "array",
           "maxItems": 128,
@@ -348,6 +388,7 @@
             "pattern": "^domains/[a-z0-9][a-z0-9._-]{0,127}\\.yaml$"
           }
         },
+        "modules": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^modules\\.yaml$"}]},
         "standardCapabilities": {
           "type": "array",
           "maxItems": 256,

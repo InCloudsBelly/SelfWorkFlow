@@ -1,8 +1,9 @@
-schemaVersion: 1
+schemaVersion: 2
 domains:
   - domains/workflow.yaml
   - domains/code-quality.yaml
   - domains/knowledge.yaml
+modules: modules.yaml
 standardCapabilities:
   - skill-discovery
   - independent-context

@@ -69,6 +69,27 @@ class RouteResult:
     issues: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ModuleRouteRequest:
+    slot_id: str
+    cardinality: str
+    operation_type: str
+    strength: str
+    write_task: bool
+    explicit_module_ids: tuple[str, ...] = ()
+    project_default_module_ids: tuple[str, ...] = ()
+    capability_states: Mapping[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class ModuleRouteResult:
+    status: str
+    selected_modules: tuple[str, ...]
+    excluded_modules: tuple[tuple[str, str], ...]
+    missing_capabilities: tuple[str, ...]
+    reason_codes: tuple[str, ...]
+
+
 def _canonical_hash(catalog: object) -> str:
     payload = json.dumps(
         catalog,
@@ -95,7 +116,7 @@ def _load_envelope(content: bytes | str | Mapping[str, object]) -> dict[str, obj
     if (
         type(value) is not dict
         or set(value) != {"schemaVersion", "catalog", "catalogHash"}
-        or value["schemaVersion"] != 1
+        or value["schemaVersion"] not in {1, 2}
         or type(value["catalog"]) is not dict
         or type(value["catalogHash"]) is not str
         or _canonical_hash(value["catalog"]) != value["catalogHash"]
@@ -370,6 +391,102 @@ def route_skills(
 
     try:
         return _route_skills(content, request)
+    except RouteError:
+        raise
+    except Exception:
+        raise RouteError() from None
+
+
+def route_modules(
+    content: bytes | str | Mapping[str, object], request: ModuleRouteRequest
+) -> ModuleRouteResult:
+    """Select one Pipeline slot without semantic activation or side effects."""
+
+    try:
+        envelope = _load_envelope(content)
+        modules = envelope["catalog"].get("modules", [])
+        if (
+            type(modules) is not list
+            or request.cardinality not in {"exactly-one", "zero-or-one", "zero-or-many", "gate"}
+            or request.strength not in {"Light", "Full", "Deep"}
+            or type(request.write_task) is not bool
+        ):
+            raise RouteError()
+        explicit = tuple(dict.fromkeys(request.explicit_module_ids))
+        defaults = set(request.project_default_module_ids)
+        states = dict(request.capability_states or {})
+        candidates: list[tuple[int, int, str, dict[str, object]]] = []
+        excluded: list[tuple[str, str]] = []
+        known_ids = {module.get("id") for module in modules if type(module) is dict}
+        for module in modules:
+            if type(module) is not dict or type(module.get("id")) is not str:
+                raise RouteError()
+            module_id = module["id"]
+            if module["slot"] != request.slot_id:
+                continue
+            when = module["when"]
+            if when["operationTypes"] and request.operation_type not in when["operationTypes"]:
+                excluded.append((module_id, "condition-not-matched"))
+                continue
+            if request.strength not in when["strengths"] or (
+                when["writeTask"] != "any" and when["writeTask"] is not request.write_task
+            ):
+                excluded.append((module_id, "condition-not-matched"))
+                continue
+            activation = module["activation"]
+            rank = 0
+            if activation == "mandatory":
+                rank = 400
+            elif module_id in explicit:
+                rank = 300
+            elif module_id in defaults or activation == "default":
+                rank = 200
+            elif activation == "deterministic" and set(module["dependencies"]) <= set(explicit):
+                rank = 100
+            if not rank:
+                excluded.append((module_id, "not-selected"))
+                continue
+            evidence = module["supportEvidence"]
+            static_layers = ("sourceIntegrity", "adapterSupport", "behaviorEvidence")
+            if any(evidence[layer] != "supported" for layer in static_layers):
+                excluded.append((module_id, "support-unverified"))
+                continue
+            candidates.append((rank, module["priority"], module_id, module))
+        candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
+        selected = candidates if request.cardinality == "zero-or-many" else candidates[:1]
+        selected_ids = tuple(item[2] for item in selected)
+        reasons: set[str] = set()
+        if request.cardinality in {"exactly-one", "gate"} and not selected_ids:
+            reasons.add("gate-unavailable" if request.cardinality == "gate" else "primary-module-unavailable")
+        if request.cardinality in {"exactly-one", "gate", "zero-or-one"} and len(
+            [item for item in candidates if item[0] == 400]
+        ) > 1:
+            reasons.add("slot-cardinality-invalid")
+        for _, _, module_id, module in selected:
+            if set(module["conflicts"]) & set(selected_ids):
+                reasons.add("module-conflict")
+        missing = sorted(
+            {
+                capability
+                for _, _, _, module in selected
+                for capability in module["requiredCapabilities"]
+                if states.get(capability) != "supported"
+            }
+        )
+        if missing:
+            reasons.add("required-capability-unavailable")
+        invalid_explicit = sorted(
+            module_id for module_id in explicit if module_id not in known_ids
+        )
+        if invalid_explicit:
+            reasons.add("explicit-selection-invalid")
+        return ModuleRouteResult(
+            status="paused" if reasons else "routed",
+            selected_modules=selected_ids,
+            excluded_modules=tuple(sorted(set(excluded))),
+            missing_capabilities=tuple(missing),
+            reason_codes=tuple(sorted(reasons)),
+        )
     except RouteError:
         raise
     except Exception:

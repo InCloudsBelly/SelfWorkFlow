@@ -32,6 +32,7 @@ _ERROR_ORDER = {
         (
             "duplicate-domain",
             "duplicate-stable-id",
+            "duplicate-module-id",
             "content-identity-conflict",
             "alias-invalid",
             "alias-collision",
@@ -42,6 +43,9 @@ _ERROR_ORDER = {
             "dependency-cycle",
             "mandatory-conflict",
             "unknown-capability",
+            "module-source-unknown",
+            "dangling-module-slot",
+            "module-invocation-invalid",
             "protected-rule-override",
             "protected-rule-operation-invalid",
             "source-invalid",
@@ -73,6 +77,8 @@ class _YamlResourceError(yaml.YAMLError):
 
 
 class _StrictLoader(yaml.SafeLoader):
+    max_nodes = MAX_YAML_NODES
+
     def __init__(self, stream: str) -> None:
         super().__init__(stream)
         self._compose_depth = 0
@@ -82,7 +88,7 @@ class _StrictLoader(yaml.SafeLoader):
         if self.check_event(yaml.events.AliasEvent):
             raise _YamlResourceError
         self._compose_nodes += 1
-        if self._compose_nodes > MAX_YAML_NODES:
+        if self._compose_nodes > self.max_nodes:
             raise _YamlResourceError
         self._compose_depth += 1
         try:
@@ -116,12 +122,29 @@ _StrictLoader.add_constructor(
 )
 
 
+class _ModuleLoader(_StrictLoader):
+    max_nodes = 4096
+
+
+_ModuleLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
+
+
 def _load_yaml(text: str) -> object:
     try:
         return yaml.load(text, Loader=_StrictLoader)
     except _DuplicateKeyError:
         raise CatalogError(("duplicate-key",)) from None
     except _YamlResourceError:
+        raise CatalogError(("resource-limit",)) from None
+
+
+def _load_module_yaml(text: str) -> object:
+    try:
+        return yaml.load(text, Loader=_ModuleLoader)
+    except (_DuplicateKeyError, _YamlResourceError):
         raise CatalogError(("resource-limit",)) from None
 
 
@@ -385,6 +408,8 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
     )
     _validate_schema(schema, "catalog-schema-invalid")
     index = _load_yaml(_read_document_text(source_path / "index.yaml"))
+    if type(index) is dict and "modules" not in index:
+        index["modules"] = None
     index_error = next(_source_validator(schema, "index").iter_errors(index), None)
     if index_error is not None:
         raise CatalogError((_index_schema_error_code(index_error),)) from None
@@ -418,6 +443,18 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
         domain = document["domain"]
         domains.append(domain)
         entries.extend({"domain": domain, **entry} for entry in document["entries"])
+    modules: list[dict[str, object]] = []
+    if index["modules"] is not None:
+        module_document = _load_module_yaml(
+            _read_document_text(_repository_file(source_path, index["modules"]))
+        )
+        module_error = next(
+            _source_validator(schema, "moduleRegistry").iter_errors(module_document),
+            None,
+        )
+        if module_error is not None:
+            raise CatalogError((_schema_error_code(module_error),)) from None
+        modules = list(module_document["modules"])
     domain_identities = [
         unicodedata.normalize("NFC", domain).casefold() for domain in domains
     ]
@@ -428,6 +465,46 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
     if len(set(entry_ids)) != len(entry_ids):
         errors.add("duplicate-stable-id")
     stable_ids = set(entry_ids)
+    module_ids = [module["id"] for module in modules]
+    if len(module_ids) != len(set(module_ids)):
+        errors.add("duplicate-module-id")
+    module_id_set = set(module_ids)
+    if any(module["sourceEntryId"] not in stable_ids for module in modules):
+        errors.add("module-source-unknown")
+    if any(
+        capability not in standard_capabilities
+        for module in modules
+        for capability in module["requiredCapabilities"]
+    ):
+        errors.add("unknown-capability")
+    if any(
+        dependency not in module_id_set
+        for module in modules
+        for dependency in module["dependencies"]
+    ) or any(
+        conflict not in module_id_set
+        for module in modules
+        for conflict in module["conflicts"]
+    ):
+        errors.add("dangling-dependency")
+    if modules:
+        from selfworkflow.pipeline import load_pipeline
+
+        pipeline = load_pipeline(
+            repository_root / "workflow" / "pipeline.yaml",
+            repository_root / "schemas" / "pipeline.schema.json",
+        )
+        slot_map = {
+            slot["id"]: (stage["id"], set(slot["allowedInvocationKinds"]))
+            for stage in pipeline.document["stages"]
+            for slot in stage["slots"]
+        }
+        for module in modules:
+            binding = slot_map.get(module["slot"])
+            if binding is None or binding[0] != module["stage"]:
+                errors.add("dangling-module-slot")
+            elif module["invocation"]["kind"] not in binding[1]:
+                errors.add("module-invocation-invalid")
     aliases = [alias for entry in entries for alias in entry["aliases"]]
     rule_operations = [
         operation
@@ -580,9 +657,11 @@ def _compile_catalog(source: str | Path) -> CompiledCatalog:
     if errors:
         raise CatalogError(tuple(errors)) from None
     entries.sort(key=lambda entry: entry["id"])
+    modules.sort(key=lambda module: module["id"])
     catalog = {
         "domains": sorted(domains),
         "entries": entries,
+        "modules": modules,
         "standardCapabilities": index["standardCapabilities"],
     }
     payload = json.dumps(
