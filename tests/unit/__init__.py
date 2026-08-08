@@ -5,6 +5,7 @@ import unittest
 
 UNIT_TEST_MODULES = (
     "tests.unit.test_capability_gate",
+    "tests.unit.test_catalog",
     "tests.unit.test_classifier",
     "tests.unit.test_config",
     "tests.unit.test_evidence",

@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/catalog.schema.json",
+  "title": "SelfWorkFlow compiled catalog envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "catalog", "catalogHash"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "catalog": {"$ref": "#/$defs/catalog"},
+    "catalogHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "relativeSourcePath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "stringList": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "identifierList": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/identifier"}
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "revision", "contentHash"],
+      "properties": {
+        "kind": {"enum": ["workflow", "planned"]},
+        "path": {"$ref": "#/$defs/relativeSourcePath"},
+        "revision": {
+          "type": "string",
+          "pattern": "^git:[0-9a-f]{40}$"
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "target"],
+      "properties": {
+        "name": {"$ref": "#/$defs/identifier"},
+        "target": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target", "mode", "value"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "capability-state",
+            "verification-status",
+            "review-level",
+            "workflow-action"
+          ]
+        },
+        "target": {"$ref": "#/$defs/identifier"},
+        "mode": {"enum": ["equals", "at-least", "recommend"]},
+        "value": {
+          "enum": [
+            "supported",
+            "passed",
+            "L0",
+            "L1",
+            "L2",
+            "L3",
+            "perform",
+            "record"
+          ]
+        }
+      }
+    },
+    "protectedRuleOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "id", "constraint"],
+      "properties": {
+        "operation": {"enum": ["add-requirement", "advisory"]},
+        "id": {"$ref": "#/$defs/identifier"},
+        "constraint": {"$ref": "#/$defs/constraint"}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "domain",
+        "id",
+        "displayName",
+        "source",
+        "aliases",
+        "triggers",
+        "exclusions",
+        "stages",
+        "requiredCapabilities",
+        "dependencies",
+        "conflicts",
+        "composition",
+        "mandatory",
+        "priority",
+        "contextCost",
+        "supportStatus",
+        "protectedRuleOperations"
+      ],
+      "properties": {
+        "domain": {"$ref": "#/$defs/identifier"},
+        "id": {"$ref": "#/$defs/identifier"},
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {"$ref": "#/$defs/source"},
+        "aliases": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/alias"}
+        },
+        "triggers": {"$ref": "#/$defs/stringList"},
+        "exclusions": {"$ref": "#/$defs/stringList"},
+        "stages": {
+          "type": "array",
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "discovered",
+              "capability-checked",
+              "classified",
+              "designed",
+              "planned",
+              "implemented",
+              "reviewed",
+              "verified",
+              "completed"
+            ]
+          }
+        },
+        "requiredCapabilities": {"$ref": "#/$defs/identifierList"},
+        "dependencies": {"$ref": "#/$defs/identifierList"},
+        "conflicts": {"$ref": "#/$defs/identifierList"},
+        "composition": {"enum": ["standalone", "augment", "exclusive"]},
+        "mandatory": {"type": "boolean"},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "contextCost": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "supportStatus": {"enum": ["supported", "unverified"]},
+        "protectedRuleOperations": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/protectedRuleOperation"}
+        }
+      }
+    },
+    "sourceEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "source",
+        "aliases",
+        "triggers",
+        "exclusions",
+        "stages",
+        "requiredCapabilities",
+        "dependencies",
+        "conflicts",
+        "composition",
+        "mandatory",
+        "priority",
+        "contextCost",
+        "supportStatus",
+        "protectedRuleOperations"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {"$ref": "#/$defs/source"},
+        "aliases": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/alias"}
+        },
+        "triggers": {"$ref": "#/$defs/stringList"},
+        "exclusions": {"$ref": "#/$defs/stringList"},
+        "stages": {
+          "type": "array",
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "discovered",
+              "capability-checked",
+              "classified",
+              "designed",
+              "planned",
+              "implemented",
+              "reviewed",
+              "verified",
+              "completed"
+            ]
+          }
+        },
+        "requiredCapabilities": {"$ref": "#/$defs/identifierList"},
+        "dependencies": {"$ref": "#/$defs/identifierList"},
+        "conflicts": {"$ref": "#/$defs/identifierList"},
+        "composition": {"enum": ["standalone", "augment", "exclusive"]},
+        "mandatory": {"type": "boolean"},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "contextCost": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "supportStatus": {"enum": ["supported", "unverified"]},
+        "protectedRuleOperations": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/protectedRuleOperation"}
+        }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domains", "entries", "standardCapabilities"],
+      "properties": {
+        "domains": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"}
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {"$ref": "#/$defs/entry"}
+        },
+        "standardCapabilities": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"}
+        }
+      }
+    },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "domains", "standardCapabilities"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "domains": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^domains/[a-z0-9][a-z0-9._-]{0,127}\\.yaml$"
+          }
+        },
+        "standardCapabilities": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/identifier"}
+        }
+      }
+    },
+    "domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "domain", "entries"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "domain": {"$ref": "#/$defs/identifier"},
+        "entries": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {"$ref": "#/$defs/sourceEntry"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+schemaVersion: 1
+domain: knowledge
+entries:
+  - id: knowledge-on-demand-loading
+    displayName: Planned on-demand knowledge loading guidance
+    source:
+      kind: planned
+      path: WORKFLOW.md
+      revision: git:b29c94b4fec9362dc4d70f1b7974e9e1a3370a57
+      contentHash: sha256:1120380927256392c767f27632675fa969393cdb0b04caca6b471b3f68f3a9ab
+    aliases:
+      - name: on-demand-knowledge
+        target: knowledge-on-demand-loading
+    triggers:
+      - phase-specific knowledge
+      - on-demand loading
+    exclusions:
+      - claim that a knowledge skill is implemented
+    stages:
+      - discovered
+      - capability-checked
+    requiredCapabilities:
+      - filesystem-read
+      - knowledge-read
+    dependencies:
+      - workflow-core
+    conflicts: []
+    composition: augment
+    mandatory: false
+    priority: 400
+    contextCost: 160
+    supportStatus: unverified
+    protectedRuleOperations:
+      - operation: advisory
+        id: catalog-on-demand-documentation
+        constraint:
+          kind: workflow-action
+          target: documentation
+          mode: recommend
+          value: record

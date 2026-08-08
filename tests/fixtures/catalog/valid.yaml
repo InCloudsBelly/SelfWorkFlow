@@ -1,0 +1,30 @@
+schemaVersion: 1
+domain: workflow
+entries:
+  - id: workflow-core
+    displayName: Core workflow
+    source:
+      kind: workflow
+      path: WORKFLOW.md
+      revision: git:b29c94b4fec9362dc4d70f1b7974e9e1a3370a57
+      contentHash: sha256:1120380927256392c767f27632675fa969393cdb0b04caca6b471b3f68f3a9ab
+    aliases:
+      - name: core-workflow
+        target: workflow-core
+    triggers:
+      - workflow
+    exclusions:
+      - read-only lookup
+    stages:
+      - discovered
+      - capability-checked
+    requiredCapabilities:
+      - filesystem-read
+    dependencies: []
+    conflicts: []
+    composition: standalone
+    mandatory: true
+    priority: 100
+    contextCost: 64
+    supportStatus: supported
+    protectedRuleOperations: []

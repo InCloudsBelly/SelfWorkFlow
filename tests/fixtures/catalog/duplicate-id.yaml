@@ -1,0 +1,43 @@
+schemaVersion: 1
+domain: workflow
+entries:
+  - id: duplicate-entry
+    displayName: First entry
+    source:
+      kind: workflow
+      path: WORKFLOW.md
+      revision: git:b29c94b4fec9362dc4d70f1b7974e9e1a3370a57
+      contentHash: sha256:1120380927256392c767f27632675fa969393cdb0b04caca6b471b3f68f3a9ab
+    aliases: []
+    triggers: [first]
+    exclusions: []
+    stages: [discovered]
+    requiredCapabilities: [filesystem-read]
+    dependencies: []
+    conflicts: []
+    composition: standalone
+    mandatory: false
+    priority: 10
+    contextCost: 10
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: duplicate-entry
+    displayName: Second entry
+    source:
+      kind: workflow
+      path: WORKFLOW.md
+      revision: git:b29c94b4fec9362dc4d70f1b7974e9e1a3370a57
+      contentHash: sha256:1120380927256392c767f27632675fa969393cdb0b04caca6b471b3f68f3a9ab
+    aliases: []
+    triggers: [second]
+    exclusions: []
+    stages: [discovered]
+    requiredCapabilities: [filesystem-read]
+    dependencies: []
+    conflicts: []
+    composition: standalone
+    mandatory: false
+    priority: 20
+    contextCost: 20
+    supportStatus: supported
+    protectedRuleOperations: []

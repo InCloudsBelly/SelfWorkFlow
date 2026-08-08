@@ -1,0 +1,16 @@
+schemaVersion: 1
+domains:
+  - domains/workflow.yaml
+  - domains/code-quality.yaml
+  - domains/knowledge.yaml
+standardCapabilities:
+  - skill-discovery
+  - independent-context
+  - command-execution
+  - filesystem-read
+  - filesystem-write
+  - test-execution
+  - user-confirmation
+  - task-resume
+  - knowledge-read
+  - knowledge-write

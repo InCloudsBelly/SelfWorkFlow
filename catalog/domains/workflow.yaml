@@ -1,0 +1,68 @@
+schemaVersion: 1
+domain: workflow
+entries:
+  - id: workflow-core
+    displayName: Core workflow contract
+    source:
+      kind: workflow
+      path: WORKFLOW.md
+      revision: git:b29c94b4fec9362dc4d70f1b7974e9e1a3370a57
+      contentHash: sha256:1120380927256392c767f27632675fa969393cdb0b04caca6b471b3f68f3a9ab
+    aliases:
+      - name: core-workflow
+        target: workflow-core
+    triggers:
+      - workflow execution
+      - task lifecycle
+    exclusions:
+      - pure read-only lookup
+    stages:
+      - discovered
+      - capability-checked
+      - classified
+      - designed
+      - planned
+      - implemented
+      - reviewed
+      - verified
+      - completed
+    requiredCapabilities:
+      - filesystem-read
+    dependencies: []
+    conflicts: []
+    composition: standalone
+    mandatory: true
+    priority: 1000
+    contextCost: 512
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: workflow-protected-rules
+    displayName: Protected rule contract
+    source:
+      kind: workflow
+      path: workflow/protected-rules.yaml
+      revision: git:77396da4465fcfe05be2dc9757289235e749802d
+      contentHash: sha256:715302be5e26aae0dbc983630e6a5cb1d8207efe93c643e8678ae13ffc09fbed
+    aliases:
+      - name: protected-rules
+        target: workflow-protected-rules
+    triggers:
+      - rule merge
+      - protected rule change
+    exclusions:
+      - unrelated content generation
+    stages:
+      - capability-checked
+      - reviewed
+      - verified
+    requiredCapabilities:
+      - filesystem-read
+    dependencies:
+      - workflow-core
+    conflicts: []
+    composition: augment
+    mandatory: true
+    priority: 900
+    contextCost: 256
+    supportStatus: supported
+    protectedRuleOperations: []

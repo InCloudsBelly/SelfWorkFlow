@@ -1,0 +1,40 @@
+schemaVersion: 1
+domain: code-quality
+entries:
+  - id: code-quality-verification-contract
+    displayName: Planned code quality verification contract
+    source:
+      kind: planned
+      path: workflow/evidence.yaml
+      revision: git:d4843843f8b3301712c322a219379d8cc06148a4
+      contentHash: sha256:2fe933b7fb5e78fd2d272ad9814a17a0354c8c26773d71018816b51ab3b27a7b
+    aliases:
+      - name: code-quality-verification
+        target: code-quality-verification-contract
+    triggers:
+      - code quality evidence
+      - verification evidence
+    exclusions:
+      - claim that a code quality skill is implemented
+    stages:
+      - reviewed
+      - verified
+    requiredCapabilities:
+      - filesystem-read
+      - test-execution
+    dependencies:
+      - workflow-core
+    conflicts: []
+    composition: augment
+    mandatory: false
+    priority: 500
+    contextCost: 192
+    supportStatus: unverified
+    protectedRuleOperations:
+      - operation: add-requirement
+        id: catalog-code-quality-verification
+        constraint:
+          kind: verification-status
+          target: code-quality-tests
+          mode: equals
+          value: passed
