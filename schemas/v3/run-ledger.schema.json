@@ -24,7 +24,8 @@
   "allOf": [
     {
       "if": {"properties": {"status": {"const": "superseded"}}, "required": ["status"]},
-      "then": {"required": ["supersededByPlanHash"]}
+      "then": {"required": ["supersededByPlanHash"]},
+      "else": {"not": {"required": ["supersededByPlanHash"]}}
     }
   ],
   "$defs": {
@@ -50,7 +51,7 @@
     "attempt": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["attemptRef", "ordinal", "previousAttemptRef"],
+      "required": ["attemptRef", "ordinal", "previousAttemptRef", "startedAt"],
       "properties": {
         "attemptRef": {"$ref": "#/$defs/stableId"},
         "ordinal": {"type": "integer", "minimum": 1, "maximum": 4096},

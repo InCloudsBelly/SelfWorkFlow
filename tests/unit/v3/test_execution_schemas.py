@@ -192,6 +192,19 @@ class ExecutionSchemaTests(unittest.TestCase):
     def _assert_schema_only_error(self, filename, document, path, validator):
         self._assert_schema_error(filename, document, path, validator)
 
+    def _assert_ledger_error(
+        self, ledger, plan, reason, path, receipts=(), successor=None,
+    ):
+        from selfworkflow.v3.contracts import ContractError, validate_run_ledger
+
+        with self.assertRaises(ContractError) as raised:
+            validate_run_ledger(
+                ledger, plan, receipts,
+                expected_successor_plan_hash=successor,
+            )
+        self.assertEqual(raised.exception.reason, reason)
+        self.assertEqual(raised.exception.path, path)
+
     def test_execution_schema_paths_exist(self):
         for name in self.SCHEMA_NAMES:
             with self.subTest(name=name):
@@ -308,7 +321,10 @@ class ExecutionSchemaTests(unittest.TestCase):
         ledger = self._ledger()
         ledger["stages"][1]["status"] = "active"
         ledger["stages"][1]["attempts"] = [
-            {"attemptRef": "attempt-b-1", "ordinal": 1, "previousAttemptRef": None}
+            {
+                "attemptRef": "attempt-b-1", "ordinal": 1,
+                "previousAttemptRef": None, "startedAt": "2026-08-09T00:00:00Z",
+            }
         ]
         self._assert_contract_error(
             "run-ledger.schema.json", ledger,
@@ -431,8 +447,10 @@ class ExecutionSchemaTests(unittest.TestCase):
             {
                 "attemptRef": "attempt-a-2", "ordinal": 2,
                 "previousAttemptRef": "attempt-a-1",
+                "startedAt": "2026-08-10T00:00:00Z",
             }
         )
+        ledger["stages"][0]["attempts"][0]["completedAt"] = "2026-08-09T01:00:00Z"
         ledger["stages"][0]["selectionReceiptRefs"] = [
             {"attemptRef": "attempt-a-1", "receiptHash": self.HASH_A}
         ]
@@ -487,14 +505,18 @@ class ExecutionSchemaTests(unittest.TestCase):
     def test_run_ledger_old_attempt_result_does_not_complete_current_attempt(self):
         plan = self._plan()
         ledger = self._ledger(plan)
+        ledger["status"] = "pending"
         stage = ledger["stages"][0]
         stage["status"] = "passed"
         stage["attempts"].append(
             {
                 "attemptRef": "attempt-a-2", "ordinal": 2,
                 "previousAttemptRef": "attempt-a-1",
+                "startedAt": "2026-08-10T00:00:00Z",
+                "completedAt": "2026-08-10T01:00:00Z",
             }
         )
+        stage["attempts"][0]["completedAt"] = "2026-08-09T01:00:00Z"
         stage["slotResults"] = [
             {
                 "attemptRef": "attempt-a-1", "slotId": "slot-a",
@@ -507,6 +529,179 @@ class ExecutionSchemaTests(unittest.TestCase):
             validate_run_ledger(ledger, plan)
         self.assertEqual(raised.exception.reason, "ledger-current-attempt-incomplete")
         self.assertEqual(raised.exception.path, ("stages", 0, "slotResults"))
+
+    def test_run_ledger_registered_loader_path_accepts_valid_ledger(self):
+        from selfworkflow.v3.contracts import load_contract
+
+        ledger = self._ledger()
+        self.assertEqual(
+            load_contract("run-ledger.schema.json", json.dumps(ledger)),
+            ledger,
+        )
+
+    def test_run_ledger_registered_reference_path_validates_receipt(self):
+        from selfworkflow.v3.contracts import load_contract, validate_run_ledger
+
+        plan = self._plan()
+        receipt = self._receipt(plan)
+        receipt.update({
+            "stageId": "stage-a", "slotId": "slot-a",
+            "attemptRef": "attempt-a-1", "eligibleModuleIds": ["module-a"],
+            "selectedModuleIds": ["module-a"],
+        })
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        ledger = self._ledger(plan)
+        ledger["stages"][0]["selectionReceiptRefs"] = [{
+            "attemptRef": "attempt-a-1", "receiptHash": receipt["receiptHash"],
+        }]
+        loaded = load_contract("run-ledger.schema.json", json.dumps(ledger))
+        self.assertIsNone(validate_run_ledger(loaded, plan, (receipt,)))
+
+    def test_run_ledger_rejects_fake_stage_slot_module_gate_and_skip(self):
+        plan = self._plan()
+        cases = []
+        fake_stage = self._ledger(plan)
+        fake_stage["stages"][1]["stageId"] = "fake-stage"
+        cases.append((fake_stage, "ledger-stage-unknown", ("stages", 1, "stageId"), ()))
+        fake_slot = self._ledger(plan)
+        fake_slot["stages"][0]["slotResults"] = [{
+            "attemptRef": "attempt-a-1", "slotId": "fake-slot",
+            "moduleId": "module-a", "artifactHash": self.HASH_A,
+        }]
+        cases.append((fake_slot, "ledger-slot-unknown", ("stages", 0, "slotResults", 0, "slotId"), ()))
+        fake_module = self._ledger(plan)
+        fake_module["stages"][0]["slotResults"] = [{
+            "attemptRef": "attempt-a-1", "slotId": "slot-a",
+            "moduleId": "fake-module", "artifactHash": self.HASH_A,
+        }]
+        cases.append((fake_module, "ledger-module-not-selected", ("stages", 0, "slotResults", 0, "moduleId"), ()))
+        fake_gate = self._ledger(plan)
+        fake_gate["stages"][0]["gateResults"] = [{
+            "attemptRef": "attempt-a-1", "gateId": "fake-gate",
+            "outcome": "passed", "artifactHash": self.HASH_A,
+        }]
+        cases.append((fake_gate, "ledger-gate-unknown", ("stages", 0, "gateResults", 0, "gateId"), ()))
+        bad_skip = self._ledger(plan)
+        bad_skip["stages"][0]["runtimeSkips"] = [{
+            "attemptRef": "attempt-a-1", "slotId": "slot-a",
+            "reasonCode": "not-needed", "evidenceHash": self.HASH_A,
+        }]
+        cases.append((bad_skip, "ledger-runtime-skip-not-optional", ("stages", 0, "runtimeSkips", 0, "slotId"), ()))
+        for ledger, reason, path, receipts in cases:
+            with self.subTest(reason=reason):
+                self._assert_ledger_error(ledger, plan, reason, path, receipts)
+
+    def test_run_ledger_bounded_module_requires_same_attempt_receipt(self):
+        plan = self._plan()
+        ledger = self._ledger(plan)
+        ledger["stages"][0].update({"status": "pending", "attempts": []})
+        stage = ledger["stages"][1]
+        stage.update({
+            "status": "active",
+            "attempts": [{
+                "attemptRef": "attempt-b-1", "ordinal": 1,
+                "previousAttemptRef": None, "startedAt": "2026-08-09T00:00:00Z",
+            }],
+            "slotResults": [{
+                "attemptRef": "attempt-b-1", "slotId": "slot-b",
+                "moduleId": "module-a", "artifactHash": self.HASH_A,
+            }],
+        })
+        receipt = self._receipt(plan)
+        receipt["attemptRef"] = "attempt-b-other"
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        self._assert_ledger_error(
+            ledger, plan, "ledger-module-selection-receipt-missing",
+            ("stages", 1, "slotResults", 0, "moduleId"), (receipt,),
+        )
+
+    def test_run_ledger_rejects_each_top_level_status_violation(self):
+        plan = self._plan()
+        cases = []
+        for status, reason in (
+            ("pending", "ledger-status-pending-invalid"),
+            ("superseded", "ledger-status-superseded-invalid"),
+        ):
+            ledger = self._ledger(plan)
+            ledger["status"] = status
+            if status == "superseded":
+                ledger["supersededByPlanHash"] = self.HASH_A
+            cases.append((ledger, reason, ("status",), self.HASH_A if status == "superseded" else None))
+        for status, reason in (
+            ("active", "ledger-status-active-invalid"),
+            ("paused", "ledger-status-paused-invalid"),
+            ("failed", "ledger-status-failed-invalid"),
+            ("completed", "ledger-status-completed-invalid"),
+        ):
+            ledger = self._ledger(plan)
+            ledger["status"] = status
+            ledger["stages"][0].update({"status": "pending", "attempts": []})
+            cases.append((ledger, reason, ("status",), None))
+        for ledger, reason, path, successor in cases:
+            with self.subTest(reason=reason):
+                self._assert_ledger_error(ledger, plan, reason, path, successor=successor)
+
+    def test_run_ledger_skipped_stage_cannot_carry_execution(self):
+        plan = self._plan()
+        ledger = self._ledger(plan)
+        ledger["status"] = "pending"
+        ledger["stages"][0]["status"] = "skipped"
+        self._assert_ledger_error(
+            ledger, plan, "ledger-skipped-stage-has-execution",
+            ("stages", 0),
+        )
+
+    def test_run_ledger_superseded_successor_is_explicit_and_exact(self):
+        plan = self._plan()
+        successor = self.HASH_A
+        ledger = self._ledger(plan)
+        ledger["status"] = "superseded"
+        ledger["stages"][0].update({"status": "paused", "attempts": []})
+        ledger["supersededByPlanHash"] = successor
+        for expected, reason in (
+            (None, "ledger-successor-plan-required"),
+            (self.HASH_B, "ledger-successor-plan-mismatch"),
+        ):
+            with self.subTest(reason=reason):
+                self._assert_ledger_error(ledger, plan, reason, ("supersededByPlanHash",), successor=expected)
+        active = self._ledger(plan)
+        self._assert_ledger_error(
+            active, plan, "ledger-successor-plan-unexpected", (),
+            successor=successor,
+        )
+
+    def test_run_ledger_schema_forbids_successor_on_non_superseded(self):
+        from selfworkflow.v3.contracts import ContractError, load_contract
+
+        ledger = self._ledger()
+        ledger["supersededByPlanHash"] = self.HASH_A
+        with self.assertRaises(ContractError) as raised:
+            load_contract("run-ledger.schema.json", json.dumps(ledger))
+        self.assertEqual(raised.exception.reason, "contract-schema-invalid")
+
+    def test_run_ledger_attempt_time_invariants(self):
+        plan = self._plan()
+        missing = self._ledger(plan)
+        missing["stages"][0]["attempts"][0].pop("startedAt")
+        backwards = self._ledger(plan)
+        backwards["stages"][0]["attempts"][0]["completedAt"] = "2026-08-08T00:00:00Z"
+        non_active = self._ledger(plan)
+        non_active["status"] = "paused"
+        non_active["stages"][0]["status"] = "paused"
+        active_completed = self._ledger(plan)
+        active_completed["stages"][0]["attempts"][0]["completedAt"] = "2026-08-10T00:00:00Z"
+        cases = (
+            (missing, "contract-schema-invalid", ("stages", 0, "attempts", 0)),
+            (backwards, "ledger-attempt-time-invalid", ("stages", 0, "attempts", 0, "completedAt")),
+            (non_active, "ledger-attempt-incomplete", ("stages", 0, "attempts", 0, "completedAt")),
+            (active_completed, "ledger-active-attempt-completed", ("stages", 0, "attempts", 0, "completedAt")),
+        )
+        from selfworkflow.v3.contracts import ContractError, validate_run_ledger
+        for ledger, reason, path in cases:
+            with self.subTest(reason=reason), self.assertRaises(ContractError) as raised:
+                validate_run_ledger(ledger, plan)
+            self.assertEqual(raised.exception.reason, reason)
+            self.assertEqual(raised.exception.path, path)
 
 
 if __name__ == "__main__":
