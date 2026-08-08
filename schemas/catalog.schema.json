@@ -101,7 +101,7 @@
       "additionalProperties": false,
       "required": ["kind", "path", "revision", "contentHash"],
       "properties": {
-        "kind": {"enum": ["workflow", "planned"]},
+        "kind": {"enum": ["workflow", "skill", "planned"]},
         "path": {"$ref": "#/$defs/relativeSourcePath"},
         "revision": {
           "type": "string",

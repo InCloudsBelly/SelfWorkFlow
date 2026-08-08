@@ -147,9 +147,14 @@ def _catalog_source(
         domain_document = yaml.safe_load(
             (FIXTURE_ROOT / fixture_name).read_text(encoding="utf-8")
         )
+        workflow_hash = "sha256:" + hashlib.sha256(
+            (repository_root / "WORKFLOW.md").read_bytes()
+        ).hexdigest()
         for entry in domain_document["entries"]:
             if "revision" in entry["source"]:
                 entry["source"]["revision"] = f"git:{source_revision}"
+            if entry["source"].get("path") == "WORKFLOW.md":
+                entry["source"]["contentHash"] = workflow_hash
         if mutate_domain is not None:
             mutate_domain(domain_document)
         (domain_root / "fixture.yaml").write_text(
@@ -353,10 +358,13 @@ class CatalogCompilationTests(unittest.TestCase):
         self.assertEqual(
             [entry["id"] for entry in catalog["entries"]],
             [
+                "code-quality",
                 "code-quality-verification-contract",
+                "grill-me",
                 "knowledge-on-demand-loading",
                 "workflow-core",
                 "workflow-protected-rules",
+                "workflow-quality",
             ],
         )
         for entry in catalog["entries"]:

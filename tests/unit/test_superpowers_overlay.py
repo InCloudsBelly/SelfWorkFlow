@@ -1,10 +1,12 @@
 from pathlib import Path
+import json
 import tempfile
 import unittest
 
 import yaml
 
 from selfworkflow.superpowers import decide_overlay, stage_selected_skills
+from selfworkflow.catalog import compile_catalog
 
 
 class SuperpowersOverlayTests(unittest.TestCase):
@@ -33,6 +35,16 @@ class SuperpowersOverlayTests(unittest.TestCase):
         self.assertIn("description: Use when ", skill)
         self.assertIn("independent", skill.casefold())
         self.assertNotIn("codex", skill.casefold())
+
+    def test_catalog_registers_new_skills_without_overstating_behavior_support(self):
+        envelope = json.loads(compile_catalog(self.ROOT / "catalog").content)
+        entries = {
+            item["id"]: item for item in envelope["catalog"]["entries"]
+        }
+        for skill_id in ("grill-me", "code-quality", "workflow-quality"):
+            self.assertIn(skill_id, entries)
+            self.assertEqual(entries[skill_id]["source"]["kind"], "skill")
+            self.assertEqual(entries[skill_id]["supportStatus"], "unverified")
 
     def test_stage_mapping_loads_only_current_phase_skills(self):
         cases = {

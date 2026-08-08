@@ -1,6 +1,37 @@
 schemaVersion: 1
 domain: code-quality
 entries:
+  - id: code-quality
+    displayName: Owner-first code quality workflow
+    source:
+      kind: skill
+      path: skills/code-quality/SKILL.md
+      revision: git:0d666311f775f435e915cc3a4d9187e7b1f5d198
+      contentHash: sha256:beede9c039f5ec6e6626ce9e6e826baeb4193d2a35e8d2801ae68264e97d80fd
+    aliases:
+      - name: owner-first-code-quality
+        target: code-quality
+    triggers: [bug fix, root cause, persistence, invalidation, shared regression]
+    exclusions: [pure content generation]
+    selectors:
+      fileExtensions: [.py, .ps1, .ts, .js, .cpp, .h, .yaml, .json]
+      operationTypes: [implement, debug, review, verify]
+      semanticTerms: [bug fix, root cause, persistence, invalidation, shared regression]
+    stages: [implemented, reviewed, verified]
+    requiredCapabilities: [filesystem-read, test-execution]
+    dependencies: [workflow-core, workflow-quality]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 840
+    contextCost: 420
+    supportStatus: unverified
+    protectedRuleOperations: []
   - id: code-quality-verification-contract
     displayName: Planned code quality verification contract
     source:

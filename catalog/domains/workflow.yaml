@@ -6,8 +6,8 @@ entries:
     source:
       kind: workflow
       path: WORKFLOW.md
-      revision: git:b29c94b4fec9362dc4d70f1b7974e9e1a3370a57
-      contentHash: sha256:1120380927256392c767f27632675fa969393cdb0b04caca6b471b3f68f3a9ab
+      revision: git:74a1c05eff442000cd2ed898776f470ff15166df
+      contentHash: sha256:b0b07c0bd29106120d3b7a760f5efeba75ef49f620ad18bbbb0e1f882a698f53
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -44,6 +44,68 @@ entries:
     priority: 1000
     contextCost: 512
     supportStatus: supported
+    protectedRuleOperations: []
+  - id: workflow-quality
+    displayName: Workflow quality guardrails
+    source:
+      kind: skill
+      path: skills/workflow-quality/SKILL.md
+      revision: git:0d666311f775f435e915cc3a4d9187e7b1f5d198
+      contentHash: sha256:52ce7b353a9c06516d52d92a8748296efe3c787fe49646f9081d714e67a73860
+    aliases:
+      - name: quality-guardrails
+        target: workflow-quality
+    triggers: [file change, side effect, review evidence, verification evidence]
+    exclusions: [pure read-only lookup]
+    selectors:
+      fileExtensions: []
+      operationTypes: [implement, debug, review, verify, install, publish]
+      semanticTerms: [file change, side effect, review evidence, verification evidence]
+    stages: [implemented, reviewed, verified]
+    requiredCapabilities: [filesystem-read]
+    dependencies: [workflow-core, workflow-protected-rules]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 850
+    contextCost: 180
+    supportStatus: unverified
+    protectedRuleOperations: []
+  - id: grill-me
+    displayName: Explicit design pressure test
+    source:
+      kind: skill
+      path: skills/grill-me/SKILL.md
+      revision: git:74a1c05eff442000cd2ed898776f470ff15166df
+      contentHash: sha256:1d1177c1611eb6fa61516a3e5dacf138c75baaa7f8b836c558b342858de8c150
+    aliases:
+      - name: grill
+        target: grill-me
+    triggers: [grill-me, pressure test, hidden assumptions, adversarial challenge]
+    exclusions: [implicit activation, ordinary brainstorming]
+    selectors:
+      fileExtensions: []
+      operationTypes: [design, plan]
+      semanticTerms: [grill-me, pressure test, hidden assumptions, adversarial challenge]
+    stages: [designed, planned]
+    requiredCapabilities: [independent-context, user-confirmation]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 800
+    contextCost: 240
+    supportStatus: unverified
     protectedRuleOperations: []
   - id: workflow-protected-rules
     displayName: Protected rule contract
