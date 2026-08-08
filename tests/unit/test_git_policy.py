@@ -52,7 +52,8 @@ class GitPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             _init(root)
-            (root / "secret.txt").write_text("-----BEGIN PRIVATE KEY-----\n", encoding="utf-8")
+            secret_marker = b"-----BEGIN " + b"PRIVATE KEY-----\n"
+            (root / "secret.txt").write_bytes(secret_marker)
             (root / "binary.dat").write_bytes(b"a\x00b")
             _git(root, "add", "secret.txt", "binary.dat")
             link_blob = _git(root, "hash-object", "-w", "--stdin", input_bytes=b"README.md").stdout.decode().strip()
