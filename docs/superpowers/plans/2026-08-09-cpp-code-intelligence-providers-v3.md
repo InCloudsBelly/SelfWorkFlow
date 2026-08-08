@@ -61,6 +61,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 - Create: `schemas/v3/review-finding.schema.json`
 - Create: `schemas/v3/review-aggregate.schema.json`
 - Create: `schemas/v3/test-strategy.schema.json`
+- Create: `schemas/v3/coverage-result.schema.json`
 - Create: `workflow/v3/pipeline.yaml`
 - Create: `catalog/v3/index.yaml`
 - Create: `src/selfworkflow/v3/__init__.py`
