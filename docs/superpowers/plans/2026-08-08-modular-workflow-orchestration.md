@@ -475,7 +475,7 @@ Expected: only Task 7 paths are committed. If Task 0 did not establish a clean b
 - Modify as needed: `docs/superpowers/specs/2026-08-08-modular-workflow-orchestration-design.md`
 - Do not modify: frozen C7 paths
 
-- [ ] **Step 1: Run format and diff checks**
+- [x] **Step 1: Run format and diff checks**
 
 Run: `git diff --check`
 
@@ -483,7 +483,7 @@ Run: `.\.venv\Scripts\python.exe -m selfworkflow.cli git-policy check --repo .`
 
 Expected: no whitespace error and no unallowlisted Git policy failure.
 
-- [ ] **Step 2: Run the focused modular workflow suite**
+- [x] **Step 2: Run the focused modular workflow suite**
 
 Run:
 
@@ -493,13 +493,13 @@ Run:
 
 Expected: exit 0. Record the test count in the final verification evidence after execution; the plan does not invent a count in advance.
 
-- [ ] **Step 3: Run the repository automated suite**
+- [x] **Step 3: Run the repository automated suite**
 
 Run: `.\scripts\verify.ps1 -Suite automated`
 
 Expected: exit 0. If it times out or fails, record the exact failing command and do not claim the full suite passed.
 
-- [ ] **Step 4: Audit the complete diff and frozen scope**
+- [x] **Step 4: Audit the complete diff and frozen scope**
 
 Check correctness, full acceptance coverage, failure paths, security, invasiveness, unrelated changes, and generated files. Run all four path audits from the real design commit `3ff07d6`:
 
@@ -512,20 +512,29 @@ git ls-files --others --exclude-standard
 
 Filter each result for the frozen C7 paths and confirm no match. Confirm no personal Wiki/runtime/credential file is tracked.
 
-- [ ] **Step 5: Dispatch one independent final reviewer**
+- [x] **Step 5: Dispatch one independent final reviewer**
 
 Provide only the approved spec, implementation diff, test evidence, skipped checks, and residual risks. Fix Critical/Important findings, rerun affected tests, and repeat Review once. Do not provide Grill-me transcripts or private reasoning.
 
-- [ ] **Step 6: Run fresh verification after Review fixes**
+- [x] **Step 6: Run fresh verification after Review fixes**
 
 Repeat targeted tests, Git policy, `git diff --check`, and the full automated suite when affected.
 
-- [ ] **Step 7: Update the plan with exact evidence**
+- [x] **Step 7: Update the plan with exact evidence**
 
 Record commands, exit codes, counts, skipped native Agent checks, and unverified boundaries. Keep raw logs out of Git.
 
-- [ ] **Step 8: Audit staging for the first-version Git submission**
+- [x] **Step 8: Audit staging for the first-version Git submission**
 
 Use `git diff --cached --name-only` and `git diff --cached --check`. Installer and V1 Resolver work must already be isolated in Task 0 and must not be restaged here. Confirm only modular-orchestration sources, tests, approved specifications, and final plans are staged. Do not automatically push or open a PR.
 
 Preferred final integration commit message: `feat: add modular self workflow orchestration`
+
+## Final verification evidence (2026-08-08)
+
+- Focused Review-fix suite: `python -m unittest tests.unit.test_ledger tests.unit.test_resolver -v`; 16 tests, exit 0.
+- Final repository automated suite: `.\scripts\verify.ps1 -Suite automated`; 378 tests, exit 0, 563.936 seconds.
+- Git policy: `python -m selfworkflow.cli git-policy check --repo .`; `status=passed`, zero findings.
+- Diff hygiene: `git diff --check` passed. Audits from design commit `3ff07d6` found no frozen C7 path and no untracked artifact.
+- Independent final Review found one Important read-only static-skip issue. Commit `2e61648` added a reproducing test and fixed it. The same reviewer then reported zero Critical, zero Important, and `Ready to merge: Yes`.
+- C7OpenWiki implementation/native MCP execution and real native runs in every advertised third-party Agent remain unverified and are intentionally outside this version. This release provides generic Knowledge slots only and makes no C7 runtime support claim.
