@@ -2,8 +2,9 @@
 
 from datetime import datetime
 from functools import lru_cache
+import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -19,6 +20,7 @@ _SCHEMA_NAMES = (
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
 @_FORMAT_CHECKER.checks("date-time", raises=ValueError)
@@ -176,9 +178,109 @@ def load_contract(schema_name: str, text: str) -> dict[str, Any]:
     return document
 
 
+def _is_reparse_point(path: Path) -> bool:
+    metadata = path.lstat()
+    return path.is_symlink() or bool(
+        getattr(metadata, "st_file_attributes", 0)
+        & _FILE_ATTRIBUTE_REPARSE_POINT
+    )
+
+
+def _module_ref_target(
+    module_root: str | Path,
+    reference: str,
+    module_index: int,
+) -> Path:
+    error_path = ("modules", module_index, "ref")
+    windows_path = PureWindowsPath(reference)
+    if (
+        windows_path.is_absolute()
+        or windows_path.drive
+        or windows_path.root
+        or not windows_path.parts
+        or any(part in {"", ".", ".."} for part in windows_path.parts)
+        or ":" in reference
+    ):
+        raise ContractError(
+            "catalog-module-ref-path-invalid",
+            error_path,
+            "semantic",
+        )
+
+    root = Path(module_root)
+    try:
+        if not root.is_dir():
+            raise OSError
+        if _is_reparse_point(root):
+            raise ContractError(
+                "catalog-module-ref-reparse",
+                error_path,
+                "semantic",
+            )
+        current = root
+        for part in windows_path.parts:
+            current /= part
+            if _is_reparse_point(current):
+                raise ContractError(
+                    "catalog-module-ref-reparse",
+                    error_path,
+                    "semantic",
+                )
+        if not current.is_file():
+            raise OSError
+        resolved_root = root.resolve(strict=True)
+        resolved_target = current.resolve(strict=True)
+        resolved_target.relative_to(resolved_root)
+    except ContractError:
+        raise
+    except (OSError, ValueError):
+        raise ContractError(
+            "catalog-module-ref-unresolved",
+            error_path,
+            "semantic",
+        ) from None
+    return current
+
+
+def _load_module_ref(
+    declaration: dict[str, Any],
+    module_root: str | Path,
+    module_index: int,
+) -> dict[str, Any]:
+    target = _module_ref_target(module_root, declaration["ref"], module_index)
+    try:
+        content = target.read_bytes()
+    except OSError:
+        raise ContractError(
+            "catalog-module-ref-unresolved",
+            ("modules", module_index, "ref"),
+            "semantic",
+        ) from None
+    content_hash = "sha256:" + hashlib.sha256(content).hexdigest()
+    if content_hash != declaration["hash"]:
+        raise ContractError(
+            "catalog-module-ref-hash-mismatch",
+            ("modules", module_index, "hash"),
+            "semantic",
+        )
+    try:
+        module_text = content.decode("utf-8")
+    except UnicodeError:
+        raise ContractError("contract-json-invalid", validator="json") from None
+    module = load_contract("module.schema.json", module_text)
+    if module["id"] != declaration["id"]:
+        raise ContractError(
+            "catalog-module-ref-id-mismatch",
+            ("modules", module_index, "id"),
+            "semantic",
+        )
+    return module
+
+
 def validate_catalog_pipeline(
     catalog: dict[str, Any],
     pipeline: dict[str, Any],
+    module_root: str | Path,
 ) -> None:
     """Validate semantic links between a V3 Catalog and Pipeline."""
 
@@ -207,6 +309,13 @@ def validate_catalog_pipeline(
             )
         seen_modules.add(module_id)
 
+    resolved_modules = [
+        module
+        if "stage" in module
+        else _load_module_ref(module, module_root, module_index)
+        for module_index, module in enumerate(catalog["modules"])
+    ]
+
     stages: dict[str, dict[str, Any]] = {}
     seen_slots: set[str] = set()
     for stage_index, stage in enumerate(pipeline["stages"]):
@@ -228,9 +337,7 @@ def validate_catalog_pipeline(
                 )
             seen_slots.add(slot_id)
 
-    for module_index, module in enumerate(catalog["modules"]):
-        if "stage" not in module:
-            continue
+    for module_index, module in enumerate(resolved_modules):
         stage = stages.get(module["stage"])
         if stage is None:
             raise ContractError(

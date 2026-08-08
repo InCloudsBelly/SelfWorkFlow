@@ -1,6 +1,8 @@
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from jsonschema import Draft202012Validator, FormatChecker
@@ -187,18 +189,59 @@ class OrchestrationSchemaTests(unittest.TestCase):
         pipeline,
         reason,
         path,
+        module_root=None,
     ):
         from selfworkflow.v3.contracts import (
             ContractError,
             validate_catalog_pipeline,
         )
 
+        if module_root is None:
+            with TemporaryDirectory() as temporary_root:
+                return self._assert_catalog_pipeline_error(
+                    catalog,
+                    pipeline,
+                    reason,
+                    path,
+                    Path(temporary_root),
+                )
+
         with self.assertRaises(ContractError) as raised:
-            validate_catalog_pipeline(catalog, pipeline)
+            validate_catalog_pipeline(catalog, pipeline, module_root)
 
         self.assertEqual(raised.exception.reason, reason)
         self.assertEqual(raised.exception.path, path)
         self.assertEqual(raised.exception.validator, "semantic")
+
+    def _catalog_with_module_ref(
+        self,
+        module_root,
+        module=None,
+        declared_id=None,
+        declared_hash=None,
+        ref="modules/review-independent.json",
+        write=True,
+    ):
+        target_module = deepcopy(module or self.MODULE)
+        content = json.dumps(
+            target_module,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if write:
+            target_path = Path(module_root) / ref
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(content)
+        content_hash = "sha256:" + hashlib.sha256(content).hexdigest()
+        catalog = deepcopy(self.CATALOG)
+        catalog["modules"] = [
+            {
+                "id": declared_id or target_module["id"],
+                "ref": ref,
+                "hash": declared_hash or content_hash,
+            }
+        ]
+        return catalog
 
     def test_v3_resolve_request_schema_is_available(self):
         schema_path = self.ROOT / "schemas" / "v3" / "resolve-request.schema.json"
@@ -442,10 +485,12 @@ class OrchestrationSchemaTests(unittest.TestCase):
     def test_catalog_pipeline_semantics_accept_matching_contracts(self):
         from selfworkflow.v3.contracts import validate_catalog_pipeline
 
-        result = validate_catalog_pipeline(
-            deepcopy(self.CATALOG),
-            deepcopy(self.PIPELINE),
-        )
+        with TemporaryDirectory() as module_root:
+            result = validate_catalog_pipeline(
+                deepcopy(self.CATALOG),
+                deepcopy(self.PIPELINE),
+                Path(module_root),
+            )
 
         self.assertIsNone(result)
 
@@ -549,6 +594,164 @@ class OrchestrationSchemaTests(unittest.TestCase):
             "catalog-module-selection-mode-mismatch",
             ("modules", 0, "selectionMode"),
         )
+
+    def test_catalog_module_ref_accepts_valid_target(self):
+        from selfworkflow.v3.contracts import validate_catalog_pipeline
+
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root)
+
+            result = validate_catalog_pipeline(catalog, self.PIPELINE, root)
+
+        self.assertIsNone(result)
+
+    def test_catalog_module_ref_rejects_missing_target(self):
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root, write=False)
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-ref-unresolved",
+                ("modules", 0, "ref"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_content_hash_drift(self):
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(
+                root,
+                declared_hash="sha256:" + "0" * 64,
+            )
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-ref-hash-mismatch",
+                ("modules", 0, "hash"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_declared_id_mismatch(self):
+        target = deepcopy(self.MODULE)
+        target["id"] = "review-other"
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(
+                root,
+                target,
+                declared_id="review-independent",
+            )
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-ref-id-mismatch",
+                ("modules", 0, "id"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_unknown_target_stage(self):
+        target = deepcopy(self.MODULE)
+        target["stage"] = "implemented"
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root, target)
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-stage-unknown",
+                ("modules", 0, "stage"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_unknown_target_slot(self):
+        target = deepcopy(self.MODULE)
+        target["slot"] = "review.unknown"
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root, target)
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-slot-unknown",
+                ("modules", 0, "slot"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_disallowed_invocation_kind(self):
+        target = deepcopy(self.MODULE)
+        target["invocation"]["kind"] = "mcp"
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root, target)
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-invocation-kind-not-allowed",
+                ("modules", 0, "invocation", "kind"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_selection_mode_mismatch(self):
+        target = deepcopy(self.MODULE)
+        target["selectionMode"] = "bounded-runtime"
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root, target)
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-selection-mode-mismatch",
+                ("modules", 0, "selectionMode"),
+                root,
+            )
+
+    def test_catalog_module_ref_rejects_absolute_and_traversal_paths(self):
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            refs = (str(root / "module.json"), "../module.json")
+            for ref in refs:
+                with self.subTest(ref=ref):
+                    catalog = self._catalog_with_module_ref(
+                        root,
+                        ref=ref,
+                        write=False,
+                    )
+                    self._assert_catalog_pipeline_error(
+                        catalog,
+                        self.PIPELINE,
+                        "catalog-module-ref-path-invalid",
+                        ("modules", 0, "ref"),
+                        root,
+                    )
+
+    def test_catalog_module_ref_rejects_reparse_target(self):
+        with TemporaryDirectory() as module_root:
+            root = Path(module_root)
+            catalog = self._catalog_with_module_ref(root)
+            module_path = root / catalog["modules"][0]["ref"]
+            target_path = root / "module-target.json"
+            module_path.replace(target_path)
+            try:
+                module_path.symlink_to(target_path)
+            except OSError as error:
+                self.fail(f"catalog-module-ref-reparse-fixture-failed:{error.winerror}")
+
+            self._assert_catalog_pipeline_error(
+                catalog,
+                self.PIPELINE,
+                "catalog-module-ref-reparse",
+                ("modules", 0, "ref"),
+                root,
+            )
 
     def test_resolve_request_rejects_invalid_calendar_timestamp(self):
         request = self._resolve_request_with_evidence(
