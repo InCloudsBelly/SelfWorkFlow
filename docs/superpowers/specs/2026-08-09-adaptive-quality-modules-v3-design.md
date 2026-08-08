@@ -6,6 +6,11 @@
 - 范围：OpenSpec、TEA、选择性 Review、Quality Playbook/安全审查模块及其 Git 依赖管理
 - 不在本轮范围：Spec Kit、C7OpenWiki MCP 的具体实现、非 Codex Agent 的完整行为认证
 
+代码理解、C++ 增强、Provider 本地覆写和维护操作由规范性设计增量
+[`2026-08-09-cpp-code-intelligence-providers-v3-design.md`](2026-08-09-cpp-code-intelligence-providers-v3-design.md)
+定义。该增量与本文共同组成 V3 设计与实施计划依据；发生冲突时，增量只能收紧 Provider、维护授权、独立 Review
+和证据边界，不能降低本文的受保护不变量。
+
 ## 1. 目标与约束
 
 SelfWorkFlow 继续保持固定的轻量代码主干，不把所有 Skill 注入每次任务。V3 在此基础上增加：
@@ -25,6 +30,8 @@ V3 保留以下受保护不变量：
 - 不覆盖用户已有修改；
 - 完成前必须具有绑定最终产物的新鲜验证证据；
 - 运行期选择器不得越过静态 PlanGraph 的允许边界。
+- 显式 Grill-me 后的 Brainstorming 交叉 Review 必须由新建的独立 SubAgent 执行，只接收规范化设计摘要；
+  宿主不支持时必须先取得用户授权，并永久标记 `independence=unverified`。
 
 ## 2. 架构决策
 
@@ -187,6 +194,13 @@ Host 必须机械校验所选模块是 `eligibleModules` 的子集、hash 新鲜
 - V3 的 `failureRoute` 可以按 finding/coverage 的 `rootCauseOwner` 回到 design、plan、implemented、reviewed
   或 verified，不再用一个阶段级 `failureOwner` 假装表达全部根因；
 - V2 代码路径和测试作为兼容回归保留，V3 测试不得通过修改 V2 fixture 来获得通过。
+
+### 3.6 Provider 绑定边界
+
+V3 代码增强增量把能力、模块和具体 Provider 分离。PlanGraph 必须静态绑定允许的
+`(moduleId, providerId, operationId, adapterHash)` 元组；运行期选择器不得发现本地工具、拼接任意命令、
+安装 Provider 或切换到计划外实现。Provider 的稳定支持证据与项目索引等动态状态分别建模，详细契约见代码
+增强增量。
 
 ## 4. Design 模块路由
 
@@ -408,6 +422,8 @@ diff 和证据均未变化时只允许有界重试。
 - Claude Code、Cursor、OpenCode：先提供适配入口，真实行为测试前为 unverified；
 - GitHub Copilot：仅提供 Instructions 兼容层；
 - OpenSpec、TEA、Quality Playbook、Trail of Bits：锁定和契约测试不等于真实执行支持；
+- CodeGraph、Serena/clangd、DebugMCP、C++ Heavy Provider：只能按“能力 × 操作 × 平台 × Adapter 版本”
+  分别升级支持状态；本地路径存在、工具可启动或上游热度均不等于受支持；
 - C7OpenWiki：本轮不修改，保持独立适配任务。
 
 ## 11. 验收策略
@@ -462,4 +478,7 @@ diff 和证据均未变化时只允许有界重试。
   ModuleLoadTrace；通过 oracle 同时校验 Schema、预期模块集合、禁止副作用和完成 Gate；
 - 最终完整 diff 的独立 Review receipt 必须包含不同 context/agent identity、最终 diff hash、结构化 findings
   和验证结论；同一上下文回退时标记 independence=unverified；
+- 显式 Grill-me 后的 Brainstorming Review 必须创建 `fork_context=false` 的独立 SubAgent，只传入规范化设计
+  摘要并绑定 `inputSummaryHash`、`designHash`、`reviewerPolicyHash` 和 Host 可提供的 identity attestation；宿主
+  不支持时必须先暂停取得用户授权，且同一 Agent Review 不得标记为 independent；
 - 不能执行的外部能力保留 `unverified`，并记录原因和人工验证方法。
