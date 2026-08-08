@@ -193,26 +193,36 @@ V1 原因码至少包括：`required-capability-unavailable`、
 不得写成 PlanGraph 事实。Host 使用显式 `RunLedger` 保存 StageResult、Gate 结果、
 重试和运行期跳过。输入或证据变化后必须重新解析；旧 planHash 不得续跑。
 
-RunLedger 使用独立 v1 Schema，但不要求中央持久化服务：
+RunLedger 使用独立 v2 Schema，但不要求中央持久化服务：
 
 ```text
-schemaVersion
+schemaVersion: 2
 planHash / requestHash
 status: pending | active | paused | failed | completed | superseded
 stages[]:
   stageId
   status: pending | active | passed | failed | paused | skipped
-  attempts[]
-  slotResults[]
-  gateResults[]
-  runtimeSkips[]
+  attempts[]: {attemptRef, ordinal, previousAttemptRef}
+  slotResults[]: {attemptRef, moduleId, resultRef}
+  gateResults[]: {attemptRef, gateId, outcome, resultRef}
+  runtimeSkips[]: {attemptRef, slotId, evidenceRef}
 supersededByPlanHash?
 ```
 
 同一时刻最多一个阶段为 active。阶段只能从 pending 进入 active，再进入终态；重试
-追加 attempt，不覆盖旧结果。Runtime skip 仅允许用于计划声明的 optional slot，且
-必须引用 Gate 结果或能力证据。失败按 PlanGraph 的 failureOwner 回流。请求或能力
-证据变化时，旧 Ledger 标为 superseded 并绑定新 planHash，不能在旧 Ledger 中继续。
+追加 attempt，不覆盖旧结果。每个 slot result、Gate result 和 runtime skip 都绑定
+产生它的 attemptRef；当前 attempt 是 `attempts[]` 的最后一项，阶段通过条件只读取
+当前 attempt 的结果。追加新 attempt 后，旧结果保留审计但立即失去通过效力，直到
+新 attempt 产生完整结果。Runtime skip 仅允许用于计划声明的 optional slot，且必须
+引用 Gate 结果或能力证据。失败按 PlanGraph 的 failureOwner 回流。请求或能力证据
+变化时，旧 Ledger 标为 superseded 并绑定新 planHash，不能在旧 Ledger 中继续。
+
+attemptRef 在整个 Ledger 内唯一。首个 attempt 固定 `ordinal=1` 且 previous 为 null；
+后续 ordinal 严格加一并引用紧邻前一个 attemptRef，形成可验证连续链。结构化结果的
+attemptRef 必须属于同一 stage 的 attempts，未知、跨 stage、重复、删除、插入或重排
+全部拒绝。只有最后一个合法 attempt 的结果参与阶段完成判定。旧 v1 结果没有可靠
+attempt 归属，V2 CLI 和 API 以稳定的 `ledger-schema-version-unsupported` 拒绝，
+不猜测迁移、不静默采用旧结果。
 
 模块返回最小 StageResult：
 
@@ -307,7 +317,8 @@ ID/hash 作为 subject，不新增 Gate 专用 receipt 格式。纯文档交付�
 receipt 立即失效并重新 Review，只有最终 diff/hash 对应的 receipt 可使 Review Gate
 通过。普通实现修正不重新解析静态计划；只有 Request、能力证据或其他 PlanGraph
 输入变化时才 supersede/re-plan。任何修正都会使旧 Review 和完成证据失效，且最终
-完成 subject 必须重新绑定最终 diff/hash。
+完成 subject 必须重新绑定最终 diff/hash。新 attempt 创建后，旧 attempt 的
+slot/Gate 结果不能使阶段通过。
 
 ## 8. 模块选择与冲突
 
@@ -434,6 +445,8 @@ Pipeline Schema、Catalog Schema、Resolver Output 和 Behavior Policy 分别版
 - 删除 `superpowers.py` 中与 Catalog 重复的运行时硬编码映射；
 - Optional 字段或 Slot 默认视为 breaking；只有消费者显式声明可忽略未知项时才可
   作为向后兼容变更；
+- RunLedger 从 v1 升级到 v2，attempt 和结果改为结构化绑定；由于 v1 无法恢复结果
+  所属 attempt，CLI/API 稳定拒绝 v1，不提供猜测性迁移；
 - 默认模块、Required Stage/Slot、顺序或 Gate 变化是 breaking change。
 
 V1 仅支持 checked-in 模块。新增模块需要模块声明、Skill/适配器、Catalog 条目、
@@ -534,11 +547,11 @@ Resolver 返回脱敏 ResolveError，不产生 PlanGraph。
 | 模块选择 | Catalog v2 + Resolver | 默认、显式、强制、确定性、冲突、去重 |
 | 强度 | classification pure function | `writeTask × 16 C/R` 共 32 格 |
 | 计划身份 | ResolveResult + PlanGraph | hash 稳定、证据变化失效、paused 原因码 |
-| 运行边界 | RunLedger v1 + StageResult | 状态转换、单 active、重试追加、supersede |
+| 运行边界 | RunLedger v2 + StageResult | 状态转换、单 active、attempt-bound 结果、v1 拒绝、supersede |
 | Grill 流程 | Design slot order | 显式/推荐确认、独立 Brainstorming 顺序 |
 | 中间文档 Review | design/plan Gate + Host policy | 最终 hash receipt、修正后旧 receipt 失效、Review 后继续实现 |
 | 纯文档交付 | `implement-documentation` + Review/Verify | document 请求可解析、落地后 Review、文档验证 |
-| 实现后 Review | Review receipt + active RunLedger attempt | 最终 diff/hash 绑定、修正使旧 receipt 失效、重新 Review、静态输入变化才 re-plan |
+| 实现后 Review | Review receipt + attempt-bound RunLedger results | 新 attempt 不复用旧结果、最终 diff/hash 绑定、重新 Review、静态输入变化才 re-plan |
 | 次要决策 | `decision-record` Schema/validator + agent-policy | 引用一致性、独立性组合、委托与关键决策拒绝自动裁决 |
 | Git 边界 | git-policy + index scanner | forbidden、allowlist、symlink/submodule/binary |
 | Knowledge 边界 | Generic slot/interface | C7 冻结路径无 diff、无 MCP 调用 |
