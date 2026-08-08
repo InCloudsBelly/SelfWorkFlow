@@ -279,16 +279,40 @@ def _validate_selection_receipt(
         return
     if document["planHash"] != plan["planHash"]:
         _raise_semantic("selection-receipt-plan-mismatch", ("planHash",))
-    for stage_index, stage in enumerate(plan["stages"]):
-        for slot_index, slot in enumerate(stage["slots"]):
-            if stage["stageId"] == document["stageId"] and slot["slotId"] == document["slotId"]:
-                if document["eligibleModuleIds"] != slot["eligibleModules"]:
-                    _raise_semantic(
-                        "selection-receipt-eligible-set-mismatch",
-                        ("eligibleModuleIds",),
-                    )
-                return
-    _raise_semantic("selection-receipt-slot-mismatch", ("slotId",))
+    stage = next(
+        (item for item in plan["stages"] if item["stageId"] == document["stageId"]),
+        None,
+    )
+    if stage is None:
+        _raise_semantic("selection-receipt-stage-mismatch", ("stageId",))
+    slot = next(
+        (item for item in stage["slots"] if item["slotId"] == document["slotId"]),
+        None,
+    )
+    if slot is None:
+        _raise_semantic("selection-receipt-slot-mismatch", ("slotId",))
+    if document["eligibleModuleIds"] != slot["eligibleModules"]:
+        _raise_semantic(
+            "selection-receipt-eligible-set-mismatch",
+            ("eligibleModuleIds",),
+        )
+    selected = document["selectedModuleIds"]
+    if slot["selectionMode"] == "static" and selected != slot["selectedModules"]:
+        _raise_semantic(
+            "selection-receipt-static-selection-mismatch",
+            ("selectedModuleIds",),
+        )
+    cardinality_valid = {
+        "exactly-one": len(selected) == 1,
+        "zero-or-one": len(selected) <= 1,
+        "zero-or-many": True,
+        "gate": len(selected) >= 1,
+    }[slot["cardinality"]]
+    if not cardinality_valid:
+        _raise_semantic(
+            "selection-receipt-cardinality-invalid",
+            ("selectedModuleIds",),
+        )
 
 
 def _validate_run_ledger(
@@ -358,9 +382,29 @@ def _validate_run_ledger(
             if receipts and receipt is None:
                 _raise_semantic("ledger-receipt-ref-invalid", ("stages", stage_index, "selectionReceiptRefs", ref_index, "receiptHash"))
             if receipt is not None:
+                receipt_path = (
+                    "stages", stage_index, "selectionReceiptRefs", ref_index,
+                    "receiptHash",
+                )
+                if receipt["planHash"] != document["planHash"]:
+                    _raise_semantic("ledger-receipt-plan-mismatch", receipt_path)
+                if receipt["stageId"] != stage["stageId"]:
+                    _raise_semantic("ledger-receipt-stage-mismatch", receipt_path)
                 if receipt["attemptRef"] != reference["attemptRef"]:
                     _raise_semantic("ledger-receipt-attempt-mismatch", attempt_path)
                 if plan is not None:
+                    plan_stage = next(
+                        (
+                            item for item in plan["stages"]
+                            if item["stageId"] == stage["stageId"]
+                        ),
+                        None,
+                    )
+                    if plan_stage is None or not any(
+                        slot["slotId"] == receipt["slotId"]
+                        for slot in plan_stage["slots"]
+                    ):
+                        _raise_semantic("ledger-receipt-slot-mismatch", receipt_path)
                     _validate_selection_receipt(receipt, plan)
 
         if plan is not None and stage["status"] == "passed":

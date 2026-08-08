@@ -355,6 +355,75 @@ class ExecutionSchemaTests(unittest.TestCase):
             "selection-receipt-hash-invalid", ("receiptHash",),
         )
 
+    def test_selection_receipt_binds_existing_stage_and_slot(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        cases = (
+            ("missing-stage", "slot-b", "selection-receipt-stage-mismatch", ("stageId",)),
+            ("stage-b", "missing-slot", "selection-receipt-slot-mismatch", ("slotId",)),
+        )
+        for stage_id, slot_id, reason, path in cases:
+            receipt = self._receipt(plan)
+            receipt["stageId"] = stage_id
+            receipt["slotId"] = slot_id
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            with self.subTest(reason=reason), self.assertRaises(ContractError) as raised:
+                validate_selection_receipt(receipt, plan)
+            self.assertEqual(raised.exception.reason, reason)
+            self.assertEqual(raised.exception.path, path)
+
+    def test_selection_receipt_requires_exact_plan_eligible_set(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        receipt = self._receipt(plan)
+        receipt["eligibleModuleIds"] = []
+        receipt["selectedModuleIds"] = []
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt, plan)
+        self.assertEqual(raised.exception.reason, "selection-receipt-eligible-set-mismatch")
+        self.assertEqual(raised.exception.path, ("eligibleModuleIds",))
+
+    def test_selection_receipt_static_selection_matches_plan(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        receipt = self._receipt(plan)
+        receipt.update({
+            "stageId": "stage-a", "slotId": "slot-a", "attemptRef": "attempt-a-1",
+            "eligibleModuleIds": ["module-a"], "selectedModuleIds": [],
+        })
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt, plan)
+        self.assertEqual(raised.exception.reason, "selection-receipt-static-selection-mismatch")
+        self.assertEqual(raised.exception.path, ("selectedModuleIds",))
+
+    def test_selection_receipt_enforces_each_cardinality(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        cases = (
+            ("exactly-one", [], "selection-receipt-cardinality-invalid"),
+            ("zero-or-one", ["module-a", "module-b"], "selection-receipt-cardinality-invalid"),
+            ("zero-or-many", ["module-outside"], "selection-receipt-selected-module-ineligible"),
+            ("gate", [], "selection-receipt-cardinality-invalid"),
+        )
+        for cardinality, selected, reason in cases:
+            plan = self._plan()
+            slot = plan["stages"][1]["slots"][0]
+            slot["cardinality"] = cardinality
+            slot["eligibleModules"] = ["module-a", "module-b"]
+            plan["planHash"] = self._hash_document(plan, "planHash")
+            receipt = self._receipt(plan)
+            receipt["eligibleModuleIds"] = ["module-a", "module-b"]
+            receipt["selectedModuleIds"] = selected
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            with self.subTest(cardinality=cardinality), self.assertRaises(ContractError) as raised:
+                validate_selection_receipt(receipt, plan)
+            self.assertEqual(raised.exception.reason, reason)
+
     def test_run_ledger_rejects_old_attempt_receipt_mismatch(self):
         plan = self._plan()
         ledger = self._ledger(plan)
@@ -380,6 +449,40 @@ class ExecutionSchemaTests(unittest.TestCase):
             validate_run_ledger(ledger, plan, (receipt,))
         self.assertEqual(raised.exception.reason, "ledger-receipt-attempt-stale")
         self.assertEqual(raised.exception.path, ("stages", 0, "selectionReceiptRefs", 0, "attemptRef"))
+
+    def test_run_ledger_rejects_receipt_plan_stage_slot_and_attempt_mismatch(self):
+        from selfworkflow.v3.contracts import ContractError, validate_run_ledger
+
+        plan = self._plan()
+        cases = (
+            ("plan", "ledger-receipt-plan-mismatch", ("stages", 0, "selectionReceiptRefs", 0, "receiptHash")),
+            ("stage", "ledger-receipt-stage-mismatch", ("stages", 0, "selectionReceiptRefs", 0, "receiptHash")),
+            ("slot", "ledger-receipt-slot-mismatch", ("stages", 0, "selectionReceiptRefs", 0, "receiptHash")),
+            ("attempt", "ledger-receipt-attempt-mismatch", ("stages", 0, "selectionReceiptRefs", 0, "attemptRef")),
+        )
+        for kind, reason, path in cases:
+            ledger = self._ledger(plan)
+            receipt = self._receipt(plan)
+            receipt.update({
+                "stageId": "stage-a", "slotId": "slot-a", "attemptRef": "attempt-a-1",
+                "eligibleModuleIds": ["module-a"], "selectedModuleIds": ["module-a"],
+            })
+            if kind == "plan":
+                receipt["planHash"] = self.HASH_A
+            elif kind == "stage":
+                receipt.update({"stageId": "stage-b", "slotId": "slot-b", "eligibleModuleIds": ["module-b"], "selectedModuleIds": ["module-b"]})
+            elif kind == "slot":
+                receipt["slotId"] = "missing-slot"
+            elif kind == "attempt":
+                receipt["attemptRef"] = "attempt-other"
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            ledger["stages"][0]["selectionReceiptRefs"] = [
+                {"attemptRef": "attempt-a-1", "receiptHash": receipt["receiptHash"]}
+            ]
+            with self.subTest(kind=kind), self.assertRaises(ContractError) as raised:
+                validate_run_ledger(ledger, plan, (receipt,))
+            self.assertEqual(raised.exception.reason, reason)
+            self.assertEqual(raised.exception.path, path)
 
     def test_run_ledger_old_attempt_result_does_not_complete_current_attempt(self):
         plan = self._plan()
