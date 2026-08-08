@@ -40,7 +40,7 @@ class LoadedPipeline:
 def load_pipeline(source: object = None) -> LoadedPipeline:
     path = _v3_pipeline_path(source)
     try:
-        document = _load_yaml_file(path, _MAX_DOCUMENT_BYTES)
+        document = _load_yaml_file(path, _MAX_DOCUMENT_BYTES, path.parents[2])
     except CatalogError as error:
         raise PipelineError(error.reason) from None
     except (OverflowError, RecursionError, TypeError, ValueError):

@@ -109,16 +109,84 @@ class V3CatalogCompilerTests(unittest.TestCase):
                 st_mode=actual.st_mode,
                 st_size=limit,
             )
+            original_lstat = Path.lstat
+
+            def bounded_lstat(candidate):
+                if candidate == path:
+                    return metadata
+                return original_lstat(candidate)
+
             source = path.open("rb")
             with (
-                patch.object(Path, "lstat", return_value=metadata),
+                patch.object(Path, "lstat", new=bounded_lstat),
                 patch.object(Path, "open", return_value=TrackingStream(source)),
                 self.assertRaises(CatalogError) as raised,
             ):
-                _read_bytes(path, limit)
+                _read_bytes(path, limit, path.parent)
 
         self.assertEqual(raised.exception.reason, "v3-yaml-resource-limit")
         self.assertEqual(read_sizes, [limit + 1])
+
+    def test_shared_yaml_read_rejects_parent_identity_change(self):
+        CatalogError, compile_catalog = _compiler()
+        with _workspace() as (_, root):
+            index = root / "catalog" / "v3" / "index.yaml"
+            parent = index.parent
+            original_lstat = Path.lstat
+            original_open = Path.open
+            parent_before = parent.lstat()
+            parent_after = SimpleNamespace(
+                st_dev=parent_before.st_dev,
+                st_file_attributes=getattr(
+                    parent_before, "st_file_attributes", 0
+                ),
+                st_ino=parent_before.st_ino + 1,
+                st_mode=parent_before.st_mode,
+                st_size=parent_before.st_size,
+            )
+            read_finished = False
+
+            class ReplacingParentStream:
+                def __init__(self, source):
+                    self.source = source
+
+                def read(self, size=-1):
+                    nonlocal read_finished
+                    data = self.source.read(size)
+                    read_finished = True
+                    return data
+
+                def fileno(self):
+                    return self.source.fileno()
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc_value, traceback):
+                    self.source.close()
+
+            def changing_lstat(candidate):
+                if candidate == parent and read_finished:
+                    return parent_after
+                return original_lstat(candidate)
+
+            def tracked_open(candidate, *args, **kwargs):
+                source = original_open(candidate, *args, **kwargs)
+                if candidate == index:
+                    return ReplacingParentStream(source)
+                return source
+
+            with (
+                patch.object(Path, "lstat", new=changing_lstat),
+                patch.object(Path, "open", new=tracked_open),
+            ):
+                try:
+                    compile_catalog(index)
+                except Exception as error:
+                    self.assertIsInstance(error, CatalogError)
+                    self.assertEqual(error.reason, "v3-yaml-path-changed")
+                else:
+                    self.fail("catalog accepted a changed parent path identity")
 
     def test_catalog_hash_and_yaml_parse_share_one_source_snapshot(self):
         from selfworkflow.v3 import catalog
@@ -143,9 +211,9 @@ class V3CatalogCompilerTests(unittest.TestCase):
             reads = {path: 0 for path in snapshots}
             original_read = catalog._read_bytes
 
-            def changing_read(path, limit):
+            def changing_read(path, limit, trusted_root):
                 if path not in snapshots:
-                    return original_read(path, limit)
+                    return original_read(path, limit, trusted_root)
                 read_index = reads[path]
                 reads[path] += 1
                 return snapshots[path][min(read_index, 1)]

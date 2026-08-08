@@ -101,7 +101,7 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
     index = _v3_index_path(source)
     root = index.parents[2]
     catalog_root = root / "catalog" / "v3"
-    document = _load_yaml_file(index, _MAX_DOCUMENT_BYTES)
+    document = _load_yaml_file(index, _MAX_DOCUMENT_BYTES, root)
     if not isinstance(document, dict):
         raise CatalogError("v3-catalog-root-invalid")
     _require_fields(document, _INDEX_FIELDS, "v3-catalog-unknown-field")
@@ -116,7 +116,7 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
     domain_modules: dict[str, list[str]] = {}
     for declaration in domain_declarations:
         target = _safe_ref(catalog_root, declaration["ref"])
-        source_bytes = _read_bytes(target, _MAX_SOURCE_BYTES)
+        source_bytes = _read_bytes(target, _MAX_SOURCE_BYTES, catalog_root)
         _verify_hash(source_bytes, declaration["hash"])
         domain = _load_yaml_bytes(source_bytes)
         _validate_domain(domain)
@@ -133,7 +133,7 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
     module_ids: set[str] = set()
     for declaration in module_declarations:
         target = _safe_ref(catalog_root, declaration["ref"])
-        source_bytes = _read_bytes(target, _MAX_SOURCE_BYTES)
+        source_bytes = _read_bytes(target, _MAX_SOURCE_BYTES, catalog_root)
         _verify_hash(source_bytes, declaration["hash"])
         try:
             source_document = _load_yaml_bytes(source_bytes)
@@ -202,23 +202,32 @@ def _canonical_hash(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
-def _read_bytes(path: Path, limit: int) -> bytes:
+def _read_bytes(
+    path: Path,
+    limit: int,
+    trusted_root: Path,
+) -> bytes:
     try:
+        parent_before = _parent_identity_snapshot(path, trusted_root)
         before = path.lstat()
         if _metadata_is_reparse(before) or before.st_size > limit:
             raise CatalogError("v3-yaml-resource-limit" if before.st_size > limit else "v3-catalog-ref-reparse")
+        if not stat.S_ISREG(before.st_mode):
+            raise CatalogError("v3-yaml-path-changed")
         with path.open("rb") as source:
             opened = os.fstat(source.fileno())
-            if not os.path.samestat(before, opened):
+            if not _same_identity(before, opened):
                 raise CatalogError("v3-yaml-path-changed")
             data = source.read(limit + 1)
             after_read = os.fstat(source.fileno())
             after_path = path.lstat()
+            parent_after = _parent_identity_snapshot(path, trusted_root)
             if _metadata_is_reparse(after_path):
                 raise CatalogError("v3-catalog-ref-reparse")
             if (
-                not os.path.samestat(opened, after_read)
-                or not os.path.samestat(after_read, after_path)
+                not _same_identity(opened, after_read)
+                or not _same_identity(after_read, after_path)
+                or not _same_parent_identities(parent_before, parent_after)
             ):
                 raise CatalogError("v3-yaml-path-changed")
         if len(data) > limit:
@@ -230,8 +239,51 @@ def _read_bytes(path: Path, limit: int) -> bytes:
         raise CatalogError("v3-catalog-ref-unresolved") from None
 
 
-def _load_yaml_file(path: Path, limit: int) -> object:
-    return _load_yaml_bytes(_read_bytes(path, limit))
+def _parent_identity_snapshot(
+    path: Path,
+    trusted_root: Path,
+) -> tuple[os.stat_result, ...]:
+    root = trusted_root
+    try:
+        relative_parent = path.parent.relative_to(root)
+    except ValueError:
+        raise CatalogError("v3-yaml-path-changed") from None
+    current = root
+    parents = [current]
+    for part in relative_parent.parts:
+        current = current / part
+        parents.append(current)
+    snapshot = []
+    for parent in parents:
+        metadata = parent.lstat()
+        if _metadata_is_reparse(metadata) or not stat.S_ISDIR(metadata.st_mode):
+            raise CatalogError("v3-yaml-path-changed")
+        snapshot.append(metadata)
+    return tuple(snapshot)
+
+
+def _same_identity(first: os.stat_result, second: os.stat_result) -> bool:
+    return (
+        stat.S_IFMT(first.st_mode) == stat.S_IFMT(second.st_mode)
+        and os.path.samestat(first, second)
+    )
+
+
+def _same_parent_identities(
+    before: tuple[os.stat_result, ...],
+    after: tuple[os.stat_result, ...],
+) -> bool:
+    return len(before) == len(after) and all(
+        _same_identity(first, second) for first, second in zip(before, after)
+    )
+
+
+def _load_yaml_file(
+    path: Path,
+    limit: int,
+    trusted_root: Path,
+) -> object:
+    return _load_yaml_bytes(_read_bytes(path, limit, trusted_root))
 
 
 def _load_yaml_bytes(data: bytes) -> object:
