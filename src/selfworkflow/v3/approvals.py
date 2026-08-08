@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Protocol
 
-from selfworkflow.v3.contracts import validate_provider_approval_receipt
-from selfworkflow.v3.hashing import clone, content_hash, require_hash
+from selfworkflow.v3.contracts import (
+    validate_provider_approval_receipt,
+    validate_provider_machine_authorization,
+)
+from selfworkflow.v3.hashing import clone, content_hash, project_root_hash, require_hash
 
 
 class ApprovalError(ValueError):
@@ -40,12 +43,93 @@ class ApprovalReceipt:
         return self.document["receiptHash"]
 
 
+class ReplayStore(Protocol):
+    """Atomic, shared replay boundary. False means the key was already consumed."""
+
+    def consume(self, key: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class MachineAuthorization:
+    document: dict[str, Any]
+
+    @property
+    def authorization_hash(self) -> str:
+        return self.document["authorizationHash"]
+
+
+def build_machine_authorization(
+    *, provider_id: str, project_root: str, subject_kind: str,
+    operation_id: str, side_effect_class: str, execution_nonce: str,
+    attempt_ref: str, issued_at: datetime | str, expires_at: datetime | str,
+    nonce: str, confirmation_source: str = "machine-policy",
+) -> MachineAuthorization:
+    if subject_kind not in {"operation-plan", "query-plan"}:
+        raise ApprovalError("machine-authorization-subject-invalid")
+    if side_effect_class not in {"local-write", "network"}:
+        raise ApprovalError("machine-authorization-side-effect-invalid")
+    if confirmation_source not in {"user-confirmation", "machine-policy", "test-fixture"}:
+        raise ApprovalError("machine-authorization-source-invalid")
+    body: dict[str, Any] = {
+        "schemaVersion": 3,
+        "providerId": provider_id,
+        "canonicalProjectRootHash": project_root_hash(project_root),
+        "subjectKind": subject_kind,
+        "operationId": operation_id,
+        "sideEffectClass": side_effect_class,
+        "executionNonce": execution_nonce,
+        "attemptRef": attempt_ref,
+        "issuedAt": _utc(issued_at),
+        "expiresAt": _utc(expires_at),
+        "nonce": nonce,
+        "confirmationSource": confirmation_source,
+        "revocationState": "active",
+    }
+    body["authorizationHash"] = content_hash(body)
+    try:
+        validate_provider_machine_authorization(body)
+    except Exception as error:
+        raise ApprovalError("machine-authorization-invalid") from error
+    return MachineAuthorization(clone(body))
+
+
+def validate_machine_authorization(
+    authorization: MachineAuthorization | Mapping[str, Any], *,
+    provider_id: str, project_root_hash: str, subject_kind: str,
+    operation_id: str, side_effect_class: str, execution_nonce: str,
+    attempt_ref: str, now: datetime | str, test_mode: bool = False,
+) -> None:
+    document = authorization.document if isinstance(authorization, MachineAuthorization) else dict(authorization)
+    try:
+        validate_provider_machine_authorization(document)
+    except Exception as error:
+        raise ApprovalError("machine-authorization-invalid") from error
+    expected = {
+        "providerId": provider_id,
+        "canonicalProjectRootHash": project_root_hash,
+        "subjectKind": subject_kind,
+        "operationId": operation_id,
+        "sideEffectClass": side_effect_class,
+        "executionNonce": execution_nonce,
+        "attemptRef": attempt_ref,
+    }
+    if any(document.get(key) != value for key, value in expected.items()):
+        raise ApprovalError("machine-authorization-scope-mismatch")
+    if document.get("revocationState") != "active":
+        raise ApprovalError("machine-authorization-revoked")
+    current = _utc(now)
+    if not (document["issuedAt"] <= current <= document["expiresAt"]):
+        raise ApprovalError("machine-authorization-expired")
+    if document.get("confirmationSource") == "test-fixture" and not test_mode:
+        raise ApprovalError("test-authorization-rejected")
+
+
 def _subject(kind: str, body: Mapping[str, Any], final_hash_field: str) -> AuthorizationSubject:
     if kind not in {"operation-plan", "query-plan", "provider-selection-exception"}:
         raise ApprovalError("approval-subject-kind-invalid")
     material = clone(dict(body))
     for key in (
-        "approvalReceiptRef", "approvalReceiptHash", "receiptHash", final_hash_field,
+        "approvalReceipt", "approvalReceiptRef", "approvalReceiptHash", "receiptHash", final_hash_field,
         "operationPlanHash", "queryPlanHash", "requestHash",
         "operationAuthorizationSubjectHash", "queryAuthorizationSubjectHash",
     ):
@@ -164,10 +248,11 @@ def validate_approval(
     *,
     now: datetime | str,
     expected_target_hashes: Iterable[str] = (),
-    used_nonces: set[str] | None = None,
     expected_provider_id: str | None = None,
     expected_project_root_hash: str | None = None,
     expected_attempt_ref: str | None = None,
+    expected_operation_id: str | None = None,
+    expected_execution_nonce: str | None = None,
 ) -> None:
     document = receipt.document if isinstance(receipt, ApprovalReceipt) else dict(receipt)
     try:
@@ -194,10 +279,11 @@ def validate_approval(
         raise ApprovalError("approval-project-mismatch")
     if expected_attempt_ref is not None and document.get("attemptRef") != expected_attempt_ref:
         raise ApprovalError("approval-attempt-mismatch")
-    if document["nonce"] != subject.body.get("executionNonce"):
+    if expected_operation_id is not None and document.get("operationId") != expected_operation_id:
+        raise ApprovalError("approval-operation-mismatch")
+    expected_nonce = expected_execution_nonce or subject.body.get("executionNonce")
+    if document["nonce"] != expected_nonce:
         raise ApprovalError("approval-nonce-mismatch")
-    if used_nonces is not None and document["nonce"] in used_nonces:
-        raise ApprovalError("approval-replay")
 
 
 def finalize_document(

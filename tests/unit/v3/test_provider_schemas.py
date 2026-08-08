@@ -2,6 +2,7 @@ import json
 import unittest
 
 from selfworkflow.v3.contracts import ContractError, load_contract
+from selfworkflow.v3.hashing import content_hash
 
 
 HASH = "sha256:" + "a" * 64
@@ -9,6 +10,11 @@ HASH = "sha256:" + "a" * 64
 
 def _load(name, document):
     return load_contract(name, json.dumps(document))
+
+
+def _rehash(document, field):
+    document[field] = content_hash({key: value for key, value in document.items() if key != field})
+    return document
 
 
 class ProviderSchemaTests(unittest.TestCase):
@@ -21,6 +27,8 @@ class ProviderSchemaTests(unittest.TestCase):
             "provider-operation-receipt.schema.json", "provider-query-plan.schema.json",
             "provider-query-receipt.schema.json", "provider-mutation-evidence.schema.json",
             "workspace-fingerprint.schema.json", "provider-fallback-receipt.schema.json",
+            "provider-project-lease.schema.json", "provider-machine-authorization.schema.json",
+            "provider-stale-unlock-authorization.schema.json",
         )
         for name in names:
             with self.subTest(name=name):
@@ -45,11 +53,14 @@ class ProviderSchemaTests(unittest.TestCase):
         base = {
             "schemaVersion": 3, "evidenceHash": HASH, "subjectKind": "operation-plan",
             "subjectPlanHash": HASH, "executionNonce": "nonce", "attemptRef": "attempt",
-            "providerBindingHash": HASH, "canonicalProjectRootHash": HASH,
+            "providerBindingHash": HASH, "providerId": "provider", "canonicalProjectRootHash": HASH,
+            "startedAt": "2026-08-09T00:00:00Z", "completedAt": "2026-08-09T00:00:00Z",
             "observedAt": "2026-08-09T00:00:00Z", "preStateIdentity": HASH,
             "postStateIdentity": HASH, "mutationTargetHash": HASH, "payloadHash": HASH,
-            "evidenceKind": "filesystem-manifest", "before": [], "after": [],
+            "evidenceKind": "filesystem-manifest", "actualTargets": [{"targetKind": "filesystem", "targetId": "managed/index", "action": "modify"}], "before": [], "after": [{"path": "managed/index", "type": "file", "size": 1, "contentHash": HASH, "reparseIdentityHash": HASH}],
         }
+        base["payloadHash"] = content_hash({"before": base["before"], "after": base["after"]})
+        _rehash(base, "evidenceHash")
         _load("provider-mutation-evidence.schema.json", base)
         old = dict(base, evidenceKind="filesystem-delta")
         with self.assertRaises(ContractError):
@@ -81,14 +92,18 @@ class ProviderSchemaTests(unittest.TestCase):
         evidence = {
             "schemaVersion": 3, "evidenceHash": HASH, "subjectKind": "operation-plan",
             "subjectPlanHash": HASH, "executionNonce": "nonce", "attemptRef": "attempt",
-            "providerBindingHash": HASH, "canonicalProjectRootHash": HASH,
+            "providerBindingHash": HASH, "providerId": "provider", "canonicalProjectRootHash": HASH,
+            "startedAt": "2026-08-09T00:00:00Z", "completedAt": "2026-08-09T00:00:00Z",
             "observedAt": "2026-08-09T08:00:00+08:00", "preStateIdentity": HASH,
             "postStateIdentity": HASH, "mutationTargetHash": HASH, "payloadHash": HASH,
-            "evidenceKind": "filesystem-manifest", "before": [], "after": [],
+            "evidenceKind": "filesystem-manifest", "actualTargets": [{"targetKind": "filesystem", "targetId": "managed/index", "action": "modify"}], "before": [], "after": [{"path": "managed/index", "type": "file", "size": 1, "contentHash": HASH, "reparseIdentityHash": HASH}],
         }
+        evidence["payloadHash"] = content_hash({"before": evidence["before"], "after": evidence["after"]})
+        _rehash(evidence, "evidenceHash")
         with self.assertRaises(ContractError):
             _load("provider-mutation-evidence.schema.json", evidence)
         evidence["observedAt"] = "2026-08-09T00:00:00Z"
+        _rehash(evidence, "evidenceHash")
         _load("provider-mutation-evidence.schema.json", evidence)
 
     def test_provider_timestamp_ranges_are_monotonic(self):
@@ -112,7 +127,7 @@ class ProviderSchemaTests(unittest.TestCase):
         operation = {
             "schemaVersion": 3, "receiptHash": HASH, "operationPlanHash": HASH,
             "executionNonce": "nonce", "attemptRef": "attempt", "providerId": "provider",
-            "bindingSnapshotHash": HASH, "startedAt": "2026-08-09T00:00:01Z",
+            "bindingSnapshotHash": HASH, "canonicalProjectRootHash": HASH, "startedAt": "2026-08-09T00:00:01Z",
             "completedAt": "2026-08-09T00:00:00Z", "outcome": "failed",
             "mutationEvidenceRefs": [],
         }
@@ -131,13 +146,15 @@ class ProviderSchemaTests(unittest.TestCase):
             "schemaVersion": 3, "receiptHash": HASH, "queryPlanHash": HASH,
             "executionNonce": "nonce", "attemptRef": "attempt", "providerId": "provider",
             "adapterHash": HASH, "sourceIdentityHash": HASH, "projectStateReceiptHash": HASH,
-            "workspaceFingerprintHash": HASH, "indexRevision": "1", "indexCompleteness": "complete",
+            "workspaceFingerprintHash": HASH, "canonicalProjectRootHash": HASH, "indexRevision": "1", "indexCompleteness": "complete",
+            "startedAt": "2026-08-09T00:00:00Z", "completedAt": "2026-08-09T00:00:00Z",
             "pendingFiles": [], "parseFailures": [], "returnedFiles": [{
                 "path": "Source/main.cpp", "byteRange": [0, 1], "contentHash": HASH,
             }], "truncated": False, "preQueryWorkspaceFingerprintHash": HASH,
             "postQueryWorkspaceFingerprintHash": HASH, "actualSideEffects": "none",
             "mutationEvidenceRefs": [],
         }
+        _rehash(receipt, "receiptHash")
         _load("provider-query-receipt.schema.json", receipt)
         for invalid in ("../secret", "/absolute", "C:/secret", "Source\\secret.cpp"):
             changed = json.loads(json.dumps(receipt))

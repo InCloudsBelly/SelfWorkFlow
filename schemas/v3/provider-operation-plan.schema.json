@@ -2,8 +2,67 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://selfworkflow.local/schemas/v3/provider-operation-plan.schema.json",
   "title": "SelfWorkFlow V3 provider operation plan",
-  "type": "object", "additionalProperties": false,
-  "required": ["schemaVersion", "operationPlanHash", "planHash", "providerId", "operationId", "bindingSnapshotHash", "canonicalTargetHash", "containmentRootHash", "adapterRenderHash", "argvHash", "cwdHash", "envAllowlist", "networkPolicy", "timeoutSeconds", "outputLimitBytes", "mutationTargets", "executionNonce", "attemptRef"],
-  "properties": {"schemaVersion": {"const": 3}, "operationPlanHash": {"$ref": "#/$defs/hash"}, "planHash": {"$ref": "#/$defs/hash"}, "providerId": {"$ref": "#/$defs/id"}, "operationId": {"$ref": "#/$defs/id"}, "bindingSnapshotHash": {"$ref": "#/$defs/hash"}, "canonicalTargetHash": {"$ref": "#/$defs/hash"}, "containmentRootHash": {"$ref": "#/$defs/hash"}, "adapterRenderHash": {"$ref": "#/$defs/hash"}, "argvHash": {"$ref": "#/$defs/hash"}, "cwdHash": {"$ref": "#/$defs/hash"}, "envAllowlist": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"}}, "networkPolicy": {"enum": ["none", "local-only", "explicit-approved", "allowed"]}, "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400}, "outputLimitBytes": {"type": "integer", "minimum": 1, "maximum": 1073741824}, "mutationTargets": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/target"}}, "executionNonce": {"$ref": "#/$defs/id"}, "attemptRef": {"$ref": "#/$defs/id"}, "approvalReceiptRef": {"$ref": "#/$defs/id"}, "approvalReceiptHash": {"$ref": "#/$defs/hash"}, "operationAuthorizationSubjectHash": {"$ref": "#/$defs/hash"}, "canonicalProjectRootHash": {"$ref": "#/$defs/hash"}},
-  "$defs": {"id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}, "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "target": {"type": "object", "additionalProperties": false, "required": ["targetKind", "canonicalTargetHash", "containmentRootHash", "recursion", "reparsePolicy"], "properties": {"targetKind": {"enum": ["exact-file", "directory-subtree", "managed-state-root", "process", "service"]}, "canonicalTargetHash": {"$ref": "#/$defs/hash"}, "containmentRootHash": {"$ref": "#/$defs/hash"}, "recursion": {"enum": ["none", "bounded", "unbounded"]}, "reparsePolicy": {"enum": ["reject", "allow-with-identity"]}}}}
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operationPlanHash", "planHash", "providerId", "operationId", "bindingSnapshotHash", "canonicalTargetHash", "containmentRootHash", "adapterRenderHash", "argvHash", "cwdHash", "envAllowlist", "networkPolicy", "sideEffectClass", "timeoutSeconds", "outputLimitBytes", "mutationTargets", "commandSpec", "executionNonce", "attemptRef", "operationAuthorizationSubjectHash", "canonicalProjectRootHash", "ownershipDomain"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "operationPlanHash": {"$ref": "#/$defs/hash"},
+    "planHash": {"$ref": "#/$defs/hash"},
+    "providerId": {"$ref": "#/$defs/id"},
+    "operationId": {"$ref": "#/$defs/id"},
+    "bindingSnapshotHash": {"$ref": "#/$defs/hash"},
+    "canonicalTargetHash": {"$ref": "#/$defs/hash"},
+    "containmentRootHash": {"$ref": "#/$defs/hash"},
+    "adapterRenderHash": {"$ref": "#/$defs/hash"},
+    "argvHash": {"$ref": "#/$defs/hash"},
+    "cwdHash": {"$ref": "#/$defs/hash"},
+    "envAllowlist": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"}},
+    "networkPolicy": {"enum": ["none", "local-only", "explicit-approved", "allowed"]},
+    "sideEffectClass": {"enum": ["none", "local-write", "network"]},
+    "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+    "outputLimitBytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+    "mutationTargets": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"$ref": "#/$defs/target"}},
+    "commandSpec": {"$ref": "#/$defs/command"},
+    "executionNonce": {"$ref": "#/$defs/id"},
+    "attemptRef": {"$ref": "#/$defs/id"},
+    "approvalReceiptRef": {"$ref": "#/$defs/id"},
+    "approvalReceiptHash": {"$ref": "#/$defs/hash"},
+    "approvalReceipt": {"type": "object"},
+    "operationAuthorizationSubjectHash": {"$ref": "#/$defs/hash"},
+    "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
+    "ownershipDomain": {"enum": ["selfworkflow-managed", "user-owned"]}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["targetKind", "targetId", "canonicalTargetHash", "containmentRootHash", "recursion", "reparsePolicy", "allowedActions", "evidenceRequired"],
+      "properties": {
+        "targetKind": {"enum": ["exact-file", "directory-subtree", "managed-state-root", "process", "service", "network"]},
+        "targetId": {"type": "string", "minLength": 1, "maxLength": 512},
+        "canonicalTargetHash": {"$ref": "#/$defs/hash"},
+        "containmentRootHash": {"$ref": "#/$defs/hash"},
+        "recursion": {"enum": ["none", "bounded", "unbounded"]},
+        "reparsePolicy": {"enum": ["reject", "allow-with-identity"]},
+        "allowedActions": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "evidenceRequired": {"type": "boolean"}
+      }
+    },
+    "command": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commandSpecHash", "argv", "env", "canonicalProjectRoot", "cwd", "sideEffectClass", "networkPolicy", "mutationTargets"],
+      "properties": {
+        "commandSpecHash": {"$ref": "#/$defs/hash"},
+        "argv": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+        "env": {"type": "object", "maxProperties": 128, "additionalProperties": {"type": "string", "maxLength": 8192}},
+        "canonicalProjectRoot": {"type": "string", "minLength": 1, "maxLength": 32767},
+        "cwd": {"type": "string", "minLength": 1, "maxLength": 32767},
+        "sideEffectClass": {"enum": ["none", "local-write", "network"]},
+        "networkPolicy": {"enum": ["none", "local-only", "explicit-approved", "allowed"]},
+        "mutationTargets": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/target"}}
+      }
+    }
+  }
 }

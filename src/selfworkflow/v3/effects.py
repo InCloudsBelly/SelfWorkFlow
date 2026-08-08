@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Mapping, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence
+
+
+@dataclass(frozen=True)
+class EffectMutation:
+    """One observed side effect reported by a Host-owned effect boundary."""
+
+    kind: str
+    target: str
+    action: str
 
 
 @dataclass(frozen=True)
@@ -15,6 +24,9 @@ class EffectResult:
     started_at: datetime
     completed_at: datetime
     touched_paths: tuple[str, ...] = ()
+    mutations: tuple[EffectMutation, ...] = ()
+    mutation_evidence: tuple[Mapping[str, Any], ...] = ()
+    observation_complete: bool = True
 
 
 class EffectPort(Protocol):
