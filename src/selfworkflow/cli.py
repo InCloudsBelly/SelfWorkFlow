@@ -126,6 +126,11 @@ def main(argv: list[str] | None = None) -> int:
     build_parser.add_argument("--repository", default=str(Path.cwd()))
     build_parser.add_argument("--output", required=True)
     build_parser.add_argument("--version", default=__version__)
+    build_parser.add_argument(
+        "--profile",
+        choices=("core", "knowledge", "maintainer"),
+        default="core",
+    )
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -162,7 +167,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif arguments.command == "build":
             result = build_runtime(
-                arguments.repository, arguments.output, arguments.version
+                arguments.repository,
+                arguments.output,
+                arguments.version,
+                profile=arguments.profile,
             )
         elif arguments.command == "install" and arguments.install_command == "plan":
             result = create_install_plan(
