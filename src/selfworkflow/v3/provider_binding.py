@@ -6,7 +6,7 @@ import hashlib
 import json
 import posixpath
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlsplit
 
 from selfworkflow.v3.contracts import ContractError, load_contract
@@ -32,6 +32,9 @@ _DYNAMIC_KEYS = {
     "projectstatereceipt", "projectstatereceipthash", "pendingfiles",
     "parsefailures", "actualsideeffects", "outputhash", "inputhash",
 }
+SupportEntryResolver = Callable[
+    [str, str], ValidatedSupportEntry | None
+]
 
 
 class ProviderBindingError(ValueError):
@@ -287,6 +290,7 @@ def create_provider_binding(
         "providerId": support_entry.provider_id,
         "capabilityId": support["capabilityId"],
         "operationId": support["operationId"],
+        "platform": support["platform"],
         "configurationLayer": configuration_layer,
         "adapterHash": support["adapterHash"],
         "sourceIdentityHash": source_identity.identity_hash,
@@ -308,12 +312,18 @@ def build_binding_snapshot(
     bindings: Iterable[ValidatedProviderBinding],
 ) -> dict[str, Any]:
     normalized = []
+    support_entries: dict[tuple[str, str], ValidatedSupportEntry] = {}
     for item in bindings:
         if not isinstance(item, ValidatedProviderBinding) or not item._is_valid():
             raise ProviderBindingError("provider-binding-not-validated")
         normalized.append(item.document)
+        support_entries[(
+            item.support_entry.matrix_hash,
+            item.support_entry.entry_hash,
+        )] = item.support_entry
     normalized.sort(key=lambda item: tuple(str(item.get(key, "")) for key in (
-        "moduleId", "providerId", "capabilityId", "operationId", "adapterHash", "sourceIdentityHash",
+        "moduleId", "providerId", "capabilityId", "operationId", "platform",
+        "adapterHash", "sourceIdentityHash",
     )))
     identities = [(
         item.get("moduleId"), item.get("capabilityId"), item.get("operationId"),
@@ -322,14 +332,54 @@ def build_binding_snapshot(
         raise ProviderBindingError("provider-binding-conflict")
     snapshot = {"schemaVersion": 3, "bindings": normalized}
     snapshot["bindingSnapshotHash"] = _hash(snapshot)
-    try:
-        load_contract("provider-binding-snapshot.schema.json", json.dumps(snapshot, separators=(",", ":")))
-    except (ContractError, TypeError, ValueError):
-        raise ProviderBindingError("provider-binding-invalid") from None
+    validate_binding_snapshot(
+        snapshot,
+        support_resolver=lambda matrix_hash, entry_hash: support_entries.get(
+            (matrix_hash, entry_hash),
+        ),
+    )
     return snapshot
 
 
-def _validate_binding_set(bindings: object) -> None:
+def _coerce_support_resolver(
+    support_registry: object | None,
+    support_resolver: SupportEntryResolver | None,
+) -> SupportEntryResolver:
+    if support_registry is not None and support_resolver is not None:
+        raise ProviderBindingError("binding-support-registry-required")
+    if support_registry is not None:
+        is_valid = getattr(support_registry, "_is_valid", None)
+        resolver = getattr(support_registry, "resolve_support_entry", None)
+        if not callable(is_valid) or not is_valid() or not callable(resolver):
+            raise ProviderBindingError("binding-support-registry-required")
+        return resolver
+    if not callable(support_resolver):
+        raise ProviderBindingError("binding-support-registry-required")
+    return support_resolver
+
+
+def _resolve_support_entry(
+    resolver: SupportEntryResolver,
+    matrix_hash: object,
+    entry_hash: object,
+) -> ValidatedSupportEntry:
+    if not isinstance(matrix_hash, str) or not isinstance(entry_hash, str):
+        raise ProviderBindingError("binding-support-entry-unresolved")
+    try:
+        entry = resolver(matrix_hash, entry_hash)
+    except (AttributeError, LookupError, TypeError, ValueError):
+        raise ProviderBindingError("binding-support-entry-unresolved") from None
+    if not isinstance(entry, ValidatedSupportEntry) or not entry._is_valid():
+        raise ProviderBindingError("binding-support-entry-unresolved")
+    if entry.matrix_hash != matrix_hash or entry.entry_hash != entry_hash:
+        raise ProviderBindingError("binding-support-entry-unresolved")
+    return entry
+
+
+def _validate_binding_set(
+    bindings: object,
+    resolver: SupportEntryResolver,
+) -> None:
     if not isinstance(bindings, list):
         raise ProviderBindingError("provider-binding-invalid")
     identities = []
@@ -341,12 +391,42 @@ def _validate_binding_set(bindings: object) -> None:
             key: item[key] for key in item if key != "bindingHash"
         }):
             raise ProviderBindingError("provider-binding-tuple-hash-invalid")
+        support_entry = _resolve_support_entry(
+            resolver,
+            item.get("supportMatrixHash"),
+            item.get("supportMatrixEntryHash"),
+        )
+        support = support_entry.document
+        expected_tuple = {
+            "providerId": support_entry.provider_id,
+            "capabilityId": support["capabilityId"],
+            "operationId": support["operationId"],
+            "platform": support["platform"],
+            "adapterHash": support["adapterHash"],
+            "sourceIdentityHash": support["sourceIdentityHash"],
+            "supportMatrixHash": support_entry.matrix_hash,
+            "supportMatrixEntryRef": support["entryId"],
+            "supportMatrixEntryHash": support_entry.entry_hash,
+        }
+        if any(item.get(field) != expected for field, expected in expected_tuple.items()):
+            raise ProviderBindingError("binding-support-tuple-mismatch")
+        try:
+            if not is_selectable(support_entry):
+                raise ProviderBindingError("binding-support-not-selectable")
+        except SupportMatrixError:
+            raise ProviderBindingError("binding-support-entry-unresolved") from None
         identities.append((item.get("moduleId"), item.get("capabilityId"), item.get("operationId")))
     if len(identities) != len(set(identities)):
         raise ProviderBindingError("provider-binding-conflict")
 
 
-def validate_binding_snapshot(snapshot: Mapping[str, Any]) -> None:
+def _validate_binding_snapshot_semantics(
+    snapshot: Mapping[str, Any],
+    *,
+    support_registry: object | None = None,
+    support_resolver: SupportEntryResolver | None = None,
+) -> None:
+    resolver = _coerce_support_resolver(support_registry, support_resolver)
     if not isinstance(snapshot, Mapping):
         raise ProviderBindingError("provider-binding-invalid")
     value = dict(snapshot)
@@ -354,8 +434,25 @@ def validate_binding_snapshot(snapshot: Mapping[str, Any]) -> None:
     expected = _hash({key: value[key] for key in value if key != "bindingSnapshotHash"})
     if value.get("bindingSnapshotHash") != expected:
         raise ProviderBindingError("provider-binding-hash-invalid")
-    _validate_binding_set(value.get("bindings"))
+    _validate_binding_set(value.get("bindings"), resolver)
+
+
+def validate_binding_snapshot(
+    snapshot: Mapping[str, Any],
+    *,
+    support_registry: object | None = None,
+    support_resolver: SupportEntryResolver | None = None,
+) -> None:
+    if not isinstance(snapshot, Mapping):
+        raise ProviderBindingError("provider-binding-invalid")
     try:
-        load_contract("provider-binding-snapshot.schema.json", json.dumps(value, separators=(",", ":")))
+        load_contract(
+            "provider-binding-snapshot.schema.json",
+            json.dumps(snapshot, separators=(",", ":")),
+            provider_support_registry=support_registry,
+            provider_support_resolver=support_resolver,
+        )
+    except ProviderBindingError:
+        raise
     except (ContractError, TypeError, ValueError):
         raise ProviderBindingError("provider-binding-invalid") from None

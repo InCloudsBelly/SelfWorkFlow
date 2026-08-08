@@ -1484,9 +1484,18 @@ def validate_provider_local_config(document: dict[str, Any]) -> None:
     _validate_provider_document("provider-local-config.schema.json", document)
 
 
-def validate_provider_binding_snapshot(document: dict[str, Any]) -> None:
+def validate_provider_binding_snapshot(
+    document: dict[str, Any],
+    *,
+    support_registry: object | None = None,
+    support_resolver: Callable[[str, str], object | None] | None = None,
+) -> None:
     from selfworkflow.v3.provider_binding import validate_binding_snapshot
-    validate_binding_snapshot(document)
+    validate_binding_snapshot(
+        document,
+        support_registry=support_registry,
+        support_resolver=support_resolver,
+    )
 
 
 def validate_provider_support_matrix(document: dict[str, Any]) -> None:
@@ -1548,6 +1557,8 @@ def load_contract(
     findings: tuple[dict[str, Any], ...] = (),
     test_strategy: dict[str, Any] | None = None,
     verification_receipt_resolver: VerificationReceiptResolver | None = None,
+    provider_support_registry: object | None = None,
+    provider_support_resolver: Callable[[str, str], object | None] | None = None,
 ) -> dict[str, Any]:
     """Load one registered V3 JSON contract."""
 
@@ -1572,7 +1583,14 @@ def load_contract(
     if not isinstance(document, dict):
         raise ContractError("contract-root-not-object", validator="type")
     _validate_schema(schema_name, document)
-    if schema_name == "resolve-request.schema.json":
+    if schema_name == "provider-binding-snapshot.schema.json":
+        from selfworkflow.v3.provider_binding import _validate_binding_snapshot_semantics
+        _validate_binding_snapshot_semantics(
+            document,
+            support_registry=provider_support_registry,
+            support_resolver=provider_support_resolver,
+        )
+    elif schema_name == "resolve-request.schema.json":
         _validate_resolve_request(document)
     elif schema_name == "resolve-result.schema.json":
         _validate_resolve_result(document)

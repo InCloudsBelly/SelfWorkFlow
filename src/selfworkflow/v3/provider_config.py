@@ -95,6 +95,23 @@ class ValidatedProviderRegistry:
     def _is_valid(self) -> bool:
         return getattr(self, "_ValidatedProviderRegistry__seal", None) is _REGISTRY_SEAL
 
+    def resolve_support_entry(
+        self,
+        matrix_hash: str,
+        entry_hash: str,
+    ) -> ValidatedSupportEntry | None:
+        """Resolve an entry only from this sealed, cross-bound registry."""
+
+        if not self._is_valid():
+            raise ProviderConfigError("provider-registry-required")
+        for record in self._records.values():
+            if record.matrix.matrix_hash != matrix_hash:
+                continue
+            for entry_document in record.matrix.document["entries"]:
+                if entry_document["entryHash"] == entry_hash:
+                    return record.matrix.entry(entry_document["entryId"])
+        return None
+
 
 @dataclass(frozen=True)
 class _RegistryRecord:
