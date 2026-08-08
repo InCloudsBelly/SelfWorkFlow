@@ -74,6 +74,12 @@ class V3CatalogCompilerTests(unittest.TestCase):
         spec = importlib.util.find_spec("selfworkflow.v3.catalog")
         self.assertIsNotNone(spec, "v3-catalog-compiler-not-found")
 
+    def test_compiled_catalog_cannot_be_publicly_constructed(self):
+        from selfworkflow.v3.catalog import CompiledCatalog
+
+        with self.assertRaises(TypeError):
+            CompiledCatalog({}, b"{}", "sha256:" + "a" * 64)
+
     def test_yaml_read_is_bounded_and_rechecks_bytes_after_lstat(self):
         from selfworkflow.v3.catalog import CatalogError, _read_bytes
 

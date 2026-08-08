@@ -1,6 +1,5 @@
 """Strict, deterministic loading for the independent V3 pipeline."""
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -30,11 +29,45 @@ class PipelineError(ValueError):
         super().__init__(reason)
 
 
-@dataclass(frozen=True)
 class LoadedPipeline:
-    document: dict[str, Any]
-    content: bytes
-    pipeline_hash: str
+    """Artifact issued only after the V3 pipeline loader succeeds."""
+
+    __slots__ = ("_document", "_content", "_pipeline_hash", "__seal")
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("LoadedPipeline is issued by load_pipeline")
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise AttributeError("LoadedPipeline is immutable")
+
+    @property
+    def document(self) -> dict[str, Any]:
+        return self._document
+
+    @property
+    def content(self) -> bytes:
+        return self._content
+
+    @property
+    def pipeline_hash(self) -> str:
+        return self._pipeline_hash
+
+    def _has_valid_seal(self) -> bool:
+        return getattr(self, "_LoadedPipeline__seal", None) is _PIPELINE_SEAL
+
+
+_PIPELINE_SEAL = object()
+
+
+def _issue_loaded_pipeline(
+    document: dict[str, Any], content: bytes, pipeline_hash: str,
+) -> LoadedPipeline:
+    artifact = object.__new__(LoadedPipeline)
+    object.__setattr__(artifact, "_document", document)
+    object.__setattr__(artifact, "_content", content)
+    object.__setattr__(artifact, "_pipeline_hash", pipeline_hash)
+    object.__setattr__(artifact, "_LoadedPipeline__seal", _PIPELINE_SEAL)
+    return artifact
 
 
 def load_pipeline(source: object = None) -> LoadedPipeline:
@@ -58,21 +91,25 @@ def load_pipeline(source: object = None) -> LoadedPipeline:
         raise PipelineError("v3-pipeline-schema-invalid") from None
     except CatalogError as error:
         raise PipelineError(error.reason) from None
-    stage_ids = [stage["id"] for stage in validated["stages"]]
-    if tuple(stage_ids) != _STAGE_ORDER:
-        raise PipelineError("v3-pipeline-stage-order-invalid")
-    slot_ids: set[str] = set()
-    for stage in validated["stages"]:
-        for slot in stage["slots"]:
-            if slot["id"] in slot_ids:
-                raise PipelineError("v3-pipeline-slot-duplicate")
-            slot_ids.add(slot["id"])
+    _validate_pipeline_semantics(validated)
     try:
         content = _canonical_json(validated)
         pipeline_hash = _canonical_hash(validated)
     except CatalogError as error:
         raise PipelineError(error.reason) from None
-    return LoadedPipeline(validated, content, pipeline_hash)
+    return _issue_loaded_pipeline(validated, content, pipeline_hash)
+
+
+def _validate_pipeline_semantics(document: dict[str, Any]) -> None:
+    stage_ids = [stage["id"] for stage in document["stages"]]
+    if tuple(stage_ids) != _STAGE_ORDER:
+        raise PipelineError("v3-pipeline-stage-order-invalid")
+    slot_ids: set[str] = set()
+    for stage in document["stages"]:
+        for slot in stage["slots"]:
+            if slot["id"] in slot_ids:
+                raise PipelineError("v3-pipeline-slot-duplicate")
+            slot_ids.add(slot["id"])
 
 
 def _v3_pipeline_path(source: object) -> Path:

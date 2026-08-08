@@ -1,23 +1,20 @@
 import copy
-import hashlib
-import json
 import unittest
 
 from selfworkflow.v3.catalog import CompiledCatalog
-from selfworkflow.v3.contracts import ContractError, validate_plan_graph
+from selfworkflow.v3.contracts import validate_plan_graph
 from selfworkflow.v3.pipeline import LoadedPipeline
 from selfworkflow.v3.plan_graph import PlanGraphArtifact, PlanGraphError, build_plan_graph
+from tests.unit.v3.artifact_fixtures import STAGES, load_test_artifacts
 
-
-def _hash(value):
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    return "sha256:" + hashlib.sha256(payload).hexdigest()
-
-
-def _canonical(value):
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    ).encode("utf-8")
+def _review_slot(graph):
+    document = graph.document
+    stage = next(
+        item for item in document["stages"] if item["stageId"] == "reviewed"
+    )
+    return next(
+        item for item in stage["slots"] if item["slotId"] == "review.primary"
+    )
 
 
 def _module(module_id, *, slot="review.primary", mode="bounded-runtime",
@@ -75,32 +72,9 @@ class PlanGraphTests(unittest.TestCase):
 
     def _artifacts(self, modules, *, cardinality="exactly-one", mode="bounded-runtime",
                    condition=None):
-        catalog = {
-            "schemaVersion": 3,
-            "domains": [],
-            "modules": modules,
-        }
-        catalog["catalogHash"] = _hash({**catalog})
-        pipeline = {
-            "schemaVersion": 3,
-            "stages": [{"id": "reviewed", "slots": [{
-                "id": "review.primary",
-                "cardinality": cardinality,
-                "allowedInvocationKinds": ["agent-native"],
-                "selectionMode": mode,
-                **({"condition": condition} if condition else {}),
-            }]}],
-        }
-        envelope = {
-            "schemaVersion": 3,
-            "catalog": catalog,
-            "catalogHash": catalog["catalogHash"],
-        }
-        return CompiledCatalog(
-            envelope,
-            _canonical(envelope),
-            catalog["catalogHash"],
-        ), LoadedPipeline(pipeline, _canonical(pipeline), _hash(pipeline))
+        return load_test_artifacts(
+            modules, cardinality=cardinality, mode=mode, condition=condition,
+        )
 
     def test_builds_schema_valid_deterministic_plan_with_all_snapshot_hashes(self):
         catalog, pipeline = self._artifacts([
@@ -123,21 +97,47 @@ class PlanGraphTests(unittest.TestCase):
         validate_plan_graph(first.document)
         self.assertEqual(first.plan_hash, second.plan_hash)
         self.assertEqual(first.document["planHash"], first.plan_hash)
-        self.assertEqual(first.document["stages"][0]["ordinal"], 1)
-        self.assertEqual(first.document["stages"][0]["slots"][0]["eligibleModules"], ["review-a", "review-b"])
+        self.assertEqual(
+            [stage["stageId"] for stage in first.document["stages"]],
+            list(STAGES),
+        )
+        self.assertEqual(_review_slot(first)["eligibleModules"], ["review-a", "review-b"])
         self.assertEqual(first.document["capabilitySnapshotHash"], second.document["capabilitySnapshotHash"])
         self.assertEqual(first.document["providerBindingHash"], second.document["providerBindingHash"])
+        self.assertEqual(
+            first.document["moduleConstraints"],
+            [
+                {
+                    "moduleId": "review-a",
+                    "stageId": "reviewed",
+                    "slotId": "review.primary",
+                    "dependencies": [],
+                    "conflicts": [],
+                    "estimatedContextCost": 10,
+                    "estimatedExecutionCost": 5,
+                },
+                {
+                    "moduleId": "review-b",
+                    "stageId": "reviewed",
+                    "slotId": "review.primary",
+                    "dependencies": [],
+                    "conflicts": [],
+                    "estimatedContextCost": 10,
+                    "estimatedExecutionCost": 5,
+                },
+            ],
+        )
 
     def test_static_selection_is_fixed_and_bounded_selection_starts_empty(self):
         static_catalog, static_pipeline = self._artifacts(
             [_module("review-a", mode="static")], mode="static"
         )
         static = build_plan_graph(self.REQUEST, static_catalog, static_pipeline)
-        self.assertEqual(static.document["stages"][0]["slots"][0]["selectedModules"], ["review-a"])
+        self.assertEqual(_review_slot(static)["selectedModules"], ["review-a"])
 
         runtime_catalog, runtime_pipeline = self._artifacts([_module("review-a")])
         runtime = build_plan_graph(self.REQUEST, runtime_catalog, runtime_pipeline)
-        self.assertEqual(runtime.document["stages"][0]["slots"][0]["selectedModules"], [])
+        self.assertEqual(_review_slot(runtime)["selectedModules"], [])
 
     def test_explicit_unknown_duplicate_conflicting_or_unsupported_input_fails_closed(self):
         catalog, pipeline = self._artifacts([
@@ -176,14 +176,14 @@ class PlanGraphTests(unittest.TestCase):
             _module("review-dependency"),
         ])
         graph = build_plan_graph(self.REQUEST, catalog, pipeline)
-        slot = graph.document["stages"][0]["slots"][0]
+        slot = _review_slot(graph)
         self.assertEqual(slot["eligibleModules"], ["review-a", "review-dependency"])
 
         not_applicable_catalog, not_applicable_pipeline = self._artifacts(
             [_module("review-a")], condition={"eq": ["operationType", "implement"]}
         )
         graph = build_plan_graph(self.REQUEST, not_applicable_catalog, not_applicable_pipeline)
-        slot = graph.document["stages"][0]["slots"][0]
+        slot = _review_slot(graph)
         self.assertEqual(slot["applicability"], "not-applicable")
         self.assertEqual(slot["eligibleModules"], [])
         self.assertEqual(slot["selectedModules"], [])
@@ -214,15 +214,35 @@ class PlanGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(PlanGraphError, "loaded"):
             build_plan_graph(self.REQUEST, catalog, pipeline.document)
 
-        forged_catalog = CompiledCatalog(
-            copy.deepcopy(catalog.document), b"forged", catalog.catalog_hash,
-        )
-        with self.assertRaisesRegex(PlanGraphError, "content"):
+        forged_catalog = object.__new__(CompiledCatalog)
+        for name, value in (
+            ("_document", copy.deepcopy(catalog.document)),
+            ("_content", bytes(catalog.content)),
+            ("_catalog_hash", catalog.catalog_hash),
+        ):
+            object.__setattr__(forged_catalog, name, value)
+        if hasattr(forged_catalog, "__dict__"):
+            forged_catalog.__dict__.update(
+                document=copy.deepcopy(catalog.document),
+                content=bytes(catalog.content),
+                catalog_hash=catalog.catalog_hash,
+            )
+        with self.assertRaisesRegex(PlanGraphError, "seal"):
             build_plan_graph(self.REQUEST, forged_catalog, pipeline)
-        forged_pipeline = LoadedPipeline(
-            copy.deepcopy(pipeline.document), b"forged", pipeline.pipeline_hash,
-        )
-        with self.assertRaisesRegex(PlanGraphError, "content"):
+        forged_pipeline = object.__new__(LoadedPipeline)
+        for name, value in (
+            ("_document", copy.deepcopy(pipeline.document)),
+            ("_content", bytes(pipeline.content)),
+            ("_pipeline_hash", pipeline.pipeline_hash),
+        ):
+            object.__setattr__(forged_pipeline, name, value)
+        if hasattr(forged_pipeline, "__dict__"):
+            forged_pipeline.__dict__.update(
+                document=copy.deepcopy(pipeline.document),
+                content=bytes(pipeline.content),
+                pipeline_hash=pipeline.pipeline_hash,
+            )
+        with self.assertRaisesRegex(PlanGraphError, "seal"):
             build_plan_graph(self.REQUEST, catalog, forged_pipeline)
 
     def test_capability_snapshot_parameter_must_equal_request_snapshot(self):
@@ -245,9 +265,11 @@ class PlanGraphTests(unittest.TestCase):
         catalog, pipeline = self._artifacts([_module("review-a")])
         graph = build_plan_graph(self.REQUEST, catalog, pipeline)
         exposed = graph.document
-        exposed["stages"][0]["slots"][0]["eligibleModules"].clear()
+        next(
+            item for item in exposed["stages"] if item["stageId"] == "reviewed"
+        )["slots"][0]["eligibleModules"].clear()
         self.assertEqual(
-            graph.document["stages"][0]["slots"][0]["eligibleModules"],
+            _review_slot(graph)["eligibleModules"],
             ["review-a"],
         )
 
@@ -258,22 +280,8 @@ class PlanGraphTests(unittest.TestCase):
                 "review-dependency", stage="planned", slot="plan.primary",
             ),
         ])
-        pipeline_document = {
-            "schemaVersion": 3,
-            "stages": [
-                {"id": "planned", "slots": [{
-                    "id": "plan.primary", "cardinality": "zero-or-many",
-                    "allowedInvocationKinds": ["agent-native"],
-                    "selectionMode": "bounded-runtime",
-                }]},
-                *pipeline.document["stages"],
-            ],
-        }
-        loaded = LoadedPipeline(
-            pipeline_document, _canonical(pipeline_document), _hash(pipeline_document),
-        )
         with self.assertRaisesRegex(PlanGraphError, "cross-slot-dependency"):
-            build_plan_graph(self.REQUEST, catalog, loaded)
+            build_plan_graph(self.REQUEST, catalog, pipeline)
 
     def test_static_selection_closes_dependencies_or_fails_cardinality(self):
         catalog, pipeline = self._artifacts(
@@ -291,7 +299,7 @@ class PlanGraphTests(unittest.TestCase):
         request["explicitModuleIds"] = ["review-a"]
         graph = build_plan_graph(request, catalog, pipeline)
         self.assertEqual(
-            graph.document["stages"][0]["slots"][0]["selectedModules"],
+            _review_slot(graph)["selectedModules"],
             ["review-a", "review-dependency"],
         )
 

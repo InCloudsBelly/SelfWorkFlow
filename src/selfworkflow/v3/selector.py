@@ -296,7 +296,7 @@ def select_modules(
         "receiptHash": _value_hash(receipt_without_hash),
     }
     try:
-        validate_selection_receipt(receipt_document, plan, specs)
+        validate_selection_receipt(receipt_document, plan)
     except ContractError as error:
         raise SelectorError(error.reason) from None
     receipt = SelectionReceiptArtifact._create(receipt_document)

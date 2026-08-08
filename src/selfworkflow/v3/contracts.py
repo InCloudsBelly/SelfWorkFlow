@@ -706,9 +706,97 @@ def _validate_coverage_result(
         _raise_semantic("coverage-passed-with-unfulfilled", ("passed",))
 
 
+def _plan_constraint_map(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    constraints: dict[str, dict[str, Any]] = {}
+    indexes: dict[str, int] = {}
+    for index, constraint in enumerate(document["moduleConstraints"]):
+        module_id = constraint["moduleId"]
+        if module_id in constraints:
+            _raise_semantic(
+                "plan-module-constraint-duplicate",
+                ("moduleConstraints", index, "moduleId"),
+            )
+        constraints[module_id] = constraint
+        indexes[module_id] = index
+    for module_id, constraint in constraints.items():
+        index = indexes[module_id]
+        for field, unknown_reason, self_reason in (
+            ("dependencies", "plan-module-dependency-unknown", "plan-module-dependency-self"),
+            ("conflicts", "plan-module-conflict-unknown", "plan-module-conflict-self"),
+        ):
+            for item_index, related_id in enumerate(constraint[field]):
+                path = ("moduleConstraints", index, field, item_index)
+                if related_id not in constraints:
+                    _raise_semantic(unknown_reason, path)
+                if related_id == module_id:
+                    _raise_semantic(self_reason, path)
+        for dependency_id in constraint["dependencies"]:
+            dependency = constraints[dependency_id]
+            if (
+                dependency["stageId"] != constraint["stageId"]
+                or dependency["slotId"] != constraint["slotId"]
+            ):
+                _raise_semantic(
+                    "plan-module-dependency-cross-slot",
+                    ("moduleConstraints", index, "dependencies"),
+                )
+        for conflict_id in constraint["conflicts"]:
+            if module_id not in constraints[conflict_id]["conflicts"]:
+                _raise_semantic(
+                    "plan-module-conflict-asymmetric",
+                    ("moduleConstraints", index, "conflicts"),
+                )
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(module_id: str) -> None:
+        if module_id in visiting:
+            _raise_semantic(
+                "plan-module-dependency-cycle",
+                ("moduleConstraints", indexes[module_id], "dependencies"),
+            )
+        if module_id in visited:
+            return
+        visiting.add(module_id)
+        for dependency_id in constraints[module_id]["dependencies"]:
+            visit(dependency_id)
+        visiting.remove(module_id)
+        visited.add(module_id)
+
+    for module_id in constraints:
+        visit(module_id)
+    return constraints
+
+
+def _selection_has_bidirectional_conflict(
+    selected: set[str], constraints: dict[str, dict[str, Any]],
+) -> bool:
+    return any(
+        right in constraints[left]["conflicts"]
+        or left in constraints[right]["conflicts"]
+        for left in selected
+        for right in selected
+        if left != right
+    )
+
+
 def _validate_plan_graph(document: dict[str, Any]) -> None:
     if document["planHash"] != _canonical_hash(document, "planHash"):
         _raise_semantic("plan-hash-invalid", ("planHash",))
+
+    constraints = _plan_constraint_map(document)
+    known_slots = {
+        (stage["stageId"], slot["slotId"])
+        for stage in document["stages"]
+        for slot in stage["slots"]
+    }
+    for index, constraint in enumerate(document["moduleConstraints"]):
+        if (constraint["stageId"], constraint["slotId"]) not in known_slots:
+            _raise_semantic(
+                "plan-module-boundary-unknown",
+                ("moduleConstraints", index, "slotId"),
+            )
 
     stage_ids: set[str] = set()
     for stage_index, stage in enumerate(document["stages"]):
@@ -733,6 +821,22 @@ def _validate_plan_graph(document: dict[str, Any]) -> None:
                 )
             selected = slot["selectedModules"]
             eligible = set(slot["eligibleModules"])
+            selected_set = set(selected)
+            for module_index, module_id in enumerate(slot["eligibleModules"]):
+                constraint = constraints.get(module_id)
+                path = (
+                    "stages", stage_index, "slots", slot_index,
+                    "eligibleModules", module_index,
+                )
+                if constraint is None:
+                    _raise_semantic("plan-module-constraint-missing", path)
+                if (
+                    constraint["stageId"] != stage["stageId"]
+                    or constraint["slotId"] != slot["slotId"]
+                ):
+                    _raise_semantic("plan-module-boundary-mismatch", path)
+                if not set(constraint["dependencies"]) <= eligible:
+                    _raise_semantic("plan-eligible-dependency-open", path)
             for module_index, module_id in enumerate(selected):
                 if module_id not in eligible:
                     _raise_semantic(
@@ -742,6 +846,19 @@ def _validate_plan_graph(document: dict[str, Any]) -> None:
                             "selectedModules", module_index,
                         ),
                     )
+                if not set(constraints[module_id]["dependencies"]) <= selected_set:
+                    _raise_semantic(
+                        "plan-selected-dependency-open",
+                        (
+                            "stages", stage_index, "slots", slot_index,
+                            "selectedModules", module_index,
+                        ),
+                    )
+            if _selection_has_bidirectional_conflict(selected_set, constraints):
+                _raise_semantic(
+                    "plan-selected-conflict",
+                    ("stages", stage_index, "slots", slot_index, "selectedModules"),
+                )
             if slot["applicability"] == "not-applicable" and (selected or eligible):
                 _raise_semantic(
                     "plan-inapplicable-slot-not-empty",
@@ -810,10 +927,41 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
             _raise_semantic("resolve-active-plan-not-executable", ("planGraph",))
 
 
+def _validate_receipt_coverage(document: dict[str, Any]) -> set[str]:
+    actual_obligations: set[str] = set()
+    used_evidence: set[str] = set()
+    signal_evidence = set(document["signalEvidenceRefs"])
+    for index, decision in enumerate(document["coverageDecisions"]):
+        obligation_id = decision["obligationId"]
+        if obligation_id in actual_obligations:
+            _raise_semantic(
+                "selection-receipt-coverage-obligation-duplicate",
+                ("coverageDecisions", index, "obligationId"),
+            )
+        actual_obligations.add(obligation_id)
+        evidence = decision.get("evidenceRefs", [])
+        if decision["decision"] == "fulfilled" and not evidence:
+            _raise_semantic(
+                "selection-receipt-coverage-evidence-required",
+                ("coverageDecisions", index, "evidenceRefs"),
+            )
+        if not set(evidence) <= signal_evidence:
+            _raise_semantic(
+                "selection-receipt-coverage-evidence-invalid",
+                ("coverageDecisions", index, "evidenceRefs"),
+            )
+        if used_evidence & set(evidence):
+            _raise_semantic(
+                "selection-receipt-coverage-evidence-reused",
+                ("coverageDecisions", index, "evidenceRefs"),
+            )
+        used_evidence.update(evidence)
+    return actual_obligations
+
+
 def _validate_selection_receipt(
     document: dict[str, Any],
     plan: dict[str, Any] | None = None,
-    module_metadata: dict[str, Any] | None = None,
 ) -> None:
     if document["receiptHash"] != _canonical_hash(document, "receiptHash"):
         _raise_semantic("selection-receipt-hash-invalid", ("receiptHash",))
@@ -824,6 +972,7 @@ def _validate_selection_receipt(
                 "selection-receipt-selected-module-ineligible",
                 ("selectedModuleIds", index),
             )
+    actual_obligations = _validate_receipt_coverage(document)
     if plan is None:
         return
     if document["planHash"] != plan["planHash"]:
@@ -867,56 +1016,65 @@ def _validate_selection_receipt(
             "selection-receipt-cardinality-invalid",
             ("selectedModuleIds",),
         )
-    if module_metadata is not None:
-        _validate_selection_module_metadata(document, module_metadata)
-
-
-def _metadata_value(metadata: Any, field: str) -> Any:
-    if isinstance(metadata, dict):
-        return metadata.get(field)
-    return getattr(metadata, field, None)
-
-
-def _validate_selection_module_metadata(
-    document: dict[str, Any], module_metadata: dict[str, Any],
-) -> None:
+    constraints = _plan_constraint_map(plan)
     eligible = set(document["eligibleModuleIds"])
     selected = set(document["selectedModuleIds"])
     for module_id in eligible:
-        metadata = module_metadata.get(module_id)
-        if metadata is None:
+        constraint = constraints.get(module_id)
+        if constraint is None:
             _raise_semantic(
                 "selection-receipt-module-metadata-missing",
                 ("eligibleModuleIds",),
             )
         if (
-            _metadata_value(metadata, "stage") != document["stageId"]
-            or _metadata_value(metadata, "slot") != document["slotId"]
+            constraint["stageId"] != document["stageId"]
+            or constraint["slotId"] != document["slotId"]
         ):
             _raise_semantic(
                 "selection-receipt-module-boundary-mismatch",
                 ("eligibleModuleIds",),
             )
-        dependencies = set(_metadata_value(metadata, "dependencies") or ())
+        dependencies = set(constraint["dependencies"])
         if not dependencies <= eligible:
             _raise_semantic(
                 "selection-receipt-eligible-dependency-open",
                 ("eligibleModuleIds",),
             )
     for module_id in selected:
-        metadata = module_metadata[module_id]
-        dependencies = set(_metadata_value(metadata, "dependencies") or ())
+        constraint = constraints[module_id]
+        dependencies = set(constraint["dependencies"])
         if not dependencies <= selected:
             _raise_semantic(
                 "selection-receipt-selected-dependency-open",
                 ("selectedModuleIds",),
             )
-        conflicts = set(_metadata_value(metadata, "conflicts") or ())
-        if conflicts & selected:
-            _raise_semantic(
-                "selection-receipt-selected-conflict",
-                ("selectedModuleIds",),
-            )
+    if _selection_has_bidirectional_conflict(selected, constraints):
+        _raise_semantic(
+            "selection-receipt-selected-conflict",
+            ("selectedModuleIds",),
+        )
+    expected_context_cost = sum(
+        constraints[module_id]["estimatedContextCost"] for module_id in selected
+    )
+    expected_execution_cost = sum(
+        constraints[module_id]["estimatedExecutionCost"] for module_id in selected
+    )
+    if document["estimatedContextCost"] != expected_context_cost:
+        _raise_semantic(
+            "selection-receipt-context-cost-mismatch",
+            ("estimatedContextCost",),
+        )
+    if document["estimatedExecutionCost"] != expected_execution_cost:
+        _raise_semantic(
+            "selection-receipt-execution-cost-mismatch",
+            ("estimatedExecutionCost",),
+        )
+
+    if actual_obligations != set(slot["coverageObligations"]):
+        _raise_semantic(
+            "selection-receipt-coverage-obligations-mismatch",
+            ("coverageDecisions",),
+        )
 
 
 def _validate_run_ledger(
@@ -1103,12 +1261,14 @@ def validate_plan_graph(document: dict[str, Any]) -> None:
 def validate_selection_receipt(
     document: dict[str, Any],
     plan: dict[str, Any] | None = None,
-    module_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Validate a V3 SelectionReceipt, optionally against its PlanGraph."""
 
     _validate_schema("selection-receipt.schema.json", document)
-    _validate_selection_receipt(document, plan, module_metadata)
+    if plan is not None:
+        _validate_schema("plan-graph.schema.json", plan)
+        _validate_plan_graph(plan)
+    _validate_selection_receipt(document, plan)
 
 
 def validate_run_ledger(
@@ -1121,6 +1281,9 @@ def validate_run_ledger(
     """Validate a V3 RunLedger, optionally against a plan and receipt set."""
 
     _validate_schema("run-ledger.schema.json", document)
+    if plan is not None:
+        _validate_schema("plan-graph.schema.json", plan)
+        _validate_plan_graph(plan)
     _validate_run_ledger(
         document, plan, receipts,
         expected_successor_plan_hash,
@@ -1235,10 +1398,15 @@ def load_contract(
     elif schema_name == "plan-graph.schema.json":
         _validate_plan_graph(document)
     elif schema_name == "selection-receipt.schema.json":
+        if plan_graph is not None:
+            _validate_schema("plan-graph.schema.json", plan_graph)
+            _validate_plan_graph(plan_graph)
         _validate_selection_receipt(document, plan_graph)
     elif schema_name == "run-ledger.schema.json":
         if plan_graph is None:
             _raise_semantic("ledger-plan-required", ())
+        _validate_schema("plan-graph.schema.json", plan_graph)
+        _validate_plan_graph(plan_graph)
         _validate_run_ledger(
             document,
             plan_graph,

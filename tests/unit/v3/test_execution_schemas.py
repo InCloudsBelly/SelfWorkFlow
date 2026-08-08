@@ -41,6 +41,26 @@ class ExecutionSchemaTests(unittest.TestCase):
             "providerPreferenceHash": cls.HASH_A,
             "providerBindingHash": cls.HASH_B,
             "executionPolicyHash": cls.HASH_C,
+            "moduleConstraints": [
+                {
+                    "moduleId": "module-a",
+                    "stageId": "stage-a",
+                    "slotId": "slot-a",
+                    "dependencies": [],
+                    "conflicts": [],
+                    "estimatedContextCost": 1,
+                    "estimatedExecutionCost": 2,
+                },
+                {
+                    "moduleId": "module-b",
+                    "stageId": "stage-b",
+                    "slotId": "slot-b",
+                    "dependencies": [],
+                    "conflicts": [],
+                    "estimatedContextCost": 10,
+                    "estimatedExecutionCost": 20,
+                },
+            ],
             "stages": [
                 {
                     "stageId": "stage-a",
@@ -76,7 +96,7 @@ class ExecutionSchemaTests(unittest.TestCase):
                             "eligibleModules": ["module-b"],
                             "selectionPolicyRef": "policy-b",
                             "selectionPolicyHash": cls.HASH_B,
-                            "coverageObligations": [],
+                            "coverageObligations": ["coverage-b"],
                             "gates": [],
                             "applicability": "applicable",
                         }
@@ -108,7 +128,11 @@ class ExecutionSchemaTests(unittest.TestCase):
             "estimatedContextCost": 10,
             "estimatedExecutionCost": 20,
             "coverageDecisions": [
-                {"obligationId": "coverage-b", "decision": "fulfilled"}
+                {
+                    "obligationId": "coverage-b",
+                    "decision": "fulfilled",
+                    "evidenceRefs": ["signal-b"],
+                }
             ],
             "receiptHash": cls.HASH_C,
         }
@@ -307,6 +331,24 @@ class ExecutionSchemaTests(unittest.TestCase):
             "plan-hash-invalid", ("planHash",),
         )
 
+    def test_plan_graph_requires_self_contained_module_constraints(self):
+        from selfworkflow.v3.contracts import ContractError, validate_plan_graph
+
+        missing = self._plan()
+        missing.pop("moduleConstraints")
+        self._assert_schema_only_error(
+            "plan-graph.schema.json", missing, (), "required",
+        )
+
+        invalid = self._plan()
+        invalid["moduleConstraints"][1]["dependencies"] = ["module-missing"]
+        invalid["planHash"] = self._hash_document(invalid, "planHash")
+        with self.assertRaises(ContractError) as raised:
+            validate_plan_graph(invalid)
+        self.assertEqual(
+            raised.exception.reason, "plan-module-dependency-unknown",
+        )
+
     def test_plan_graph_rejects_runtime_exactly_one_without_candidates(self):
         invalid = self._plan()
         slot = invalid["stages"][1]["slots"][0]
@@ -425,7 +467,7 @@ class ExecutionSchemaTests(unittest.TestCase):
 
         cases = (
             ("exactly-one", [], "selection-receipt-cardinality-invalid"),
-            ("zero-or-one", ["module-a", "module-b"], "selection-receipt-cardinality-invalid"),
+            ("zero-or-one", ["module-b", "module-c"], "selection-receipt-cardinality-invalid"),
             ("zero-or-many", ["module-outside"], "selection-receipt-selected-module-ineligible"),
             ("gate", [], "selection-receipt-cardinality-invalid"),
         )
@@ -433,10 +475,19 @@ class ExecutionSchemaTests(unittest.TestCase):
             plan = self._plan()
             slot = plan["stages"][1]["slots"][0]
             slot["cardinality"] = cardinality
-            slot["eligibleModules"] = ["module-a", "module-b"]
+            slot["eligibleModules"] = ["module-b", "module-c"]
+            plan["moduleConstraints"].append({
+                "moduleId": "module-c",
+                "stageId": "stage-b",
+                "slotId": "slot-b",
+                "dependencies": [],
+                "conflicts": [],
+                "estimatedContextCost": 1,
+                "estimatedExecutionCost": 1,
+            })
             plan["planHash"] = self._hash_document(plan, "planHash")
             receipt = self._receipt(plan)
-            receipt["eligibleModuleIds"] = ["module-a", "module-b"]
+            receipt["eligibleModuleIds"] = ["module-b", "module-c"]
             receipt["selectedModuleIds"] = selected
             receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
             with self.subTest(cardinality=cardinality), self.assertRaises(ContractError) as raised:
@@ -558,6 +609,13 @@ class ExecutionSchemaTests(unittest.TestCase):
             "selectionPolicyHash": self.HASH_A,
             "attemptRef": "attempt-a-1", "eligibleModuleIds": ["module-a"],
             "selectedModuleIds": ["module-a"],
+            "estimatedContextCost": 1,
+            "estimatedExecutionCost": 2,
+            "coverageDecisions": [{
+                "obligationId": "coverage-a",
+                "decision": "fulfilled",
+                "evidenceRefs": ["signal-b"],
+            }],
         })
         receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
         ledger = self._ledger(plan)
@@ -584,42 +642,143 @@ class ExecutionSchemaTests(unittest.TestCase):
         )
         self.assertEqual(raised.exception.path, ("selectionPolicyHash",))
 
-    def test_selection_receipt_metadata_enforces_dependency_and_conflict(self):
+    def test_selection_receipt_plan_constraints_enforce_dependency_and_conflict(self):
         from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
 
         plan = self._plan()
         slot = plan["stages"][1]["slots"][0]
         slot["cardinality"] = "zero-or-many"
         slot["eligibleModules"] = ["module-b", "module-dependency"]
+        module_b = next(
+            item for item in plan["moduleConstraints"]
+            if item["moduleId"] == "module-b"
+        )
+        module_b["dependencies"] = ["module-dependency"]
+        plan["moduleConstraints"].append({
+            "moduleId": "module-dependency",
+            "stageId": "stage-b",
+            "slotId": "slot-b",
+            "dependencies": [],
+            "conflicts": [],
+            "estimatedContextCost": 3,
+            "estimatedExecutionCost": 4,
+        })
         plan["planHash"] = self._hash_document(plan, "planHash")
         receipt = self._receipt(plan)
         receipt["eligibleModuleIds"] = ["module-b", "module-dependency"]
         receipt["selectedModuleIds"] = ["module-b"]
         receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
-        metadata = {
-            "module-b": {
-                "stage": "stage-b", "slot": "slot-b",
-                "dependencies": ["module-dependency"], "conflicts": [],
-            },
-            "module-dependency": {
-                "stage": "stage-b", "slot": "slot-b",
-                "dependencies": [], "conflicts": [],
-            },
-        }
         with self.assertRaises(ContractError) as raised:
-            validate_selection_receipt(receipt, plan, metadata)
+            validate_selection_receipt(receipt, plan)
         self.assertEqual(
             raised.exception.reason,
             "selection-receipt-selected-dependency-open",
         )
 
         receipt["selectedModuleIds"] = ["module-b", "module-dependency"]
+        receipt["estimatedContextCost"] = 13
+        receipt["estimatedExecutionCost"] = 24
         receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
-        metadata["module-b"]["conflicts"] = ["module-dependency"]
+        module_b["conflicts"] = ["module-dependency"]
+        plan["moduleConstraints"][-1]["conflicts"] = ["module-b"]
+        plan["planHash"] = self._hash_document(plan, "planHash")
+        receipt["planHash"] = plan["planHash"]
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
         with self.assertRaises(ContractError) as raised:
-            validate_selection_receipt(receipt, plan, metadata)
+            validate_selection_receipt(receipt, plan)
         self.assertEqual(
             raised.exception.reason, "selection-receipt-selected-conflict",
+        )
+
+    def test_selection_receipt_costs_must_match_plan_constraints(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        receipt = self._receipt(plan)
+        receipt["estimatedContextCost"] += 1
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt, plan)
+        self.assertEqual(
+            raised.exception.reason, "selection-receipt-context-cost-mismatch",
+        )
+
+    def test_selection_receipt_coverage_is_exact_and_fulfilled_needs_evidence(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        plan = self._plan()
+        cases = []
+        missing = self._receipt(plan)
+        missing["coverageDecisions"] = []
+        cases.append((missing, "selection-receipt-coverage-obligations-mismatch"))
+        extra = self._receipt(plan)
+        extra["coverageDecisions"].append({
+            "obligationId": "coverage-extra",
+            "decision": "blocked",
+            "evidenceRefs": [],
+        })
+        cases.append((extra, "selection-receipt-coverage-obligations-mismatch"))
+        duplicate = self._receipt(plan)
+        duplicate["coverageDecisions"].append({
+            "obligationId": "coverage-b",
+            "decision": "unverified",
+            "evidenceRefs": [],
+        })
+        cases.append((duplicate, "selection-receipt-coverage-obligation-duplicate"))
+        no_evidence = self._receipt(plan)
+        no_evidence["coverageDecisions"][0]["evidenceRefs"] = []
+        cases.append((no_evidence, "selection-receipt-coverage-evidence-required"))
+        for receipt, reason in cases:
+            receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+            with self.subTest(reason=reason):
+                with self.assertRaises(ContractError) as raised:
+                    validate_selection_receipt(receipt, plan)
+                self.assertEqual(raised.exception.reason, reason)
+
+    def test_selection_receipt_standalone_rejects_fulfilled_without_evidence(self):
+        from selfworkflow.v3.contracts import ContractError, validate_selection_receipt
+
+        receipt = self._receipt()
+        receipt["coverageDecisions"][0]["evidenceRefs"] = []
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        with self.assertRaises(ContractError) as raised:
+            validate_selection_receipt(receipt)
+        self.assertEqual(
+            raised.exception.reason,
+            "selection-receipt-coverage-evidence-required",
+        )
+
+    def test_run_ledger_reuses_receipt_coverage_validation(self):
+        from selfworkflow.v3.contracts import ContractError, validate_run_ledger
+
+        plan = self._plan()
+        receipt = self._receipt(plan)
+        receipt["coverageDecisions"][0]["evidenceRefs"] = []
+        receipt["receiptHash"] = self._hash_document(receipt, "receiptHash")
+        ledger = self._ledger(plan)
+        ledger["stages"][0].update({"status": "skipped", "attempts": []})
+        ledger["stages"][1].update({
+            "status": "active",
+            "attempts": [{
+                "attemptRef": "attempt-b-1",
+                "ordinal": 1,
+                "previousAttemptRef": None,
+                "startedAt": "2026-08-09T00:00:00Z",
+            }],
+            "selectionReceiptRefs": [{
+                "attemptRef": "attempt-b-1",
+                "receiptHash": receipt["receiptHash"],
+            }],
+        })
+        with self.assertRaises(ContractError) as raised:
+            validate_run_ledger(ledger, plan, (receipt,))
+        self.assertEqual(
+            raised.exception.reason,
+            "selection-receipt-coverage-evidence-required",
+        )
+        self.assertEqual(
+            raised.exception.path,
+            ("coverageDecisions", 0, "evidenceRefs"),
         )
 
     def test_run_ledger_rejects_fake_stage_slot_module_gate_and_skip(self):

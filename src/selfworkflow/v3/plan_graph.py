@@ -1,7 +1,7 @@
 """Pure construction of a provenance-bound V3 PlanGraph artifact."""
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import copy
 import hashlib
 import json
@@ -14,7 +14,11 @@ from selfworkflow.v3.contracts import (
     validate_catalog_pipeline,
     validate_plan_graph,
 )
-from selfworkflow.v3.pipeline import LoadedPipeline
+from selfworkflow.v3.pipeline import (
+    LoadedPipeline,
+    PipelineError,
+    _validate_pipeline_semantics,
+)
 
 
 class PlanGraphError(ValueError):
@@ -30,7 +34,6 @@ class ModuleSpec:
     id: str
     stage: str
     slot: str
-    source_hash: str
     dependencies: tuple[str, ...]
     conflicts: tuple[str, ...]
     context_cost: int
@@ -43,30 +46,24 @@ _ARTIFACT_TOKEN = object()
 class PlanGraphArtifact:
     """Builder-only immutable view over a PlanGraph and bound module metadata."""
 
-    __slots__ = (
-        "__document", "__module_specs", "__provenance_hash", "__token",
-    )
+    __slots__ = ("__document", "__provenance_hash", "__token")
 
     def __init__(
         self,
         token: object,
         document: dict[str, Any],
-        module_specs: tuple[ModuleSpec, ...],
         provenance_hash: str,
     ) -> None:
         if token is not _ARTIFACT_TOKEN:
             raise TypeError("PlanGraphArtifact is builder-only")
         self.__document = copy.deepcopy(document)
-        self.__module_specs = tuple(module_specs)
         self.__provenance_hash = provenance_hash
         self.__token = token
 
     @classmethod
-    def _from_builder(
-        cls, document: dict[str, Any], module_specs: tuple[ModuleSpec, ...],
-    ) -> "PlanGraphArtifact":
-        provenance_hash = _artifact_provenance_hash(document, module_specs)
-        return cls(_ARTIFACT_TOKEN, document, module_specs, provenance_hash)
+    def _from_builder(cls, document: dict[str, Any]) -> "PlanGraphArtifact":
+        provenance_hash = _artifact_provenance_hash(document)
+        return cls(_ARTIFACT_TOKEN, document, provenance_hash)
 
     @property
     def document(self) -> dict[str, Any]:
@@ -82,24 +79,20 @@ class PlanGraphArtifact:
     def as_dict(self) -> dict[str, Any]:
         return copy.deepcopy(self.__document)
 
-    def spec_by_id(self) -> dict[str, ModuleSpec]:
-        return {spec.id: spec for spec in self.__module_specs}
-
     def _trusted_snapshot(
         self,
     ) -> tuple[dict[str, Any], dict[str, ModuleSpec]]:
         if self.__token is not _ARTIFACT_TOKEN:
             raise PlanGraphError("v3-plan-artifact-provenance-invalid")
-        actual = _artifact_provenance_hash(
-            self.__document, self.__module_specs,
-        )
+        actual = _artifact_provenance_hash(self.__document)
         if actual != self.__provenance_hash:
             raise PlanGraphError("v3-plan-artifact-provenance-invalid")
         try:
             validate_plan_graph(self.__document)
         except ContractError as error:
             raise PlanGraphError(error.reason) from None
-        return copy.deepcopy(self.__document), self.spec_by_id()
+        document = copy.deepcopy(self.__document)
+        return document, _module_specs_from_plan(document)
 
 
 PlanGraph = PlanGraphArtifact
@@ -246,6 +239,7 @@ def build_plan_graph(
         "providerPreferenceHash": snapshots["providerPreferenceHash"],
         "providerBindingHash": snapshots["providerBindingHash"],
         "executionPolicyHash": snapshots["executionPolicyHash"],
+        "moduleConstraints": [_constraint(spec) for spec in specs],
         "stages": stages,
     }
     document = {
@@ -256,7 +250,7 @@ def build_plan_graph(
         validate_plan_graph(document)
     except ContractError as error:
         raise PlanGraphError(error.reason) from None
-    return PlanGraphArtifact._from_builder(document, specs)
+    return PlanGraphArtifact._from_builder(document)
 
 
 def _validated_request(request: Mapping[str, Any]) -> dict[str, Any]:
@@ -286,6 +280,8 @@ def _validated_request(request: Mapping[str, Any]) -> dict[str, Any]:
 def _catalog_document(compiled: CompiledCatalog) -> tuple[dict[str, Any], str]:
     if type(compiled) is not CompiledCatalog:
         raise PlanGraphError("v3-catalog-not-compiled")
+    if not compiled._has_valid_seal():
+        raise PlanGraphError("v3-catalog-seal-invalid")
     envelope = compiled.document
     if not isinstance(envelope, dict) or set(envelope) != {
         "schemaVersion", "catalog", "catalogHash",
@@ -309,6 +305,8 @@ def _catalog_document(compiled: CompiledCatalog) -> tuple[dict[str, Any], str]:
 def _pipeline_document(pipeline: LoadedPipeline) -> tuple[dict[str, Any], str]:
     if type(pipeline) is not LoadedPipeline:
         raise PlanGraphError("v3-pipeline-not-loaded")
+    if not pipeline._has_valid_seal():
+        raise PlanGraphError("v3-pipeline-seal-invalid")
     document = pipeline.document
     if not isinstance(document, dict):
         raise PlanGraphError("v3-pipeline-invalid")
@@ -325,6 +323,10 @@ def _pipeline_document(pipeline: LoadedPipeline) -> tuple[dict[str, Any], str]:
         raise PlanGraphError(reason) from None
     if validated != document:
         raise PlanGraphError("v3-pipeline-content-mismatch")
+    try:
+        _validate_pipeline_semantics(validated)
+    except PipelineError as error:
+        raise PlanGraphError(error.reason) from None
     return copy.deepcopy(validated), pipeline.pipeline_hash
 
 
@@ -526,12 +528,40 @@ def _spec(module: Mapping[str, Any]) -> ModuleSpec:
         id=module["id"],
         stage=module["stage"],
         slot=module["slot"],
-        source_hash=module["sourceHash"],
         dependencies=tuple(sorted(module["dependencies"])),
         conflicts=tuple(sorted(module["conflicts"])),
         context_cost=costs["estimatedContextCost"],
         execution_cost=costs["estimatedExecutionCost"],
     )
+
+
+def _constraint(spec: ModuleSpec) -> dict[str, Any]:
+    return {
+        "moduleId": spec.id,
+        "stageId": spec.stage,
+        "slotId": spec.slot,
+        "dependencies": list(spec.dependencies),
+        "conflicts": list(spec.conflicts),
+        "estimatedContextCost": spec.context_cost,
+        "estimatedExecutionCost": spec.execution_cost,
+    }
+
+
+def _module_specs_from_plan(
+    document: Mapping[str, Any],
+) -> dict[str, ModuleSpec]:
+    return {
+        item["moduleId"]: ModuleSpec(
+            id=item["moduleId"],
+            stage=item["stageId"],
+            slot=item["slotId"],
+            dependencies=tuple(item["dependencies"]),
+            conflicts=tuple(item["conflicts"]),
+            context_cost=item["estimatedContextCost"],
+            execution_cost=item["estimatedExecutionCost"],
+        )
+        for item in document["moduleConstraints"]
+    }
 
 
 def _static_selection(
@@ -678,13 +708,8 @@ def _selection_policy_hash(
     })
 
 
-def _artifact_provenance_hash(
-    document: Mapping[str, Any], specs: Sequence[ModuleSpec],
-) -> str:
-    return _value_hash({
-        "document": document,
-        "moduleSpecs": [asdict(spec) for spec in specs],
-    })
+def _artifact_provenance_hash(document: Mapping[str, Any]) -> str:
+    return _value_hash(document)
 
 
 def _canonical_bytes(value: Any) -> bytes:

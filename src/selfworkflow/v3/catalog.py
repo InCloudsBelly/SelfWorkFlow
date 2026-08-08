@@ -1,6 +1,5 @@
 """Strict, deterministic compilation for the independent V3 catalog."""
 
-from dataclasses import dataclass
 import hashlib
 import json
 import math
@@ -90,11 +89,45 @@ class CatalogError(ValueError):
         super().__init__(reason)
 
 
-@dataclass(frozen=True)
 class CompiledCatalog:
-    document: dict[str, Any]
-    content: bytes
-    catalog_hash: str
+    """Artifact issued only after the V3 catalog compiler succeeds."""
+
+    __slots__ = ("_document", "_content", "_catalog_hash", "__seal")
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("CompiledCatalog is issued by compile_catalog")
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise AttributeError("CompiledCatalog is immutable")
+
+    @property
+    def document(self) -> dict[str, Any]:
+        return self._document
+
+    @property
+    def content(self) -> bytes:
+        return self._content
+
+    @property
+    def catalog_hash(self) -> str:
+        return self._catalog_hash
+
+    def _has_valid_seal(self) -> bool:
+        return getattr(self, "_CompiledCatalog__seal", None) is _CATALOG_SEAL
+
+
+_CATALOG_SEAL = object()
+
+
+def _issue_compiled_catalog(
+    document: dict[str, Any], content: bytes, catalog_hash: str,
+) -> CompiledCatalog:
+    artifact = object.__new__(CompiledCatalog)
+    object.__setattr__(artifact, "_document", document)
+    object.__setattr__(artifact, "_content", content)
+    object.__setattr__(artifact, "_catalog_hash", catalog_hash)
+    object.__setattr__(artifact, "_CompiledCatalog__seal", _CATALOG_SEAL)
+    return artifact
 
 
 def compile_catalog(source: object = None) -> CompiledCatalog:
@@ -173,7 +206,9 @@ def compile_catalog(source: object = None) -> CompiledCatalog:
         "catalog": catalog,
         "catalogHash": catalog_hash,
     }
-    return CompiledCatalog(envelope, _canonical_json(envelope), catalog_hash)
+    return _issue_compiled_catalog(
+        envelope, _canonical_json(envelope), catalog_hash,
+    )
 
 
 def _canonical_json(value: object) -> bytes:

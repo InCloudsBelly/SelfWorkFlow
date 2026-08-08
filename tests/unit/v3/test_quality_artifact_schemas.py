@@ -45,6 +45,15 @@ class QualityArtifactSchemaTests(unittest.TestCase):
             "providerPreferenceHash": cls.HASH_A,
             "providerBindingHash": cls.HASH_B,
             "executionPolicyHash": cls.HASH_C,
+            "moduleConstraints": [{
+                "moduleId": "module-a",
+                "stageId": "stage-a",
+                "slotId": "slot-a",
+                "dependencies": [],
+                "conflicts": [],
+                "estimatedContextCost": 1,
+                "estimatedExecutionCost": 1,
+            }],
             "stages": [
                 {
                     "stageId": "stage-a",
@@ -516,13 +525,13 @@ class QualityArtifactSchemaTests(unittest.TestCase):
         from selfworkflow.v3.contracts import load_contract
 
         plan = self._plan()
-        plan_hash = "sha256:11baad281ac205e68ee64bbe068b0b30676f34089da3b82c2ef45879b2e4e058"
+        plan_hash = "sha256:65cecaf41b7ad988fec03a741ac37cf1760abf6239571f45386ca2ccfa0fb4fa"
         self.assertEqual(plan["planHash"], plan_hash)
 
         # Precomputed independently from compact UTF-8 JSON with recursively
         # sorted keys and the final strategyHash member omitted. The source key
         # order is deliberately different and includes Unicode, a bool, and arrays.
-        expected = "sha256:fb3482278cc6807ed40142b7bd7c850f6181ea9a00a6017d2c1658c7d8634211"
+        expected = "sha256:5057f4f6ec3fefdb707fe162b31ef37d5d430f13070896b903a5464135f16852"
         vector = {
             "strategyHash": expected,
             "coverageObligations": [{

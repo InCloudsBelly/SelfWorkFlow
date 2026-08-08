@@ -55,6 +55,12 @@ class V3PipelineLoaderTests(unittest.TestCase):
         spec = importlib.util.find_spec("selfworkflow.v3.pipeline")
         self.assertIsNotNone(spec, "v3-pipeline-loader-not-found")
 
+    def test_loaded_pipeline_cannot_be_publicly_constructed(self):
+        from selfworkflow.v3.pipeline import LoadedPipeline
+
+        with self.assertRaises(TypeError):
+            LoadedPipeline({}, b"{}", "sha256:" + "a" * 64)
+
     def test_public_api_loads_a_deterministic_v3_pipeline(self):
         PipelineError, load_pipeline = _loader()
         with _pipeline_workspace() as (_, _, path):

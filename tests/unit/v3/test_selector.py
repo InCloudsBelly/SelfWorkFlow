@@ -2,8 +2,6 @@ import hashlib
 import json
 import unittest
 
-from selfworkflow.v3.catalog import CompiledCatalog
-from selfworkflow.v3.pipeline import LoadedPipeline
 from selfworkflow.v3.plan_graph import build_plan_graph
 from selfworkflow.v3.selector import (
     SelectionInput,
@@ -11,6 +9,7 @@ from selfworkflow.v3.selector import (
     SelectorError,
     select_modules,
 )
+from tests.unit.v3.artifact_fixtures import load_test_artifacts
 
 
 REQUEST = {
@@ -53,6 +52,16 @@ def _hash(value):
     return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
 
 
+def _review_slot(graph):
+    stage = next(
+        item for item in graph.document["stages"]
+        if item["stageId"] == "reviewed"
+    )
+    return next(
+        item for item in stage["slots"] if item["slotId"] == "review.primary"
+    )
+
+
 def _plan(slot, *, stage="reviewed", plan_hash=None, specs=()):
     del plan_hash
     eligible = set(slot["eligibleModules"])
@@ -81,32 +90,19 @@ def _plan(slot, *, stage="reviewed", plan_hash=None, specs=()):
             },
             "supportEvidence": support,
         })
-    catalog = {"schemaVersion": 3, "domains": [], "modules": modules}
-    catalog["catalogHash"] = _hash(catalog)
-    envelope = {
-        "schemaVersion": 3, "catalog": catalog,
-        "catalogHash": catalog["catalogHash"],
-    }
-    pipeline = {
-        "schemaVersion": 3,
-        "stages": [{"id": stage, "slots": [{
-            "id": slot["slotId"],
-            "cardinality": slot["cardinality"],
-            "allowedInvocationKinds": ["agent-native"],
-            "selectionMode": slot["selectionMode"],
-        }]}],
-    }
+    if stage != "reviewed" or slot["slotId"] != "review.primary":
+        raise AssertionError("selector fixture only supports the reviewed test slot")
     policy = {
         "coverageObligationsBySlot": {
             slot["slotId"]: slot["coverageObligations"],
         }
     }
-    return build_plan_graph(
-        REQUEST,
-        CompiledCatalog(envelope, _canonical(envelope), catalog["catalogHash"]),
-        LoadedPipeline(pipeline, _canonical(pipeline), _hash(pipeline)),
-        policy_snapshot=policy,
+    catalog, pipeline = load_test_artifacts(
+        modules,
+        cardinality=slot["cardinality"],
+        mode=slot["selectionMode"],
     )
+    return build_plan_graph(REQUEST, catalog, pipeline, policy_snapshot=policy)
 
 
 def _slot(*, mode="bounded-runtime", cardinality="exactly-one", eligible=None,
@@ -158,7 +154,7 @@ class SelectorTests(unittest.TestCase):
             result.receipt.document["coverageDecisions"],
             [{"obligationId": "review.coverage", "decision": "unverified", "evidenceRefs": []}],
         )
-        policy_hash = graph.document["stages"][0]["slots"][0]["selectionPolicyHash"]
+        policy_hash = _review_slot(graph)["selectionPolicyHash"]
         self.assertEqual(result.receipt.selection_policy_hash, policy_hash)
         self.assertEqual(
             result.receipt.document["selectionPolicyHash"],
@@ -232,7 +228,7 @@ class SelectorTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "next-stage-request")
         self.assertEqual(result.next_stage_request["requestedModuleIds"], ["review-extra"])
-        self.assertEqual(graph.document["stages"][0]["slots"][0]["eligibleModules"], ["review-a"])
+        self.assertEqual(_review_slot(graph)["eligibleModules"], ["review-a"])
 
     def test_dependency_closure_is_selected_only_when_dependency_is_eligible(self):
         graph = _plan(
@@ -263,14 +259,18 @@ class SelectorTests(unittest.TestCase):
                 self._input(),
             )
         exposed = graph.document
-        exposed["stages"][0]["slots"][0]["selectionPolicyHash"] = "sha256:" + "9" * 64
+        next(
+            item for item in exposed["stages"] if item["stageId"] == "reviewed"
+        )["slots"][0]["selectionPolicyHash"] = "sha256:" + "9" * 64
         select_modules(
             graph, "reviewed", "review.primary", "attempt-1", self._input(),
         )
         internal = object.__getattribute__(
             graph, "_PlanGraphArtifact__document",
         )
-        internal["stages"][0]["slots"][0]["selectionPolicyHash"] = "sha256:" + "9" * 64
+        next(
+            item for item in internal["stages"] if item["stageId"] == "reviewed"
+        )["slots"][0]["selectionPolicyHash"] = "sha256:" + "9" * 64
         with self.assertRaisesRegex(SelectorError, "plan"):
             select_modules(
                 graph, "reviewed", "review.primary", "attempt-1", self._input(),
@@ -348,7 +348,7 @@ class SelectorTests(unittest.TestCase):
             self.assertEqual(document["inputArtifactHash"], "sha256:" + "4" * 64)
             self.assertEqual(
                 document["selectionPolicyHash"],
-                graph.document["stages"][0]["slots"][0]["selectionPolicyHash"],
+                _review_slot(graph)["selectionPolicyHash"],
             )
             self.assertTrue(document["resultHash"].startswith("sha256:"))
             material = dict(document)
