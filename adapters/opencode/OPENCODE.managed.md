@@ -1,1 +1,1 @@
-Bootstrap from the installed SelfWorkFlow `WORKFLOW.md`; use `selfworkflow resolve` when available, disclose unsupported capabilities, and never weaken protected invariants.
+Bootstrap from installed `WORKFLOW.md`; call `selfworkflow resolve`, refuse a `paused` PlanGraph, and load only current-stage modules. Record runtime results in a PlanGraph-bound RunLedger, disclose unavailable capabilities, and ask only for critical decisions. This is `agent-policy` compatibility, not conforming-Host proof. Knowledge is optional; C7OpenWiki execution is deferred.

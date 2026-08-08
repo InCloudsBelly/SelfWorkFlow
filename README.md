@@ -55,30 +55,35 @@ classify briefly
 -> run the narrowest sufficient verification
 ```
 
-Grill-me is explicit-only. Knowledge persistence is optional and confirmation
-gated. Install, migration, release, native-Agent validation, and knowledge-backend
-maintenance are explicit maintainer operations and are never loaded merely because
-a normal code task started.
+The runtime sequence is `Discover -> Capability Check -> Classify -> Design ->
+Plan -> Implement/Debug -> Review -> Verify -> optional Knowledge -> Complete`.
+`selfworkflow resolve` returns an immutable PlanGraph; the Host refuses paused
+plans, loads only current-stage modules, and records runtime facts in a
+plan-bound RunLedger. Grill-me is explicit-only and is followed by independent
+Brainstorming cross-review. Knowledge persistence is optional and confirmation
+gated. C7OpenWiki execution is deliberately deferred to a later extension.
 
 Runtime profiles are closed and deterministic:
 
 - `core` (default): compact workflow, code-quality sources, stage routing, and thin
   Agent adapters;
-- `knowledge`: `core` plus the knowledge contract and C7OpenWiki adapter;
+- `knowledge`: `core` plus only the generic Knowledge contract; it does not
+  enable a C7OpenWiki adapter;
 - `maintainer`: the complete governance, installation, release, and extension
   snapshot.
 
 ## Current capability status
 
-- Deterministic workflow, evidence, Catalog, routing, stateless task resolution,
+- Deterministic workflow, Pipeline, Catalog v2, PlanGraph/RunLedger validation,
+  Git index policy, routing, stateless task resolution,
   Skill absorption, adapters,
-  optional knowledge contract, C7OpenWiki contract mapping, runtime build, and
+  optional generic Knowledge slots, runtime build, and
   sandbox transaction install/verify/rollback are implemented and automated-tested.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
   `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
   `adapters/unknown/BOOTSTRAP.md`.
-- C7OpenWiki is optional and `experimental-unverified`. The adapter contains no
-  runtime dependency on the maintainer's OpenWiki checkout.
+- C7OpenWiki MCP behavior is not implemented or enabled by this release. Frozen
+  legacy contract files do not constitute support evidence.
 - Installer manifests currently record `securityStatus: unverified`; do not use the
   sandbox result as proof of production ACL hardening.
 - Native login, model/OAuth calls, formal global installation, and final independent
@@ -94,18 +99,18 @@ Runtime profiles are closed and deterministic:
 Use `--profile knowledge` or `--profile maintainer` only when the requested task
 actually needs those boundaries.
 
-Resolve one current workflow stage without starting a long-lived orchestrator:
+Resolve a complete static workflow plan without starting a long-lived orchestrator:
 
 ```powershell
 Copy-Item build\runtime\workflow\resolve-request.example.json build\request.json
-# Update the copied request with observed C/R, capabilities, and Superpowers status.
+# Update the copied request with observed C/R and fresh capability evidence.
 .venv\Scripts\python.exe -m selfworkflow.cli resolve --catalog build\runtime\catalog.json --request build\request.json
 ```
 
-The result composes the capability gate, Catalog route, current-stage
-Superpowers Skills, and minimum Review/verification requirements. Input capability
-and source statuses are explicit reports from the calling Agent, not authentication
-or native-host proof. `paused` must not be silently promoted to `active`.
+The result is a hash-bound PlanGraph containing static stage applicability,
+selected modules, Gates, and failure owners. Runtime results are recorded
+separately with `selfworkflow ledger validate`. Capability evidence is not
+authentication or native-host proof. `paused` must not be silently promoted.
 
 Review the complete plan and its `planHash`, then pass that exact hash to
 `install apply`. Use the returned manifest for `install verify`; use the returned

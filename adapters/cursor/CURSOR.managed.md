@@ -1,1 +1,1 @@
-Bootstrap from the installed SelfWorkFlow `WORKFLOW.md`; use `selfworkflow resolve` when available, load only relevant Skill bodies, and preserve all protected invariants.
+Bootstrap from installed `WORKFLOW.md`; call `selfworkflow resolve`, refuse a `paused` PlanGraph, and load only current-stage modules. Keep execution facts in a PlanGraph-bound RunLedger and ask only for critical decisions. This is `agent-policy` compatibility, not conforming-Host proof. Knowledge is optional; C7OpenWiki execution is deferred.

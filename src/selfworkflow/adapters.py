@@ -28,7 +28,16 @@ _CORE_CATALOG_IDS = {
 }
 _CORE_PATHS = (
     "workflow/core.md",
+    "workflow/pipeline.yaml",
+    "workflow/git-policy.yaml",
     "workflow/resolve-request.example.json",
+    "schemas/pipeline.schema.json",
+    "schemas/plan-graph.schema.json",
+    "schemas/stage-result.schema.json",
+    "schemas/run-ledger.schema.json",
+    "schemas/resolve-request.schema.json",
+    "schemas/resolve-result.schema.json",
+    "schemas/git-policy.schema.json",
     "skills/code-quality",
     "skills/workflow-quality",
     "capabilities/code-quality",
@@ -189,7 +198,7 @@ def build_runtime(
             if include_grill_me:
                 _copy_runtime_path(source, temporary, "skills/grill-me")
             if profile == "knowledge":
-                _copy_runtime_path(source, temporary, "extensions/knowledge")
+                _copy_runtime_path(source, temporary, "extensions/knowledge/contract.yaml")
         catalog_output = temporary / "catalog.json"
         catalog_output.write_bytes(
             _profile_catalog(

@@ -27,7 +27,8 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 (self.ROOT / "workflow/core.md").read_bytes(),
             )
             self.assertFalse((root / "first/extensions").exists())
-            self.assertFalse((root / "first/schemas").exists())
+            self.assertTrue((root / "first/schemas/plan-graph.schema.json").is_file())
+            self.assertTrue((root / "first/workflow/pipeline.yaml").is_file())
             self.assertFalse((root / "first/workflow/protected-rules.yaml").exists())
             core_catalog = json.loads((root / "first/catalog.json").read_text())
             self.assertEqual(
@@ -74,6 +75,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
             )
             self.assertEqual(knowledge["profile"], "knowledge")
             self.assertTrue((root / "knowledge/extensions/knowledge/contract.yaml").is_file())
+            self.assertFalse((root / "knowledge/extensions/knowledge/c7-openwiki").exists())
             self.assertFalse((root / "knowledge/workflow/protected-rules.yaml").exists())
             knowledge_catalog = json.loads((root / "knowledge/catalog.json").read_text())
             self.assertIn(

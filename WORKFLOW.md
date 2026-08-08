@@ -17,6 +17,37 @@ The exact phase and status vocabulary is in
 [the lifecycle source](workflow/lifecycle.yaml). Classification thresholds and
 upgrade-only overrides are in [the policy source](workflow/policies.yaml).
 
+## Modular execution protocol
+
+The checked-in Pipeline is the fixed lightweight spine; Catalog v2 is the only
+runtime module registry. A Host performs this sequence:
+
+```text
+Discover -> Capability Check -> Classify -> Design -> Plan
+-> Implement/Debug -> Review -> Verify -> optional Knowledge -> Complete
+```
+
+The Host calls `selfworkflow resolve` with a normalized request and fresh,
+identity-bound capability evidence. An `active` result contains an immutable
+PlanGraph; `paused` must never be promoted or silently degraded. Only modules in
+the current PlanGraph stage are loaded. Runtime attempts, Gate results, skips,
+and failures belong in a RunLedger bound to the exact `planHash`, `requestHash`,
+and capability snapshot. Changed or expired evidence requires a new plan and
+supersedes the old ledger.
+
+Light tasks use a structured Design check and inline Plan. Full and Deep tasks
+use Brainstorming and Writing Plans. Deep recommends Grill-me but never enables
+it automatically; when the user selects it, Grill-me is followed by an
+independent-context Brainstorming cross-review. Every modifying task still
+requires complete-diff Review and the narrowest sufficient direct, failure-path,
+and related-regression verification. Users are prompted only for material scope
+or product choices, sensitive data, irreversible/external effects, protected
+defaults, and formal knowledge publication.
+
+Knowledge exposes only optional `knowledge.read`, `knowledge.propose`, and
+`knowledge.update` slots. This version does not implement or enable C7OpenWiki;
+its concrete MCP behavior is a later, separately tested extension.
+
 ## Phase capability contract
 
 Before classification or state-changing work, identify the capabilities the
@@ -164,11 +195,11 @@ changes, and evidence rules for Review or completion. Load
 auditing those deterministic checks. This keeps unrelated phase material out of
 the active context while preserving direct links to every implemented contract.
 
-## Superpowers overlay
+## Superpowers source support
 
 Modifying tasks require a user-selected, inspected Superpowers source. Missing
 or declined sources pause writes; read-only analysis may continue only with an
-explicit limitation. The overlay loads only Skills mapped to the current stage.
+explicit limitation. Catalog v2 loads only Skills mapped to the current Pipeline slot.
 Grill-me is explicit-only; a high complexity/risk classification recommends it
 but never activates it. A completed Grill-me design requires a separate-context
 Brainstorming cross-review before implementation. Source selection, dirty-state

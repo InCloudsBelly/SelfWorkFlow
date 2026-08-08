@@ -49,6 +49,13 @@ class AdapterContractTests(unittest.TestCase):
                     self.ROOT / "adapters" / adapter["id"] / adapter["entryFile"]
                 ).read_text(encoding="utf-8")
                 self.assertIn("selfworkflow resolve", content)
+                for phrase in (
+                    "paused", "PlanGraph", "RunLedger", "current-stage",
+                    "critical decisions", "agent-policy", "Knowledge",
+                    "C7OpenWiki execution is deferred",
+                ):
+                    self.assertIn(phrase, content)
+                self.assertNotIn("is a conforming Host", content)
 
 
 if __name__ == "__main__":
