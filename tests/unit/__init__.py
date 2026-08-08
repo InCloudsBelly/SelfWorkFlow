@@ -10,6 +10,7 @@ UNIT_TEST_MODULES = (
     "tests.unit.test_config",
     "tests.unit.test_evidence",
     "tests.unit.test_protected_rules",
+    "tests.unit.test_router",
 )
 
 

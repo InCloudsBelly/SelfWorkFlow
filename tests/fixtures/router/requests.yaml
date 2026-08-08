@@ -1,0 +1,12 @@
+schemaVersion: 1
+requests:
+  deterministic-code:
+    stage: implemented
+    operationType: implement
+    fileExtensions: [.cpp]
+    semanticTerms: []
+  semantic-docs:
+    stage: designed
+    operationType: document
+    fileExtensions: [.md]
+    semanticTerms: [durable docs]
