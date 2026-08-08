@@ -899,26 +899,21 @@ class ProtectedRulesTests(unittest.TestCase):
         self.assertNotIn(secret, "".join(traceback.format_exception(caught.exception)))
 
     def test_workflow_document_states_the_current_enforcement_boundary(self):
-        text = (REPOSITORY_ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        text = (REPOSITORY_ROOT / "workflow/core.md").read_text(encoding="utf-8")
         headings = tuple(
             line.strip() for line in text.splitlines() if line.startswith("## ")
         )
         self.assertEqual(
             headings,
             (
-                "## Lifecycle",
-                "## Phase capability contract",
-                "## Rule precedence",
-                "## Completion evidence",
-                "## On-demand loading",
+                "## 核心流程",
+                "## 按需能力",
+                "## 安全底线",
             ),
         )
-        self.assertIn(
-            "agent-policy depends on agent adherence and has unit-tested structure",
-            text,
-        )
-        self.assertIn("not technical or behavioral enforcement", text)
-        self.assertNotIn("behavior-tested policies", text)
+        self.assertIn("不得虚构能力、Review 或测试结果", text)
+        self.assertIn("不得静默降级", text)
+        self.assertIn("`unverified`", text)
         forbidden = re.compile(
             r"\b(catalog|router|installer|mcp|openai|anthropic|codex|claude)\b",
             flags=re.IGNORECASE,
