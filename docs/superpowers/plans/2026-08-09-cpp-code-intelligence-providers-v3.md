@@ -279,7 +279,72 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
   Expected: PASS。
 
-## Phase 3: 落地 C++ 能力模块与任务路由
+## Phase 3A: 以 Git submodule 接入 TEA 并建立分层测试设计
+
+**Files:**
+
+- Modify/Create: `.gitmodules`
+- Add gitlink: `dependencies/upstream/tea`
+- Create: `dependencies/locks/tea.lock.yaml`
+- Create: `overlays/tea/adapter.yaml`
+- Create: `overlays/tea/routing.yaml`
+- Create: `catalog/v3/domains/test-quality.yaml`
+- Modify: `catalog/v3/index.yaml`
+- Modify: `catalog/v3/modules.yaml`
+- Modify: `workflow/v3/pipeline.yaml`
+- Create: `src/selfworkflow/v3/test_strategy.py`
+- Create: `src/selfworkflow/v3/tea_adapter.py`
+- Modify: `scripts/install-selfworkflow.ps1`
+- Modify: `Install_SelfWorkFlow.bat`
+- Create: `tests/fixtures/v3/test-strategy-routing.yaml`
+- Create: `tests/unit/v3/test_test_strategy.py`
+- Create: `tests/unit/v3/test_tea_adapter.py`
+- Create: `tests/conformance/test_tea_source.py`
+- Create: `tests/behavioral/test_v3_tea_workflow.py`
+- Create: `tests/installer/test_submodule_profiles.py`
+
+- [ ] **Step 1: 锁定 TEA 官方来源并验证身份**
+
+  将 `https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise.git` 作为 `dependencies/upstream/tea` Git submodule，固定到实施时明确记录的 commit。lock 文件保存 canonical URL、commit、tree/inventory hash、许可证/许可证文件 hash、Adapter hash 和验证状态；不得配置浮动 branch，也不得在普通安装时执行 `submodule update --remote`。先写 conformance RED，覆盖缺失 gitlink/lock、URL 漂移、非预期 branch 配置、commit/tree/inventory、dirty inventory、许可证/清单漂移；合法 detached HEAD 必须通过。任何身份缺口都返回 `tea-source-identity-invalid`，再添加 submodule 和 lock 使其 GREEN。
+
+- [ ] **Step 2: 阅读锁定 TEA 的入口、test-design、ATDD、test-review、trace 工作流**
+
+  读取锁定 submodule 内 agent 入口以及九个上游 workflow 的完整 `SKILL.md` 和 metadata，为每项建立候选条目；只有本轮实际适配的 test-design、ATDD、test-review、trace/NFR 再读取其步骤、checklist 和直接引用资源。逐项记录输入、输出、写入路径、按需加载、工具边界以及 `sourceIntegrity`、`adapterSupport`、`runtimeCapability`、`behaviorEvidence`。不得复制 TEA 正文到 SelfWorkFlow，也不得把 persona 菜单当成机器可验证能力。若许可证或入口与锁记录不符，暂停并保持 `unverified`。
+
+- [ ] **Step 3: 先用 TEA test-design 产出本轮风险测试策略**
+
+  对“V3 模块化主干 + Provider 安全内核 + C++ 路由 + Review Host Gate + 安装器”执行锁定 TEA 的 test-design 流程，形成内容寻址的 `TestStrategy`：风险、P0-P3 优先级、验收条件映射、直接/失败/边界/状态不变量、NFR、测试级别、授权需求和残余 `unverified`。每条风险义务必须绑定后续真实测试 invocation/result hash，并在 CoverageResult 中成为 `fulfilled | unverified | blocked`；未绑定真实结果或仍 unverified 的义务不能把对应行为证据升级为 `supported`。TEA 输出先作为设计工件，不能替代真实测试结果；设计工件经 Schema 与 test-review 校验后再驱动后续测试增补。
+
+- [ ] **Step 4: 实现 T0-T3 路由和 TEA bounded module 适配**
+
+  T0 只做格式/解析/链接/消费者；T1 覆盖直接、失败、状态不变量和最窄回归；T2 在 **Plan/Test Design 阶段**只把 TEA test-design 放入 eligible 集合，在 **Review/Test Review 阶段**只把 test-review 放入 eligible 集合；T3 的 Verify/Release Gate 再按信号选择 trace、NFR 和高级技法。ATDD 只在进入实现且需要验收测试 RED 时选择。Grill-me 后进入实现的任务最低 T2，但不自动加载所有 TEA workflow。适配器逐步、按需加载当前 workflow/step/resource，禁止把 TEA 全量上下文注入任务。
+
+- [ ] **Step 5: 验证触发、误触发、冲突、组合和上下文成本**
+
+  逐项 TDD 覆盖：T0/T1 不误加载 TEA；T2 按阶段严格分离 test-design/test-review；T3 trace/NFR；ATDD 的 RED 边界；显式选择；TEA 缺失/dirty/hash 漂移；九个 workflow 的候选条目和四层支持证据；与内置轻量测试策略的覆盖关系；非 Web/C++ 任务不加载 Playwright/Pact 专项资源；输出路径只能落入声明的测试工件目录。锁定来源、适配器、触发、失败、上下文成本和 CoverageResult 测试通过前，Catalog 状态保持 `unverified`。
+
+- [ ] **Step 6: 实现按 Profile 初始化、pull 后同步和 Heavy 隔离**
+
+  安装器执行 `git submodule sync -- dependencies/upstream/tea`，并只对用户选择的普通依赖使用 `git submodule update --init -- <allowed-paths>`；默认不得初始化 `dependencies/heavy/*`。父仓库 pull 更新 Gitlink 后，同一入口把 TEA 切换到父仓库锁定 commit，但绝不追踪远端最新分支。使用临时 bare remotes/fixtures 测试普通 clone、首次安装、重复安装、Gitlink 更新、离线失败和 rollback，机械证明 Heavy 未被初始化。
+
+  ```powershell
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.unit.v3.test_test_strategy
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.unit.v3.test_tea_adapter
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.conformance.test_tea_source
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.behavioral.test_v3_tea_workflow
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.installer.test_submodule_profiles
+  ```
+
+  Expected: PASS；只有完成真实行为验证的精确 TEA workflow 维度可升级为 `supported`，其他维度继续 `unverified`。
+
+- [ ] **Step 7: 提交 TEA 来源与适配**
+
+  ```powershell
+  git add .gitmodules dependencies/upstream/tea dependencies/locks/tea.lock.yaml overlays/tea catalog/v3 workflow/v3 src/selfworkflow/v3 scripts/install-selfworkflow.ps1 Install_SelfWorkFlow.bat tests
+  git commit -m "feat: integrate risk-based tea test design"
+  ```
+
+## Phase 3B: 落地 C++ 能力模块与任务路由
 
 **Files:**
 
