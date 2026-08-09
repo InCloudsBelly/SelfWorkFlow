@@ -86,10 +86,18 @@ class GitPolicyTests(unittest.TestCase):
             self.assertFalse(any(item["code"] == "large-file-failure" for item in allowed["findings"]))
 
     def test_current_repository_has_no_policy_failure_or_frozen_c7_feature_diff(self):
-        from selfworkflow.git_policy import check_repository
+        from selfworkflow.git_policy import check_repository, load_git_policy
 
         report = check_repository(self.ROOT, self.ROOT / "workflow/git-policy.yaml")
         self.assertNotEqual(report["status"], "failed", report)
+        policy = load_git_policy(self.ROOT / "workflow/git-policy.yaml")
+        self.assertEqual(policy["allowlist"], [{
+            "path": "dependencies/upstream/tea",
+            "objectHash": "2882e9c8972a94f48d5e848039eec435436f2459",
+            "reason": "Pinned official TEA source used by the optional V3 test-quality adapter",
+            "owner": "SelfWorkFlow maintainers",
+            "expires": "2030-12-31",
+        }])
         changed = subprocess.run(
             ["git", "diff", "--name-only", "3ff07d6..HEAD"], cwd=self.ROOT,
             check=True, capture_output=True, text=True,

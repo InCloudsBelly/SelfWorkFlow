@@ -3,4 +3,9 @@ forbiddenRoots: [.venv, build, dist, artifacts, logs, runtime, .pytest_cache, ht
 allowedSensitiveNames: [.env.example, .env.sample]
 databaseSuffixes: [.sqlite, .sqlite3, .db-wal, .sqlite-wal]
 sizeBytes: {warning: 1048576, failure: 5242880}
-allowlist: []
+allowlist:
+  - path: dependencies/upstream/tea
+    objectHash: 2882e9c8972a94f48d5e848039eec435436f2459
+    reason: Pinned official TEA source used by the optional V3 test-quality adapter
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
