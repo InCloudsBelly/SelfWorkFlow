@@ -37,7 +37,7 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
         value.update(overrides)
         return value
 
-    def test_installed_core_resolves_implement_review_and_verify_stages(self):
+    def test_installed_core_keeps_resolver_opt_in_and_resolves_explicit_requests(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             artifact = root / "runtime"
@@ -53,10 +53,12 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             self.assertTrue(
                 (snapshot / "workflow/resolve-request.example.json").is_file()
             )
-            self.assertIn(
-                "selfworkflow resolve",
-                (codex / "AGENTS.md").read_text(encoding="utf-8"),
+            installed_instruction = (codex / "AGENTS.md").read_text(
+                encoding="utf-8"
             )
+            self.assertIn("For ordinary tasks, follow", installed_instruction)
+            self.assertIn("explicitly contract-managed task", installed_instruction)
+            self.assertNotIn("selfworkflow resolve", installed_instruction)
 
             cases = (
                 ("implement", "C1", "R1", "implement-tdd"),
