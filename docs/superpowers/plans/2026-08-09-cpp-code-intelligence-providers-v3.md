@@ -527,7 +527,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [x] **Step 4: 修改一键安装和 runtime 打包**
 
-  安装器首次运行只询问一次是否显式配置覆写；不得扫描磁盘。runtime 的 core/maintainer profile 包含 V3 schema、pipeline、cpp-core、Provider descriptors 和管理入口；机器配置、日志、索引、缓存、测试临时文件不进入 artifact 或 Git。
+  安装器首次运行只询问一次是否显式配置覆写；不得扫描磁盘。runtime 的 core/maintainer profile 包含 V3 schema、pipeline、cpp-core 和 Provider descriptors；Provider 管理入口只在克隆的 SelfWorkFlow 仓库中运行，不进入缺少 Python/package 的静态 Agent snapshot。机器配置、日志、索引、缓存、测试临时文件不进入 artifact 或 Git。
 
 - [x] **Step 5: 记录本机 CodeGraph 观察但保持原生操作未验证**
 

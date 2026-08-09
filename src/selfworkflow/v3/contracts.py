@@ -983,6 +983,24 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
         trace_ids = [item["moduleId"] for item in route["moduleLoadTrace"]]
         if trace_ids != route["selectedModuleIds"]:
             _raise_semantic("capability-route-trace-mismatch", ("capabilityRoute", "moduleLoadTrace"))
+        plan = document.get("planGraph")
+        if plan is not None:
+            code_slots = [
+                slot
+                for stage in plan["stages"]
+                for slot in stage["slots"]
+                if stage["stageId"] == "designed"
+                and slot["slotId"] == "code.reasoning"
+            ]
+            if (
+                len(code_slots) != 1
+                or not set(route["selectedModuleIds"])
+                <= set(code_slots[0]["eligibleModules"])
+            ):
+                _raise_semantic(
+                    "capability-route-plan-mismatch",
+                    ("capabilityRoute", "selectedModuleIds"),
+                )
         if route["contextCost"] != sum(
             item["estimatedContextCost"] for item in route["moduleLoadTrace"]
         ):

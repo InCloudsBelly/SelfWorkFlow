@@ -156,14 +156,13 @@ def _artifact_profile(artifact: Path) -> str:
 
 def _managed_instruction(snapshot: Path) -> str:
     workflow = snapshot / "WORKFLOW.md"
-    catalog = snapshot / "catalog.json"
-    example = snapshot / "workflow/resolve-request.example.json"
     return (
         f"Read the vendor-neutral workflow at `{workflow}`. "
-        "When deterministic stage resolution is needed, copy and update "
-        f"`{example}`, then run `selfworkflow resolve --catalog \"{catalog}\" "
-        "--request <request.json>`. If the resolver is unavailable, follow the "
-        "workflow directly and report automatic resolution as unverified."
+        "For ordinary tasks, follow that lightweight policy directly and do not "
+        "create a PlanGraph or RunLedger. Use a repository-provided resolver only "
+        "for an explicitly contract-managed task or through a conforming Host; "
+        "if that capability is unavailable, pause only the contract-managed mode "
+        "and never invent resolution evidence."
     )
 
 
@@ -301,7 +300,9 @@ def _atomic_write(path: Path, content: bytes) -> None:
             os.unlink(temporary_name)
 
 
-def _operation(target: Path, content: bytes, backup_root: Path) -> dict[str, object]:
+def _prepare_operation(
+    target: Path, content: bytes, backup_root: Path,
+) -> dict[str, object]:
     before_exists = target.is_file()
     before_hash = _path_hash(target) if before_exists else None
     backup_path = None
@@ -309,20 +310,44 @@ def _operation(target: Path, content: bytes, backup_root: Path) -> dict[str, obj
         backup_path = backup_root / f"{len(list(backup_root.glob('*'))):06d}.bak"
         backup_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(target, backup_path)
-    _atomic_write(target, content)
     return {
         "target": str(target),
         "beforeExists": before_exists,
         "beforeHash": before_hash,
-        "afterHash": _path_hash(target),
+        "afterHash": "sha256:" + hashlib.sha256(content).hexdigest(),
         "backupPath": str(backup_path) if backup_path else None,
+        "phase": "prepared",
+    }
+
+
+def _publish_operation(operation: dict[str, object], content: bytes) -> None:
+    expected = "sha256:" + hashlib.sha256(content).hexdigest()
+    if operation.get("afterHash") != expected or operation.get("phase") != "prepared":
+        raise InstallerError("operation-intent-invalid")
+    _atomic_write(Path(operation["target"]), content)
+    operation["phase"] = "applied"
+
+
+def _manifest_operation(operation: dict[str, object]) -> dict[str, object]:
+    return {
+        key: operation[key]
+        for key in (
+            "target", "beforeExists", "beforeHash", "afterHash", "backupPath",
+        )
     }
 
 
 def _restore_operations(operations: list[dict[str, object]]) -> None:
     for item in reversed(operations):
         target = Path(item["target"])
-        if not target.is_file() or _path_hash(target) != item["afterHash"]:
+        current_hash = _path_hash(target) if target.is_file() else None
+        if current_hash == item["beforeHash"] and item["beforeExists"]:
+            item["phase"] = "rolled-back"
+            continue
+        if current_hash is None and not item["beforeExists"]:
+            item["phase"] = "rolled-back"
+            continue
+        if current_hash != item["afterHash"]:
             raise InstallerError("automatic-rollback-target-drift")
         if item["beforeExists"]:
             backup = Path(item["backupPath"])
@@ -331,6 +356,7 @@ def _restore_operations(operations: list[dict[str, object]]) -> None:
             _atomic_write(target, backup.read_bytes())
         else:
             target.unlink()
+        item["phase"] = "rolled-back"
 
 
 def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
@@ -415,7 +441,11 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 write_json_atomic(transaction_path, transaction)
 
                 def record(target: Path, content: bytes) -> None:
-                    operations.append(_operation(target, content, backup_root))
+                    operation = _prepare_operation(target, content, backup_root)
+                    operations.append(operation)
+                    transaction["operations"] = operations
+                    write_json_atomic(transaction_path, transaction)
+                    _publish_operation(operation, content)
                     transaction["operations"] = operations
                     write_json_atomic(transaction_path, transaction)
 
@@ -464,13 +494,13 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                     "agentsRoot": str(agents),
                     "codexRoot": str(codex),
                     "stateRoot": str(state),
-                    "operations": operations,
+                    "operations": [_manifest_operation(item) for item in operations],
                     "securityStatus": "unverified",
                 }
                 write_json_atomic(manifest_path, manifest)
                 transaction.update({"state": "completed", "operations": operations, "manifestPath": str(manifest_path)})
                 write_json_atomic(transaction_path, transaction)
-            except Exception:
+            except BaseException as failure:
                 try:
                     _restore_operations(operations)
                     manifest_path.unlink(missing_ok=True)
@@ -478,6 +508,8 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                     write_json_atomic(transaction_path, transaction)
                 except Exception:
                     raise InstallerError("automatic-rollback-failed") from None
+                if not isinstance(failure, Exception):
+                    raise
                 raise InstallerError("apply-failed") from None
     except InstallerError:
         raise

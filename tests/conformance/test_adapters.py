@@ -64,6 +64,11 @@ class AdapterContractTests(unittest.TestCase):
                     self.assertIn(phrase, content)
                 self.assertNotIn("This adapter is a conforming Host", content)
 
+        core = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
+        self.assertIn("显式契约管理模式", core)
+        self.assertIn("普通轻量模式", core)
+        self.assertNotIn("修正保持在当前阶段并创建新的 RunLedger", core)
+
 
 if __name__ == "__main__":
     unittest.main()

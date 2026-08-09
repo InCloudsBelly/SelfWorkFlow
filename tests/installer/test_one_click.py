@@ -10,6 +10,11 @@ from selfworkflow.installer import tree_hash
 
 def _commit(root):
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "--local", "core.autocrlf", "false"],
+        cwd=root,
+        check=True,
+    )
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(
         [
@@ -49,6 +54,23 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertIn("provider-manager-failed", script)
         self.assertIn("selfworkflow\\logs", script)
         self.assertNotIn("invoke-expression", script)
+
+    def test_provider_batch_forwards_list_from_an_arbitrary_working_directory(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            environment = os.environ.copy()
+            environment["LOCALAPPDATA"] = str(root / "localappdata")
+            result = subprocess.run(
+                [str(self.ROOT / "Manage_SelfWorkFlow_Providers.bat"), "list"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"providers": []})
+        self.assertFalse((root / "list").exists())
 
     def test_powershell_help_documents_grill_choices_logs_and_explicit_apply(self):
         script = self.ROOT / "scripts" / "install-selfworkflow.ps1"
@@ -446,7 +468,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertIn("superpowers-skill-untracked", summary["reason"])
             self.assertFalse((root / "agents/skills/superpowers").exists())
 
-    def test_approved_official_clone_path_is_exercised_without_network(self):
+    def test_approved_official_clone_path_uses_explicit_test_transport(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             mirror = root / "official mirror"
@@ -463,14 +485,20 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 skill.parent.mkdir(parents=True, exist_ok=True)
                 skill.write_text(name + "\n", encoding="utf-8")
             _commit(mirror)
+            attacker = root / "attacker mirror"
+            attacker_skill = attacker / "skills/brainstorming/SKILL.md"
+            attacker_skill.parent.mkdir(parents=True, exist_ok=True)
+            attacker_skill.write_text("attacker\n", encoding="utf-8")
+            _commit(attacker)
             environment = os.environ.copy()
-            environment.update(
-                {
-                    "GIT_CONFIG_COUNT": "1",
-                    "GIT_CONFIG_KEY_0": f"url.{mirror.resolve().as_uri()}.insteadOf",
-                    "GIT_CONFIG_VALUE_0": "https://github.com/obra/superpowers.git",
-                }
-            )
+            environment.update({
+                "SELFWORKFLOW_TEST_MODE": "1",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": (
+                    f"url.{attacker.resolve().as_uri()}.insteadOf"
+                ),
+                "GIT_CONFIG_VALUE_0": mirror.resolve().as_uri(),
+            })
 
             result = self._run_installer(
                 root,
@@ -478,6 +506,8 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 "Install",
                 "-SuperpowersChoice",
                 "InstallOfficial",
+                "-OfficialSuperpowersTestRemote",
+                mirror.resolve().as_uri(),
                 "-ConfirmApply",
                 env=environment,
             )
@@ -485,7 +515,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertLess(
                 result.stdout.index(
-                    "Cloning the approved official Superpowers source."
+                    "Cloning the approved official Superpowers source"
                 ),
                 result.stdout.index("Plan status:"),
             )
@@ -499,6 +529,36 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertTrue(
                 (root / "agents/skills/superpowers/brainstorming/SKILL.md").is_file()
             )
+            self.assertEqual(
+                (root / "agents/skills/superpowers/brainstorming/SKILL.md")
+                .read_text(encoding="utf-8"),
+                "brainstorming\n",
+            )
+
+    def test_official_test_transport_is_forbidden_outside_test_mode(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            mirror = root / "test mirror"
+            mirror.mkdir()
+
+            environment = os.environ.copy()
+            environment.pop("SELFWORKFLOW_TEST_MODE", None)
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice", "Skip",
+                "-SuperpowersChoice", "InstallOfficial",
+                "-OfficialSuperpowersTestRemote", mirror.resolve().as_uri(),
+                "-ConfirmApply",
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 30, result.stdout + result.stderr)
+            summary = json.loads(
+                (self._single_log_directory(root) / "summary.json").read_text()
+            )
+            self.assertEqual(summary["stage"], "superpowers-selection")
+            self.assertEqual(summary["reason"], "official-test-transport-forbidden")
+            self.assertFalse((root / "dependencies/superpowers").exists())
 
 
 if __name__ == "__main__":

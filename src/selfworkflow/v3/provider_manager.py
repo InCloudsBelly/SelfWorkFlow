@@ -358,16 +358,31 @@ class ProviderManager:
             "schemaVersion": 1,
             "rollbackToken": token,
             "configPathHash": self._config_path_hash(),
+            "state": "prepared",
             "preimage": (
                 None if preimage is None
                 else base64.b64encode(preimage).decode("ascii")
             ),
+            "preimageHash": _payload_hash(preimage),
             "postimageHash": _payload_hash(postimage),
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.parent.is_symlink() or path.is_symlink():
                 raise OSError
+            self._replace_payload(path, _canonical_bytes(transaction) + b"\n")
+        except Exception:
+            raise ProviderManagerError("provider-config-transaction-write-failed") from None
+
+    def _set_rollback_transaction_state(self, token: str, state: str) -> None:
+        if state not in {"applied", "rolled-back"}:
+            raise ProviderManagerError("provider-config-transaction-write-failed")
+        loaded = self._read_rollback_transaction(token)
+        if loaded is None:
+            raise ProviderManagerError("provider-config-transaction-write-failed")
+        path, transaction = loaded
+        transaction["state"] = state
+        try:
             self._replace_payload(path, _canonical_bytes(transaction) + b"\n")
         except Exception:
             raise ProviderManagerError("provider-config-transaction-write-failed") from None
@@ -389,11 +404,17 @@ class ProviderManager:
                 not isinstance(transaction, dict)
                 or set(transaction) != {
                     "schemaVersion", "rollbackToken", "configPathHash",
-                    "preimage", "postimageHash",
+                    "state", "preimage", "preimageHash", "postimageHash",
                 }
                 or transaction["schemaVersion"] != 1
                 or transaction["rollbackToken"] != token
                 or transaction["configPathHash"] != self._config_path_hash()
+                or transaction["state"] not in {"prepared", "applied", "rolled-back"}
+                or not isinstance(transaction["preimageHash"], str)
+                or not (
+                    transaction["preimageHash"] == "missing"
+                    or _HASH.fullmatch(transaction["preimageHash"]) is not None
+                )
                 or not isinstance(transaction["postimageHash"], str)
                 or _HASH.fullmatch(transaction["postimageHash"]) is None
                 or not (
@@ -401,6 +422,15 @@ class ProviderManager:
                     or isinstance(transaction["preimage"], str)
                 )
             ):
+                raise ProviderManagerError("provider-config-rollback-invalid")
+            try:
+                encoded = transaction["preimage"]
+                preimage = None if encoded is None else base64.b64decode(
+                    encoded, validate=True,
+                )
+            except Exception:
+                raise ProviderManagerError("provider-config-rollback-invalid") from None
+            if transaction["preimageHash"] != _payload_hash(preimage):
                 raise ProviderManagerError("provider-config-rollback-invalid")
             if verify_postimage and transaction["postimageHash"] != _payload_hash(
                 self._paths.config_file.read_bytes()
@@ -510,14 +540,25 @@ class ProviderManager:
                 ] + [provider]
                 config["providers"].sort(key=lambda item: item["providerId"])
                 self._validate_config(config)
-                changed = self._write_config(config)
                 if token is not None:
-                    try:
-                        postimage = self._paths.config_file.read_bytes()
-                        self._write_rollback_transaction(token, preimage, postimage)
-                    except Exception:
-                        self._restore_config_preimage(preimage)
+                    postimage = _canonical_bytes(config) + b"\n"
+                    self._write_rollback_transaction(token, preimage, postimage)
+                try:
+                    changed = self._write_config(config)
+                    if token is not None:
+                        self._set_rollback_transaction_state(token, "applied")
+                except BaseException as failure:
+                    self._restore_config_preimage(preimage)
+                    if token is not None:
+                        try:
+                            self._set_rollback_transaction_state(
+                                token, "rolled-back",
+                            )
+                        except ProviderManagerError:
+                            pass
+                    if not isinstance(failure, Exception):
                         raise
+                    raise
             if changed:
                 self._adapter_cache.pop(provider_id, None)
             status = "configured" if changed else "unchanged"
@@ -553,11 +594,13 @@ class ProviderManager:
         token = self._validate_rollback_token(rollback_token)
         with self._config_lock():
             loaded = self._read_rollback_transaction(
-                token, if_issued=if_issued, verify_postimage=True,
+                token, if_issued=if_issued,
             )
             if loaded is None:
                 return {"status": "not-issued"}
             path, transaction = loaded
+            if transaction["state"] == "rolled-back" and if_issued:
+                return {"status": "already-rolled-back"}
             try:
                 encoded = transaction["preimage"]
                 preimage = None if encoded is None else base64.b64decode(
@@ -567,7 +610,16 @@ class ProviderManager:
                     raise ValueError
             except Exception:
                 raise ProviderManagerError("provider-config-rollback-invalid") from None
-            self._restore_config_preimage(preimage)
+            current = _payload_hash(
+                self._paths.config_file.read_bytes()
+                if self._paths.config_file.exists() else None
+            )
+            if transaction["state"] == "rolled-back":
+                raise ProviderManagerError("provider-config-rollback-invalid")
+            if current == transaction["postimageHash"]:
+                self._restore_config_preimage(preimage)
+            elif current != transaction["preimageHash"]:
+                raise ProviderManagerError("provider-config-rollback-state-drift")
             try:
                 path.unlink()
             except OSError:
@@ -580,7 +632,9 @@ class ProviderManager:
             loaded = self._read_rollback_transaction(token)
             if loaded is None:
                 raise ProviderManagerError("provider-config-rollback-invalid")
-            path, _transaction = loaded
+            path, transaction = loaded
+            if transaction["state"] != "applied":
+                raise ProviderManagerError("provider-config-rollback-invalid")
             try:
                 path.unlink()
             except OSError:

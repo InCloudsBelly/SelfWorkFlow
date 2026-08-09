@@ -209,10 +209,15 @@ def evaluate_post_grill_review(
     host_attestation_consumer: Callable[[str, str], bool] | None = None,
     fallback_authorization_resolver: Callable[[str], object] | None = None,
     fallback_authorization_consumer: Callable[[str, str], bool] | None = None,
+    fallback_authorization_preconsumed: bool = False,
 ) -> PostGrillReviewDecision:
     """Evaluate the policy; only Host-resolved, one-shot evidence can proceed."""
 
-    if type(independent_context_available) is not bool or type(now) is not datetime:
+    if (
+        type(independent_context_available) is not bool
+        or type(fallback_authorization_preconsumed) is not bool
+        or type(now) is not datetime
+    ):
         return _decision("pause", "unverified", "post-grill-review-input-invalid", "none")
     try:
         for value in (design_hash, reviewer_policy_hash, input_summary_hash, plan_hash):
@@ -303,6 +308,12 @@ def evaluate_post_grill_review(
         now=observed_at,
     ):
         if parsed_receipt is None:
+            if not _consume_fallback(fallback, fallback_authorization_consumer):
+                return _decision(
+                    "pause", "unverified",
+                    "post-grill-review-authorization-replayed",
+                    "same-agent-structured-review",
+                )
             return _decision(
                 "review-required", "unverified", None,
                 "same-agent-structured-review", fallback["authorizationHash"],
@@ -311,7 +322,10 @@ def evaluate_post_grill_review(
             parsed_receipt["forkContext"] is True
             and parsed_receipt["fallbackAuthorizationRef"] == fallback["authorizationHash"]
         ):
-            if not _consume_fallback(fallback, fallback_authorization_consumer):
+            if (
+                not fallback_authorization_preconsumed
+                and not _consume_fallback(fallback, fallback_authorization_consumer)
+            ):
                 return _decision(
                     "pause", "unverified", "post-grill-review-authorization-replayed",
                     "same-agent-structured-review",

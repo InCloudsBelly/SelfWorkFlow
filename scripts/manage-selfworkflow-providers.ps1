@@ -1,8 +1,9 @@
 [CmdletBinding()]
 param(
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$ProviderArguments,
-    [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs")
+    [Parameter()]
+    [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs"),
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+    [string[]]$ProviderArguments
 )
 
 Set-StrictMode -Version Latest

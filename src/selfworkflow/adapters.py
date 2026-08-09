@@ -52,8 +52,6 @@ _CORE_PATHS = (
     "catalog/v3",
     "skills/cpp-core",
     "capabilities/cpp",
-    "Manage_SelfWorkFlow_Providers.bat",
-    "scripts/manage-selfworkflow-providers.ps1",
 )
 
 

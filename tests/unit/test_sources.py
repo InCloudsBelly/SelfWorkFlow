@@ -1,6 +1,7 @@
 from pathlib import Path
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +18,11 @@ from selfworkflow.cli import main
 
 def _commit(root: Path):
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "--local", "core.autocrlf", "false"],
+        cwd=root,
+        check=True,
+    )
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(
         [
@@ -30,6 +36,31 @@ def _commit(root: Path):
 
 
 class SuperpowersSourceTests(unittest.TestCase):
+    def test_git_inspection_ignores_inherited_config_and_executable_extensions(self):
+        from selfworkflow.sources import _run
+
+        inherited = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "url.file:///attacker.insteadOf",
+            "GIT_CONFIG_VALUE_0": "https://github.com/obra/superpowers.git",
+            "GIT_CONFIG_PARAMETERS": "'core.fsmonitor'='attacker.exe'",
+        }
+        with mock.patch.dict(os.environ, inherited, clear=False), mock.patch(
+            "selfworkflow.sources.subprocess.run"
+        ) as run:
+            _run(Path.cwd(), "status", "--porcelain")
+
+        command = run.call_args.args[0]
+        environment = run.call_args.kwargs["env"]
+        self.assertNotIn("GIT_CONFIG_COUNT", environment)
+        self.assertNotIn("GIT_CONFIG_KEY_0", environment)
+        self.assertNotIn("GIT_CONFIG_VALUE_0", environment)
+        self.assertNotIn("GIT_CONFIG_PARAMETERS", environment)
+        self.assertEqual(environment["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(environment["GIT_CONFIG_GLOBAL"], os.devnull)
+        self.assertIn("core.fsmonitor=false", command)
+        self.assertIn(f"core.hooksPath={os.devnull}", command)
+
     def test_local_git_source_records_commit_dirty_inventory_and_hash_drift(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)

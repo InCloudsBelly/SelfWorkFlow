@@ -26,11 +26,13 @@ The resulting machine-only configuration is written to
 `%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml` and is excluded from Git.
 
 Installing the official Superpowers dependency has its own earlier authorization;
-the clone is inspected before the final plan and its commit and inventory hash are
-shown in the confirmation summary. Before publishing workflow files, the installer
-shows the generated plan and requires the exact confirmation `APPLY`. It uses the
-existing transactional installer, verifies the manifest, and rolls back the current
-publication if a later verification step fails. Detailed diagnostics and machine-readable artifacts are written under
+the clone and all Git source inspection ignore inherited system/global configuration,
+URL rewrites, hooks, system attributes and fsmonitor integration. The clone is inspected
+before the final plan and its commit and inventory hash are shown in the confirmation
+summary. Before publishing workflow files, the installer shows the generated plan
+and requires the exact confirmation `APPLY`. It uses a write-ahead transactional
+installer, verifies the manifest, and rolls back the current publication if a later
+verification step fails. Detailed diagnostics and machine-readable artifacts are written under
 `%LOCALAPPDATA%\SelfWorkFlow\logs\install-<timestamp>`. Logs do not include an
 environment dump or credential values.
 
@@ -92,13 +94,16 @@ Runtime profiles are closed and deterministic:
   snapshot.
 
 The `core` and `maintainer` artifacts include the explicit V3 contracts,
-bounded TEA candidates, C++ routing, `cpp-core`, Provider descriptors and the
-Provider management entry. These files are loaded only by matching V3 requests; machine
+bounded TEA candidates, C++ routing, `cpp-core` and Provider descriptors. The
+repository-scoped Provider management entry is deliberately not packaged into
+the static Agent snapshot. These files are loaded only by matching V3 requests; machine
 configuration, logs, indexes and caches are never packaged.
 
 ## Optional CodeGraph provider
 
-Use the thin management entry after installation:
+Run the Provider management entry from the cloned SelfWorkFlow repository. It is
+not copied into the static Agent runtime snapshot because that snapshot does not
+contain a Python executable or the SelfWorkFlow package:
 
 ```bat
 Manage_SelfWorkFlow_Providers.bat list
@@ -133,8 +138,8 @@ marks the upstream CLI's unavoidable auto-sync possibility as
 - V3 schemas, versioned Catalog/Pipeline loaders, immutable PlanGraph/RunLedger
   validation, bounded selector kernel, TEA candidate routing, C++ content-addressed
   routing, default Brainstorming policy, the fail-closed post-Grill contract gate,
-  machine-local CodeGraph binding, non-executing source inspection, CAS-protected
-  installer rollback, and content-addressed maintenance planning are implemented
+  machine-local CodeGraph binding, non-executing source inspection, write-ahead
+  CAS-protected installer/Provider rollback, and content-addressed maintenance planning are implemented
   and automated-tested. The checked-in V3 request intentionally remains `paused`
   until a conforming Host supplies fresh supported evidence.
 - OpenSpec routing, a generic specialist Review selector/aggregate execution path,

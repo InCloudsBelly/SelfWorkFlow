@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import copy
 from typing import Any
 
 from selfworkflow.v3.catalog import CompiledCatalog, CatalogError, compile_catalog
@@ -68,19 +69,23 @@ def resolve_request(
     """Return a schema-valid V3 ResolveResult containing only its PlanGraph."""
 
     normalized = _load_request(request)
+    plan_request = copy.deepcopy(normalized)
     capability_route = None
     if "codeSignals" in normalized:
         try:
             capability_route = route_cpp_capabilities(
                 request_from_code_signals(normalized, normalized["codeSignals"])
             ).as_dict()
+            plan_request["explicitModuleIds"] = sorted(set(
+                plan_request["explicitModuleIds"]
+            ) | set(capability_route["selectedModuleIds"]))
         except CppRouteError as error:
             raise ResolveError(str(error)) from None
     catalog = _artifact_or_compile_catalog(catalog_source)
     pipeline = _artifact_or_load_pipeline(pipeline_source)
     try:
         plan = build_plan_graph(
-            normalized,
+            plan_request,
             catalog,
             pipeline,
             capability_snapshot=capability_snapshot,

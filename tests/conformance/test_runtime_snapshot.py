@@ -34,8 +34,8 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertTrue((root / "first/catalog/v3/index.yaml").is_file())
             self.assertTrue((root / "first/skills/cpp-core/SKILL.md").is_file())
             self.assertTrue((root / "first/capabilities/cpp/core.yaml").is_file())
-            self.assertTrue((root / "first/Manage_SelfWorkFlow_Providers.bat").is_file())
-            self.assertTrue((root / "first/scripts/manage-selfworkflow-providers.ps1").is_file())
+            self.assertFalse((root / "first/Manage_SelfWorkFlow_Providers.bat").exists())
+            self.assertFalse((root / "first/scripts/manage-selfworkflow-providers.ps1").exists())
             self.assertFalse((root / "first/workflow/protected-rules.yaml").exists())
             core_catalog = json.loads((root / "first/catalog.json").read_text())
             self.assertEqual(

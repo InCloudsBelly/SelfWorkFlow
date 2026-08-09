@@ -359,6 +359,30 @@ class PlanGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(PlanGraphError, "dependency-unavailable"):
             build_plan_graph(request, catalog, pipeline)
 
+    def test_explicit_modules_are_validated_only_against_their_own_slot(self):
+        catalog, pipeline = self._artifacts([
+            _module(
+                "design-precheck", stage="designed", slot="design.precheck",
+                mode="static",
+            ),
+            _module(
+                "cpp-core", stage="designed", slot="code.reasoning",
+                mode="bounded-runtime",
+            ),
+        ])
+        request = copy.deepcopy(self.REQUEST)
+        request["explicitModuleIds"] = ["design-precheck", "cpp-core"]
+
+        graph = build_plan_graph(request, catalog, pipeline)
+
+        designed = next(
+            stage for stage in graph.document["stages"]
+            if stage["stageId"] == "designed"
+        )
+        slots = {slot["slotId"]: slot for slot in designed["slots"]}
+        self.assertEqual(slots["design.precheck"]["selectedModules"], ["design-precheck"])
+        self.assertEqual(slots["code.reasoning"]["eligibleModules"], ["cpp-core"])
+
 
 if __name__ == "__main__":
     unittest.main()

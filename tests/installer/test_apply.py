@@ -35,6 +35,10 @@ class InstallApplyTests(unittest.TestCase):
             agents_text = (codex / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("user content", agents_text)
             self.assertEqual(agents_text.count("<!-- selfworkflow:begin -->"), 1)
+            self.assertIn("For ordinary tasks", agents_text)
+            self.assertIn("do not create a PlanGraph or RunLedger", agents_text)
+            self.assertIn("explicitly contract-managed", agents_text)
+            self.assertNotIn("run `selfworkflow resolve", agents_text)
             self.assertTrue(
                 (agents / "skills/sample-skill/SKILL.md").is_file()
             )
@@ -96,7 +100,7 @@ class InstallApplyTests(unittest.TestCase):
             agents_file = codex / "AGENTS.md"
             agents_file.write_text("user content\n", encoding="utf-8")
             plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
-            real_operation = installer._operation
+            real_operation = installer._publish_operation
             calls = 0
 
             def fail_second_operation(*arguments, **keywords):
@@ -107,7 +111,7 @@ class InstallApplyTests(unittest.TestCase):
                 return real_operation(*arguments, **keywords)
 
             with mock.patch(
-                "selfworkflow.installer._operation",
+                "selfworkflow.installer._publish_operation",
                 side_effect=fail_second_operation,
             ):
                 with self.assertRaises(InstallerError):
@@ -121,6 +125,38 @@ class InstallApplyTests(unittest.TestCase):
             self.assertEqual(len(transactions), 1)
             transaction = json.loads(transactions[0].read_text(encoding="utf-8"))
             self.assertEqual(transaction["state"], "rolled-back")
+
+    def test_interrupt_after_publish_has_a_persisted_intent_and_rolls_back(self):
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            real_write = installer._atomic_write
+            interrupted = False
+
+            def publish_then_interrupt(path, content):
+                nonlocal interrupted
+                real_write(path, content)
+                if not interrupted:
+                    interrupted = True
+                    raise SystemExit("injected-interrupt")
+
+            with mock.patch(
+                "selfworkflow.installer._atomic_write",
+                side_effect=publish_then_interrupt,
+            ):
+                with self.assertRaises(SystemExit):
+                    apply_install_plan(plan, plan["planHash"])
+
+            transactions = list((state / "transactions").glob("*.json"))
+            self.assertEqual(len(transactions), 1)
+            transaction = json.loads(transactions[0].read_text(encoding="utf-8"))
+            self.assertEqual(transaction["state"], "rolled-back")
+            self.assertGreaterEqual(len(transaction["operations"]), 1)
+            self.assertFalse((agents / "skills/sample-skill/SKILL.md").exists())
 
 
 if __name__ == "__main__":

@@ -225,6 +225,38 @@ class ProviderManagerTests(unittest.TestCase):
         )
         self.assertEqual(config.read_bytes(), original)
 
+    def test_interrupt_after_config_publish_has_write_ahead_preimage(self):
+        manager = self._manager()
+        self._configure(manager, "old.js")
+        config = self.root / "machine/providers.local.yaml"
+        original = config.read_bytes()
+        real_write = manager._write_config
+
+        def write_then_interrupt(value):
+            real_write(value)
+            raise SystemExit("injected-interrupt")
+
+        manager._write_config = write_then_interrupt
+        with self.assertRaises(SystemExit):
+            self._configure(
+                manager, "new.js", replace_existing=True,
+                issue_rollback_token=True,
+            )
+
+        self.assertEqual(config.read_bytes(), original)
+        transactions = list(
+            (self.root / "machine/.provider-transactions").glob("*.json")
+        )
+        self.assertEqual(len(transactions), 1)
+        transaction = json.loads(transactions[0].read_text(encoding="utf-8"))
+        self.assertEqual(transaction["state"], "rolled-back")
+        self.assertEqual(
+            manager.rollback_config(
+                transaction["rollbackToken"], if_issued=True,
+            )["status"],
+            "already-rolled-back",
+        )
+
     def test_different_existing_binding_requires_explicit_replace(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
 

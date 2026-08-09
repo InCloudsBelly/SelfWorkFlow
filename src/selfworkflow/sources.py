@@ -19,9 +19,43 @@ class SourceSelectionError(RuntimeError):
     pass
 
 
+def _git_environment() -> dict[str, str]:
+    """Return a Git environment that cannot inherit executable or URL config."""
+
+    blocked_exact = {
+        "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL",
+    }
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() not in blocked_exact
+        and not key.upper().startswith("GIT_CONFIG_KEY_")
+        and not key.upper().startswith("GIT_CONFIG_VALUE_")
+    }
+    environment.update({
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return environment
+
+
 def _run(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *arguments], cwd=root, check=False, capture_output=True, text=True
+        [
+            "git",
+            "-c", f"core.hooksPath={os.devnull}",
+            "-c", "core.fsmonitor=false",
+            *arguments,
+        ],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_git_environment(),
     )
 
 

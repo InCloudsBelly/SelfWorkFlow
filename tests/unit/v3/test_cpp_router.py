@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from copy import deepcopy
+from pathlib import Path
 import unittest
 
 
@@ -260,6 +261,50 @@ class CppRouterTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ContractError, "capability-route-execution-forbidden"):
             validate_resolve_result(execution_forgery)
+
+    def test_active_plan_contains_every_automatically_routed_cpp_module_as_eligible(self):
+        from selfworkflow.v3.catalog import compile_catalog
+        from selfworkflow.v3.pipeline import load_pipeline
+        from selfworkflow.v3.resolver import resolve_request
+
+        request = _v3_request()
+        request["codeSignals"] = {
+            "languages": ["cpp"],
+            "fileExtensions": [".cpp"],
+            "taskSignals": ["concurrency"],
+            "explicitCppModuleIds": [],
+            "userConfirmedHeavy": False,
+            "projectAllowsExecution": False,
+        }
+        required = {
+            "discover-context", "capability-check", "classify-task",
+            "design-precheck", "plan-primary", "implement-tdd",
+            "review-self", "verify-execution", "complete-gate",
+        }
+        request["explicitModuleIds"] = sorted(required)
+        approved = sorted(required | {"cpp-core", "cpp.concurrency"})
+        root = Path(__file__).resolve().parents[3]
+
+        result = resolve_request(
+            request,
+            catalog_source=compile_catalog(root / "catalog/v3/index.yaml"),
+            pipeline_source=load_pipeline(root / "workflow/v3/pipeline.yaml"),
+            execution_policy_snapshot={"allowUnverifiedModuleIds": approved},
+        )
+
+        self.assertEqual(result["status"], "active")
+        designed = next(
+            stage for stage in result["planGraph"]["stages"]
+            if stage["stageId"] == "designed"
+        )
+        code_slot = next(
+            slot for slot in designed["slots"]
+            if slot["slotId"] == "code.reasoning"
+        )
+        self.assertTrue(
+            set(result["capabilityRoute"]["selectedModuleIds"])
+            <= set(code_slot["eligibleModules"])
+        )
 
 
 if __name__ == "__main__":

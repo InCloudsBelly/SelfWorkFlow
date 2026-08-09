@@ -18,7 +18,8 @@ param(
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\state"),
     [string]$ProviderConfigFile = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\config\providers.local.yaml"),
     [string]$DependencyRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\dependencies"),
-    [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs")
+    [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs"),
+    [string]$OfficialSuperpowersTestRemote
 )
 
 Set-StrictMode -Version Latest
@@ -119,6 +120,46 @@ function Invoke-NativeLogged {
         Add-Content -LiteralPath $script:InstallLog -Value $nativeOutput -Encoding UTF8
     }
     return $nativeExitCode
+}
+
+function Invoke-GitSanitized {
+    param([string[]]$Arguments)
+    $saved = @{}
+    $blockedNames = @(
+        "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM",
+        "GIT_ATTR_NOSYSTEM"
+    )
+    $dynamicNames = @(
+        Get-ChildItem Env: | Where-Object {
+            $_.Name -match '^GIT_CONFIG_(KEY|VALUE)_\d+$'
+        } | ForEach-Object { $_.Name }
+    )
+    foreach ($name in @($blockedNames + $dynamicNames | Select-Object -Unique)) {
+        if (Test-Path ("Env:" + $name)) {
+            $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+            Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
+        }
+    }
+    try {
+        $env:GIT_CONFIG_NOSYSTEM = "1"
+        $env:GIT_CONFIG_GLOBAL = "NUL"
+        $env:GIT_CONFIG_SYSTEM = "NUL"
+        $env:GIT_ATTR_NOSYSTEM = "1"
+        $gitArguments = @(
+            "-c", "core.hooksPath=NUL",
+            "-c", "core.fsmonitor=false"
+        ) + @($Arguments)
+        return Invoke-NativeLogged "git.exe" $gitArguments
+    }
+    finally {
+        foreach ($name in @($blockedNames + $dynamicNames | Select-Object -Unique)) {
+            Remove-Item ("Env:" + $name) -ErrorAction SilentlyContinue
+        }
+        foreach ($entry in $saved.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value)
+        }
+    }
 }
 
 function Test-VenvReady {
@@ -360,8 +401,18 @@ try {
         }
         [IO.Directory]::CreateDirectory($DependencyRoot) | Out-Null
         $createdOfficialClone = $true
-        Write-InstallLog "Cloning the approved official Superpowers source."
-        $cloneExit = Invoke-NativeLogged "git.exe" @("clone", "--depth", "1", $OfficialSuperpowers, $SuperpowersSource)
+        $cloneRemote = $OfficialSuperpowers
+        if ($OfficialSuperpowersTestRemote) {
+            if ($env:SELFWORKFLOW_TEST_MODE -ne "1") {
+                Stop-Install "superpowers-selection" 30 "official-test-transport-forbidden"
+            }
+            $cloneRemote = $OfficialSuperpowersTestRemote
+            Write-InstallLog "Cloning the approved official Superpowers source through an explicit test transport."
+        }
+        else {
+            Write-InstallLog "Cloning the approved official Superpowers source."
+        }
+        $cloneExit = Invoke-GitSanitized @("clone", "--depth", "1", "--", $cloneRemote, $SuperpowersSource)
         if ($cloneExit -ne 0) {
             Stop-Install "superpowers-selection" 30 "official-superpowers-clone-failed"
         }

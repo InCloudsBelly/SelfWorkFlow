@@ -476,6 +476,7 @@ def _closed_eligible_modules(
     allow_unverified: set[str],
     requested: set[str],
 ) -> list[dict[str, Any]]:
+    slot_module_ids = {module["id"] for module in slot_modules}
     eligible = {
         module["id"]: dict(module)
         for module in slot_modules
@@ -495,7 +496,7 @@ def _closed_eligible_modules(
                 changed = True
     for module_id in requested:
         module = all_modules[module_id]
-        if slot_modules and module["stage"] == slot_modules[0]["stage"]:
+        if module_id in slot_module_ids:
             if module_id not in eligible:
                 if not _support_is_eligible(module, allow_unverified):
                     raise PlanGraphError("v3-explicit-module-unsupported")

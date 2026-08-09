@@ -11,7 +11,8 @@ installer's `-ReplaceCodeGraphOverride` switch.
 
 ## Configure
 
-Run `Install_SelfWorkFlow.bat` and choose the local CodeGraph override, or use:
+Run `Install_SelfWorkFlow.bat` and choose the local CodeGraph override, or run
+the repository-scoped management entry from a cloned SelfWorkFlow checkout:
 
 ```bat
 Manage_SelfWorkFlow_Providers.bat configure --codegraph-path <local-codegraph-root>
@@ -27,11 +28,16 @@ machine configuration consumed by Provider selection; it is not a parallel
 management-only registry. Existing unrelated Provider entries are preserved.
 
 During one-click installation, configuration uses a machine-local, one-use
-rollback transaction. The Provider manager records the exact preimage and the
-postimage hash under the same cross-process lock as configuration. Rollback is
+write-ahead rollback transaction. Before publishing the configuration, the
+Provider manager records the exact preimage and expected postimage hash under
+the same cross-process lock as configuration. Rollback is
 compare-and-swap: it restores only while the current file still matches that
 postimage, and fails closed instead of overwriting a concurrent update. A
-successful installation commits and removes the rollback record.
+catchable interruption, including `SystemExit`, restores the preimage and leaves
+an auditable rolled-back record; a successful installation commits and removes
+the rollback record. An abrupt process or machine termination can leave a complete
+transaction record for diagnosis, but automatic crash recovery is not implemented
+in this release and therefore requires manual attention.
 
 Dirty means the selected source is not reproducible from its commit alone. It
 is reported, not silently normalized. SelfWorkFlow may inspect a user-owned
@@ -69,7 +75,7 @@ sufficient mutation authorization.
 ## Current verification boundary
 
 Automated tests use an injected Fake command port and prove command rendering,
-redaction, no implicit initialization, atomic configuration, rollback,
+redaction, no implicit initialization, atomic configuration, write-ahead rollback,
 postimage-CAS concurrency protection, idempotence, source-drift rejection before
 dispatch, deterministic planning, and
 fail-closed maintenance execution. A prior local observation does not prove the

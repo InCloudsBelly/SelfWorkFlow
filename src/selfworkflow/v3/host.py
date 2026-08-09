@@ -359,6 +359,9 @@ class Host:
                 host_attestation_consumer=self._review_services.host_attestation_consumer,
                 fallback_authorization_resolver=self._review_services.fallback_authorization_resolver,
                 fallback_authorization_consumer=self._review_services.fallback_authorization_consumer,
+                fallback_authorization_preconsumed=(
+                    not independent_context_available
+                ),
             )
             if decision.status != "proceed":
                 raise HostError(
