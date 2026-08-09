@@ -112,7 +112,7 @@ entries:
     source:
       kind: workflow
       path: workflow/protected-rules.yaml
-      revision: git:fdce9b85e8008d2e5b6a28c127f7c8e56efb4bb3
+      revision: git:e3c6da43da78c751e267e230798bf2c2e50cc80a
       contentHash: sha256:31a7b239187f194a2ceaebb0d61cc4d36158beb42a21bc4e0dd9c32b98e8e288
     aliases:
       - name: protected-rules
