@@ -8,4 +8,4 @@ invocation: {kind: agent-native, ref: discover-context}
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
-supportEvidence: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
+supportEvidence: {sourceIntegrity: unverified, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

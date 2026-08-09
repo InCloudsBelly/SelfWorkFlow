@@ -91,6 +91,14 @@ class WorkflowMatrixTests(unittest.TestCase):
                 ):
                     self.assertIn(phrase, content)
 
+    def test_lightweight_design_matches_default_brainstorming_policy(self):
+        design = (
+            self.ROOT
+            / "docs/superpowers/specs/2026-08-08-lightweight-code-first-core-design.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("所有修改任务默认调用 Brainstorming", design)
+        self.assertNotIn("只有存在设计选择或跨模块影响时才执行 Brainstorming", design)
+
 
 if __name__ == "__main__":
     unittest.main()

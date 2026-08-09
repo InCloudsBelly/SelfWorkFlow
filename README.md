@@ -62,9 +62,12 @@ classify briefly
 -> run the narrowest sufficient verification
 ```
 
-The runtime sequence is `Discover -> Capability Check -> Classify -> Design ->
+The conceptual sequence is `Discover -> Capability Check -> Classify -> Design ->
 Plan -> Implement/Debug -> Review -> Verify -> optional Knowledge -> Complete`.
-`selfworkflow resolve` returns an immutable PlanGraph; the Host refuses paused
+For ordinary work, thin Agent adapters follow `WORKFLOW.md` directly and do not
+manufacture a PlanGraph or RunLedger. `selfworkflow resolve` is an opt-in
+contract-management interface for an explicit V3 request or a conforming Host
+that can provide fresh capability evidence; when used, the Host refuses paused
 plans, loads only current-stage modules, and records runtime facts in a
 plan-bound RunLedger. Grill-me is explicit-only and is followed by independent
 Brainstorming cross-review. The Host verifies typed Grill completion, clean-summary
@@ -89,8 +92,8 @@ Runtime profiles are closed and deterministic:
   snapshot.
 
 The `core` and `maintainer` artifacts include the explicit V3 contracts,
-adaptive TEA/C++ routing, `cpp-core`, Provider descriptors and the Provider
-management entry. These files are loaded only by matching V3 requests; machine
+bounded TEA candidates, C++ routing, `cpp-core`, Provider descriptors and the
+Provider management entry. These files are loaded only by matching V3 requests; machine
 configuration, logs, indexes and caches are never packaged.
 
 ## Optional CodeGraph provider
@@ -127,11 +130,17 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   Skill absorption, adapters,
   optional generic Knowledge slots, runtime build, and
   sandbox transaction install/verify/rollback are implemented and automated-tested.
-- V3 adaptive TEA/C++ routing, default Brainstorming for every modification,
-  the post-Grill Host gate, machine-local CodeGraph binding, non-executing source
-  inspection, CAS-protected installer rollback, and content-addressed maintenance planning are
-  implemented and automated-tested. Real CodeGraph query and mutation operations
-  remain `unverified` and are not silently promoted by Fake-port tests.
+- V3 schemas, versioned Catalog/Pipeline loaders, immutable PlanGraph/RunLedger
+  validation, bounded selector kernel, TEA candidate routing, C++ content-addressed
+  routing, default Brainstorming policy, the fail-closed post-Grill contract gate,
+  machine-local CodeGraph binding, non-executing source inspection, CAS-protected
+  installer rollback, and content-addressed maintenance planning are implemented
+  and automated-tested. The checked-in V3 request intentionally remains `paused`
+  until a conforming Host supplies fresh supported evidence.
+- OpenSpec routing, a generic specialist Review selector/aggregate execution path,
+  Heavy/Forensic adapters and dependencies, real CodeGraph query/mutation, and
+  native post-Grill SubAgent dispatch are not implemented by this release. Their
+  design contracts or Fake-port tests are not support evidence.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
   `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
   `adapters/unknown/BOOTSTRAP.md`.
@@ -139,8 +148,11 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   legacy contract files do not constitute support evidence.
 - Installer manifests currently record `securityStatus: unverified`; do not use the
   sandbox result as proof of production ACL hardening.
-- Native login, model/OAuth calls, formal global installation, and final independent
-  Review are release blockers until their versioned evidence exists.
+- Native login, model/OAuth calls and formal global installation remain unverified
+  until their versioned evidence exists.
+
+The detailed design-to-implementation audit is recorded in
+`docs/reviews/2026-08-09-v3-design-implementation-conformance.md`.
 
 ## Build and sandbox installation
 

@@ -42,34 +42,34 @@ modules:
     hash: sha256:19071b0275c1454f9a07ce5fd50f179d7310fe782145d6b7f9dd637fbeccac2c
   - id: discover-context
     ref: modules/discover-context.yaml
-    hash: sha256:c81d38476ca34578fc0b5e675cac2f148b79f17035cbf34f70ccd0a68ee0fbca
+    hash: sha256:16bb4f817b3dbf5a9f4bea24c1efeab475e5dddf325e1c706e9e7148c3ce00f0
   - id: capability-check
     ref: modules/capability-check.yaml
-    hash: sha256:3fff2ff90b4943f73e959cd528ea07b7a9132bc2b6578fe46402207d764a695f
+    hash: sha256:bae7bbbe99f4a1f1ffd5d6649ca26f34809c9ca205fd59645f63041d1bac198b
   - id: classify-task
     ref: modules/classify-task.yaml
-    hash: sha256:f42b6c26ddccdedeb3aab6c9de0ef13c0c1d51590514cf36d60f9ea461443066
+    hash: sha256:d178f51628a47e7e9b77e4b5c11b3909abada1cdaa846f436a3ea61aad7cf3bd
   - id: design-precheck
     ref: modules/design-precheck.yaml
-    hash: sha256:a9da0cc47350b5acc56f442a34b5ba891381556d400b0abdac5a7adb92c11286
+    hash: sha256:319332e3711b4089d8cb92b024b946913c95e7696a84275555e4db0624729176
   - id: design-grill-me
     ref: modules/design-grill-me.yaml
     hash: sha256:0539a51e32e57f964b4e13e6fa0e56ffdf38192f355a0f605cea77ea28ce6bec
   - id: plan-primary
     ref: modules/plan-primary.yaml
-    hash: sha256:836178f203f560b587c774eb55e8a55b151138967a12a8d680cafa023287100a
+    hash: sha256:4695660ed184ff5628a51574866282c505ab0d50fda55848f2d956bc60eae0bf
   - id: implement-tdd
     ref: modules/implement-tdd.yaml
-    hash: sha256:a6ca1498fe7dff9f6a5fed144c83861f0d557d941d6f1375402744118d93c85b
+    hash: sha256:3c2baabf42cc2f856420f12e9c545431d9894b71bd2938babc202524db7b508e
   - id: review-self
     ref: modules/review-self.yaml
-    hash: sha256:71d7ca570cfc6be1ad797ced247eb7230acbba75063efeaa900c399d40bdd0bc
+    hash: sha256:aaf8008a16adc725659d241e3f129a9d68f0ce890e2fd6766c312d663591453e
   - id: verify-execution
     ref: modules/verify-execution.yaml
-    hash: sha256:acca6b6d820844c078e51972bdc5cd92815c9d5de127d2f243afe4c0b013436d
+    hash: sha256:dd881b8c4d2be28bd46db4a9ef30e7e9619438dac87875ce1a9639600a62d1c6
   - id: complete-gate
     ref: modules/complete-gate.yaml
-    hash: sha256:c47819570eac1f6b5c951488f6fcf6a0fd1fb751addb79a669baf2deebdd3dd3
+    hash: sha256:dd407a4166b7af3a0688805c15ec4c398048acbfe1a968e79240446bbe19be08
   - id: tea-test-design
     ref: modules/tea-test-design.yaml
     hash: sha256:64ab64224f57da446ddbe8577232c6f5ad28a8e24a7c234e8d66d985ef2a7b99

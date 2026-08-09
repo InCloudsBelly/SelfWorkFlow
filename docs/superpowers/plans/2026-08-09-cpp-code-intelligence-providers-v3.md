@@ -549,6 +549,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 ## Final Gate: 完整验证、文档对照和独立终审
 
+当前收敛决策：V3 Resolver 是显式契约管理接口，不是日常任务默认控制面。普通 Agent 通过薄适配器直接遵循
+`WORKFLOW.md`；缺少原生 Host 证据时，不创建虚假的 PlanGraph/RunLedger。自适应质量目标中尚未进入实际
+Catalog/Host 的 OpenSpec、通用专项 Review 和 Heavy/Forensic 能力记录为 deferred，不在本计划末尾冒充已交付。
+
 **Files:**
 
 - Modify: `docs/superpowers/specs/2026-08-09-adaptive-quality-modules-v3-design.md`

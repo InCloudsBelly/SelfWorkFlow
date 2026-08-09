@@ -38,7 +38,7 @@ class AdapterContractTests(unittest.TestCase):
         self.assertEqual(codex["supportStatus"], "experimental-unverified")
         self.assertEqual(codex["overrideBehavior"], "pause-and-confirm-target")
 
-    def test_vendor_entries_expose_the_optional_stateless_resolver(self):
+    def test_vendor_entries_keep_the_resolver_optional_for_ordinary_tasks(self):
         adapters = load_adapters(
             self.ROOT / "adapters",
             self.ROOT / "schemas/adapter.schema.json",
@@ -49,6 +49,12 @@ class AdapterContractTests(unittest.TestCase):
                     self.ROOT / "adapters" / adapter["id"] / adapter["entryFile"]
                 ).read_text(encoding="utf-8")
                 self.assertIn("selfworkflow resolve", content)
+                self.assertIn("ordinary tasks", content)
+                self.assertIn("follow", content)
+                self.assertIn("WORKFLOW.md", content)
+                self.assertIn("do not create a PlanGraph or RunLedger", content)
+                self.assertIn("explicitly contract-managed", content)
+                self.assertIn("conforming Host", content)
                 for phrase in (
                     "paused", "PlanGraph", "RunLedger", "current-stage",
                     "critical decisions", "agent-policy", "Knowledge",
@@ -56,7 +62,7 @@ class AdapterContractTests(unittest.TestCase):
                     "post-landing Review", "minor decisions", "decision-record",
                 ):
                     self.assertIn(phrase, content)
-                self.assertNotIn("is a conforming Host", content)
+                self.assertNotIn("This adapter is a conforming Host", content)
 
 
 if __name__ == "__main__":

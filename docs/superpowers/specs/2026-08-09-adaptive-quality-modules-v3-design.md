@@ -1,7 +1,7 @@
 # SelfWorkFlow V3 自适应质量模块设计
 
 - 日期：2026-08-09
-- 状态：已批准进入实施
+- 状态：目标设计已批准；首个可交付切片已落地，未落地项见实现一致性审计
 - 基线：SelfWorkFlow 编排契约 V2
 - 范围：OpenSpec、TEA、选择性 Review、Quality Playbook/安全审查模块及其 Git 依赖管理
 - 不在本轮范围：Spec Kit、C7OpenWiki MCP 的具体实现、非 Codex Agent 的完整行为认证
@@ -10,6 +10,11 @@
 [`2026-08-09-cpp-code-intelligence-providers-v3-design.md`](2026-08-09-cpp-code-intelligence-providers-v3-design.md)
 定义。该增量与本文共同组成 V3 设计与实施计划依据；发生冲突时，增量只能收紧 Provider、维护授权、独立 Review
 和证据边界，不能降低本文的受保护不变量。
+
+> 当前实现边界：本轮实际交付 V3 契约主干、静态/有界选择内核、TEA 候选路由、C++ 路由与 Provider
+> 安全内核。OpenSpec、通用专项 Review 选择/聚合执行以及 Heavy/Forensic 集成仍是目标设计，尚未进入
+> Catalog 或生产执行路径，不得据此宣称支持。逐项状态见
+> [`2026-08-09-v3-design-implementation-conformance.md`](../../reviews/2026-08-09-v3-design-implementation-conformance.md)。
 
 ## 1. 目标与约束
 
@@ -425,6 +430,11 @@ diff 和证据均未变化时只允许有界重试。
 - CodeGraph、Serena/clangd、DebugMCP、C++ Heavy Provider：只能按“能力 × 操作 × 平台 × Adapter 版本”
   分别升级支持状态；本地路径存在、工具可启动或上游热度均不等于受支持；
 - C7OpenWiki：本轮不修改，保持独立适配任务。
+
+首个切片完成后仍保持以下边界：只有 TEA 作为普通 Git submodule 被锁定；OpenSpec、Quality Playbook、
+Trail of Bits/Joern 等 Heavy 来源没有进入 `.gitmodules`。ReviewAggregate 等 Schema 与语义验证器的存在只证明
+契约边界，不代表通用 Review 选择、专项执行和聚合闭环已实现。日常 Agent 直接执行轻量 `WORKFLOW.md`；
+V3 Resolver 只用于显式契约管理或具备新鲜能力证据的 conforming Host，不能成为普通任务的隐式阻塞项。
 
 ## 11. 验收策略
 

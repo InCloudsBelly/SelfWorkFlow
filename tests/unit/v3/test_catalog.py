@@ -456,6 +456,29 @@ class V3CatalogCompilerTests(unittest.TestCase):
             for module in cpp
         ))
 
+    def test_checked_in_unbound_core_modules_do_not_claim_source_integrity(self):
+        CatalogError, compile_catalog = _compiler()
+        root = Path(__file__).resolve().parents[3]
+        compiled = compile_catalog(root / "catalog" / "v3" / "index.yaml")
+        modules = {
+            module["id"]: module
+            for module in compiled.document["catalog"]["modules"]
+        }
+        unbound = {
+            "discover-context", "capability-check", "classify-task",
+            "design-precheck", "plan-primary", "implement-tdd",
+            "review-self", "verify-execution", "complete-gate",
+        }
+        self.assertEqual(
+            {
+                module_id
+                for module_id in unbound
+                if modules[module_id]["supportEvidence"]["sourceIntegrity"]
+                != "unverified"
+            },
+            set(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
