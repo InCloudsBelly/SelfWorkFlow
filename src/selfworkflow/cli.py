@@ -67,12 +67,12 @@ def _provider_manager(config_file: str | None):
     return ProviderManager(
         paths=MachineLocalPaths(config_file=_provider_config_file(config_file)),
         command_port=_SubprocessCommandPort(),
+        source_identity_resolver=_inspect_codegraph_source_identity,
     )
 
 
-def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
-    from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
-
+def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
+    """Hash a CodeGraph checkout without executing code from that checkout."""
     source = _absolute_path(source_value).resolve(strict=True)
     script = source / "dist" / "bin" / "codegraph.js"
     if source.is_symlink() or not script.is_file() or script.is_symlink():
@@ -112,12 +112,6 @@ def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
     source_hash = "sha256:" + hashlib.sha256(
         json.dumps(source_material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    adapter = CodeGraphAdapter(
-        command_port=_SubprocessCommandPort(),
-        command_prefix=("node", str(script)),
-        ownership="user-local",
-    )
-    version = adapter.version()["version"]
     return {
         "source": source,
         "script": script,
@@ -127,10 +121,23 @@ def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
             "commit": commit,
             "dirty": bool(status),
             "sourceHash": source_hash,
-            "version": version,
             "supportStatus": "unverified",
         },
     }
+
+
+def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
+    """Inspect source identity, then run its read-only version probe for setup."""
+    from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
+
+    observation = _inspect_codegraph_source_identity(source_value)
+    adapter = CodeGraphAdapter(
+        command_port=_SubprocessCommandPort(),
+        command_prefix=("node", str(observation["script"])),
+        ownership="user-local",
+    )
+    observation["report"]["version"] = adapter.version()["version"]
+    return observation
 
 
 def _configure_codegraph(

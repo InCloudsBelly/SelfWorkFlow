@@ -473,7 +473,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
   由宿主以 `fork_context=false` 启动全新 SubAgent，只传递 DesignReviewSummary、规则 diff、验收条件和测试证据；不传 Grill-me 推理过程。将 Host attestation 与结论写入正式 `docs/releases/evidence/protected-rules-v2/owner-review.json`，并让 gate 测试校验其 hash。若出现 Important/Critical，先修正规则、代码和测试后再启动新的独立 Review。
 
-- [ ] **Step 6: 运行测试并提交**
+- [x] **Step 6: 运行测试并提交**
 
   ```powershell
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.unit.v3.test_review_dispatch
@@ -509,7 +509,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [x] **Step 1: 写 CLI、安装、幂等和回滚失败测试**
 
-  覆盖 `provider list`、`provider configure`、`provider doctor`、`provider status`、`provider maintain --plan-only`、确认 hash 后执行；首次安装询问是否配置本地覆写，空答即跳过；重复安装不重复写；配置冲突需用户决策；中途失败恢复旧配置；日志包含阶段和错误码但不包含敏感值。
+  覆盖 `provider list`、`provider configure`、`provider doctor`、`provider status`、`provider maintain --plan-only`，并证明任何维护执行（包括提供确认 hash）在生产安全端口接入前失败关闭；首次安装询问是否配置本地覆写，空答即跳过；重复安装不重复写；配置冲突需用户决策；中途失败恢复旧配置；日志包含阶段和错误码但不包含敏感值。
 
   ```powershell
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.unit.v3.test_codegraph_adapter
@@ -523,7 +523,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [x] **Step 3: 实现 Provider CLI 与管理脚本**
 
-  `Manage_SelfWorkFlow_Providers.bat` 只转发到 PowerShell，并把失败日志写到 `%LOCALAPPDATA%\SelfWorkFlow\logs`。管理器展示来源类型、commit/version、dirty、hash、项目授权和可用操作；修改配置使用临时文件、fsync/replace 和恢复副本。用户拥有的本地 Provider 只允许 inspect/status/query，不允许 SelfWorkFlow upgrade。
+  `Manage_SelfWorkFlow_Providers.bat` 只转发到 PowerShell，并把失败日志写到 `%LOCALAPPDATA%\SelfWorkFlow\logs`。管理器展示来源类型、commit/version、dirty、hash、项目授权和可用操作；修改配置使用临时文件、fsync/replace 和恢复副本。每次命令调度前以不执行 Provider 源码的方式重新验证 source/entry identity。用户拥有的本地 Provider 只允许已验证的 inspect/status；query 和维护执行保持 `unverified` 且失败关闭，不允许 SelfWorkFlow upgrade。
 
 - [x] **Step 4: 修改一键安装和 runtime 打包**
 
@@ -557,11 +557,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 - Modify: `scripts/verify.ps1`
 - Modify: `tests/conformance/test_release_gate.py`
 
-- [ ] **Step 1: 把验证命令纳入发布门禁**
+- [x] **Step 1: 把验证命令纳入发布门禁**
 
   `scripts/verify.ps1` 增加 V3 schema、Fake Provider、C++ 路由、post-Grill gate、安装沙箱和 runtime snapshot；不把本机 CodeGraph 可用性变成通用仓库测试的硬依赖。
 
-- [ ] **Step 2: 运行聚焦回归**
+- [x] **Step 2: 运行聚焦回归**
 
   ```powershell
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -Suite unit
@@ -573,7 +573,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
   Expected: PASS。
 
-- [ ] **Step 3: 运行完整验证**
+- [x] **Step 3: 运行完整验证**
 
   ```powershell
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1 -Suite automated
@@ -583,9 +583,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
   Expected: automated suite 和 `git diff --check` PASS；`git status` 只包含本任务预期文件。无参数 `verify.ps1` 的 `all` 模式继续诚实包含 native gate；若需要用户操作或真实 Provider 不可用，应保持非零/incomplete，不得为获得 PASS 改掉该语义。
 
-- [ ] **Step 4: 对照设计更新真实支持状态**
+- [x] **Step 4: 对照设计更新真实支持状态**
 
-  逐条检查验收条件与真实证据。只有通过 native-validation 的 Provider 才改为 supported；跳过或失败项标为 `unverified`，写明原因、风险和人工验证方法。不得把 Fake Provider 测试当作真实 CodeGraph 支持证据。
+  逐条检查验收条件与真实证据。只有通过 native-validation 的 Provider operation 才改为 supported；跳过或失败项标为 `unverified`，写明原因、风险和人工验证方法。不得把 Fake Provider 测试当作真实 CodeGraph 支持证据。当前维护只支持计划，执行入口已失败关闭；真实查询、索引和维护执行不属于已支持能力。
 
 - [ ] **Step 5: 启动全新独立 SubAgent 终审**
 
@@ -602,7 +602,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - V2 全量测试保持通过，V3 仅由显式版本请求启用。
 - C++ 任务可得到稳定、可解释、按需加载的能力路由；非代码任务不会误加载 cpp-core。
-- Provider 的配置、选择、fallback、freshness、授权、查询、维护和收据形成可验证闭环。
+- Provider 的配置、静态选择、source freshness、只读诊断和维护计划形成自动化验证闭环；生产查询、维护执行、授权持久化和收据对账保持 `unverified` 并失败关闭。
 - 本地覆写只能显式配置，机器路径不进入仓库；用户 Provider 源码不被 SelfWorkFlow 修改。
 - Grill-me 后同一 Agent 自审无法通过门禁；全新无上下文 SubAgent Review 有结构化证据。
 - 安装、冲突、幂等、失败回滚、升级边界和 runtime 打包均有真实测试。

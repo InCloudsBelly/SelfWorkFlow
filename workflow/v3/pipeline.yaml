@@ -22,8 +22,9 @@ stages:
     slots:
       - id: design.precheck
         cardinality: exactly-one
-        allowedInvocationKinds: [agent-native]
+        allowedInvocationKinds: [skill]
         selectionMode: static
+        condition: {eq: [writeTask, true]}
       - id: code.reasoning
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]

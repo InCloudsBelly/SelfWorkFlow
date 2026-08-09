@@ -330,6 +330,19 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(design.status, "routed")
         self.assertEqual(design.selected_modules, ("design-brainstorming",))
 
+        light_design = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="design.primary",
+                cardinality="exactly-one",
+                operation_type="implement",
+                strength="Light",
+                write_task=True,
+                capability_states={"skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(light_design.selected_modules, ("design-brainstorming",))
+
         knowledge = route_modules(
             compiled.content,
             ModuleRouteRequest(

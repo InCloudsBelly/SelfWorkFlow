@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import ntpath
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 _MAX_OUTPUT_BYTES = 1024 * 1024
@@ -105,14 +105,18 @@ class CodeGraphAdapter:
         command_port: CommandPort,
         command_prefix: Sequence[str],
         ownership: str,
+        pre_dispatch_validator: Callable[[], None] | None = None,
     ) -> None:
         if not callable(getattr(command_port, "run", None)):
             raise CodeGraphAdapterError("codegraph-command-port-invalid")
         if ownership not in {"user-local", "selfworkflow-managed"}:
             raise CodeGraphAdapterError("codegraph-ownership-invalid")
+        if pre_dispatch_validator is not None and not callable(pre_dispatch_validator):
+            raise CodeGraphAdapterError("codegraph-source-validator-invalid")
         self._port = command_port
         self._prefix = _validate_prefix(command_prefix)
         self._ownership = ownership
+        self._pre_dispatch_validator = pre_dispatch_validator
         self._issued_maintenance_plans: set[str] = set()
         self._consumed_maintenance_plans: set[str] = set()
 
@@ -126,6 +130,8 @@ class CodeGraphAdapter:
 
     def _run(self, arguments: Sequence[str]) -> CommandResult:
         try:
+            if self._pre_dispatch_validator is not None:
+                self._pre_dispatch_validator()
             result = self._port.run(self._prefix + tuple(arguments), cwd=None)
         except CodeGraphAdapterError:
             raise

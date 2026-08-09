@@ -111,6 +111,25 @@ class V3CppWorkflowTests(unittest.TestCase):
             for item in cpp_modules
         ))
 
+    def test_every_v3_modification_routes_design_through_brainstorming(self):
+        catalog = compile_catalog().document["catalog"]
+        pipeline = load_pipeline().document
+        design = next(
+            item for item in catalog["modules"] if item["id"] == "design-precheck"
+        )
+        slot = next(
+            slot
+            for stage in pipeline["stages"] if stage["id"] == "designed"
+            for slot in stage["slots"] if slot["id"] == "design.precheck"
+        )
+
+        self.assertEqual(
+            design["invocation"],
+            {"kind": "skill", "ref": "superpowers:brainstorming"},
+        )
+        self.assertEqual(slot["allowedInvocationKinds"], ["skill"])
+        self.assertEqual(slot["condition"], {"eq": ["writeTask", True]})
+
 
 if __name__ == "__main__":
     unittest.main()

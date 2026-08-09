@@ -27,7 +27,8 @@ class _Manager:
                 "supportStatus": "unverified",
                 "planHash": "sha256:" + "a" * 64,
             }
-        return {"providerId": provider_id, "status": "succeeded"}
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+        raise ProviderManagerError("provider-maintenance-apply-unverified")
 
 
 class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
@@ -56,10 +57,10 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
                 self.assertEqual(main(base + ["--plan-only"]), 0)
             with mock.patch("sys.stderr", StringIO()):
                 self.assertEqual(main(base), 70)
-            with mock.patch("sys.stdout", StringIO()):
+            with mock.patch("sys.stderr", StringIO()):
                 self.assertEqual(
                     main(base + ["--confirm-plan-hash", "sha256:" + "a" * 64]),
-                    0,
+                    70,
                 )
         self.assertEqual(manager.calls[-1][-1], "sha256:" + "a" * 64)
 
@@ -100,6 +101,19 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
                 expected_source_hash="sha256:" + "c" * 64,
             )
         manager.configure.assert_not_called()
+
+    def test_runtime_manager_uses_non_executing_source_identity_inspection(self):
+        from selfworkflow import cli
+
+        with mock.patch(
+            "selfworkflow.v3.provider_manager.ProviderManager"
+        ) as manager_type:
+            cli._provider_manager(None)
+
+        self.assertIs(
+            manager_type.call_args.kwargs["source_identity_resolver"],
+            cli._inspect_codegraph_source_identity,
+        )
 
 
 if __name__ == "__main__":

@@ -109,6 +109,7 @@ class ProviderManager:
         *,
         paths: MachineLocalPaths,
         command_port: CommandPort,
+        source_identity_resolver: Callable[[str], Mapping[str, Any]],
         logger: Callable[[str, Mapping[str, Any]], None] | None = None,
         replace_operation: Callable[[str | Path, str | Path], object] = os.replace,
     ) -> None:
@@ -116,17 +117,18 @@ class ProviderManager:
             raise ProviderManagerError("provider-machine-paths-invalid")
         if not callable(getattr(command_port, "run", None)):
             raise ProviderManagerError("provider-command-port-invalid")
+        if not callable(source_identity_resolver):
+            raise ProviderManagerError("provider-source-identity-resolver-invalid")
         if logger is not None and not callable(logger):
             raise ProviderManagerError("provider-logger-invalid")
         if not callable(replace_operation):
             raise ProviderManagerError("provider-replace-operation-invalid")
         self._paths = paths
         self._command_port = command_port
+        self._source_identity_resolver = source_identity_resolver
         self._logger = logger
         self._replace = replace_operation
         self._adapter_cache: dict[str, tuple[str, CodeGraphAdapter]] = {}
-        self._issued_maintenance_plans: dict[str, dict[str, Any]] = {}
-        self._consumed_maintenance_plans: set[str] = set()
 
     def _log(self, event: str, **fields: object) -> None:
         if self._logger is None:
@@ -362,7 +364,6 @@ class ProviderManager:
             changed = self._write_config(config)
             if changed:
                 self._adapter_cache.pop(provider_id, None)
-                self._issued_maintenance_plans.clear()
             status = "configured" if changed else "unchanged"
             self._log(
                 "provider.configure.completed",
@@ -387,6 +388,29 @@ class ProviderManager:
             )
             raise
 
+    def _assert_source_identity(self, provider: Mapping[str, Any]) -> None:
+        try:
+            observation = self._source_identity_resolver(provider["sourcePath"])
+            if not isinstance(observation, Mapping):
+                raise ProviderManagerError("provider-source-identity-drift")
+            report = observation.get("report")
+            observed_source = observation.get("source")
+            if not isinstance(report, Mapping) or observed_source is None:
+                raise ProviderManagerError("provider-source-identity-drift")
+            observed_path = validate_provider_source_path(str(observed_source))
+            expected = provider["source"]
+            if (
+                observed_path != provider["sourcePath"]
+                or report.get("commit") != expected["commit"]
+                or report.get("sourceHash") != expected["sourceHash"]
+                or report.get("dirty") is not expected["dirty"]
+            ):
+                raise ProviderManagerError("provider-source-identity-drift")
+        except ProviderManagerError:
+            raise
+        except Exception:
+            raise ProviderManagerError("provider-source-identity-drift") from None
+
     def _adapter(self, provider_id: str) -> CodeGraphAdapter:
         if provider_id != "codegraph":
             raise ProviderManagerError("provider-not-supported")
@@ -399,6 +423,7 @@ class ProviderManager:
             raise ProviderManagerError("provider-not-configured")
         if "bindingHash" not in provider:
             raise ProviderManagerError("provider-adapter-unavailable")
+        self._assert_source_identity(provider)
         cached = self._adapter_cache.get(provider_id)
         if cached is not None and cached[0] == provider["bindingHash"]:
             return cached[1]
@@ -407,6 +432,7 @@ class ProviderManager:
                 command_port=self._command_port,
                 command_prefix=tuple(provider["commandPrefix"]),
                 ownership=provider["ownership"],
+                pre_dispatch_validator=lambda: self._assert_source_identity(provider),
             )
             self._adapter_cache[provider_id] = (provider["bindingHash"], adapter)
             return adapter
@@ -468,58 +494,22 @@ class ProviderManager:
     ) -> dict[str, Any]:
         if provider_id != "codegraph":
             raise ProviderManagerError("provider-not-supported")
+        if not plan_only:
+            raise ProviderManagerError("provider-maintenance-apply-unverified")
         adapter = self._adapter(provider_id)
         if action == "upgrade-managed-install" and adapter.ownership == "user-local":
             raise ProviderManagerError("provider-user-owned-upgrade-forbidden")
-        if plan_only:
-            try:
-                plan = adapter.plan_maintenance(action, project_root)
-            except CodeGraphAdapterError as error:
-                reason = (
-                    "provider-user-owned-upgrade-forbidden"
-                    if error.reason == "codegraph-user-owned-upgrade-forbidden"
-                    else "provider-maintenance-plan-invalid"
-                )
-                raise ProviderManagerError(reason) from None
-            self._issued_maintenance_plans[plan["planHash"]] = dict(plan)
-            self._log(
-                "provider.maintain.planned", providerId=provider_id,
-                operation="maintain", status="planned", planHash=plan["planHash"],
-            )
-            return plan
-        if confirmed_plan_hash in self._consumed_maintenance_plans:
-            raise ProviderManagerError("provider-maintenance-plan-replayed")
-        plan = self._issued_maintenance_plans.get(str(confirmed_plan_hash))
-        if plan is None:
-            try:
-                candidate = adapter.plan_maintenance(action, project_root)
-            except CodeGraphAdapterError:
-                raise ProviderManagerError("provider-maintenance-plan-invalid") from None
-            reason = (
-                "provider-maintenance-plan-not-issued"
-                if confirmed_plan_hash == candidate["planHash"]
-                else "provider-maintenance-confirmation-mismatch"
-            )
-            raise ProviderManagerError(reason)
-        if action != plan["action"]:
-            raise ProviderManagerError("provider-maintenance-confirmation-mismatch")
         try:
-            result = adapter.execute_maintenance(
-                plan,
-                project_root,
-                confirmed_plan_hash=confirmed_plan_hash,
+            plan = adapter.plan_maintenance(action, project_root)
+        except CodeGraphAdapterError as error:
+            reason = (
+                "provider-user-owned-upgrade-forbidden"
+                if error.reason == "codegraph-user-owned-upgrade-forbidden"
+                else "provider-maintenance-plan-invalid"
             )
-        except CodeGraphAdapterError:
-            self._log(
-                "provider.maintain.failed", providerId=provider_id,
-                operation="maintain", status="failed",
-                reasonCode="provider-operation-failed", planHash=plan["planHash"],
-            )
-            raise ProviderManagerError("provider-operation-failed") from None
-        self._consumed_maintenance_plans.add(plan["planHash"])
-        self._issued_maintenance_plans.pop(plan["planHash"], None)
+            raise ProviderManagerError(reason) from None
         self._log(
-            "provider.maintain.completed", providerId=provider_id,
-            operation="maintain", status="succeeded", planHash=plan["planHash"],
+            "provider.maintain.planned", providerId=provider_id,
+            operation="maintain", status="planned", planHash=plan["planHash"],
         )
-        return result
+        return plan

@@ -355,6 +355,12 @@ mutationTargetHash / payloadHash / evidenceHash
 OperationReceipt/QueryReceipt 必须与 envelope 的 plan、execution nonce、attempt、Provider 和项目身份完全一致，
 并验证 observedAt 位于本次执行窗口。旧 attempt、旧 nonce 或其他执行产生的 Evidence 一律拒绝。
 
+当前生产 Provider Manager 只实现内容寻址的维护计划，不执行维护。任何非 `plan-only` 调用都必须以
+`provider-maintenance-apply-unverified` 失败关闭；不能用 CLI 的确认 hash 代替上述 ApprovalReceipt、持久
+lease/replay、MutationEvidence 与 rollback 端口。只有这些端口接入 Host 并通过行为测试后，才能开放执行。
+配置后的每次 Provider 命令调度前，还必须在不执行 Provider 源码的前提下重新计算 source/entry identity；
+发生漂移时不得启动目标命令。
+
 项目增量自动同步需要机器配置对 `(providerId, canonicalProjectRoot)` 保存一次性、可撤销授权。项目仓库只能
 提出请求，不能自行授权本机命令执行。
 

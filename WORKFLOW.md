@@ -35,8 +35,8 @@ and failures belong in a RunLedger bound to the exact `planHash`, `requestHash`,
 and capability snapshot. Changed or expired evidence requires a new plan and
 supersedes the old ledger.
 
-Light tasks use a structured Design check and inline Plan. Full and Deep tasks
-use Brainstorming and Writing Plans. Deep recommends Grill-me but never enables
+All modifying tasks use Brainstorming; Light keeps it bounded and uses an inline
+Plan, while Full and Deep also use Writing Plans. Deep recommends Grill-me but never enables
 it automatically; when the user selects it, Grill-me is followed by an
 independent-context Brainstorming cross-review. Every modifying task still
 requires complete-diff Review and the narrowest sufficient direct, failure-path,

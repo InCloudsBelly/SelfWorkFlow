@@ -32,8 +32,11 @@ user-owned checkout, but will never upgrade or remove it.
 
 ## Operations and safety
 
-`list`, `doctor` and `status` are explicit diagnostics. They use a shell-free,
-argument-array process boundary, bounded output and stable redacted errors.
+`list`, `doctor` and `status` are explicit diagnostics. Before every Provider
+process dispatch, SelfWorkFlow recomputes the configured Git/source/entry
+identity without executing code from the checkout and fails closed on drift.
+The operation then uses a shell-free, argument-array process boundary, bounded
+output and stable redacted errors.
 Their adapter support remains `unverified` until native evidence proves the
 exact source identity and operation behavior.
 
@@ -48,23 +51,20 @@ plan:
 Manage_SelfWorkFlow_Providers.bat maintain --action sync --project-root D:\project --plan-only
 ```
 
-Then execute only the exact reviewed hash:
-
-```bat
-Manage_SelfWorkFlow_Providers.bat maintain --action sync --project-root D:\project --confirm-plan-hash sha256:<64-hex>
-```
-
 The plan binds the Provider command, ownership, project root hash, action and
-side-effect class. A mismatched, tampered or in-process replayed plan fails
-closed. Machine-process restart invalidates in-memory issuance; the CLI therefore
-reissues the same deterministic plan in the confirmed invocation before
-execution. This confirmation is a side-effect guard, not identity authentication.
+side-effect class. Execution is deliberately disabled in this release. Any call
+without `--plan-only`, including one carrying `--confirm-plan-hash`, fails closed
+with `provider-maintenance-apply-unverified`. The production Host does not yet
+bind the V3 authorization, persistent lease/replay, mutation-evidence, and
+rollback ports; a CLI confirmation hash alone is not identity authentication or
+sufficient mutation authorization.
 
 ## Current verification boundary
 
 Automated tests use an injected Fake command port and prove command rendering,
 redaction, no implicit initialization, atomic configuration, rollback,
-idempotence, exact-hash confirmation and replay handling. A local read-only
+idempotence, source-drift rejection before dispatch, deterministic planning, and
+fail-closed maintenance execution. A local read-only
 inspection has observed CodeGraph `1.3.1-ks.7`, `status` on an uninitialized
 workspace, no `.codegraph` creation and an unchanged Git worktree, plus the available command surface,
 but this does not prove query freshness, auto-sync behavior, mutation containment

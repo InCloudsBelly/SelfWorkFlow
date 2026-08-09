@@ -27,8 +27,7 @@ class WorkflowMatrixTests(unittest.TestCase):
                             capability_states={"skill-discovery": "supported"},
                         ),
                     )
-                    expected = "design-light" if strength == "Light" else "design-brainstorming"
-                    self.assertEqual(route.selected_modules, (expected,))
+                    self.assertEqual(route.selected_modules, ("design-brainstorming",))
                     self.assertNotIn("design-grill-me", route.selected_modules)
                     self.assertEqual(classification.suggest_grill_me, max(complexity, risk) >= 3 or (complexity >= 2 and risk >= 2))
 

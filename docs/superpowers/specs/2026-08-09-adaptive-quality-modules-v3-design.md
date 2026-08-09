@@ -479,8 +479,11 @@ diff 和证据均未变化时只允许有界重试。
 - 最终完整 diff 的独立 Review receipt 必须包含不同 context/agent identity、最终 diff hash、结构化 findings
   和验证结论；同一上下文回退时标记 independence=unverified；
 - 显式 Grill-me 后的 Brainstorming Review 必须创建 `fork_context=false` 的独立 SubAgent，只传入规范化设计
-  摘要并绑定 `inputSummaryHash`、`designHash`、`reviewerPolicyHash` 和 Host 可提供的 identity attestation；宿主
+  摘要；Host 先验证 typed Grill completion/common-understanding 与 summary provenance，后者限定输入类且证明
+  未接收 Grill transcript、Grill reasoning 或父上下文。摘要绑定 `inputSummaryHash`、`designHash`、来自仓库
+  策略工件的 `reviewerPolicyHash` 和 Host 可提供的 identity attestation；宿主
   不支持时必须先暂停取得用户授权，且同一 Agent Review 不得标记为 independent；
-- Review 摘要使用 Host 解析的内容寻址引用；调度、解析和 replay consumer 在 Host 构造时绑定。证明同时绑定
-  plan、attempt、nonce 与有效期并一次性消费；生产 Host 未适配时失败关闭，Fake 端口结果不得冒充原生支持；
+- Review 摘要使用 Host 解析的内容寻址引用；调度、摘要/完成证明解析和 replay consumer 在 Host 构造时绑定。
+  fallback authorization 同时绑定 design、policy、plan、attempt、summary、nonce 与有效期并一次性消费；生产
+  Host 未适配时失败关闭，Fake 端口结果不得冒充原生支持；
 - 不能执行的外部能力保留 `unverified`，并记录原因和人工验证方法。

@@ -51,7 +51,7 @@ modules:
     hash: sha256:f42b6c26ddccdedeb3aab6c9de0ef13c0c1d51590514cf36d60f9ea461443066
   - id: design-precheck
     ref: modules/design-precheck.yaml
-    hash: sha256:cb06d4fd7eddd62a5bdc7856c8753d73bcf8a7359cbae5cee9e7a64de9712192
+    hash: sha256:a9da0cc47350b5acc56f442a34b5ba891381556d400b0abdac5a7adb92c11286
   - id: design-grill-me
     ref: modules/design-grill-me.yaml
     hash: sha256:0539a51e32e57f964b4e13e6fa0e56ffdf38192f355a0f605cea77ea28ce6bec

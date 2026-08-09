@@ -36,7 +36,10 @@ class ProviderManagerTests(unittest.TestCase):
 
         return CommandResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
 
-    def _manager(self, port=None, logger=None, replace_operation=None):
+    def _manager(
+        self, port=None, logger=None, replace_operation=None,
+        source_identity_resolver=None,
+    ):
         from selfworkflow.v3.provider_manager import MachineLocalPaths, ProviderManager
 
         kwargs = {
@@ -45,6 +48,16 @@ class ProviderManagerTests(unittest.TestCase):
             ),
             "command_port": port or FakeCommandPort(),
             "logger": logger,
+            "source_identity_resolver": source_identity_resolver or (
+                lambda source_path: {
+                    "source": Path(source_path),
+                    "report": {
+                        "version": "1.3.1-local", "commit": "b" * 40,
+                        "sourceHash": "sha256:" + "a" * 64,
+                        "dirty": True,
+                    },
+                }
+            ),
         }
         if replace_operation is not None:
             kwargs["replace_operation"] = replace_operation
@@ -145,7 +158,7 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertEqual(plan["supportStatus"], "unverified")
         self.assertEqual(port.calls, [])
 
-    def test_maintain_exact_hash_executes_once_and_replay_is_rejected(self):
+    def test_maintain_apply_is_disabled_until_production_safety_ports_exist(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
 
         port = FakeCommandPort(self._result(stdout='{"ok":true}'))
@@ -155,15 +168,6 @@ class ProviderManagerTests(unittest.TestCase):
             "codegraph", "sync", "C:/work/project", plan_only=True
         )
 
-        result = manager.maintain(
-            "codegraph",
-            "sync",
-            "C:/work/project",
-            plan_only=False,
-            confirmed_plan_hash=plan["planHash"],
-        )
-        self.assertEqual(result["status"], "succeeded")
-
         with self.assertRaises(ProviderManagerError) as caught:
             manager.maintain(
                 "codegraph",
@@ -172,8 +176,8 @@ class ProviderManagerTests(unittest.TestCase):
                 plan_only=False,
                 confirmed_plan_hash=plan["planHash"],
             )
-        self.assertEqual(caught.exception.reason, "provider-maintenance-plan-replayed")
-        self.assertEqual(len(port.calls), 1)
+        self.assertEqual(caught.exception.reason, "provider-maintenance-apply-unverified")
+        self.assertEqual(port.calls, [])
 
     def test_maintain_rejects_hash_mismatch_before_command(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
@@ -190,7 +194,7 @@ class ProviderManagerTests(unittest.TestCase):
                 plan_only=False,
                 confirmed_plan_hash="sha256:" + "0" * 64,
             )
-        self.assertEqual(caught.exception.reason, "provider-maintenance-confirmation-mismatch")
+        self.assertEqual(caught.exception.reason, "provider-maintenance-apply-unverified")
         self.assertEqual(port.calls, [])
 
     def test_maintain_plan_cannot_be_replayed_by_fresh_manager(self):
@@ -212,8 +216,31 @@ class ProviderManagerTests(unittest.TestCase):
                 plan_only=False,
                 confirmed_plan_hash=plan["planHash"],
             )
-        self.assertEqual(caught.exception.reason, "provider-maintenance-plan-not-issued")
+        self.assertEqual(caught.exception.reason, "provider-maintenance-apply-unverified")
         self.assertEqual(fresh_port.calls, [])
+
+    def test_source_identity_is_revalidated_before_every_dispatch(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        state = {"sourceHash": "sha256:" + "a" * 64}
+        port = FakeCommandPort(self._result(stdout="1.3.1"))
+        manager = self._manager(
+            port=port,
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "1.3.1-local", "commit": "b" * 40,
+                    "sourceHash": state["sourceHash"], "dirty": True,
+                },
+            },
+        )
+        self._configure(manager)
+        state["sourceHash"] = "sha256:" + "c" * 64
+
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.doctor("codegraph")
+        self.assertEqual(caught.exception.reason, "provider-operation-failed")
+        self.assertEqual(port.calls, [])
 
     def test_user_owned_provider_upgrade_is_always_rejected(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError

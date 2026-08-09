@@ -4,7 +4,7 @@ sourceHash: sha256:3333333333333333333333333333333333333333333333333333333333333
 stage: designed
 slot: design.precheck
 selectionMode: static
-invocation: {kind: agent-native, ref: design-precheck}
+invocation: {kind: skill, ref: superpowers:brainstorming}
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}

@@ -56,7 +56,7 @@ current stage:
 ```text
 classify briefly
 -> locate the owning layer
--> brainstorm/plan only when needed
+-> Brainstorming for every modification; deeper Plan only when needed
 -> implement the smallest safe change
 -> review the complete diff
 -> run the narrowest sufficient verification
@@ -105,9 +105,12 @@ Manage_SelfWorkFlow_Providers.bat status --project-root D:\project
 Manage_SelfWorkFlow_Providers.bat maintain --action sync --project-root D:\project --plan-only
 ```
 
-Review the maintenance plan, then repeat the command without `--plan-only` and
-add `--confirm-plan-hash <exact-hash>`. User-owned local overrides are never
-upgraded by SelfWorkFlow. Replacing a different existing binding fails with a
+Maintenance execution is deliberately disabled in this release: omitting
+`--plan-only`, even with `--confirm-plan-hash`, fails closed with
+`provider-maintenance-apply-unverified`. The production Host does not yet bind
+the authorization, persistent lease/replay, mutation-evidence, and rollback
+ports required by the V3 contract. User-owned local overrides are never upgraded
+by SelfWorkFlow. Replacing a different existing binding fails with a
 conflict unless the user explicitly repeats configure with `--replace-existing`
 (or the installer is run with `-ReplaceCodeGraphOverride`). CodeGraph query/sync/index behavior remains
 `unverified` until native per-operation validation; query planning explicitly
@@ -121,8 +124,9 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   Skill absorption, adapters,
   optional generic Knowledge slots, runtime build, and
   sandbox transaction install/verify/rollback are implemented and automated-tested.
-- V3 adaptive TEA/C++ routing, the post-Grill Host gate, machine-local CodeGraph
-  binding, Provider diagnostics and hash-confirmed maintenance planning are
+- V3 adaptive TEA/C++ routing, default Brainstorming for every modification,
+  the post-Grill Host gate, machine-local CodeGraph binding, Provider diagnostics
+  and content-addressed maintenance planning are
   implemented and automated-tested. Real CodeGraph query and mutation operations
   remain `unverified` and are not silently promoted by Fake-port tests.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
