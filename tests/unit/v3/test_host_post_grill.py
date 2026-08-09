@@ -376,6 +376,46 @@ class HostPostGrillGateTests(unittest.TestCase):
             )
         self.assertEqual(len(port.calls), 1)
 
+    def test_changes_required_unattested_independent_review_consumes_fallback(self):
+        from selfworkflow.v3.host import HostError
+
+        fallback = _fallback(
+            "independent-context-without-attestation",
+            design_hash=self.summary["designHash"],
+            policy_hash=self.review_policy.policy_hash,
+            plan_hash=self.plan.plan_hash,
+            summary_hash=self.summary["summaryHash"],
+        )
+        self.fallback_store[fallback["authorizationHash"]] = fallback
+        consumer = _Consumer()
+        port = _SpyPort(attested=False, verdict="changes-required")
+        fallback_host = self._host_with_port(port, consumer=consumer)
+
+        with self.assertRaisesRegex(HostError, "post-grill-review-changes-required"):
+            fallback_host.dispatch_post_grill_review(
+                self.ledger, self.summary["summaryHash"],
+                implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                independent_context_available=True,
+                now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+                fallback_authorization_ref=fallback["authorizationHash"],
+                grill_completion_ref=self.grill_completion["attestationHash"],
+            )
+
+        port.verdict = "approve"
+        with self.assertRaisesRegex(
+            HostError, "post-grill-review-authorization-replayed"
+        ):
+            fallback_host.dispatch_post_grill_review(
+                self.ledger, self.summary["summaryHash"],
+                implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                independent_context_available=True,
+                now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+                fallback_authorization_ref=fallback["authorizationHash"],
+                grill_completion_ref=self.grill_completion["attestationHash"],
+            )
+
     def test_caller_cannot_force_fallback_when_sealed_host_supports_independence(self):
         from selfworkflow.v3.host import HostError
 

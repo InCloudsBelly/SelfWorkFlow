@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from selfworkflow.v3.catalog import CompiledCatalog
+from selfworkflow.v3.cpp_router import CppRouteResult
 from selfworkflow.v3.contracts import (
     ContractError,
     load_contract,
@@ -111,6 +112,7 @@ def build_plan_graph(
     provider_binding_snapshot: Mapping[str, Any] | None = None,
     execution_policy_snapshot: Mapping[str, Any] | None = None,
     policy_snapshot: Mapping[str, Any] | None = None,
+    capability_route: CppRouteResult | None = None,
 ) -> PlanGraphArtifact:
     """Build a deterministic plan from strict loader artifacts and snapshots."""
 
@@ -152,12 +154,18 @@ def build_plan_graph(
     )
     if project_defaults & _EXPLICIT_ONLY_MODULE_IDS:
         raise PlanGraphError("v3-explicit-only-module-default-invalid")
-    requested = explicit | project_defaults
+    if capability_route is not None and type(capability_route) is not CppRouteResult:
+        raise PlanGraphError("v3-capability-route-not-typed")
+    routed = (
+        set() if capability_route is None
+        else set(capability_route.selected_module_ids)
+    )
+    requested = explicit | project_defaults | routed
     modules = _module_map(catalog_document)
     _validate_module_graph(modules)
     _validate_dependency_boundaries(modules)
     _validate_requested_ids(requested, modules)
-    _validate_explicit_conflicts(explicit, modules)
+    _validate_explicit_conflicts(explicit | routed, modules)
     allow_unverified = _approved_unverified_ids(
         execution_policy_snapshot, requested,
     )

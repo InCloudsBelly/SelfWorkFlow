@@ -382,6 +382,18 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
         raise InstallerError("plan-confirmation-invalid")
 
 
+def _validate_ready_plan_baseline(
+    plan: dict[str, object], artifact: Path, agents: Path, codex: Path,
+) -> None:
+    if _canonical_hash(_manifest(artifact)) != plan["artifactHash"]:
+        raise InstallerError("artifact-drift")
+    if (
+        tree_hash(agents) != plan["baselineHashes"]["agentsRoot"]
+        or tree_hash(codex) != plan["baselineHashes"]["codexRoot"]
+    ):
+        raise InstallerError("target-drift")
+
+
 def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str, object]:
     _validate_plan_hash(plan, confirmed_hash)
     if plan.get("status") == "already-installed":
@@ -415,10 +427,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     agents = _safe_root(plan["agentsRoot"])
     codex = _safe_root(plan["codexRoot"])
     state = _safe_root(plan["stateRoot"])
-    if _canonical_hash(_manifest(artifact)) != plan["artifactHash"]:
-        raise InstallerError("artifact-drift")
-    if tree_hash(agents) != plan["baselineHashes"]["agentsRoot"] or tree_hash(codex) != plan["baselineHashes"]["codexRoot"]:
-        raise InstallerError("target-drift")
+    _validate_ready_plan_baseline(plan, artifact, agents, codex)
     transaction_id = uuid4().hex
     transaction_path = state / "transactions" / f"{transaction_id}.json"
     backup_root = state / "backups" / transaction_id
@@ -426,6 +435,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     operations: list[dict[str, object]] = []
     try:
         with exclusive_install_lock(state):
+            _validate_ready_plan_baseline(plan, artifact, agents, codex)
             transaction = {
                 "schemaVersion": 1,
                 "transactionId": transaction_id,

@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import contextmanager
 import json
 import tempfile
 import unittest
@@ -88,6 +89,48 @@ class InstallApplyTests(unittest.TestCase):
                         (artifact / "WORKFLOW.md").write_text("drift\n", encoding="utf-8")
                     with self.assertRaises(InstallerError):
                         apply_install_plan(plan, plan["planHash"])
+
+    def test_apply_rechecks_artifact_and_target_after_lock_acquisition(self):
+        from selfworkflow import installer
+
+        for drift in ("target", "artifact"):
+            with self.subTest(drift=drift):
+                with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+                    root = Path(temporary)
+                    artifact = create_artifact(root)
+                    agents, codex, state = (
+                        root / "agents", root / "codex", root / "state"
+                    )
+                    plan = create_install_plan(
+                        artifact, agents, codex, state, "0.1.0"
+                    )
+
+                    @contextmanager
+                    def drift_while_waiting(_state):
+                        if drift == "target":
+                            agents.mkdir(parents=True, exist_ok=True)
+                            (agents / "concurrent.txt").write_text(
+                                "concurrent\n", encoding="utf-8"
+                            )
+                        else:
+                            (artifact / "WORKFLOW.md").write_text(
+                                "concurrent artifact\n", encoding="utf-8"
+                            )
+                        yield
+
+                    with mock.patch(
+                        "selfworkflow.installer.exclusive_install_lock",
+                        side_effect=drift_while_waiting,
+                    ):
+                        with self.assertRaisesRegex(
+                            InstallerError,
+                            "target-drift" if drift == "target" else "artifact-drift",
+                        ):
+                            apply_install_plan(plan, plan["planHash"])
+
+                    self.assertFalse(
+                        (agents / "skills/sample-skill/SKILL.md").exists()
+                    )
 
     def test_apply_failure_after_first_write_automatically_restores_targets(self):
         from selfworkflow import installer

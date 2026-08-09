@@ -306,6 +306,50 @@ class CppRouterTests(unittest.TestCase):
             <= set(code_slot["eligibleModules"])
         )
 
+    def test_resolved_cpp_plan_constructs_host_with_original_request(self):
+        from selfworkflow.v3.catalog import compile_catalog
+        from selfworkflow.v3.pipeline import load_pipeline
+        from selfworkflow.v3.resolver import resolve_plan
+
+        request = _v3_request()
+        request["codeSignals"] = {
+            "languages": ["cpp"],
+            "fileExtensions": [".cpp"],
+            "taskSignals": ["concurrency"],
+            "explicitCppModuleIds": [],
+            "userConfirmedHeavy": False,
+            "projectAllowsExecution": False,
+        }
+        required = {
+            "discover-context", "capability-check", "classify-task",
+            "design-precheck", "plan-primary", "implement-tdd",
+            "review-self", "verify-execution", "complete-gate",
+        }
+        request["explicitModuleIds"] = sorted(required)
+        root = Path(__file__).resolve().parents[3]
+
+        resolved = resolve_plan(
+            request,
+            catalog_source=compile_catalog(root / "catalog/v3/index.yaml"),
+            pipeline_source=load_pipeline(root / "workflow/v3/pipeline.yaml"),
+            execution_policy_snapshot={
+                "allowUnverifiedModuleIds": sorted(
+                    required | {"cpp-core", "cpp.concurrency"}
+                )
+            },
+        )
+        host = resolved.create_host()
+
+        self.assertEqual(host.request, request)
+        self.assertEqual(
+            host.plan["requestHash"],
+            resolved.result["planGraph"]["requestHash"],
+        )
+        self.assertEqual(
+            set(resolved.result["capabilityRoute"]["selectedModuleIds"]),
+            {"cpp-core", "cpp.concurrency"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,7 +23,7 @@
 | TEA | 部分实现 | 唯一锁定 Git submodule；五个候选模块可路由，但真实 runtime/behavior 保持 `unverified` |
 | C++ 增强 | 已实现内置路由切片 | `cpp-core` 与九个专项能力内容寻址、正/误触发与组合测试；选中的能力必须进入 PlanGraph `designed/code.reasoning` eligible 集合；真实 Agent runtime 仍需原生验收 |
 | Grill-me 后独立 Brainstorming | 契约与失败关闭已实现 | Host gate、摘要来源和 Fake dispatch port 已测试；生产 Agent 的原生调度仍为 `unverified` |
-| Provider 本地覆写 | 已实现安全管理面 | 显式路径、无磁盘扫描、静态检查、write-ahead CAS 配置事务、可捕获中断/冲突/回滚/幂等测试；强制进程或机器终止后的自动恢复仍未实现 |
+| Provider 本地覆写 | 已实现安全管理面 | 显式路径、无磁盘扫描、静态检查；一键安装传入 rollback token 时使用 write-ahead CAS 配置事务，并覆盖可捕获中断/冲突/回滚/幂等测试；独立 `provider configure` 是原子写但不创建 rollback transaction，强制进程或机器终止后的自动恢复仍未实现 |
 | CodeGraph | 仅配置、静态检查和 plan-only | 不执行真实查询、索引或维护；非 plan-only 操作失败关闭 |
 | OpenSpec | deferred | 没有 Catalog 模块、Adapter 或 Git submodule |
 | 通用专项 Review 选择与聚合 | deferred | DiffSignalSet/ReviewAggregate Schema 和验证器已存在；没有完整 selector→specialists→aggregate Host 执行链 |
@@ -47,8 +47,9 @@
 
 1. 官方 Superpowers clone 与所有来源检查隔离继承的 Git URL rewrite、system/global config、hooks、
    system attributes 和 fsmonitor；测试替代传输只能在显式测试模式使用。
-2. 工作流安装器和 Provider 配置都在正式写入前持久化 preimage、预期 postimage hash 与 `prepared`
-   状态；可捕获中断恢复原值。突然进程/机器终止只保证留下可诊断事务，本版不虚构自动 crash recovery。
+2. 工作流安装器及一键安装期间带 rollback token 的 Provider 配置都在正式写入前持久化 preimage、
+   预期 postimage hash 与 `prepared` 状态；可捕获中断恢复原值。独立 `provider configure` 只保证原子写；
+   突然进程/机器终止只保证已有 write-ahead 路径留下可诊断事务，本版不虚构自动 crash recovery。
 3. Grill-me 后同 Agent 结构化 fallback 的授权在 dispatch 前消费；Review 返回 `changes-required` 后不能
    重放同一授权。
 4. 跨 slot 显式模块只在所属 slot 验证；C++ 自动路由结果在创建 PlanGraph 前合入显式模块，并由结果

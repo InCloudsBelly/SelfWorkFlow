@@ -239,6 +239,30 @@ def evaluate_post_grill_review(
             now=observed_at,
         ):
             if parsed_receipt.get("reviewVerdict") == "changes-required":
+                if (
+                    independent_context_available
+                    and _valid_fallback(
+                        fallback,
+                        expected_mode="independent-context-without-attestation",
+                        design_hash=design_hash,
+                        policy_hash=reviewer_policy_hash,
+                        plan_hash=plan_hash,
+                        attempt_ref=attempt_ref,
+                        input_summary_hash=input_summary_hash,
+                        now=observed_at,
+                    )
+                    and parsed_receipt.get("forkContext") is False
+                    and parsed_receipt.get("fallbackAuthorizationRef")
+                    == fallback["authorizationHash"]
+                    and not _consume_fallback(
+                        fallback, fallback_authorization_consumer,
+                    )
+                ):
+                    return _decision(
+                        "pause", "unverified",
+                        "post-grill-review-authorization-replayed",
+                        "independent-context-without-attestation",
+                    )
                 return _decision(
                     "pause", parsed_receipt.get("independence", "unverified"),
                     "post-grill-review-changes-required", "none",

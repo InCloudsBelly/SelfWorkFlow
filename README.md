@@ -139,7 +139,7 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   validation, bounded selector kernel, TEA candidate routing, C++ content-addressed
   routing, default Brainstorming policy, the fail-closed post-Grill contract gate,
   machine-local CodeGraph binding, non-executing source inspection, write-ahead
-  CAS-protected installer/Provider rollback, and content-addressed maintenance planning are implemented
+  CAS-protected installer and one-click Provider rollback, and content-addressed maintenance planning are implemented
   and automated-tested. The checked-in V3 request intentionally remains `paused`
   until a conforming Host supplies fresh supported evidence.
 - OpenSpec routing, a generic specialist Review selector/aggregate execution path,
