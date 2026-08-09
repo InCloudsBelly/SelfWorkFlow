@@ -5,6 +5,7 @@ modules:
   - capability-check
   - classify-task
   - design-precheck
+  - design-grill-me
   - plan-primary
   - implement-tdd
   - review-self

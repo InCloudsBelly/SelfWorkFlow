@@ -19,9 +19,14 @@ dispatch:
 attestation:
   authority: host-only
   ignoreAgentSelfReport: true
+  bindActualDispatchPayloadIdentitiesAndResult: true
 gate:
   evaluator: post-grill-review-independence-v1
   fallbackModes:
     - independent-context-without-attestation
     - same-agent-structured-review
   invalidEvidenceAction: pause
+  requireApprovedStructuredResult: true
+  fallbackAuthorization:
+    resolveAtHostBoundary: true
+    consumeOnceOnProceed: true

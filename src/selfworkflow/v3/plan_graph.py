@@ -215,7 +215,10 @@ def build_plan_graph(
                 "coverageObligations": _coverage_obligations(
                     slot["id"], policy_snapshot,
                 ),
-                "gates": [],
+                "gates": (
+                    ["design.post-grill-review"]
+                    if "design-grill-me" in selected_ids else []
+                ),
                 "applicability": (
                     "applicable" if applicable else "not-applicable"
                 ),

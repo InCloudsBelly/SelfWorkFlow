@@ -28,6 +28,10 @@ stages:
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]
         selectionMode: bounded-runtime
+      - id: design.specialists
+        cardinality: zero-or-many
+        allowedInvocationKinds: [skill]
+        selectionMode: static
   - id: planned
     slots:
       - id: plan.primary

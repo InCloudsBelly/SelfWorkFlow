@@ -23,6 +23,7 @@ from selfworkflow.v3.selector import SelectionResult
 
 
 _MISSING = object()
+_POST_GRILL_EVIDENCE_TOKEN = object()
 _SNAPSHOT_KEYS = (
     "capabilitySnapshot",
     "providerPreferenceSnapshot",
@@ -99,6 +100,48 @@ class PlanExtension:
         return _value_hash(self.new_request)
 
 
+class PostGrillReviewEvidence:
+    """Sealed Host result that can satisfy the designed-stage gate once."""
+
+    __slots__ = (
+        "_plan_hash", "_attempt_ref", "_design_hash", "_summary_hash",
+        "_receipt", "_decision", "__token",
+    )
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("PostGrillReviewEvidence is issued by Host")
+
+    @property
+    def receipt(self) -> dict[str, Any]:
+        return copy.deepcopy(self._receipt)
+
+    @property
+    def receipt_hash(self) -> str:
+        return self._receipt["receiptHash"]
+
+    @property
+    def design_hash(self) -> str:
+        return self._design_hash
+
+    @classmethod
+    def _issue(
+        cls, *, plan_hash: str, attempt_ref: str, design_hash: str,
+        summary_hash: str, receipt: dict[str, Any], decision: object,
+    ) -> "PostGrillReviewEvidence":
+        artifact = object.__new__(cls)
+        artifact._plan_hash = plan_hash
+        artifact._attempt_ref = attempt_ref
+        artifact._design_hash = design_hash
+        artifact._summary_hash = summary_hash
+        artifact._receipt = copy.deepcopy(receipt)
+        artifact._decision = decision
+        artifact._PostGrillReviewEvidence__token = _POST_GRILL_EVIDENCE_TOKEN
+        return artifact
+
+    def _is_valid(self) -> bool:
+        return getattr(self, "_PostGrillReviewEvidence__token", None) is _POST_GRILL_EVIDENCE_TOKEN
+
+
 class Host:
     """A pure Host facade over one compiled V3 plan.
 
@@ -169,11 +212,170 @@ class Host:
         ledger: Mapping[str, Any],
         stage_result: Mapping[str, Any],
         receipts: tuple[Any, ...] = (),
+        *,
+        post_grill_review_evidence: PostGrillReviewEvidence | None = None,
     ) -> dict[str, Any]:
+        self._validate_post_grill_stage_gate(
+            ledger, stage_result, post_grill_review_evidence,
+        )
         try:
             return apply_stage_result(ledger, self._plan, stage_result, receipts)
         except Exception as error:
             raise HostError(getattr(error, "reason", "v3-host-stage-result-failed")) from None
+
+    def dispatch_post_grill_review(
+        self,
+        ledger: Mapping[str, Any],
+        summary: Mapping[str, Any],
+        *,
+        implementation_agent_identity: str,
+        implementation_context_identity: str,
+        port: object,
+        independent_context_available: bool,
+        now: object,
+        host_attestation_resolver: object = None,
+        fallback_authorization_ref: str | None = None,
+        fallback_authorization_resolver: object = None,
+        fallback_authorization_consumer: object = None,
+    ) -> PostGrillReviewEvidence:
+        """Dispatch and evaluate the mandatory review through Host-owned ports."""
+
+        if not self._requires_post_grill_review():
+            raise HostError("post-grill-independent-review-not-required")
+        try:
+            from selfworkflow.v3.ledger import assert_valid_ledger
+            from selfworkflow.v3.review_dispatch import (
+                _load_summary,
+                dispatch_independent_review,
+                dispatch_same_agent_fallback_review,
+            )
+            from selfworkflow.v3.review_gate import evaluate_post_grill_review
+
+            assert_valid_ledger(ledger, self._plan)
+            active = [item for item in ledger["stages"] if item["status"] == "active"]
+            if len(active) != 1 or active[0]["stageId"] != "designed":
+                raise HostError("post-grill-review-stage-not-active")
+            attempt_ref = active[0]["attempts"][-1]["attemptRef"]
+            normalized_summary = _load_summary(dict(summary))
+            if independent_context_available:
+                receipt = dispatch_independent_review(
+                    normalized_summary,
+                    implementation_agent_identity=implementation_agent_identity,
+                    implementation_context_identity=implementation_context_identity,
+                    port=port,
+                    fallback_authorization_ref=fallback_authorization_ref,
+                )
+            else:
+                if fallback_authorization_ref is None:
+                    raise HostError("post-grill-review-user-authorization-required")
+                preflight = evaluate_post_grill_review(
+                    independent_context_available=False,
+                    receipt=None,
+                    fallback_authorization_ref=fallback_authorization_ref,
+                    design_hash=normalized_summary["designHash"],
+                    reviewer_policy_hash=normalized_summary["reviewerPolicyHash"],
+                    input_summary_hash=normalized_summary["summaryHash"],
+                    now=now,
+                    fallback_authorization_resolver=fallback_authorization_resolver,
+                    fallback_authorization_consumer=fallback_authorization_consumer,
+                )
+                if preflight.status != "review-required":
+                    raise HostError(
+                        preflight.reason_code
+                        or "post-grill-review-user-authorization-required"
+                    )
+                receipt = dispatch_same_agent_fallback_review(
+                    normalized_summary,
+                    implementation_agent_identity=implementation_agent_identity,
+                    implementation_context_identity=implementation_context_identity,
+                    port=port,
+                    fallback_authorization_ref=fallback_authorization_ref,
+                )
+            decision = evaluate_post_grill_review(
+                independent_context_available=independent_context_available,
+                receipt=receipt,
+                fallback_authorization_ref=fallback_authorization_ref,
+                design_hash=receipt["designHash"],
+                reviewer_policy_hash=receipt["reviewerPolicyHash"],
+                input_summary_hash=receipt["inputSummaryHash"],
+                now=now,
+                host_attestation_resolver=host_attestation_resolver,
+                fallback_authorization_resolver=fallback_authorization_resolver,
+                fallback_authorization_consumer=fallback_authorization_consumer,
+            )
+            if decision.status != "proceed":
+                raise HostError(
+                    decision.reason_code or "post-grill-independent-review-required"
+                )
+            return PostGrillReviewEvidence._issue(
+                plan_hash=self._plan.plan_hash,
+                attempt_ref=attempt_ref,
+                design_hash=receipt["designHash"],
+                summary_hash=receipt["inputSummaryHash"],
+                receipt=receipt,
+                decision=decision,
+            )
+        except HostError:
+            raise
+        except Exception as error:
+            raise HostError(
+                getattr(error, "reason", "post-grill-review-input-invalid")
+            ) from None
+
+    def _requires_post_grill_review(self) -> bool:
+        document = self._plan.as_dict()
+        return any(
+            "design-grill-me" in slot["selectedModules"]
+            for stage in document["stages"]
+            for slot in stage["slots"]
+        )
+
+    def _validate_post_grill_stage_gate(
+        self,
+        ledger: Mapping[str, Any],
+        stage_result: Mapping[str, Any],
+        evidence: PostGrillReviewEvidence | None,
+    ) -> None:
+        required = self._requires_post_grill_review()
+        is_designed_pass = (
+            isinstance(stage_result, Mapping)
+            and stage_result.get("stageId") == "designed"
+            and stage_result.get("status") == "passed"
+        )
+        if not required:
+            if evidence is not None:
+                raise HostError("post-grill-review-evidence-unexpected")
+            return
+        if not is_designed_pass:
+            if evidence is not None:
+                raise HostError("post-grill-review-evidence-stage-invalid")
+            return
+        if not isinstance(evidence, PostGrillReviewEvidence) or not evidence._is_valid():
+            raise HostError("post-grill-independent-review-required")
+        active = [item for item in ledger.get("stages", []) if item.get("status") == "active"]
+        if (
+            evidence._plan_hash != self._plan.plan_hash
+            or len(active) != 1
+            or active[0].get("stageId") != "designed"
+            or not active[0].get("attempts")
+            or active[0]["attempts"][-1].get("attemptRef") != evidence._attempt_ref
+        ):
+            raise HostError("post-grill-review-evidence-binding-invalid")
+        output_hashes = set(stage_result.get("outputArtifactHashes", ()))
+        gate_results = stage_result.get("gateResults", ())
+        matching = [
+            item for item in gate_results
+            if isinstance(item, Mapping)
+            and item.get("gateId") == "design.post-grill-review"
+            and item.get("outcome") == "passed"
+            and item.get("artifactHash") == evidence.receipt_hash
+        ]
+        if (
+            evidence.design_hash not in output_hashes
+            or evidence.receipt_hash not in output_hashes
+            or len(matching) != 1
+        ):
+            raise HostError("post-grill-review-evidence-binding-invalid")
 
     def extend_from_next_stage_request(
         self,
@@ -326,6 +528,10 @@ def create_host(*args: Any, **kwargs: Any) -> Host:
 
 def handoff_stage(
     host: Host, ledger: Mapping[str, Any], stage_result: Mapping[str, Any],
-    receipts: tuple[Any, ...] = (),
+    receipts: tuple[Any, ...] = (), *,
+    post_grill_review_evidence: PostGrillReviewEvidence | None = None,
 ) -> dict[str, Any]:
-    return host.apply_stage_result(ledger, stage_result, receipts)
+    return host.apply_stage_result(
+        ledger, stage_result, receipts,
+        post_grill_review_evidence=post_grill_review_evidence,
+    )

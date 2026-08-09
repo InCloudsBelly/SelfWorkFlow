@@ -48,6 +48,8 @@ _SCHEMA_NAMES = (
     "provider-command-template.schema.json",
     "trusted-command-registry.schema.json",
     "design-review-summary.schema.json",
+    "design-review-result.schema.json",
+    "review-host-attestation.schema.json",
     "review-fallback-authorization.schema.json",
     "review-independence-receipt.schema.json",
 )

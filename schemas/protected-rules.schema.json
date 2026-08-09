@@ -119,11 +119,13 @@
                 {"const": "post-grill-independent-review-required"},
                 {"const": "post-grill-review-input-invalid"},
                 {"const": "post-grill-review-attestation-missing"},
-                {"const": "post-grill-review-user-authorization-required"}
+                {"const": "post-grill-review-user-authorization-required"},
+                {"const": "post-grill-review-changes-required"},
+                {"const": "post-grill-review-authorization-replayed"}
               ],
               "items": false,
-              "minItems": 4,
-              "maxItems": 4
+              "minItems": 6,
+              "maxItems": 6
             }
           }
         }

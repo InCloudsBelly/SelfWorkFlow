@@ -3,12 +3,12 @@
   "$id": "https://selfworkflow.local/schemas/v3/review-independence-receipt.schema.json",
   "title": "SelfWorkFlow V3 review independence receipt",
   "type": "object", "additionalProperties": false,
-  "required": ["schemaVersion", "reviewMode", "dispatchId", "forkContext", "implementationAgentIdentity", "implementationContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "hostAgentIdentity", "hostContextIdentity", "hostAttestationRef", "inputMode", "parentContextImported", "grillReasoningReceived", "inputSummaryHash", "designHash", "reviewerPolicyHash", "resultHash", "fallbackAuthorizationRef", "independence", "receiptHash"],
+  "required": ["schemaVersion", "reviewMode", "dispatchId", "forkContext", "implementationAgentIdentity", "implementationContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "hostAgentIdentity", "hostContextIdentity", "hostAttestationRef", "inputMode", "parentContextImported", "grillReasoningReceived", "payloadHash", "inputSummaryHash", "designHash", "reviewerPolicyHash", "resultHash", "reviewVerdict", "reviewLevel", "fallbackAuthorizationRef", "independence", "receiptHash"],
   "properties": {
     "schemaVersion": {"const": 3},
     "reviewMode": {"const": "brainstorming-cross-review"},
     "dispatchId": {"$ref": "#/$defs/id"},
-    "forkContext": {"const": false},
+    "forkContext": {"type": "boolean"},
     "implementationAgentIdentity": {"$ref": "#/$defs/id"},
     "implementationContextIdentity": {"$ref": "#/$defs/id"},
     "reviewerAgentIdentity": {"$ref": "#/$defs/id"},
@@ -17,12 +17,15 @@
     "hostContextIdentity": {"$ref": "#/$defs/id"},
     "hostAttestationRef": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
     "inputMode": {"const": "summary-only"},
-    "parentContextImported": {"const": false},
+    "parentContextImported": {"type": "boolean"},
     "grillReasoningReceived": {"const": false},
+    "payloadHash": {"$ref": "#/$defs/hash"},
     "inputSummaryHash": {"$ref": "#/$defs/hash"},
     "designHash": {"$ref": "#/$defs/hash"},
     "reviewerPolicyHash": {"$ref": "#/$defs/hash"},
     "resultHash": {"$ref": "#/$defs/hash"},
+    "reviewVerdict": {"enum": ["approve", "changes-required"]},
+    "reviewLevel": {"enum": ["L2", "L3"]},
     "fallbackAuthorizationRef": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
     "independence": {"enum": ["independent", "unverified"]},
     "receiptHash": {"$ref": "#/$defs/hash"}
@@ -30,7 +33,22 @@
   "allOf": [
     {
       "if": {"properties": {"independence": {"const": "independent"}}, "required": ["independence"]},
-      "then": {"properties": {"hostAttestationRef": {"$ref": "#/$defs/id"}}}
+      "then": {
+        "properties": {
+          "hostAttestationRef": {"$ref": "#/$defs/hash"},
+          "forkContext": {"const": false},
+          "parentContextImported": {"const": false}
+        }
+      },
+      "else": {
+        "if": {"properties": {"forkContext": {"const": true}}, "required": ["forkContext"]},
+        "then": {
+          "properties": {
+            "parentContextImported": {"const": true},
+            "hostAttestationRef": {"type": "null"}
+          }
+        }
+      }
     }
   ],
   "$defs": {

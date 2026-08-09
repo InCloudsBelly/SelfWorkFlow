@@ -5,7 +5,7 @@ domains:
     hash: sha256:53aa8c0af43e386fff2facec0dee006759f8e785424b928c7121cf28b50bc275
   - id: workflow
     ref: domains/workflow.yaml
-    hash: sha256:e34621b32eca4828109dd674e1d48f551294c75b85b84ef83585537d4ba353c4
+    hash: sha256:8b5ef3c14e7706076c2fdead47490eff9c4c70ef7d3067cbcea0604d6e94d70a
   - id: test-quality
     ref: domains/test-quality.yaml
     hash: sha256:3f4fa0d84cd2bdf2bdd4dcefa988b347bc0712550be8f08f791956185a3017d2
@@ -52,6 +52,9 @@ modules:
   - id: design-precheck
     ref: modules/design-precheck.yaml
     hash: sha256:cb06d4fd7eddd62a5bdc7856c8753d73bcf8a7359cbae5cee9e7a64de9712192
+  - id: design-grill-me
+    ref: modules/design-grill-me.yaml
+    hash: sha256:0539a51e32e57f964b4e13e6fa0e56ffdf38192f355a0f605cea77ea28ce6bec
   - id: plan-primary
     ref: modules/plan-primary.yaml
     hash: sha256:836178f203f560b587c774eb55e8a55b151138967a12a8d680cafa023287100a

@@ -65,6 +65,8 @@ class WorkflowMatrixTests(unittest.TestCase):
                     "post-grill-review-input-invalid",
                     "post-grill-review-attestation-missing",
                     "post-grill-review-user-authorization-required",
+                    "post-grill-review-changes-required",
+                    "post-grill-review-authorization-replayed",
                 ],
             },
         )

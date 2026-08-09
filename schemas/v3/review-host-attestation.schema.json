@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/review-host-attestation.schema.json",
+  "title": "SelfWorkFlow V3 host-observed review dispatch attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "dispatchId", "reviewMode", "forkContext", "payloadHash", "implementationAgentIdentity", "implementationContextIdentity", "hostAgentIdentity", "hostContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "resultHash", "attestationHash"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "dispatchId": {"$ref": "#/$defs/id"},
+    "reviewMode": {"const": "brainstorming-cross-review"},
+    "forkContext": {"type": "boolean"},
+    "payloadHash": {"$ref": "#/$defs/hash"},
+    "implementationAgentIdentity": {"$ref": "#/$defs/id"},
+    "implementationContextIdentity": {"$ref": "#/$defs/id"},
+    "hostAgentIdentity": {"$ref": "#/$defs/id"},
+    "hostContextIdentity": {"$ref": "#/$defs/id"},
+    "reviewerAgentIdentity": {"$ref": "#/$defs/id"},
+    "reviewerContextIdentity": {"$ref": "#/$defs/id"},
+    "resultHash": {"$ref": "#/$defs/hash"},
+    "attestationHash": {"$ref": "#/$defs/hash"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

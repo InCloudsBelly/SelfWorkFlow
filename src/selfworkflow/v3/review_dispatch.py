@@ -7,7 +7,7 @@ import json
 from typing import Any, Protocol
 
 from selfworkflow.v3.contracts import ContractError, load_contract
-from selfworkflow.v3.hashing import HashingError, clone, content_hash
+from selfworkflow.v3.hashing import HashingError, clone, content_hash, require_hash
 
 
 class ReviewDispatchError(ValueError):
@@ -28,18 +28,42 @@ class HostDispatchObservation:
     host_context_identity: str
     reviewer_agent_identity: str
     reviewer_context_identity: str
-    host_attestation_ref: str | None
+    host_attestation: dict[str, Any] | None
     returned_value: dict[str, Any]
 
 
 class ReviewDispatchPort(Protocol):
     def dispatch_review(
-        self, *, review_mode: str, fork_context: bool, payload: dict[str, Any]
+        self, *, review_mode: str, fork_context: bool, payload: dict[str, Any],
+        implementation_agent_identity: str,
+        implementation_context_identity: str,
     ) -> HostDispatchObservation: ...
+
+
+_FORBIDDEN_SUMMARY_MARKERS = (
+    "transcript", "reasoning", "chain-of-thought", "chain of thought",
+    "盘问记录", "推理过程",
+)
 
 
 def _valid_identity(value: object) -> bool:
     return type(value) is str and 1 <= len(value.encode("utf-8")) <= 256
+
+
+def _unique_object_ids(items: list[dict[str, Any]], key: str) -> bool:
+    values = [item[key] for item in items]
+    return len(values) == len(set(values))
+
+
+def _contains_forbidden_summary_content(value: object) -> bool:
+    if isinstance(value, str):
+        folded = value.casefold()
+        return any(marker in folded for marker in _FORBIDDEN_SUMMARY_MARKERS)
+    if isinstance(value, list):
+        return any(_contains_forbidden_summary_content(item) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_forbidden_summary_content(item) for item in value.values())
+    return False
 
 
 def _load_summary(value: object) -> dict[str, Any]:
@@ -50,8 +74,14 @@ def _load_summary(value: object) -> dict[str, Any]:
             "design-review-summary.schema.json",
             json.dumps(value, ensure_ascii=False, allow_nan=False),
         )
-        if summary["summaryHash"] != content_hash(
-            {key: item for key, item in summary.items() if key != "summaryHash"}
+        if (
+            summary["summaryHash"] != content_hash(
+                {key: item for key, item in summary.items() if key != "summaryHash"}
+            )
+            or not _unique_object_ids(summary["alternatives"], "alternativeId")
+            or not _unique_object_ids(summary["risks"], "riskId")
+            or not _unique_object_ids(summary["acceptanceCriteria"], "criterionId")
+            or _contains_forbidden_summary_content(summary)
         ):
             raise ReviewDispatchError("post-grill-review-input-invalid")
         return summary
@@ -59,16 +89,84 @@ def _load_summary(value: object) -> dict[str, Any]:
         raise ReviewDispatchError("post-grill-review-input-invalid") from None
 
 
-def dispatch_independent_review(
+def _load_result(value: object, summary: dict[str, Any]) -> dict[str, Any]:
+    if type(value) is not dict:
+        raise ReviewDispatchError("review-result-invalid")
+    try:
+        result = load_contract(
+            "design-review-result.schema.json",
+            json.dumps(value, ensure_ascii=False, allow_nan=False),
+        )
+        finding_ids = [item["findingId"] for item in result["findings"]]
+        if (
+            result["resultHash"] != content_hash(
+                {key: item for key, item in result.items() if key != "resultHash"}
+            )
+            or result["summaryHash"] != summary["summaryHash"]
+            or result["designHash"] != summary["designHash"]
+            or len(finding_ids) != len(set(finding_ids))
+            or (
+                result["verdict"] == "approve"
+                and any(item["severity"] in {"critical", "important"} for item in result["findings"])
+            )
+        ):
+            raise ReviewDispatchError("review-result-invalid")
+        return result
+    except (ContractError, HashingError, TypeError, ValueError, OverflowError):
+        raise ReviewDispatchError("review-result-invalid") from None
+
+
+def _load_attestation(
+    value: object,
+    *,
+    observation: HostDispatchObservation,
+    payload_hash: str,
+    result_hash: str,
+    implementation_agent_identity: str,
+    implementation_context_identity: str,
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if type(value) is not dict:
+        raise ReviewDispatchError("review-host-attestation-invalid")
+    try:
+        attestation = load_contract(
+            "review-host-attestation.schema.json",
+            json.dumps(value, ensure_ascii=False, allow_nan=False),
+        )
+        if attestation["attestationHash"] != content_hash(
+            {key: item for key, item in attestation.items() if key != "attestationHash"}
+        ):
+            raise ReviewDispatchError("review-host-attestation-invalid")
+        expected = {
+            "dispatchId": observation.dispatch_id,
+            "reviewMode": observation.review_mode,
+            "forkContext": observation.fork_context,
+            "payloadHash": payload_hash,
+            "implementationAgentIdentity": implementation_agent_identity,
+            "implementationContextIdentity": implementation_context_identity,
+            "hostAgentIdentity": observation.host_agent_identity,
+            "hostContextIdentity": observation.host_context_identity,
+            "reviewerAgentIdentity": observation.reviewer_agent_identity,
+            "reviewerContextIdentity": observation.reviewer_context_identity,
+            "resultHash": result_hash,
+        }
+        if any(attestation[key] != item for key, item in expected.items()):
+            raise ReviewDispatchError("review-host-attestation-binding-invalid")
+        return attestation
+    except (ContractError, HashingError, TypeError, ValueError, OverflowError):
+        raise ReviewDispatchError("review-host-attestation-invalid") from None
+
+
+def _dispatch_review(
     summary: object,
     *,
     implementation_agent_identity: str,
     implementation_context_identity: str,
     port: ReviewDispatchPort,
-    fallback_authorization_ref: str | None = None,
+    fork_context: bool,
+    fallback_authorization_ref: str | None,
 ) -> dict[str, Any]:
-    """Force fresh-context dispatch and derive a receipt from Host observations."""
-
     if (
         not _valid_identity(implementation_agent_identity)
         or not _valid_identity(implementation_context_identity)
@@ -77,7 +175,6 @@ def dispatch_independent_review(
         raise ReviewDispatchError("post-grill-review-input-invalid")
     if fallback_authorization_ref is not None:
         try:
-            from selfworkflow.v3.hashing import require_hash
             require_hash(fallback_authorization_ref)
         except HashingError:
             raise ReviewDispatchError("post-grill-review-input-invalid") from None
@@ -90,8 +187,10 @@ def dispatch_independent_review(
     try:
         observation = port.dispatch_review(
             review_mode="brainstorming-cross-review",
-            fork_context=False,
+            fork_context=fork_context,
             payload=clone(payload),
+            implementation_agent_identity=implementation_agent_identity,
+            implementation_context_identity=implementation_context_identity,
         )
     except ReviewDispatchError:
         raise
@@ -101,12 +200,11 @@ def dispatch_independent_review(
         raise ReviewDispatchError("review-dispatch-observation-invalid")
     try:
         observed_payload = clone(observation.sent_payload)
-        result_hash = content_hash(observation.returned_value)
     except (HashingError, TypeError, ValueError, OverflowError):
         raise ReviewDispatchError("review-dispatch-observation-invalid") from None
     if (
         observation.review_mode != "brainstorming-cross-review"
-        or observation.fork_context is not False
+        or observation.fork_context is not fork_context
         or observed_payload != payload
     ):
         raise ReviewDispatchError("review-dispatch-observation-mismatch")
@@ -117,40 +215,54 @@ def dispatch_independent_review(
         observation.reviewer_agent_identity,
         observation.reviewer_context_identity,
     )
-    if any(not _valid_identity(item) for item in identities) or (
-        observation.host_attestation_ref is not None
-        and not _valid_identity(observation.host_attestation_ref)
-    ):
+    if any(not _valid_identity(item) for item in identities):
         raise ReviewDispatchError("review-dispatch-observation-invalid")
-    if (
-        observation.reviewer_agent_identity == implementation_agent_identity
-        or observation.reviewer_context_identity == implementation_context_identity
-    ):
+    independent_identity = (
+        observation.reviewer_agent_identity != implementation_agent_identity
+        and observation.reviewer_context_identity != implementation_context_identity
+    )
+    if fork_context is False and not independent_identity:
         raise ReviewDispatchError("review-identity-not-independent")
+    if fork_context is True and independent_identity:
+        raise ReviewDispatchError("fallback-review-identity-mismatch")
 
+    result = _load_result(observation.returned_value, normalized)
+    payload_hash = content_hash(payload)
+    attestation = _load_attestation(
+        observation.host_attestation,
+        observation=observation,
+        payload_hash=payload_hash,
+        result_hash=result["resultHash"],
+        implementation_agent_identity=implementation_agent_identity,
+        implementation_context_identity=implementation_context_identity,
+    )
+    if fork_context is True and attestation is not None:
+        raise ReviewDispatchError("fallback-review-attestation-invalid")
+    independence = "independent" if attestation is not None else "unverified"
     receipt = {
         "schemaVersion": 3,
         "reviewMode": "brainstorming-cross-review",
         "dispatchId": observation.dispatch_id,
-        "forkContext": False,
+        "forkContext": fork_context,
         "implementationAgentIdentity": implementation_agent_identity,
         "implementationContextIdentity": implementation_context_identity,
         "reviewerAgentIdentity": observation.reviewer_agent_identity,
         "reviewerContextIdentity": observation.reviewer_context_identity,
         "hostAgentIdentity": observation.host_agent_identity,
         "hostContextIdentity": observation.host_context_identity,
-        "hostAttestationRef": observation.host_attestation_ref,
+        "hostAttestationRef": None if attestation is None else attestation["attestationHash"],
         "inputMode": "summary-only",
-        "parentContextImported": False,
+        "parentContextImported": fork_context,
         "grillReasoningReceived": False,
+        "payloadHash": payload_hash,
         "inputSummaryHash": normalized["summaryHash"],
         "designHash": normalized["designHash"],
         "reviewerPolicyHash": normalized["reviewerPolicyHash"],
-        "resultHash": result_hash,
+        "resultHash": result["resultHash"],
+        "reviewVerdict": result["verdict"],
+        "reviewLevel": result["reviewLevel"],
         "fallbackAuthorizationRef": fallback_authorization_ref,
-        "independence": (
-            "independent" if observation.host_attestation_ref else "unverified"
-        ),
+        "independence": independence,
     }
     receipt["receiptHash"] = content_hash(receipt)
     try:
@@ -160,3 +272,43 @@ def dispatch_independent_review(
         )
     except ContractError:
         raise ReviewDispatchError("review-dispatch-observation-invalid") from None
+
+
+def dispatch_independent_review(
+    summary: object,
+    *,
+    implementation_agent_identity: str,
+    implementation_context_identity: str,
+    port: ReviewDispatchPort,
+    fallback_authorization_ref: str | None = None,
+) -> dict[str, Any]:
+    """Force a fresh-context dispatch and derive a receipt from Host observations."""
+
+    return _dispatch_review(
+        summary,
+        implementation_agent_identity=implementation_agent_identity,
+        implementation_context_identity=implementation_context_identity,
+        port=port,
+        fork_context=False,
+        fallback_authorization_ref=fallback_authorization_ref,
+    )
+
+
+def dispatch_same_agent_fallback_review(
+    summary: object,
+    *,
+    implementation_agent_identity: str,
+    implementation_context_identity: str,
+    port: ReviewDispatchPort,
+    fallback_authorization_ref: str,
+) -> dict[str, Any]:
+    """Record the explicitly authorized same-Agent structured review path."""
+
+    return _dispatch_review(
+        summary,
+        implementation_agent_identity=implementation_agent_identity,
+        implementation_context_identity=implementation_context_identity,
+        port=port,
+        fork_context=True,
+        fallback_authorization_ref=fallback_authorization_ref,
+    )
