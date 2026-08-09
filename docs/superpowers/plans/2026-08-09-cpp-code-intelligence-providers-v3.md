@@ -557,7 +557,7 @@ Catalog/Host 的 OpenSpec、通用专项 Review 和 Heavy/Forensic 能力记录�
 
 - Modify: `docs/superpowers/specs/2026-08-09-adaptive-quality-modules-v3-design.md`
 - Modify: `docs/superpowers/specs/2026-08-09-cpp-code-intelligence-providers-v3-design.md`
-- Create: `docs/reviews/2026-08-09-cpp-code-intelligence-providers-v3-final-review.md`
+- Create: `docs/reviews/2026-08-09-v3-design-implementation-conformance.md`
 - Modify: `scripts/verify.ps1`
 - Modify: `tests/conformance/test_release_gate.py`
 
@@ -591,11 +591,14 @@ Catalog/Host 的 OpenSpec、通用专项 Review 和 Heavy/Forensic 能力记录�
 
   逐条检查验收条件与真实证据。只有通过 native-validation 的 Provider operation 才改为 supported；跳过或失败项标为 `unverified`，写明原因、风险和人工验证方法。不得把 Fake Provider 测试当作真实 CodeGraph 支持证据。当前维护只支持计划，执行入口已失败关闭；真实查询、索引和维护执行不属于已支持能力。
 
-- [ ] **Step 5: 启动全新独立 SubAgent 终审**
+- [x] **Step 5: 启动全新独立 SubAgent 终审**
 
   使用 `fork_context=false`，只提供最终设计、完整 diff、验收条件和新鲜测试输出。Review 覆盖逻辑闭环、失败路径、安全、侵入性、凭据、并发、升级边界、V2 回归和未验证声明。发现 Critical/Important 必须修复并重新运行受影响测试，直到批准或明确阻塞。
 
-- [ ] **Step 6: 提交最终验证和文档**
+  实际终审先给出 `changes-required`；修复全部 Critical/Important 后，由同一独立 Reviewer 聚焦复核并
+  给出 `post-fix approved`。完整过程和仍未验证边界记录在设计—实现一致性审计中。
+
+- [x] **Step 6: 提交最终验证和文档**
 
   ```powershell
   git add docs scripts/verify.ps1 tests/conformance/test_release_gate.py
