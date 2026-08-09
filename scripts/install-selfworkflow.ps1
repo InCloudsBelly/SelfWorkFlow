@@ -540,7 +540,13 @@ catch {
                     $providerRestore = $ProviderConfigFile + ".rollback-" + [Guid]::NewGuid().ToString("N")
                     [IO.File]::WriteAllBytes($providerRestore, $providerConfigPreimage)
                     if (Test-Path -LiteralPath $ProviderConfigFile) {
-                        [IO.File]::Replace($providerRestore, $ProviderConfigFile, $null)
+                        $providerRollbackBackup = $ProviderConfigFile + ".failed-" + [Guid]::NewGuid().ToString("N")
+                        [IO.File]::Replace(
+                            $providerRestore,
+                            $ProviderConfigFile,
+                            $providerRollbackBackup
+                        )
+                        Remove-Item -LiteralPath $providerRollbackBackup -Force -ErrorAction SilentlyContinue
                     }
                     else {
                         [IO.File]::Move($providerRestore, $ProviderConfigFile)

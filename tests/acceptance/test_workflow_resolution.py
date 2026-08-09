@@ -191,6 +191,7 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
                 json.dumps(
                     self._request(
                         operationType="design", complexity="C2", risk="R2",
+                        writeTask=False,
                         explicitModuleIds=["design-grill-me"],
                     )
                 ),
