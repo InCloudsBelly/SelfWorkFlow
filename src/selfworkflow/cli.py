@@ -154,6 +154,7 @@ def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
 def _configure_codegraph(
     manager, source_value: str, *, replace_existing: bool = False,
     expected_source_hash: str | None = None,
+    rollback_token: str | None = None,
 ) -> dict[str, object]:
     observation = _inspect_codegraph_source(source_value)
     report = observation["report"]
@@ -172,6 +173,7 @@ def _configure_codegraph(
         source_hash=str(report["sourceHash"]),
         dirty=bool(report["dirty"]),
         replace_existing=replace_existing,
+        rollback_token=rollback_token,
     )
 
 
@@ -353,6 +355,14 @@ def main(argv: list[str] | None = None) -> int:
     provider_configure.add_argument("--codegraph-path", required=True)
     provider_configure.add_argument("--replace-existing", action="store_true")
     provider_configure.add_argument("--expected-source-hash")
+    provider_configure.add_argument("--rollback-token")
+    provider_rollback = provider_commands.add_parser("rollback-config")
+    provider_rollback.add_argument("--config-file")
+    provider_rollback.add_argument("--rollback-token", required=True)
+    provider_rollback.add_argument("--if-issued", action="store_true")
+    provider_commit = provider_commands.add_parser("commit-config")
+    provider_commit.add_argument("--config-file")
+    provider_commit.add_argument("--rollback-token", required=True)
     provider_doctor = provider_commands.add_parser("doctor")
     provider_doctor.add_argument("--config-file")
     provider_doctor.add_argument("--provider-id", default="codegraph")
@@ -403,7 +413,14 @@ def main(argv: list[str] | None = None) -> int:
                     manager, arguments.codegraph_path,
                     replace_existing=arguments.replace_existing,
                     expected_source_hash=arguments.expected_source_hash,
+                    rollback_token=arguments.rollback_token,
                 )
+            elif arguments.provider_command == "rollback-config":
+                result = manager.rollback_config(
+                    arguments.rollback_token, if_issued=arguments.if_issued,
+                )
+            elif arguments.provider_command == "commit-config":
+                result = manager.commit_config(arguments.rollback_token)
             elif arguments.provider_command == "doctor":
                 result = manager.doctor(arguments.provider_id)
             elif arguments.provider_command == "status":

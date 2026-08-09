@@ -192,6 +192,11 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertEqual(value["schemaVersion"], 3)
             self.assertEqual(value["providers"][0]["providerId"], "codegraph")
             self.assertEqual(value["providers"][0]["source"]["version"], "unverified")
+            transaction_directory = config.parent / ".provider-transactions"
+            self.assertFalse(
+                transaction_directory.exists()
+                and any(transaction_directory.glob("*.json"))
+            )
             summary = json.loads(
                 (self._single_log_directory(root) / "summary.json").read_text()
             )

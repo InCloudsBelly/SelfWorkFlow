@@ -20,7 +20,7 @@ BAT 只负责定位仓库并启动 PowerShell。`scripts/install-selfworkflow.ps
 6. 运行只读 doctor，构建确定性运行时，生成安装计划，并展示目标根目录、profile、artifact 文件数量、Grill-me 选择、Superpowers 来源/commit/dirty/inventory hash、冲突和 `planHash`。同样内容写入 `confirmation-summary.json`。
 7. 只有用户输入 `APPLY` 后才调用现有 `install apply`。非交互模式必须通过参数显式给出等价确认，不能隐式确认。
 8. 调用 `install verify`，随后从已确认且 hash 绑定的 Superpowers Git 源中，仅复制受跟踪的 `skills/**` 文件到临时目录，并在复制前后验证完整 tracked inventory、逐文件验证复制 hash，最后原子发布并写入来源锁。之所以不使用官方示例中的 junction，是因为事务 doctor 有意拒绝 reparse point；junction 会破坏后续 doctor、幂等安装和升级。Python apply 本身对中途异常执行持锁自动恢复；后续任一步失败也会删除本次新建的生成目录，并按事务记录回滚本次 SelfWorkFlow 发布；已有目录和文件不动。
-9. 再次运行 doctor，输出摘要、日志目录、manifest 和必要的重启 Codex 提示。
+9. 再次运行 doctor。若用户选择配置 CodeGraph，安装器先生成一次性 rollback token，再让 ProviderManager 在同一跨进程锁内原子写入配置及绑定 preimage/postimage 的事务记录。后续失败仅在当前配置仍匹配 postimage 时回滚；并发变化时失败关闭而不覆盖。全部步骤成功后提交并删除 token。最后输出摘要、日志目录、manifest 和必要的重启 Codex 提示。
 
 ## 冲突与幂等
 
@@ -41,5 +41,6 @@ BAT 只负责定位仓库并启动 PowerShell。`scripts/install-selfworkflow.ps
 - 选择跳过后，后续显式 Grill 请求返回 `paused/grill-me-unavailable`，不得注入不存在的 Skill。
 - Superpowers 缺失、dirty、冲突和拒绝路径不会被误报为支持。
 - 安装计划未确认时不发布工作流文件；失败验证会触发本次变更回滚；Python apply 中途写失败也不得留下部分正式文件。
+- Provider 配置失败回滚必须恢复精确 preimage；并发修改后不得陈旧恢复；成功安装不得残留 rollback transaction。
 - Superpowers 来源在检查与复制之间变化时不发布；官方 clone 失败的本次半成品可清理并重试。
 - 干净安装、重复安装、冲突、跳过 Grill-me、日志生成和失败定位均有自动化测试；真实 Agent 重启和技能触发保留为原生验收，不虚构为自动通过。

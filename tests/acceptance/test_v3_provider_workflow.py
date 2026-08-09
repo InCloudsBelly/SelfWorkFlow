@@ -36,6 +36,14 @@ class _Manager:
         from selfworkflow.v3.provider_manager import ProviderManagerError
         raise ProviderManagerError("provider-maintenance-apply-unverified")
 
+    def rollback_config(self, rollback_token, *, if_issued=False):
+        self.calls.append(("rollback", rollback_token, if_issued))
+        return {"status": "rolled-back"}
+
+    def commit_config(self, rollback_token):
+        self.calls.append(("commit", rollback_token))
+        return {"status": "committed"}
+
 
 class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
     def test_list_is_available_but_unverified_diagnostics_fail_closed(self):
@@ -88,7 +96,40 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         configure.assert_called_once_with(
             manager, "C:/explicit", replace_existing=False,
             expected_source_hash=None,
+            rollback_token=None,
         )
+
+    def test_configure_and_transaction_commands_forward_exact_rollback_token(self):
+        manager = _Manager()
+        token = "a" * 32
+        configured = {
+            "providerId": "codegraph", "status": "configured",
+            "rollbackToken": token,
+        }
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch(
+            "selfworkflow.cli._configure_codegraph", return_value=configured
+        ) as configure, mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main([
+                "provider", "configure", "--codegraph-path", "C:/explicit",
+                "--rollback-token", token,
+            ]), 0)
+            self.assertEqual(main([
+                "provider", "rollback-config", "--rollback-token", token,
+                "--if-issued",
+            ]), 0)
+            self.assertEqual(main([
+                "provider", "commit-config", "--rollback-token", token,
+            ]), 0)
+
+        configure.assert_called_once_with(
+            manager, "C:/explicit", replace_existing=False,
+            expected_source_hash=None, rollback_token=token,
+        )
+        self.assertEqual(manager.calls[-2:], [
+            ("rollback", token, True), ("commit", token),
+        ])
 
     def test_configure_rejects_source_drift_before_machine_write(self):
         from selfworkflow.cli import _configure_codegraph

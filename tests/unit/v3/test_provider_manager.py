@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import uuid
 
 
 class FakeCommandPort:
@@ -63,7 +64,10 @@ class ProviderManagerTests(unittest.TestCase):
             kwargs["replace_operation"] = replace_operation
         return ProviderManager(**kwargs)
 
-    def _configure(self, manager, command_suffix="cli.js", *, replace_existing=False):
+    def _configure(
+        self, manager, command_suffix="cli.js", *, replace_existing=False,
+        issue_rollback_token=False,
+    ):
         source = self.root / "private" / "codegraph"
         source.mkdir(parents=True, exist_ok=True)
         return manager.configure(
@@ -76,6 +80,7 @@ class ProviderManagerTests(unittest.TestCase):
             source_hash="sha256:" + "a" * 64,
             dirty=True,
             replace_existing=replace_existing,
+            rollback_token=uuid.uuid4().hex if issue_rollback_token else None,
         )
 
     def test_list_is_empty_without_scanning_or_creating_config(self):
@@ -126,6 +131,99 @@ class ProviderManagerTests(unittest.TestCase):
                 self._configure(manager)
         self.assertEqual(caught.exception.reason, "provider-config-locked")
         self.assertFalse((self.root / "machine/providers.local.yaml").exists())
+
+    def test_rollback_token_uses_postimage_cas_and_never_overwrites_concurrent_change(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        original = self._configure(manager, "old.js")
+        transaction = self._configure(
+            manager, "install.js", replace_existing=True,
+            issue_rollback_token=True,
+        )
+        concurrent = self._configure(manager, "concurrent.js", replace_existing=True)
+
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.rollback_config(transaction["rollbackToken"])
+        self.assertEqual(
+            caught.exception.reason, "provider-config-rollback-state-drift"
+        )
+        self.assertEqual(
+            manager.list_providers()["providers"][0]["bindingHash"],
+            concurrent["bindingHash"],
+        )
+        self.assertNotEqual(original["bindingHash"], concurrent["bindingHash"])
+
+    def test_rollback_token_restores_preimage_once_under_the_config_lock(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        original = self._configure(manager, "old.js")
+        transaction = self._configure(
+            manager, "install.js", replace_existing=True,
+            issue_rollback_token=True,
+        )
+
+        result = manager.rollback_config(transaction["rollbackToken"])
+
+        self.assertEqual(result["status"], "rolled-back")
+        self.assertEqual(
+            manager.list_providers()["providers"][0]["bindingHash"],
+            original["bindingHash"],
+        )
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.rollback_config(transaction["rollbackToken"])
+        self.assertEqual(caught.exception.reason, "provider-config-rollback-invalid")
+
+    def test_commit_token_discards_preimage_without_changing_configuration(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        transaction = self._configure(manager, issue_rollback_token=True)
+        configured = manager.list_providers()["providers"][0]["bindingHash"]
+
+        result = manager.commit_config(transaction["rollbackToken"])
+
+        self.assertEqual(result["status"], "committed")
+        self.assertEqual(
+            manager.list_providers()["providers"][0]["bindingHash"], configured
+        )
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.rollback_config(transaction["rollbackToken"])
+        self.assertEqual(caught.exception.reason, "provider-config-rollback-invalid")
+
+    def test_if_issued_rollback_is_noop_when_configure_never_issued_token(self):
+        manager = self._manager()
+
+        result = manager.rollback_config("0" * 32, if_issued=True)
+
+        self.assertEqual(result["status"], "not-issued")
+        self.assertFalse((self.root / "machine/providers.local.yaml").exists())
+
+    def test_transaction_record_failure_restores_config_before_releasing_lock(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        self._configure(manager, "old.js")
+        config = self.root / "machine/providers.local.yaml"
+        original = config.read_bytes()
+
+        def fail_transaction_replace(source, target):
+            if Path(target).parent.name == ".provider-transactions":
+                raise OSError("injected transaction failure")
+            os.replace(source, target)
+
+        failing = self._manager(replace_operation=fail_transaction_replace)
+        with self.assertRaises(ProviderManagerError) as caught:
+            self._configure(
+                failing, "new.js", replace_existing=True,
+                issue_rollback_token=True,
+            )
+
+        self.assertEqual(
+            caught.exception.reason, "provider-config-transaction-write-failed"
+        )
+        self.assertEqual(config.read_bytes(), original)
 
     def test_different_existing_binding_requires_explicit_replace(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError

@@ -129,7 +129,7 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   sandbox transaction install/verify/rollback are implemented and automated-tested.
 - V3 adaptive TEA/C++ routing, default Brainstorming for every modification,
   the post-Grill Host gate, machine-local CodeGraph binding, non-executing source
-  inspection and content-addressed maintenance planning are
+  inspection, CAS-protected installer rollback, and content-addressed maintenance planning are
   implemented and automated-tested. Real CodeGraph query and mutation operations
   remain `unverified` and are not silently promoted by Fake-port tests.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain

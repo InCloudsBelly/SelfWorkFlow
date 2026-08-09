@@ -279,9 +279,7 @@ $superpowersReport = [ordered]@{
 }
 $providerReport = [ordered]@{ status = "skipped" }
 $providerSourceReport = $null
-$providerConfigSnapshotTaken = $false
-$providerConfigExisted = $false
-$providerConfigPreimage = $null
+$providerRollbackToken = $null
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -483,16 +481,13 @@ try {
 
     if ($CodeGraphOverrideChoice -eq "Configure") {
         Set-InstallStage "provider-configure" 75
-        $providerConfigSnapshotTaken = $true
-        $providerConfigExisted = Test-Path -LiteralPath $ProviderConfigFile -PathType Leaf
-        if ($providerConfigExisted) {
-            $providerConfigPreimage = [IO.File]::ReadAllBytes($ProviderConfigFile)
-        }
+        $providerRollbackToken = [Guid]::NewGuid().ToString("N")
         $providerArguments = @(
             "provider", "configure",
             "--config-file", $ProviderConfigFile,
             "--codegraph-path", $CodeGraphPath,
-            "--expected-source-hash", $providerSourceReport.sourceHash
+            "--expected-source-hash", $providerSourceReport.sourceHash,
+            "--rollback-token", $providerRollbackToken
         )
         if ($ReplaceCodeGraphOverride) {
             $providerArguments += "--replace-existing"
@@ -516,7 +511,16 @@ try {
         nativeAgentVerification = "unverified-restart-required"
     }
     Write-JsonFile (Join-Path $script:LogDirectory "summary.json") $summary
-    Write-InstallLog ("Installation verified. Logs: " + $script:LogDirectory)
+    Write-InstallLog ("Installation verification completed; finalizing transaction. Logs: " + $script:LogDirectory)
+    if ($providerRollbackToken) {
+        Invoke-SelfWorkflow @(
+            "provider", "commit-config",
+            "--config-file", $ProviderConfigFile,
+            "--rollback-token", $providerRollbackToken
+        ) (Join-Path $script:LogDirectory "provider-config-commit.json") | Out-Null
+        $providerRollbackToken = $null
+    }
+    Write-Host "Installation verified."
     Write-Host "Restart Codex before relying on newly discovered Skills."
     exit 0
 }
@@ -525,41 +529,19 @@ catch {
     Write-InstallLog ("FAILED [{0}]: {1}" -f $script:CurrentStage, $failure)
     $rollbackStatus = "not-required"
     try {
-        if ($providerConfigSnapshotTaken) {
-            $providerParent = Split-Path -Parent $ProviderConfigFile
-            [IO.Directory]::CreateDirectory($providerParent) | Out-Null
-            $providerLockPath = $ProviderConfigFile + ".lock"
-            $providerLock = [IO.File]::Open(
-                $providerLockPath,
-                [IO.FileMode]::OpenOrCreate,
-                [IO.FileAccess]::ReadWrite,
-                [IO.FileShare]::None
-            )
-            try {
-                if ($providerConfigExisted) {
-                    $providerRestore = $ProviderConfigFile + ".rollback-" + [Guid]::NewGuid().ToString("N")
-                    [IO.File]::WriteAllBytes($providerRestore, $providerConfigPreimage)
-                    if (Test-Path -LiteralPath $ProviderConfigFile) {
-                        $providerRollbackBackup = $ProviderConfigFile + ".failed-" + [Guid]::NewGuid().ToString("N")
-                        [IO.File]::Replace(
-                            $providerRestore,
-                            $ProviderConfigFile,
-                            $providerRollbackBackup
-                        )
-                        Remove-Item -LiteralPath $providerRollbackBackup -Force -ErrorAction SilentlyContinue
-                    }
-                    else {
-                        [IO.File]::Move($providerRestore, $ProviderConfigFile)
-                    }
-                }
-                elseif (Test-Path -LiteralPath $ProviderConfigFile) {
-                    Remove-Item -LiteralPath $ProviderConfigFile -Force
-                }
+        if ($providerRollbackToken) {
+            $providerRollback = Invoke-SelfWorkflow @(
+                "provider", "rollback-config",
+                "--config-file", $ProviderConfigFile,
+                "--rollback-token", $providerRollbackToken,
+                "--if-issued"
+            ) (Join-Path $script:LogDirectory "provider-config-rollback.json")
+            if ($providerRollback.status -eq "rolled-back") {
+                $rollbackStatus = "rolled-back"
             }
-            finally {
-                $providerLock.Dispose()
+            elseif ($providerRollback.status -ne "not-issued") {
+                throw "provider-config-rollback-status-invalid"
             }
-            $rollbackStatus = "rolled-back"
         }
         if ($stagedSuperpowers -and $stagedSuperpowers.status -eq "staged") {
             $superpowersTarget = Resolve-FullPath (Join-Path $AgentsRoot "skills\superpowers")

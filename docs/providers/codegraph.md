@@ -26,6 +26,13 @@ and binding hash in
 machine configuration consumed by Provider selection; it is not a parallel
 management-only registry. Existing unrelated Provider entries are preserved.
 
+During one-click installation, configuration uses a machine-local, one-use
+rollback transaction. The Provider manager records the exact preimage and the
+postimage hash under the same cross-process lock as configuration. Rollback is
+compare-and-swap: it restores only while the current file still matches that
+postimage, and fails closed instead of overwriting a concurrent update. A
+successful installation commits and removes the rollback record.
+
 Dirty means the selected source is not reproducible from its commit alone. It
 is reported, not silently normalized. SelfWorkFlow may inspect a user-owned
 checkout, but this release never executes, upgrades, or removes it.
@@ -63,7 +70,8 @@ sufficient mutation authorization.
 
 Automated tests use an injected Fake command port and prove command rendering,
 redaction, no implicit initialization, atomic configuration, rollback,
-idempotence, source-drift rejection before dispatch, deterministic planning, and
+postimage-CAS concurrency protection, idempotence, source-drift rejection before
+dispatch, deterministic planning, and
 fail-closed maintenance execution. A prior local observation does not prove the
 current checkout, `doctor`, `status`, query freshness, auto-sync behavior,
 mutation containment, or rollback. Those operations remain `unverified` until a dedicated native test

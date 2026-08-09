@@ -578,8 +578,10 @@ Manage_SelfWorkFlow_Providers.bat
 
 当前薄入口只支持 `list`、`configure`、非执行 source inspection 和维护 `plan-only`。`doctor`、`status` 名称已
 保留但失败关闭；initialize、sync、rebuild、update-check、项目授权和日志查看属于 deferred/unverified，不能
-出现在当前支持清单。机器配置通过固定根路径、跨进程锁、原子替换和安装失败 preimage 恢复维护，不创建
-第二套非原子配置路径。
+出现在当前支持清单。机器配置通过固定根路径、跨进程锁和原子替换维护。安装器在调用 configure 前生成
+一次性 rollback token；ProviderManager 在同一配置锁内绑定 preimage、postimage hash 与 token。失败回滚
+只有在当前配置仍等于该 postimage 时才恢复，发现并发写入则失败关闭，绝不以陈旧 preimage 覆盖新状态；
+安装成功后显式提交并销毁 token。安装器本身不读取或覆写 Provider 配置，不创建第二套非原子配置路径。
 
 日志只记录命令 hash、退出码和脱敏摘要，不记录源码正文、完整环境、凭据、Debugger 内存或本地绝对路径。
 
