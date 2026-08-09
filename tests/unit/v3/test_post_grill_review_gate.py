@@ -10,6 +10,7 @@ POLICY_HASH = "sha256:" + "b" * 64
 SUMMARY_HASH = "sha256:" + "c" * 64
 PAYLOAD_HASH = "sha256:" + "d" * 64
 RESULT_HASH = "sha256:" + "e" * 64
+PLAN_HASH = "sha256:" + "f" * 64
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
 
 
@@ -30,6 +31,9 @@ def _receipt(*, attested=True, same_agent=False, fallback_ref=None, verdict="app
     value = {
         "schemaVersion": 3, "reviewMode": "brainstorming-cross-review",
         "dispatchId": "dispatch-1", "forkContext": same_agent,
+        "dispatchNonce": "dispatch-nonce-1", "planHash": PLAN_HASH,
+        "attemptRef": "attempt-designed",
+        "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
         "implementationAgentIdentity": "implementation-agent",
         "implementationContextIdentity": "implementation-context",
         "reviewerAgentIdentity": "implementation-agent" if same_agent else "review-agent",
@@ -47,6 +51,9 @@ def _receipt(*, attested=True, same_agent=False, fallback_ref=None, verdict="app
     if attested:
         attestation = {
             "schemaVersion": 3, "dispatchId": value["dispatchId"],
+            "dispatchNonce": value["dispatchNonce"], "planHash": value["planHash"],
+            "attemptRef": value["attemptRef"], "issuedAt": value["issuedAt"],
+            "expiresAt": value["expiresAt"],
             "reviewMode": value["reviewMode"], "forkContext": value["forkContext"],
             "payloadHash": value["payloadHash"],
             "implementationAgentIdentity": value["implementationAgentIdentity"],
@@ -87,7 +94,9 @@ class PostGrillReviewGateTests(unittest.TestCase):
             fallback_authorization_ref=None if fallback is None else fallback["authorizationHash"],
             design_hash=DESIGN_HASH, reviewer_policy_hash=POLICY_HASH,
             input_summary_hash=SUMMARY_HASH, now=NOW,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             host_attestation_resolver=attestation_store.get,
+            host_attestation_consumer=consumer or _Consumer(),
             fallback_authorization_resolver=fallback_store.get,
             fallback_authorization_consumer=consumer or _Consumer(),
         )
@@ -129,6 +138,7 @@ class PostGrillReviewGateTests(unittest.TestCase):
             fallback_authorization_ref=fallback["authorizationHash"],
             design_hash=DESIGN_HASH, reviewer_policy_hash=POLICY_HASH,
             input_summary_hash=SUMMARY_HASH, now=NOW,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             fallback_authorization_resolver=lambda _ref: None,
         )
         self.assertEqual(result.reason_code, "post-grill-review-input-invalid")
@@ -137,6 +147,24 @@ class PostGrillReviewGateTests(unittest.TestCase):
         self.assertEqual(self._evaluate(False, None, drift).reason_code, "post-grill-review-input-invalid")
 
     def test_attestation_replay_and_changes_required_cannot_proceed(self):
+        original_receipt, original_attestation = _receipt()
+        consumer = _Consumer()
+        self.assertEqual(
+            self._evaluate(
+                True, original_receipt, None,
+                attestation=original_attestation, consumer=consumer,
+            ).status,
+            "proceed",
+        )
+        exact_replay = self._evaluate(
+            True, original_receipt, None,
+            attestation=original_attestation, consumer=consumer,
+        )
+        self.assertEqual(
+            (exact_replay.status, exact_replay.reason_code),
+            ("pause", "post-grill-review-attestation-replayed"),
+        )
+
         receipt, attestation = _receipt()
         replayed = copy.deepcopy(attestation)
         replayed["dispatchId"] = "other-dispatch"

@@ -7,6 +7,7 @@ from selfworkflow.v3.hashing import content_hash
 
 HASH_A = "sha256:" + "a" * 64
 HASH_B = "sha256:" + "b" * 64
+PLAN_HASH = "sha256:" + "f" * 64
 
 
 def _summary():
@@ -44,6 +45,11 @@ def _attestation(observation, implementation_agent, implementation_context):
     value = {
         "schemaVersion": 3,
         "dispatchId": observation["dispatchId"],
+        "dispatchNonce": observation["dispatchNonce"],
+        "planHash": observation["planHash"],
+        "attemptRef": observation["attemptRef"],
+        "issuedAt": observation["issuedAt"],
+        "expiresAt": observation["expiresAt"],
         "reviewMode": observation["reviewMode"],
         "forkContext": observation["forkContext"],
         "payloadHash": content_hash(observation["payload"]),
@@ -82,6 +88,9 @@ class _SpyPort:
         reviewer_context = call["implementation_context_identity"] if self.same_identity else "review-context"
         observed = {
             "dispatchId": "dispatch-1", "reviewMode": call["review_mode"],
+            "dispatchNonce": "dispatch-nonce-1",
+            "planHash": call["plan_hash"], "attemptRef": call["attempt_ref"],
+            "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
             "forkContext": call["fork_context"], "payload": call["payload"],
             "reviewerAgent": reviewer_agent, "reviewerContext": reviewer_context,
             "result": result,
@@ -95,7 +104,10 @@ class _SpyPort:
             attestation["attestationHash"] = content_hash({key: value for key, value in attestation.items() if key != "attestationHash"})
         self.last_attestation = attestation
         return HostDispatchObservation(
-            dispatch_id="dispatch-1", review_mode=call["review_mode"],
+            dispatch_id="dispatch-1", dispatch_nonce="dispatch-nonce-1",
+            plan_hash=call["plan_hash"], attempt_ref=call["attempt_ref"],
+            issued_at="2026-08-09T11:59:00Z", expires_at="2026-08-09T12:05:00Z",
+            review_mode=call["review_mode"],
             fork_context=call["fork_context"], sent_payload=call["payload"],
             host_agent_identity="host-agent", host_context_identity="host-context",
             reviewer_agent_identity=reviewer_agent,
@@ -112,6 +124,7 @@ class ReviewDispatchTests(unittest.TestCase):
         receipt = dispatch_independent_review(
             _summary(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=port,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
         )
         self.assertEqual(len(port.calls), 1)
         call = port.calls[0]
@@ -138,6 +151,7 @@ class ReviewDispatchTests(unittest.TestCase):
             dispatch_independent_review(
                 _summary(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=SelfReportingPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
     def test_attestation_is_bound_to_actual_dispatch_payload_identities_and_result(self):
@@ -148,6 +162,7 @@ class ReviewDispatchTests(unittest.TestCase):
                 _summary(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context",
                 port=_SpyPort(tamper_attestation=True),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
     def test_missing_attestation_or_same_host_identity_cannot_claim_independence(self):
@@ -156,12 +171,14 @@ class ReviewDispatchTests(unittest.TestCase):
         receipt = dispatch_independent_review(
             _summary(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=_SpyPort(attested=False),
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
         )
         self.assertEqual(receipt["independence"], "unverified")
         with self.assertRaisesRegex(ReviewDispatchError, "review-identity-not-independent"):
             dispatch_independent_review(
                 _summary(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=_SpyPort(same_identity=True),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
     def test_changes_required_is_preserved_and_forbidden_summary_content_is_rejected(self):
@@ -170,6 +187,7 @@ class ReviewDispatchTests(unittest.TestCase):
         receipt = dispatch_independent_review(
             _summary(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=_SpyPort(verdict="changes-required"),
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
         )
         self.assertEqual(receipt["reviewVerdict"], "changes-required")
         unsafe = _summary()
@@ -179,6 +197,7 @@ class ReviewDispatchTests(unittest.TestCase):
             dispatch_independent_review(
                 unsafe, implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=_SpyPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
     def test_duplicate_semantic_ids_are_rejected(self):
@@ -191,6 +210,7 @@ class ReviewDispatchTests(unittest.TestCase):
             dispatch_independent_review(
                 duplicate, implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=_SpyPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
 

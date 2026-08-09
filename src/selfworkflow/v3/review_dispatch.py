@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import json
 from typing import Any, Protocol
 
@@ -21,6 +22,11 @@ class HostDispatchObservation:
     """Trusted Host observation; Agent output is isolated in returned_value."""
 
     dispatch_id: str
+    dispatch_nonce: str
+    plan_hash: str
+    attempt_ref: str
+    issued_at: str
+    expires_at: str
     review_mode: str
     fork_context: bool
     sent_payload: dict[str, Any]
@@ -37,6 +43,8 @@ class ReviewDispatchPort(Protocol):
         self, *, review_mode: str, fork_context: bool, payload: dict[str, Any],
         implementation_agent_identity: str,
         implementation_context_identity: str,
+        plan_hash: str,
+        attempt_ref: str,
     ) -> HostDispatchObservation: ...
 
 
@@ -48,6 +56,17 @@ _FORBIDDEN_SUMMARY_MARKERS = (
 
 def _valid_identity(value: object) -> bool:
     return type(value) is str and 1 <= len(value.encode("utf-8")) <= 256
+
+
+def _valid_window(issued_at: object, expires_at: object) -> bool:
+    try:
+        if not isinstance(issued_at, str) or not isinstance(expires_at, str):
+            return False
+        issued = datetime.fromisoformat(issued_at[:-1] + "+00:00")
+        expires = datetime.fromisoformat(expires_at[:-1] + "+00:00")
+        return issued_at.endswith("Z") and expires_at.endswith("Z") and issued < expires
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _unique_object_ids(items: list[dict[str, Any]], key: str) -> bool:
@@ -124,6 +143,8 @@ def _load_attestation(
     result_hash: str,
     implementation_agent_identity: str,
     implementation_context_identity: str,
+    plan_hash: str,
+    attempt_ref: str,
 ) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -140,6 +161,11 @@ def _load_attestation(
             raise ReviewDispatchError("review-host-attestation-invalid")
         expected = {
             "dispatchId": observation.dispatch_id,
+            "dispatchNonce": observation.dispatch_nonce,
+            "planHash": plan_hash,
+            "attemptRef": attempt_ref,
+            "issuedAt": observation.issued_at,
+            "expiresAt": observation.expires_at,
             "reviewMode": observation.review_mode,
             "forkContext": observation.fork_context,
             "payloadHash": payload_hash,
@@ -166,6 +192,8 @@ def _dispatch_review(
     port: ReviewDispatchPort,
     fork_context: bool,
     fallback_authorization_ref: str | None,
+    plan_hash: str,
+    attempt_ref: str,
 ) -> dict[str, Any]:
     if (
         not _valid_identity(implementation_agent_identity)
@@ -178,6 +206,12 @@ def _dispatch_review(
             require_hash(fallback_authorization_ref)
         except HashingError:
             raise ReviewDispatchError("post-grill-review-input-invalid") from None
+    try:
+        require_hash(plan_hash)
+    except HashingError:
+        raise ReviewDispatchError("post-grill-review-input-invalid") from None
+    if not _valid_identity(attempt_ref):
+        raise ReviewDispatchError("post-grill-review-input-invalid")
     normalized = _load_summary(summary)
     payload = {
         "schemaVersion": 3,
@@ -191,6 +225,8 @@ def _dispatch_review(
             payload=clone(payload),
             implementation_agent_identity=implementation_agent_identity,
             implementation_context_identity=implementation_context_identity,
+            plan_hash=plan_hash,
+            attempt_ref=attempt_ref,
         )
     except ReviewDispatchError:
         raise
@@ -214,8 +250,15 @@ def _dispatch_review(
         observation.host_context_identity,
         observation.reviewer_agent_identity,
         observation.reviewer_context_identity,
+        observation.dispatch_nonce,
+        observation.attempt_ref,
     )
-    if any(not _valid_identity(item) for item in identities):
+    if (
+        any(not _valid_identity(item) for item in identities)
+        or observation.plan_hash != plan_hash
+        or observation.attempt_ref != attempt_ref
+        or not _valid_window(observation.issued_at, observation.expires_at)
+    ):
         raise ReviewDispatchError("review-dispatch-observation-invalid")
     independent_identity = (
         observation.reviewer_agent_identity != implementation_agent_identity
@@ -235,6 +278,8 @@ def _dispatch_review(
         result_hash=result["resultHash"],
         implementation_agent_identity=implementation_agent_identity,
         implementation_context_identity=implementation_context_identity,
+        plan_hash=plan_hash,
+        attempt_ref=attempt_ref,
     )
     if fork_context is True and attestation is not None:
         raise ReviewDispatchError("fallback-review-attestation-invalid")
@@ -243,6 +288,11 @@ def _dispatch_review(
         "schemaVersion": 3,
         "reviewMode": "brainstorming-cross-review",
         "dispatchId": observation.dispatch_id,
+        "dispatchNonce": observation.dispatch_nonce,
+        "planHash": plan_hash,
+        "attemptRef": attempt_ref,
+        "issuedAt": observation.issued_at,
+        "expiresAt": observation.expires_at,
         "forkContext": fork_context,
         "implementationAgentIdentity": implementation_agent_identity,
         "implementationContextIdentity": implementation_context_identity,
@@ -281,6 +331,8 @@ def dispatch_independent_review(
     implementation_context_identity: str,
     port: ReviewDispatchPort,
     fallback_authorization_ref: str | None = None,
+    plan_hash: str,
+    attempt_ref: str,
 ) -> dict[str, Any]:
     """Force a fresh-context dispatch and derive a receipt from Host observations."""
 
@@ -291,6 +343,8 @@ def dispatch_independent_review(
         port=port,
         fork_context=False,
         fallback_authorization_ref=fallback_authorization_ref,
+        plan_hash=plan_hash,
+        attempt_ref=attempt_ref,
     )
 
 
@@ -301,6 +355,8 @@ def dispatch_same_agent_fallback_review(
     implementation_context_identity: str,
     port: ReviewDispatchPort,
     fallback_authorization_ref: str,
+    plan_hash: str,
+    attempt_ref: str,
 ) -> dict[str, Any]:
     """Record the explicitly authorized same-Agent structured review path."""
 
@@ -311,4 +367,6 @@ def dispatch_same_agent_fallback_review(
         port=port,
         fork_context=True,
         fallback_authorization_ref=fallback_authorization_ref,
+        plan_hash=plan_hash,
+        attempt_ref=attempt_ref,
     )

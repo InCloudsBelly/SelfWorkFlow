@@ -24,6 +24,7 @@ from selfworkflow.v3.selector import SelectionResult
 
 _MISSING = object()
 _POST_GRILL_EVIDENCE_TOKEN = object()
+_ISSUED_POST_GRILL_EVIDENCE: set[object] = set()
 _SNAPSHOT_KEYS = (
     "capabilitySnapshot",
     "providerPreferenceSnapshot",
@@ -106,10 +107,14 @@ class PostGrillReviewEvidence:
     __slots__ = (
         "_plan_hash", "_attempt_ref", "_design_hash", "_summary_hash",
         "_receipt", "_decision", "__token",
+        "_service_identity",
     )
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("PostGrillReviewEvidence is issued by Host")
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise AttributeError("PostGrillReviewEvidence is immutable")
 
     @property
     def receipt(self) -> dict[str, Any]:
@@ -123,30 +128,38 @@ class PostGrillReviewEvidence:
     def design_hash(self) -> str:
         return self._design_hash
 
-    @classmethod
-    def _issue(
-        cls, *, plan_hash: str, attempt_ref: str, design_hash: str,
-        summary_hash: str, receipt: dict[str, Any], decision: object,
-    ) -> "PostGrillReviewEvidence":
-        artifact = object.__new__(cls)
-        artifact._plan_hash = plan_hash
-        artifact._attempt_ref = attempt_ref
-        artifact._design_hash = design_hash
-        artifact._summary_hash = summary_hash
-        artifact._receipt = copy.deepcopy(receipt)
-        artifact._decision = decision
-        artifact._PostGrillReviewEvidence__token = _POST_GRILL_EVIDENCE_TOKEN
-        return artifact
-
     def _is_valid(self) -> bool:
-        return getattr(self, "_PostGrillReviewEvidence__token", None) is _POST_GRILL_EVIDENCE_TOKEN
+        return (
+            getattr(self, "_PostGrillReviewEvidence__token", None)
+            is _POST_GRILL_EVIDENCE_TOKEN
+            and self in _ISSUED_POST_GRILL_EVIDENCE
+        )
+
+
+def _issue_post_grill_evidence(
+    *, services: object, plan_hash: str, attempt_ref: str, design_hash: str,
+    summary_hash: str, receipt: dict[str, Any], decision: object,
+) -> PostGrillReviewEvidence:
+    artifact = object.__new__(PostGrillReviewEvidence)
+    object.__setattr__(artifact, "_plan_hash", plan_hash)
+    object.__setattr__(artifact, "_attempt_ref", attempt_ref)
+    object.__setattr__(artifact, "_design_hash", design_hash)
+    object.__setattr__(artifact, "_summary_hash", summary_hash)
+    object.__setattr__(artifact, "_receipt", copy.deepcopy(receipt))
+    object.__setattr__(artifact, "_decision", decision)
+    object.__setattr__(artifact, "_service_identity", id(services))
+    object.__setattr__(
+        artifact, "_PostGrillReviewEvidence__token", _POST_GRILL_EVIDENCE_TOKEN,
+    )
+    _ISSUED_POST_GRILL_EVIDENCE.add(artifact)
+    return artifact
 
 
 class Host:
     """A pure Host facade over one compiled V3 plan.
 
-    The object keeps only immutable copies of caller-provided values.  It never
-    reads or writes files and never invokes a module, process, MCP, or agent.
+    The object keeps immutable planning inputs. Optional Review Host services
+    are bound once at construction; Agent-provided data cannot replace them.
     """
 
     def __init__(
@@ -159,6 +172,8 @@ class Host:
         snapshot_resolver: Callable[
             [dict[str, Any], dict[str, Any]], Mapping[str, Any]
         ] | None = None,
+        review_services: object = None,
+        review_test_mode: bool = False,
     ) -> None:
         if type(plan) is not PlanGraphArtifact:
             raise HostError("v3-host-plan-not-typed")
@@ -177,6 +192,14 @@ class Host:
         if snapshot_resolver is not None and not callable(snapshot_resolver):
             raise HostError("v3-fresh-snapshot-resolver-invalid")
         self._snapshot_resolver = snapshot_resolver
+        if review_services is not None:
+            from selfworkflow.v3.review_services import ReviewHostServices
+            if (
+                not isinstance(review_services, ReviewHostServices)
+                or not review_services._is_valid(test_mode=review_test_mode)
+            ):
+                raise HostError("review-host-services-invalid")
+        self._review_services = review_services
 
     @property
     def plan(self) -> PlanGraphArtifact:
@@ -219,29 +242,30 @@ class Host:
             ledger, stage_result, post_grill_review_evidence,
         )
         try:
-            return apply_stage_result(ledger, self._plan, stage_result, receipts)
+            result = apply_stage_result(ledger, self._plan, stage_result, receipts)
         except Exception as error:
             raise HostError(getattr(error, "reason", "v3-host-stage-result-failed")) from None
+        if post_grill_review_evidence is not None:
+            _ISSUED_POST_GRILL_EVIDENCE.discard(post_grill_review_evidence)
+        return result
 
     def dispatch_post_grill_review(
         self,
         ledger: Mapping[str, Any],
-        summary: Mapping[str, Any],
+        summary_ref: str,
         *,
         implementation_agent_identity: str,
         implementation_context_identity: str,
-        port: object,
         independent_context_available: bool,
         now: object,
-        host_attestation_resolver: object = None,
         fallback_authorization_ref: str | None = None,
-        fallback_authorization_resolver: object = None,
-        fallback_authorization_consumer: object = None,
     ) -> PostGrillReviewEvidence:
         """Dispatch and evaluate the mandatory review through Host-owned ports."""
 
         if not self._requires_post_grill_review():
             raise HostError("post-grill-independent-review-not-required")
+        if self._review_services is None:
+            raise HostError("post-grill-review-host-services-required")
         try:
             from selfworkflow.v3.ledger import assert_valid_ledger
             from selfworkflow.v3.review_dispatch import (
@@ -250,20 +274,28 @@ class Host:
                 dispatch_same_agent_fallback_review,
             )
             from selfworkflow.v3.review_gate import evaluate_post_grill_review
+            from selfworkflow.v3.hashing import require_hash
 
             assert_valid_ledger(ledger, self._plan)
             active = [item for item in ledger["stages"] if item["status"] == "active"]
             if len(active) != 1 or active[0]["stageId"] != "designed":
                 raise HostError("post-grill-review-stage-not-active")
             attempt_ref = active[0]["attempts"][-1]["attemptRef"]
-            normalized_summary = _load_summary(dict(summary))
+            require_hash(summary_ref)
+            normalized_summary = _load_summary(
+                self._review_services.summary_resolver(summary_ref)
+            )
+            if normalized_summary["summaryHash"] != summary_ref:
+                raise HostError("post-grill-review-summary-reference-invalid")
             if independent_context_available:
                 receipt = dispatch_independent_review(
                     normalized_summary,
                     implementation_agent_identity=implementation_agent_identity,
                     implementation_context_identity=implementation_context_identity,
-                    port=port,
+                    port=self._review_services.dispatch_port,
                     fallback_authorization_ref=fallback_authorization_ref,
+                    plan_hash=self._plan.plan_hash,
+                    attempt_ref=attempt_ref,
                 )
             else:
                 if fallback_authorization_ref is None:
@@ -276,8 +308,10 @@ class Host:
                     reviewer_policy_hash=normalized_summary["reviewerPolicyHash"],
                     input_summary_hash=normalized_summary["summaryHash"],
                     now=now,
-                    fallback_authorization_resolver=fallback_authorization_resolver,
-                    fallback_authorization_consumer=fallback_authorization_consumer,
+                    plan_hash=self._plan.plan_hash,
+                    attempt_ref=attempt_ref,
+                    fallback_authorization_resolver=self._review_services.fallback_authorization_resolver,
+                    fallback_authorization_consumer=self._review_services.fallback_authorization_consumer,
                 )
                 if preflight.status != "review-required":
                     raise HostError(
@@ -288,8 +322,10 @@ class Host:
                     normalized_summary,
                     implementation_agent_identity=implementation_agent_identity,
                     implementation_context_identity=implementation_context_identity,
-                    port=port,
+                    port=self._review_services.dispatch_port,
                     fallback_authorization_ref=fallback_authorization_ref,
+                    plan_hash=self._plan.plan_hash,
+                    attempt_ref=attempt_ref,
                 )
             decision = evaluate_post_grill_review(
                 independent_context_available=independent_context_available,
@@ -299,15 +335,19 @@ class Host:
                 reviewer_policy_hash=receipt["reviewerPolicyHash"],
                 input_summary_hash=receipt["inputSummaryHash"],
                 now=now,
-                host_attestation_resolver=host_attestation_resolver,
-                fallback_authorization_resolver=fallback_authorization_resolver,
-                fallback_authorization_consumer=fallback_authorization_consumer,
+                plan_hash=self._plan.plan_hash,
+                attempt_ref=attempt_ref,
+                host_attestation_resolver=self._review_services.host_attestation_resolver,
+                host_attestation_consumer=self._review_services.host_attestation_consumer,
+                fallback_authorization_resolver=self._review_services.fallback_authorization_resolver,
+                fallback_authorization_consumer=self._review_services.fallback_authorization_consumer,
             )
             if decision.status != "proceed":
                 raise HostError(
                     decision.reason_code or "post-grill-independent-review-required"
                 )
-            return PostGrillReviewEvidence._issue(
+            return _issue_post_grill_evidence(
+                services=self._review_services,
                 plan_hash=self._plan.plan_hash,
                 attempt_ref=attempt_ref,
                 design_hash=receipt["designHash"],
@@ -355,6 +395,7 @@ class Host:
         active = [item for item in ledger.get("stages", []) if item.get("status") == "active"]
         if (
             evidence._plan_hash != self._plan.plan_hash
+            or evidence._service_identity != id(self._review_services)
             or len(active) != 1
             or active[0].get("stageId") != "designed"
             or not active[0].get("attempts")

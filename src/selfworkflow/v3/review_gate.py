@@ -84,11 +84,13 @@ def _valid_fallback(
 
 def _resolve_attestation(
     receipt: dict[str, Any], resolver: Callable[[str], object] | None,
-) -> bool:
+    consumer: Callable[[str, str], bool] | None, *, now: datetime,
+    plan_hash: str, attempt_ref: str,
+) -> str:
     try:
         reference = receipt["hostAttestationRef"]
         if reference is None or not callable(resolver):
-            return False
+            return "missing"
         value = resolver(reference)
         attestation = _load("review-host-attestation.schema.json", value)
         if (
@@ -96,7 +98,7 @@ def _resolve_attestation(
             or attestation["attestationHash"] != reference
             or not _hash_valid(attestation, "attestationHash")
         ):
-            return False
+            return "missing"
         bindings = {
             "dispatchId": "dispatchId",
             "reviewMode": "reviewMode",
@@ -109,16 +111,42 @@ def _resolve_attestation(
             "reviewerAgentIdentity": "reviewerAgentIdentity",
             "reviewerContextIdentity": "reviewerContextIdentity",
             "resultHash": "resultHash",
+            "dispatchNonce": "dispatchNonce",
+            "planHash": "planHash",
+            "attemptRef": "attemptRef",
+            "issuedAt": "issuedAt",
+            "expiresAt": "expiresAt",
         }
-        return all(attestation[left] == receipt[right] for left, right in bindings.items())
+        issued = datetime.fromisoformat(attestation["issuedAt"][:-1] + "+00:00")
+        expires = datetime.fromisoformat(attestation["expiresAt"][:-1] + "+00:00")
+        if (
+            not all(attestation[left] == receipt[right] for left, right in bindings.items())
+            or attestation["planHash"] != plan_hash
+            or attestation["attemptRef"] != attempt_ref
+            or not (issued <= now < expires)
+        ):
+            return "missing"
+        if not callable(consumer):
+            return "missing"
+        return (
+            "valid"
+            if consumer(attestation["attestationHash"], attestation["dispatchNonce"]) is True
+            else "replayed"
+        )
     except (ContractError, HashingError, TypeError, ValueError, OverflowError):
-        return False
+        return "missing"
 
 
 def _receipt_semantics_valid(
     receipt: dict[str, Any],
     *, design_hash: str, reviewer_policy_hash: str, input_summary_hash: str,
+    plan_hash: str, attempt_ref: str, now: datetime,
 ) -> bool:
+    try:
+        issued = datetime.fromisoformat(receipt["issuedAt"][:-1] + "+00:00")
+        expires = datetime.fromisoformat(receipt["expiresAt"][:-1] + "+00:00")
+    except (TypeError, ValueError, OverflowError):
+        return False
     if (
         not _hash_valid(receipt, "receiptHash")
         or receipt["designHash"] != design_hash
@@ -126,6 +154,9 @@ def _receipt_semantics_valid(
         or receipt["inputSummaryHash"] != input_summary_hash
         or receipt["inputMode"] != "summary-only"
         or receipt["grillReasoningReceived"] is not False
+        or receipt["planHash"] != plan_hash
+        or receipt["attemptRef"] != attempt_ref
+        or not (issued <= now < expires)
     ):
         return False
     if receipt["reviewVerdict"] != "approve" or receipt["reviewLevel"] not in {"L2", "L3"}:
@@ -165,8 +196,11 @@ def evaluate_post_grill_review(
     design_hash: str,
     reviewer_policy_hash: str,
     input_summary_hash: str,
+    plan_hash: str,
+    attempt_ref: str,
     now: datetime,
     host_attestation_resolver: Callable[[str], object] | None = None,
+    host_attestation_consumer: Callable[[str, str], bool] | None = None,
     fallback_authorization_resolver: Callable[[str], object] | None = None,
     fallback_authorization_consumer: Callable[[str, str], bool] | None = None,
 ) -> PostGrillReviewDecision:
@@ -175,8 +209,10 @@ def evaluate_post_grill_review(
     if type(independent_context_available) is not bool or type(now) is not datetime:
         return _decision("pause", "unverified", "post-grill-review-input-invalid", "none")
     try:
-        for value in (design_hash, reviewer_policy_hash, input_summary_hash):
+        for value in (design_hash, reviewer_policy_hash, input_summary_hash, plan_hash):
             require_hash(value)
+        if type(attempt_ref) is not str or not attempt_ref:
+            raise ValueError
         observed_at = now.astimezone(timezone.utc)
         parsed_receipt = _load("review-independence-receipt.schema.json", receipt)
         fallback = _resolve_fallback(
@@ -187,6 +223,9 @@ def evaluate_post_grill_review(
             design_hash=design_hash,
             reviewer_policy_hash=reviewer_policy_hash,
             input_summary_hash=input_summary_hash,
+            plan_hash=plan_hash,
+            attempt_ref=attempt_ref,
+            now=observed_at,
         ):
             if parsed_receipt.get("reviewVerdict") == "changes-required":
                 return _decision(
@@ -198,13 +237,25 @@ def evaluate_post_grill_review(
         return _decision("pause", "unverified", "post-grill-review-input-invalid", "none")
 
     if independent_context_available:
+        attestation_state = "missing"
+        if parsed_receipt is not None and parsed_receipt["forkContext"] is False:
+            attestation_state = _resolve_attestation(
+                parsed_receipt, host_attestation_resolver,
+                host_attestation_consumer, now=observed_at,
+                plan_hash=plan_hash, attempt_ref=attempt_ref,
+            )
         if (
             parsed_receipt is not None
             and parsed_receipt["forkContext"] is False
             and parsed_receipt["independence"] == "independent"
-            and _resolve_attestation(parsed_receipt, host_attestation_resolver)
+            and attestation_state == "valid"
         ):
             return _decision("proceed", "independent", None, "independent-context")
+        if attestation_state == "replayed":
+            return _decision(
+                "pause", "unverified", "post-grill-review-attestation-replayed",
+                "independent-context",
+            )
         if (
             _valid_fallback(
                 fallback,

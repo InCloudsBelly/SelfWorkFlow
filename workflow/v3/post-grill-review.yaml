@@ -8,6 +8,8 @@ dispatch:
   reviewMode: brainstorming-cross-review
   forkContext: false
   inputMode: summary-only
+  hostServicesBoundAtConstruction: true
+  summaryResolvedByHostReference: true
   allowedPayloadFields:
     - schemaVersion
     - reviewMode
@@ -20,6 +22,8 @@ attestation:
   authority: host-only
   ignoreAgentSelfReport: true
   bindActualDispatchPayloadIdentitiesAndResult: true
+  bindPlanAttemptNonceAndValidityWindow: true
+  consumeOnce: true
 gate:
   evaluator: post-grill-review-independence-v1
   fallbackModes:
