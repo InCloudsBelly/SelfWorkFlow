@@ -67,7 +67,9 @@ Plan -> Implement/Debug -> Review -> Verify -> optional Knowledge -> Complete`.
 `selfworkflow resolve` returns an immutable PlanGraph; the Host refuses paused
 plans, loads only current-stage modules, and records runtime facts in a
 plan-bound RunLedger. Grill-me is explicit-only and is followed by independent
-Brainstorming cross-review. Knowledge persistence is optional and confirmation
+Brainstorming cross-review. The Host verifies typed Grill completion, clean-summary
+provenance, the repository review-policy hash, and plan/attempt/summary-bound fallback
+authorization before that gate can pass. Knowledge persistence is optional and confirmation
 gated. C7OpenWiki execution is deliberately deferred to a later extension.
 
 Every landed change, including a document-only delivery, receives post-landing

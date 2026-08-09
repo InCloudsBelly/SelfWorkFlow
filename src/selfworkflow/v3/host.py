@@ -182,11 +182,14 @@ class Host:
         if type(pipeline) is not LoadedPipeline:
             raise HostError("v3-host-pipeline-not-typed")
         try:
-            plan._trusted_snapshot()
+            plan_document, _module_specs = plan._trusted_snapshot()
         except Exception as error:
             raise HostError(getattr(error, "reason", "v3-host-plan-invalid")) from None
+        normalized_request = _validated_request(request)
+        if _value_hash(normalized_request) != plan_document["requestHash"]:
+            raise HostError("v3-host-request-plan-mismatch")
         self._plan = plan
-        self._request = copy.deepcopy(dict(request))
+        self._request = normalized_request
         self._catalog = compiled_catalog
         self._pipeline = pipeline
         if snapshot_resolver is not None and not callable(snapshot_resolver):
@@ -258,6 +261,7 @@ class Host:
         implementation_context_identity: str,
         independent_context_available: bool,
         now: object,
+        grill_completion_ref: str,
         fallback_authorization_ref: str | None = None,
     ) -> PostGrillReviewEvidence:
         """Dispatch and evaluate the mandatory review through Host-owned ports."""
@@ -269,10 +273,10 @@ class Host:
         try:
             from selfworkflow.v3.ledger import assert_valid_ledger
             from selfworkflow.v3.review_dispatch import (
-                _load_summary,
                 dispatch_independent_review,
                 dispatch_same_agent_fallback_review,
             )
+            from selfworkflow.v3.review_inputs import verify_review_inputs
             from selfworkflow.v3.review_gate import evaluate_post_grill_review
             from selfworkflow.v3.hashing import require_hash
 
@@ -282,14 +286,22 @@ class Host:
                 raise HostError("post-grill-review-stage-not-active")
             attempt_ref = active[0]["attempts"][-1]["attemptRef"]
             require_hash(summary_ref)
-            normalized_summary = _load_summary(
-                self._review_services.summary_resolver(summary_ref)
+            verified_input = verify_review_inputs(
+                self._review_services.summary_resolver(summary_ref),
+                summary_attestation_resolver=self._review_services.summary_attestation_resolver,
+                grill_completion_ref=grill_completion_ref,
+                grill_completion_resolver=self._review_services.grill_completion_resolver,
+                reviewer_policy_hash=self._review_services.review_policy_hash,
+                plan_hash=self._plan.plan_hash,
+                attempt_ref=attempt_ref,
+                now=now,
             )
+            normalized_summary = verified_input.summary
             if normalized_summary["summaryHash"] != summary_ref:
                 raise HostError("post-grill-review-summary-reference-invalid")
             if independent_context_available:
                 receipt = dispatch_independent_review(
-                    normalized_summary,
+                    verified_input,
                     implementation_agent_identity=implementation_agent_identity,
                     implementation_context_identity=implementation_context_identity,
                     port=self._review_services.dispatch_port,
@@ -319,7 +331,7 @@ class Host:
                         or "post-grill-review-user-authorization-required"
                     )
                 receipt = dispatch_same_agent_fallback_review(
-                    normalized_summary,
+                    verified_input,
                     implementation_agent_identity=implementation_agent_identity,
                     implementation_context_identity=implementation_context_identity,
                     port=self._review_services.dispatch_port,
@@ -364,11 +376,14 @@ class Host:
 
     def _requires_post_grill_review(self) -> bool:
         document = self._plan.as_dict()
-        return any(
+        selected = any(
             "design-grill-me" in slot["selectedModules"]
             for stage in document["stages"]
             for slot in stage["slots"]
         )
+        if selected and "design-grill-me" not in self._request["explicitModuleIds"]:
+            raise HostError("post-grill-review-input-invalid")
+        return selected
 
     def _validate_post_grill_stage_gate(
         self,

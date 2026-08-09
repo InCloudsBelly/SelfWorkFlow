@@ -14,12 +14,18 @@ PLAN_HASH = "sha256:" + "f" * 64
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
 
 
-def _fallback(mode):
+def _fallback(
+    mode, *, design_hash=DESIGN_HASH, policy_hash=POLICY_HASH,
+    plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+    summary_hash=SUMMARY_HASH,
+):
     value = {
-        "schemaVersion": 3, "designHash": DESIGN_HASH,
-        "reviewerPolicyHash": POLICY_HASH,
+        "schemaVersion": 3, "designHash": design_hash,
+        "reviewerPolicyHash": policy_hash,
+        "planHash": plan_hash, "attemptRef": attempt_ref,
+        "inputSummaryHash": summary_hash,
         "reason": "host-attestation-unavailable" if mode == "independent-context-without-attestation" else "independent-context-unavailable",
-        "fallbackMode": mode, "confirmationSource": "explicit-user-confirmation",
+        "fallbackMode": mode, "confirmationSource": "user-confirmation",
         "issuedAt": "2026-08-09T11:00:00Z", "expiresAt": "2026-08-09T13:00:00Z",
         "nonce": "fallback-1", "revocationState": "active",
     }
@@ -146,6 +152,22 @@ class PostGrillReviewGateTests(unittest.TestCase):
         drift["nonce"] = "tampered"
         self.assertEqual(self._evaluate(False, None, drift).reason_code, "post-grill-review-input-invalid")
 
+    def test_fallback_is_bound_to_plan_attempt_and_summary(self):
+        for field, replacement in (
+            ("planHash", "sha256:" + "0" * 64),
+            ("attemptRef", "attempt-other"),
+            ("inputSummaryHash", "sha256:" + "1" * 64),
+        ):
+            with self.subTest(field=field):
+                fallback = _fallback("same-agent-structured-review")
+                fallback[field] = replacement
+                fallback["authorizationHash"] = content_hash({
+                    key: value for key, value in fallback.items()
+                    if key != "authorizationHash"
+                })
+                result = self._evaluate(False, None, fallback)
+                self.assertEqual(result.reason_code, "post-grill-review-user-authorization-required")
+
     def test_attestation_replay_and_changes_required_cannot_proceed(self):
         original_receipt, original_attestation = _receipt()
         consumer = _Consumer()
@@ -183,6 +205,9 @@ class PostGrillReviewGateTests(unittest.TestCase):
 
         for name in (
             "design-review-summary.schema.json", "design-review-result.schema.json",
+            "design-review-summary-attestation.schema.json",
+            "grill-completion-attestation.schema.json",
+            "post-grill-review-policy.schema.json",
             "review-host-attestation.schema.json", "review-fallback-authorization.schema.json",
             "review-independence-receipt.schema.json",
         ):

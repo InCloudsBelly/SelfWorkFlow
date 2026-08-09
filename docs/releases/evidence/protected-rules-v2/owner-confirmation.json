@@ -1,0 +1,18 @@
+{
+  "kind": "owner-confirmation",
+  "status": "passed",
+  "subjectId": "protected-rules-change",
+  "subjectHash": "sha256:1352d8133c7b9942ef61aff5438ec3a72108d2221a7eef34477ecc65144fdbb0",
+  "actorId": "repository-owner-user",
+  "contextId": "selfworkflow-v3-approval-task",
+  "relatedIds": [],
+  "recordedAt": "2026-08-09T01:20:00Z",
+  "attributes": {
+    "provider": "codex-conversation-confirmation",
+    "receiptId": "approved-full-v3-design",
+    "inputHash": "sha256:1352d8133c7b9942ef61aff5438ec3a72108d2221a7eef34477ecc65144fdbb0",
+    "outputHash": "sha256:18fbd12e4e99a5bee61777dba2771b36d7b5d3b1ccf4d96d83a7c57f63241155",
+    "decision": "authorized",
+    "scope": "replace-protected-rules"
+  }
+}

@@ -29,6 +29,9 @@ class PlanGraphError(ValueError):
         super().__init__(reason)
 
 
+_EXPLICIT_ONLY_MODULE_IDS = frozenset({"design-grill-me"})
+
+
 @dataclass(frozen=True)
 class ModuleSpec:
     id: str
@@ -147,6 +150,8 @@ def build_plan_graph(
     project_defaults = _unique_ids(
         request_document["projectDefaultModuleIds"], "project-default",
     )
+    if project_defaults & _EXPLICIT_ONLY_MODULE_IDS:
+        raise PlanGraphError("v3-explicit-only-module-default-invalid")
     requested = explicit | project_defaults
     modules = _module_map(catalog_document)
     _validate_module_graph(modules)
@@ -585,7 +590,11 @@ def _static_selection(
     selected: list[str] = []
     for module_id in ordered:
         closure = _spec_closure(module_id, specs, eligible_ids)
-        if closure is None or _spec_selection_conflicts(closure, specs):
+        if (
+            closure is None
+            or (closure & _EXPLICIT_ONLY_MODULE_IDS) - explicit
+            or _spec_selection_conflicts(closure, specs)
+        ):
             continue
         candidate = set(selected) | closure
         if _spec_selection_conflicts(candidate, specs):
@@ -599,6 +608,8 @@ def _static_selection(
     if not required_explicit <= set(selected):
         raise PlanGraphError("v3-static-selection-unavailable")
     if cardinality in {"exactly-one", "gate"} and not selected:
+        if eligible_ids & _EXPLICIT_ONLY_MODULE_IDS:
+            raise PlanGraphError("v3-explicit-only-module-required")
         raise PlanGraphError("v3-static-selection-unavailable")
     return selected
 

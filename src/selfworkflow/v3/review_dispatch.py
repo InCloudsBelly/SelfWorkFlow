@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from selfworkflow.v3.contracts import ContractError, load_contract
 from selfworkflow.v3.hashing import HashingError, clone, content_hash, require_hash
+from selfworkflow.v3.review_inputs import VerifiedReviewInput
 
 
 class ReviewDispatchError(ValueError):
@@ -48,12 +49,6 @@ class ReviewDispatchPort(Protocol):
     ) -> HostDispatchObservation: ...
 
 
-_FORBIDDEN_SUMMARY_MARKERS = (
-    "transcript", "reasoning", "chain-of-thought", "chain of thought",
-    "盘问记录", "推理过程",
-)
-
-
 def _valid_identity(value: object) -> bool:
     return type(value) is str and 1 <= len(value.encode("utf-8")) <= 256
 
@@ -67,45 +62,6 @@ def _valid_window(issued_at: object, expires_at: object) -> bool:
         return issued_at.endswith("Z") and expires_at.endswith("Z") and issued < expires
     except (TypeError, ValueError, OverflowError):
         return False
-
-
-def _unique_object_ids(items: list[dict[str, Any]], key: str) -> bool:
-    values = [item[key] for item in items]
-    return len(values) == len(set(values))
-
-
-def _contains_forbidden_summary_content(value: object) -> bool:
-    if isinstance(value, str):
-        folded = value.casefold()
-        return any(marker in folded for marker in _FORBIDDEN_SUMMARY_MARKERS)
-    if isinstance(value, list):
-        return any(_contains_forbidden_summary_content(item) for item in value)
-    if isinstance(value, dict):
-        return any(_contains_forbidden_summary_content(item) for item in value.values())
-    return False
-
-
-def _load_summary(value: object) -> dict[str, Any]:
-    if type(value) is not dict:
-        raise ReviewDispatchError("post-grill-review-input-invalid")
-    try:
-        summary = load_contract(
-            "design-review-summary.schema.json",
-            json.dumps(value, ensure_ascii=False, allow_nan=False),
-        )
-        if (
-            summary["summaryHash"] != content_hash(
-                {key: item for key, item in summary.items() if key != "summaryHash"}
-            )
-            or not _unique_object_ids(summary["alternatives"], "alternativeId")
-            or not _unique_object_ids(summary["risks"], "riskId")
-            or not _unique_object_ids(summary["acceptanceCriteria"], "criterionId")
-            or _contains_forbidden_summary_content(summary)
-        ):
-            raise ReviewDispatchError("post-grill-review-input-invalid")
-        return summary
-    except (ContractError, HashingError, TypeError, ValueError, OverflowError):
-        raise ReviewDispatchError("post-grill-review-input-invalid") from None
 
 
 def _load_result(value: object, summary: dict[str, Any]) -> dict[str, Any]:
@@ -185,7 +141,7 @@ def _load_attestation(
 
 
 def _dispatch_review(
-    summary: object,
+    verified_input: VerifiedReviewInput,
     *,
     implementation_agent_identity: str,
     implementation_context_identity: str,
@@ -212,7 +168,9 @@ def _dispatch_review(
         raise ReviewDispatchError("post-grill-review-input-invalid") from None
     if not _valid_identity(attempt_ref):
         raise ReviewDispatchError("post-grill-review-input-invalid")
-    normalized = _load_summary(summary)
+    if type(verified_input) is not VerifiedReviewInput or not verified_input._is_valid():
+        raise ReviewDispatchError("post-grill-review-input-invalid")
+    normalized = verified_input.summary
     payload = {
         "schemaVersion": 3,
         "reviewMode": "brainstorming-cross-review",
@@ -325,7 +283,7 @@ def _dispatch_review(
 
 
 def dispatch_independent_review(
-    summary: object,
+    verified_input: VerifiedReviewInput,
     *,
     implementation_agent_identity: str,
     implementation_context_identity: str,
@@ -337,7 +295,7 @@ def dispatch_independent_review(
     """Force a fresh-context dispatch and derive a receipt from Host observations."""
 
     return _dispatch_review(
-        summary,
+        verified_input,
         implementation_agent_identity=implementation_agent_identity,
         implementation_context_identity=implementation_context_identity,
         port=port,
@@ -349,7 +307,7 @@ def dispatch_independent_review(
 
 
 def dispatch_same_agent_fallback_review(
-    summary: object,
+    verified_input: VerifiedReviewInput,
     *,
     implementation_agent_identity: str,
     implementation_context_identity: str,
@@ -361,7 +319,7 @@ def dispatch_same_agent_fallback_review(
     """Record the explicitly authorized same-Agent structured review path."""
 
     return _dispatch_review(
-        summary,
+        verified_input,
         implementation_agent_identity=implementation_agent_identity,
         implementation_context_identity=implementation_context_identity,
         port=port,

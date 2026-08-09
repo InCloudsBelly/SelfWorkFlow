@@ -45,6 +45,8 @@ class WorkflowMatrixTests(unittest.TestCase):
 
     def test_post_grill_policy_is_an_enforced_host_gate(self):
         import yaml
+        from selfworkflow.v3.host import HostError
+        from tests.unit.v3.test_host_post_grill import HostPostGrillGateTests
 
         protected = yaml.safe_load(
             (self.ROOT / "workflow/protected-rules.yaml").read_text(encoding="utf-8")
@@ -71,6 +73,13 @@ class WorkflowMatrixTests(unittest.TestCase):
                 ],
             },
         )
+        fixture = HostPostGrillGateTests()
+        fixture.setUp()
+        with self.assertRaisesRegex(HostError, "post-grill-independent-review-required"):
+            fixture.host.apply_stage_result(
+                fixture.ledger,
+                fixture._result("designed", "attempt-designed"),
+            )
 
     def test_core_policy_requires_reviewed_landing_and_bounded_decisions(self):
         for relative in ("WORKFLOW.md", "workflow/core.md"):

@@ -493,11 +493,20 @@ reasonCodes:
   - post-grill-review-attestation-replayed
 ```
 
-显式 Grill-me 完成并确认共同理解后，必须创建新的独立 SubAgent，`fork_context=false`，只传规范化设计摘要、
-约束和验收条件，不传 Grill-me 的盘问记录或推理过程。摘要必须符合关闭的
-`design-review-summary.schema.json`。Agent 只提交摘要的内容 hash；摘要正文、调度端口、证明解析器与一次性消费器
-均由嵌入 Host 在构造时绑定，不能在单次 Agent 调用中替换。Host/Collector 从实际 spawn 参数和发送 payload 计算 summary hash，并生成
-ReviewIndependenceReceipt；Agent 自报字段不能升级独立性。Receipt 绑定：
+`design-grill-me` 只能出现在 `explicitModuleIds`，项目默认和自动路由均不能启用。显式 Grill-me 完成并确认共同
+理解后，Host 必须先解析关闭的 `GrillCompletionAttestation`，再创建新的独立 SubAgent，`fork_context=false`，
+只传规范化设计摘要、约束和验收条件，不传 Grill-me 的盘问记录或推理过程。摘要必须符合关闭的
+`design-review-summary.schema.json`。Agent 只提交摘要内容 hash 和 Grill 完成凭据引用；摘要正文、摘要来源证明、
+Grill 完成证明、调度端口、证明解析器与一次性消费器均由嵌入 Host 在构造时绑定，不能在单次 Agent 调用中替换。
+
+Host 解析的 `DesignReviewSummaryAttestation` 必须绑定 summary/design/policy/plan/attempt，且声明输入类严格等于
+`confirmed-design + acceptance-criteria`，三个禁止输入观察值 `grillTranscriptReceived`、
+`grillReasoningReceived`、`parentContextReceived` 都为 false。它替代关键字黑名单：自然语言中即使没有
+“transcript/reasoning”等标记，没有 Host 来源证明也不能调度。`reviewerPolicyHash` 必须来自严格加载并验证
+`workflow/v3/post-grill-review.yaml` 后形成的不可变策略工件，摘要自报的策略 hash 不能成为信任根。
+
+Host/Collector 从实际 spawn 参数和发送 payload 计算 summary hash，并生成 ReviewIndependenceReceipt；Agent
+自报字段不能升级独立性。Receipt 绑定：
 
 ```text
 forkContext=false
@@ -515,8 +524,9 @@ Agent 自报身份不是身份认证。只有 Host attestation 可以把结果�
 取得用户授权，才可由同一 Agent 开启新的结构化 Review；该结果同样固定为
 `independence=unverified`，不得事后补签或声称 independent。
 
-`ReviewFallbackAuthorization` 是独立 typed 工件，绑定 designHash、reviewerPolicyHash、降级原因、精确
-`fallbackMode`、confirmationSource、issuedAt/expiresAt、nonce 和 revocationState；`fallbackMode` 是关闭
+`ReviewFallbackAuthorization` 是独立 typed 工件，绑定 designHash、reviewerPolicyHash、planHash、attemptRef、
+inputSummaryHash、降级原因、精确 `fallbackMode`、固定的 `confirmationSource=user-confirmation`、
+issuedAt/expiresAt、nonce 和 revocationState；`fallbackMode` 是关闭
 union：`independent-context-without-attestation | same-agent-structured-review`。它是
 防误操作授权，不伪称用户身份认证。Evaluator 真值表固定为：
 
@@ -529,7 +539,7 @@ union：`independent-context-without-attestation | same-agent-structured-review`
 | 否 | 任意 | 是，且 mode 匹配 | 继续同 Agent 结构化 Review，`independence=unverified` |
 
 Host attestation 与 fallback authorization 都必须一次性消费；重复使用返回稳定的 replay reason code。Fallback
-authorization 过期、撤销、designHash 或 reviewerPolicyHash 漂移时一律无效。结构化 Review 返回
+authorization 过期、撤销或 design/policy/plan/attempt/summary 任一绑定漂移时一律无效。结构化 Review 返回
 `changes-required` 时不得签发可通过 designed-stage 的 Host evidence。
 
 信任边界是嵌入 SelfWorkFlow 的 Host/runtime；同一 Python 进程中拥有任意代码执行权的恶意嵌入方不在本契约的
@@ -613,10 +623,12 @@ SelectionReceipt、coverage 差异和完成报告。任何未执行能力均不�
 ### 15.5 独立 Review
 
 - 行为测试创建 `fork_context=false` SubAgent，只传 canonical summary；
+- Host 必须先验证显式 Grill 完成、共同理解、摘要来源类别与禁止输入观察值，缺失任一 typed attestation 即失败关闭；
+- `reviewerPolicyHash` 从严格加载的仓库策略工件取得，策略语义漂移或摘要 hash 自报漂移均失败关闭；
 - 验证 Host/Collector 从实际 dispatch payload 生成新 context、摘要与设计 hash、Reviewer policy 和身份凭据；
 - Host 不支持独立上下文时先暂停，只有用户授权 Receipt 存在才继续，并保持 independence=unverified；
 - 独立上下文但 Host attestation 缺失时同样先暂停；真值表五条路径、fallbackMode 不匹配和 authorization
-  漂移全部测试；
+  以及 plan/attempt/summary 绑定漂移全部测试；
 - Grill-me 推理过程不会出现在独立 Reviewer 输入中。
 
 ### 15.6 原生验收

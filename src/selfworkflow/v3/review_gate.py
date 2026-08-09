@@ -67,6 +67,9 @@ def _valid_fallback(
     expected_mode: str,
     design_hash: str,
     policy_hash: str,
+    plan_hash: str,
+    attempt_ref: str,
+    input_summary_hash: str,
     now: datetime,
 ) -> bool:
     if authorization is None:
@@ -77,6 +80,9 @@ def _valid_fallback(
         authorization["fallbackMode"] == expected_mode
         and authorization["designHash"] == design_hash
         and authorization["reviewerPolicyHash"] == policy_hash
+        and authorization["planHash"] == plan_hash
+        and authorization["attemptRef"] == attempt_ref
+        and authorization["inputSummaryHash"] == input_summary_hash
         and authorization["revocationState"] == "active"
         and issued <= now < expires
     )
@@ -262,6 +268,9 @@ def evaluate_post_grill_review(
                 expected_mode="independent-context-without-attestation",
                 design_hash=design_hash,
                 policy_hash=reviewer_policy_hash,
+                plan_hash=plan_hash,
+                attempt_ref=attempt_ref,
+                input_summary_hash=input_summary_hash,
                 now=observed_at,
             )
             and parsed_receipt is not None
@@ -288,6 +297,9 @@ def evaluate_post_grill_review(
         expected_mode="same-agent-structured-review",
         design_hash=design_hash,
         policy_hash=reviewer_policy_hash,
+        plan_hash=plan_hash,
+        attempt_ref=attempt_ref,
+        input_summary_hash=input_summary_hash,
         now=observed_at,
     ):
         if parsed_receipt is None:

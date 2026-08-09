@@ -170,6 +170,35 @@ class PlanGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(PlanGraphError, "unsupported"):
             build_plan_graph(unsupported, unsupported_catalog, unsupported_pipeline)
 
+    def test_grill_me_cannot_be_selected_as_a_project_default(self):
+        catalog, pipeline = self._artifacts([_module("design-grill-me")])
+        request = copy.deepcopy(self.REQUEST)
+        request["projectDefaultModuleIds"] = ["design-grill-me"]
+        with self.assertRaisesRegex(PlanGraphError, "explicit-only"):
+            build_plan_graph(request, catalog, pipeline)
+
+    def test_required_static_slot_cannot_auto_select_explicit_only_grill(self):
+        catalog, pipeline = self._artifacts(
+            [_module("design-grill-me", mode="static")],
+            cardinality="exactly-one", mode="static",
+        )
+        with self.assertRaisesRegex(PlanGraphError, "explicit-only"):
+            build_plan_graph(self.REQUEST, catalog, pipeline)
+
+    def test_gate_cannot_auto_select_module_that_depends_on_explicit_only_grill(self):
+        catalog, pipeline = self._artifacts(
+            [
+                _module("design-grill-me", mode="static"),
+                _module(
+                    "review-wrapper", mode="static",
+                    dependencies=("design-grill-me",),
+                ),
+            ],
+            cardinality="gate", mode="static",
+        )
+        with self.assertRaisesRegex(PlanGraphError, "explicit-only"):
+            build_plan_graph(self.REQUEST, catalog, pipeline)
+
     def test_dependencies_are_closed_and_inapplicable_slot_is_empty(self):
         catalog, pipeline = self._artifacts([
             _module("review-a", dependencies=("review-dependency",)),

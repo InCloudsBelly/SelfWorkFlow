@@ -1,0 +1,37 @@
+{
+  "kind": "behavioral-test",
+  "status": "passed",
+  "subjectId": "protected-rules-change",
+  "subjectHash": "sha256:1352d8133c7b9942ef61aff5438ec3a72108d2221a7eef34477ecc65144fdbb0",
+  "actorId": "selfworkflow-test-runner",
+  "contextId": "protected-rules-v2-behavioral-test",
+  "relatedIds": [],
+  "recordedAt": "2026-08-09T01:20:00Z",
+  "attributes": {
+    "provider": "python-unittest",
+    "receiptId": "workflow-matrix-20260809-0120",
+    "inputHash": "sha256:1352d8133c7b9942ef61aff5438ec3a72108d2221a7eef34477ecc65144fdbb0",
+    "outputHash": "sha256:76f1805001bc4f155c8efa5651c57c4f1858af1f6786cbe4596214a4b64375a6",
+    "invocation": {
+      "executable": "powershell",
+      "module": null,
+      "argv": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".\\scripts\\test.ps1",
+        "-Test",
+        "tests.behavioral.test_workflow_matrix"
+      ],
+      "cwd": ".",
+      "environmentKeys": [],
+      "environmentHash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "inputHash": "sha256:0c3792e273a22a337b4dbc427bbd72d740c0376f5f6e678ffbddb1244f904ed2"
+    },
+    "invocationHash": "sha256:69fdcdfe02b360acc72442240cb833342117edc34dc6c998b15b411b0595d1e4",
+    "checkType": "behavioral-test",
+    "exitCode": 0,
+    "suite": "protected-rules"
+  }
+}

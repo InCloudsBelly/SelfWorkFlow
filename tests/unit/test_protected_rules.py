@@ -544,6 +544,64 @@ class ProtectedRulesTests(unittest.TestCase):
             tuple(rule["id"] for rule in protected["rules"]),
         )
 
+    def test_checked_in_v2_transition_has_formal_owner_evidence(self):
+        from selfworkflow.evidence import (
+            ExecutionInvocation,
+            OwnerChangeRequest,
+            canonical_content_hash,
+            merge_protected_rules,
+        )
+
+        protected = _protected_document()
+        base = copy.deepcopy(protected)
+        base["policyVersion"] = "1.0.0"
+        base["rules"] = base["rules"][:-1]
+        evidence_root = (
+            REPOSITORY_ROOT / "docs/releases/evidence/protected-rules-v2"
+        )
+        records = {
+            path.stem: json.loads(path.read_text(encoding="utf-8"))
+            for path in evidence_root.glob("*.json")
+        }
+        self.assertEqual(
+            set(records), {"owner-confirmation", "owner-review", "behavioral-test"}
+        )
+        invocation_envelope = records["behavioral-test"]["attributes"]["invocation"]
+        invocation = ExecutionInvocation(
+            executable=invocation_envelope["executable"],
+            module=invocation_envelope["module"],
+            argv=tuple(invocation_envelope["argv"]),
+            cwd=invocation_envelope["cwd"],
+            environment={},
+            input_hash=invocation_envelope["inputHash"],
+        )
+        request = OwnerChangeRequest(
+            base_rules_hash="sha256:7db00fc634f74a995e4397cd44f96c9ec4c2939a930b36e40c13d245f9ed91c2",
+            proposed_rules_hash="sha256:370c575231a746c6df81b7b2e811d054e7ec6ca4712b3554d56b49c7881f1c5c",
+            previous_version="1.0.0",
+            new_version="2.0.0",
+            owner_actor="repository-owner-user",
+            implementation_actor="codex-implementation-agent",
+            implementation_context="selfworkflow-v3-task",
+            operation_nonce="protected-rules-v2-operation-1",
+            proposed_at=datetime(2026, 8, 9, 1, 15, tzinfo=timezone.utc),
+            valid_for_seconds=7200,
+            behavioral_test_invocation_hash=invocation.invocation_hash,
+            confirmation_artifact_hash=canonical_content_hash(records["owner-confirmation"]),
+            review_artifact_hash=canonical_content_hash(records["owner-review"]),
+            behavioral_test_artifact_hash=canonical_content_hash(records["behavioral-test"]),
+        )
+        merged = merge_protected_rules(
+            base,
+            owner_rules=protected["rules"],
+            owner_change=request,
+            artifact_store=_trusted_owner_store(
+                records, behavioral_invocation=invocation,
+            ),
+            now=datetime(2026, 8, 9, 1, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(merged.policy_version, "2.0.0")
+
     def test_lower_layers_have_only_monotonic_typed_operations(self):
         from selfworkflow.evidence import WorkflowEvidenceError, merge_protected_rules
 

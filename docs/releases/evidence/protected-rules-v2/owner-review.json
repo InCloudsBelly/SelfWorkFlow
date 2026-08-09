@@ -1,0 +1,20 @@
+{
+  "kind": "owner-review",
+  "status": "passed",
+  "subjectId": "protected-rules-change",
+  "subjectHash": "sha256:1352d8133c7b9942ef61aff5438ec3a72108d2221a7eef34477ecc65144fdbb0",
+  "actorId": "codex-review-agent-019fe420",
+  "contextId": "fork-context-019fe420",
+  "relatedIds": [],
+  "recordedAt": "2026-08-09T01:29:36Z",
+  "attributes": {
+    "provider": "codex-multi-agent-v1",
+    "receiptId": "019fe420-90a1-78a0-aa9c-023eec2d5bc8",
+    "inputHash": "sha256:1352d8133c7b9942ef61aff5438ec3a72108d2221a7eef34477ecc65144fdbb0",
+    "outputHash": "sha256:1584e609cfb8aa8a151059f85c5122d2bcbbf69048eab107712b12825dff1023",
+    "decision": "passed",
+    "level": "L2",
+    "implementationActor": "codex-implementation-agent",
+    "implementationContext": "selfworkflow-v3-task"
+  }
+}

@@ -10,6 +10,7 @@ dispatch:
   inputMode: summary-only
   hostServicesBoundAtConstruction: true
   summaryResolvedByHostReference: true
+  summaryProvenanceAttestedByHost: true
   allowedPayloadFields:
     - schemaVersion
     - reviewMode
@@ -33,4 +34,5 @@ gate:
   requireApprovedStructuredResult: true
   fallbackAuthorization:
     resolveAtHostBoundary: true
+    bindPlanAttemptAndSummary: true
     consumeOnceOnProceed: true

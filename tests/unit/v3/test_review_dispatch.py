@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timezone
 import json
 import unittest
 
@@ -26,6 +27,47 @@ def _summary():
     }
     value["summaryHash"] = content_hash(value)
     return value
+
+
+def _verified(summary=None):
+    from selfworkflow.v3.review_inputs import verify_review_inputs
+
+    value = _summary() if summary is None else summary
+    provenance = {
+        "schemaVersion": 3,
+        "summaryHash": value["summaryHash"], "designHash": value["designHash"],
+        "reviewerPolicyHash": value["reviewerPolicyHash"],
+        "planHash": PLAN_HASH, "attemptRef": "attempt-designed",
+        "sourceClasses": ["acceptance-criteria", "confirmed-design"],
+        "sourceFields": [
+            "acceptanceCriteria", "alternatives", "assumptions", "constraints",
+            "objective", "risks", "scope.excluded", "scope.included",
+        ],
+        "grillTranscriptReceived": False, "grillReasoningReceived": False,
+        "parentContextReceived": False,
+        "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
+        "nonce": "summary-provenance-1",
+    }
+    provenance["attestationHash"] = content_hash(provenance)
+    completion = {
+        "schemaVersion": 3, "moduleId": "design-grill-me",
+        "triggerSource": "explicit-user-request", "grillStatus": "completed",
+        "commonUnderstandingConfirmed": True, "confirmationSource": "user-confirmation",
+        "designHash": value["designHash"], "summaryHash": value["summaryHash"],
+        "planHash": PLAN_HASH, "attemptRef": "attempt-designed",
+        "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
+        "nonce": "grill-completion-1",
+    }
+    completion["attestationHash"] = content_hash(completion)
+    return verify_review_inputs(
+        value,
+        summary_attestation_resolver=lambda ref: provenance if ref == value["summaryHash"] else None,
+        grill_completion_ref=completion["attestationHash"],
+        grill_completion_resolver=lambda ref: completion if ref == completion["attestationHash"] else None,
+        reviewer_policy_hash=value["reviewerPolicyHash"], plan_hash=PLAN_HASH,
+        attempt_ref="attempt-designed",
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+    )
 
 
 def _result(summary, *, verdict="approve", findings=None):
@@ -122,7 +164,7 @@ class ReviewDispatchTests(unittest.TestCase):
 
         port = _SpyPort()
         receipt = dispatch_independent_review(
-            _summary(), implementation_agent_identity="implementation-agent",
+            _verified(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=port,
             plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
         )
@@ -149,7 +191,7 @@ class ReviewDispatchTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ReviewDispatchError, "review-result-invalid"):
             dispatch_independent_review(
-                _summary(), implementation_agent_identity="implementation-agent",
+                _verified(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=SelfReportingPort(),
                 plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
@@ -159,7 +201,7 @@ class ReviewDispatchTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ReviewDispatchError, "review-host-attestation"):
             dispatch_independent_review(
-                _summary(), implementation_agent_identity="implementation-agent",
+                _verified(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context",
                 port=_SpyPort(tamper_attestation=True),
                 plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
@@ -169,49 +211,42 @@ class ReviewDispatchTests(unittest.TestCase):
         from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
 
         receipt = dispatch_independent_review(
-            _summary(), implementation_agent_identity="implementation-agent",
+            _verified(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=_SpyPort(attested=False),
             plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
         )
         self.assertEqual(receipt["independence"], "unverified")
         with self.assertRaisesRegex(ReviewDispatchError, "review-identity-not-independent"):
             dispatch_independent_review(
-                _summary(), implementation_agent_identity="implementation-agent",
+                _verified(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=_SpyPort(same_identity=True),
                 plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
-    def test_changes_required_is_preserved_and_forbidden_summary_content_is_rejected(self):
+    def test_changes_required_is_preserved_and_unverified_summary_is_rejected(self):
         from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
 
         receipt = dispatch_independent_review(
-            _summary(), implementation_agent_identity="implementation-agent",
+            _verified(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=_SpyPort(verdict="changes-required"),
             plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
         )
         self.assertEqual(receipt["reviewVerdict"], "changes-required")
-        unsafe = _summary()
-        unsafe["objective"] = "Embed the full transcript here."
-        unsafe["summaryHash"] = content_hash({key: value for key, value in unsafe.items() if key != "summaryHash"})
         with self.assertRaisesRegex(ReviewDispatchError, "post-grill-review-input-invalid"):
             dispatch_independent_review(
-                unsafe, implementation_agent_identity="implementation-agent",
+                _summary(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=_SpyPort(),
                 plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             )
 
     def test_duplicate_semantic_ids_are_rejected(self):
-        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+        from selfworkflow.v3.review_inputs import ReviewInputError
 
         duplicate = _summary()
         duplicate["risks"].append({**duplicate["risks"][0], "description": "different"})
         duplicate["summaryHash"] = content_hash({key: value for key, value in duplicate.items() if key != "summaryHash"})
-        with self.assertRaisesRegex(ReviewDispatchError, "post-grill-review-input-invalid"):
-            dispatch_independent_review(
-                duplicate, implementation_agent_identity="implementation-agent",
-                implementation_context_identity="implementation-context", port=_SpyPort(),
-                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
-            )
+        with self.assertRaisesRegex(ReviewInputError, "post-grill-review-input-invalid"):
+            _verified(duplicate)
 
 
 if __name__ == "__main__":
