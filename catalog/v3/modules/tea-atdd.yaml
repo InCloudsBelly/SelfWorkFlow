@@ -8,4 +8,4 @@ invocation: {kind: skill, ref: dependencies/upstream/tea/src/workflows/testarch/
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 96, estimatedExecutionCost: 48}
-supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: supported}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

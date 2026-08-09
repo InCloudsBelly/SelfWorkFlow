@@ -105,6 +105,27 @@ class TaskResolverV2Tests(unittest.TestCase):
                 self._request(operationType="document", writeTask=False),
             )
 
+    def test_operation_write_semantics_cannot_be_forged(self):
+        from selfworkflow.resolver import ResolveError, resolve_task
+
+        for operation in (
+            "implement", "debug", "document", "install", "publish",
+            "knowledge-write",
+        ):
+            with self.subTest(operation=operation), self.assertRaises(ResolveError):
+                resolve_task(
+                    self.catalog,
+                    self._request(operationType=operation, writeTask=False),
+                )
+        for operation in (
+            "analyze", "design", "plan", "review", "verify", "knowledge-read",
+        ):
+            with self.subTest(operation=operation), self.assertRaises(ResolveError):
+                resolve_task(
+                    self.catalog,
+                    self._request(operationType=operation, writeTask=True),
+                )
+
     def test_plan_hash_is_stable_and_binds_capability_identity(self):
         from selfworkflow.resolver import resolve_task
 
@@ -180,7 +201,7 @@ class TaskResolverV2Tests(unittest.TestCase):
         envelope["catalogHash"] = canonical_hash(envelope["catalog"])
         request = self._request(
             operationType="knowledge-write",
-            writeTask=False,
+            writeTask=True,
             explicitModuleIds=["knowledge-update"],
         )
         request["capabilityEvidenceSnapshot"]["evidence"].append(

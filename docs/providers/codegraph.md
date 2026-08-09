@@ -19,26 +19,26 @@ Manage_SelfWorkFlow_Providers.bat configure --codegraph-path <local-codegraph-ro
 
 The selected directory must be the exact root of a Git checkout and must contain
 the fixed entry `dist\bin\codegraph.js`. Configuration records the commit, Git
-tree and relevant working-state-derived source hash, CLI version observation,
-dirty state, command hash
+tree and relevant working-state-derived source hash, an `unverified` version
+placeholder, dirty state, command hash
 and binding hash in
 `%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml`. This is the same V3
 machine configuration consumed by Provider selection; it is not a parallel
 management-only registry. Existing unrelated Provider entries are preserved.
 
 Dirty means the selected source is not reproducible from its commit alone. It
-is reported, not silently normalized. SelfWorkFlow may inspect or call a
-user-owned checkout, but will never upgrade or remove it.
+is reported, not silently normalized. SelfWorkFlow may inspect a user-owned
+checkout, but this release never executes, upgrades, or removes it.
 
 ## Operations and safety
 
-`list`, `doctor` and `status` are explicit diagnostics. Before every Provider
-process dispatch, SelfWorkFlow recomputes the configured Git/source/entry
-identity without executing code from the checkout and fails closed on drift.
-The operation then uses a shell-free, argument-array process boundary, bounded
-output and stable redacted errors.
-Their adapter support remains `unverified` until native evidence proves the
-exact source identity and operation behavior.
+`list` and source inspection do not execute Provider code. Git inspection runs
+with system/global configuration disabled, fsmonitor disabled, optional locks
+disabled, and external diff/textconv disabled. `doctor` and `status` are reserved
+CLI names but fail closed with `provider-operation-unverified`; this release has
+no production Provider process dispatch. That boundary remains closed until an
+immutable LaunchSpec binds the canonical entry, runtime identity, source hash,
+and atomic launch operation.
 
 `query` is intentionally plan-only in this version. The inspected CodeGraph CLI
 does not expose a `--no-sync` option for query/explore, so the plan is marked
@@ -64,9 +64,7 @@ sufficient mutation authorization.
 Automated tests use an injected Fake command port and prove command rendering,
 redaction, no implicit initialization, atomic configuration, rollback,
 idempotence, source-drift rejection before dispatch, deterministic planning, and
-fail-closed maintenance execution. A local read-only
-inspection has observed CodeGraph `1.3.1-ks.7`, `status` on an uninitialized
-workspace, no `.codegraph` creation and an unchanged Git worktree, plus the available command surface,
-but this does not prove query freshness, auto-sync behavior, mutation containment
-or rollback. Those operations remain `unverified` until a dedicated native test
+fail-closed maintenance execution. A prior local observation does not prove the
+current checkout, `doctor`, `status`, query freshness, auto-sync behavior,
+mutation containment, or rollback. Those operations remain `unverified` until a dedicated native test
 uses an exact source identity and disposable synthetic C++ repository.

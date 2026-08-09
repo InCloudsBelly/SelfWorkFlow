@@ -17,6 +17,11 @@ class RequestV2Error(ValueError):
     pass
 
 
+_WRITE_OPERATIONS = frozenset({
+    "implement", "debug", "document", "install", "publish", "knowledge-write",
+})
+
+
 def migrate_v1_request(request: Mapping[str, object]) -> dict[str, object]:
     required = {"schemaVersion", "stage", "operationType", "complexity", "risk", "writeTask", "superpowersSourceStatus", "capabilityStates"}
     allowed = required | {"ambiguity", "explicitGrill", "fileExtensions", "semanticTerms", "explicitSkills", "contextBudget"}
@@ -65,7 +70,7 @@ def normalize_request(request: Mapping[str, object], repository_root: Path) -> t
         schema = json.loads((repository_root / "schemas/resolve-request.schema.json").read_text(encoding="utf-8"))
         if next(Draft202012Validator(schema).iter_errors(value), None) is not None:
             raise RequestV2Error("resolve-input-invalid")
-        if value["operationType"] in {"implement", "document"} and value["writeTask"] is not True:
+        if value["writeTask"] is not (value["operationType"] in _WRITE_OPERATIONS):
             raise RequestV2Error("resolve-input-invalid")
         snapshot, snapshot_hash, states, stale = normalize_capability_snapshot(value["capabilityEvidenceSnapshot"])
     except RequestV2Error:

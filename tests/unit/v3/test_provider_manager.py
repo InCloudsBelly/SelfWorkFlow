@@ -117,6 +117,16 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertEqual(second["status"], "unchanged")
         self.assertEqual(config.read_bytes(), before)
 
+    def test_configure_holds_an_exclusive_machine_config_lock(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        with manager._config_lock():
+            with self.assertRaises(ProviderManagerError) as caught:
+                self._configure(manager)
+        self.assertEqual(caught.exception.reason, "provider-config-locked")
+        self.assertFalse((self.root / "machine/providers.local.yaml").exists())
+
     def test_different_existing_binding_requires_explicit_replace(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
 
@@ -128,7 +138,9 @@ class ProviderManagerTests(unittest.TestCase):
         replaced = self._configure(manager, "new.js", replace_existing=True)
         self.assertEqual(replaced["status"], "configured")
 
-    def test_doctor_and_status_use_configured_adapter(self):
+    def test_production_diagnostics_are_disabled_until_atomic_launch_is_bound(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
         port = FakeCommandPort(
             self._result(stdout="1.3.1"),
             self._result(stdout="Usage: codegraph"),
@@ -137,13 +149,14 @@ class ProviderManagerTests(unittest.TestCase):
         manager = self._manager(port=port)
         self._configure(manager)
 
-        doctor = manager.doctor("codegraph")
-        status = manager.status("codegraph", "C:/work/project")
-
-        self.assertEqual(doctor["status"], "healthy")
-        self.assertEqual(doctor["supportStatus"], "unverified")
-        self.assertTrue(status["initialized"])
-        self.assertEqual(status["revision"], "r9")
+        for operation in (
+            lambda: manager.doctor("codegraph"),
+            lambda: manager.status("codegraph", "C:/work/project"),
+        ):
+            with self.assertRaises(ProviderManagerError) as caught:
+                operation()
+            self.assertEqual(caught.exception.reason, "provider-operation-unverified")
+        self.assertEqual(port.calls, [])
 
     def test_maintain_plan_only_does_not_execute_mutation(self):
         port = FakeCommandPort()
@@ -219,7 +232,7 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "provider-maintenance-apply-unverified")
         self.assertEqual(fresh_port.calls, [])
 
-    def test_source_identity_is_revalidated_before_every_dispatch(self):
+    def test_source_identity_is_revalidated_before_every_maintenance_plan(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
 
         state = {"sourceHash": "sha256:" + "a" * 64}
@@ -238,8 +251,10 @@ class ProviderManagerTests(unittest.TestCase):
         state["sourceHash"] = "sha256:" + "c" * 64
 
         with self.assertRaises(ProviderManagerError) as caught:
-            manager.doctor("codegraph")
-        self.assertEqual(caught.exception.reason, "provider-operation-failed")
+            manager.maintain(
+                "codegraph", "sync", "C:/work/project", plan_only=True
+            )
+        self.assertEqual(caught.exception.reason, "provider-source-identity-drift")
         self.assertEqual(port.calls, [])
 
     def test_user_owned_provider_upgrade_is_always_rejected(self):
@@ -294,7 +309,7 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertNotIn(secret, serialized)
         self.assertNotIn(str(self.root), serialized)
         self.assertNotIn(secret, str(caught.exception))
-        self.assertEqual(caught.exception.reason, "provider-operation-failed")
+        self.assertEqual(caught.exception.reason, "provider-operation-unverified")
 
 
 if __name__ == "__main__":

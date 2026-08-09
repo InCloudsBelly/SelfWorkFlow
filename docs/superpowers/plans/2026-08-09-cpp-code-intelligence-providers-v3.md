@@ -509,7 +509,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [x] **Step 1: 写 CLI、安装、幂等和回滚失败测试**
 
-  覆盖 `provider list`、`provider configure`、`provider doctor`、`provider status`、`provider maintain --plan-only`，并证明任何维护执行（包括提供确认 hash）在生产安全端口接入前失败关闭；首次安装询问是否配置本地覆写，空答即跳过；重复安装不重复写；配置冲突需用户决策；中途失败恢复旧配置；日志包含阶段和错误码但不包含敏感值。
+  覆盖 `provider list`、`provider configure`、`provider maintain --plan-only`，并证明 `doctor`、`status` 及任何维护执行（包括提供确认 hash）在生产安全/原子启动端口接入前失败关闭；首次安装询问是否配置本地覆写，空答即跳过；重复安装不重复写；配置冲突需用户决策；中途失败精确恢复 Provider 配置 preimage；日志包含阶段和错误码但不包含敏感值。
 
   ```powershell
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tests.unit.v3.test_codegraph_adapter
@@ -519,19 +519,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [x] **Step 2: 实现 CodeGraph 适配器**
 
-  适配器通过注入的命令执行端口调用 CLI，解析 `status/sync/index` 的真实返回；默认查询不得偷偷初始化索引。无法禁止的自动写行为必须反映到 QueryPlan。对用户显式选择的本地 CodeGraph 仅做本机原生验收，路径只能进入机器配置，绝不写入 Git。
+  适配器通过注入的命令执行端口描述 CLI 和解析契约；Fake 测试不开放生产执行。默认查询不得偷偷初始化索引，无法禁止的自动写行为必须反映到 QueryPlan。对用户显式选择的本地 CodeGraph 只做不执行 Provider 代码的来源检查，路径只能进入加锁的机器配置，绝不写入 Git。
 
 - [x] **Step 3: 实现 Provider CLI 与管理脚本**
 
-  `Manage_SelfWorkFlow_Providers.bat` 只转发到 PowerShell，并把失败日志写到 `%LOCALAPPDATA%\SelfWorkFlow\logs`。管理器展示来源类型、commit/version、dirty、hash、项目授权和可用操作；修改配置使用临时文件、fsync/replace 和恢复副本。每次命令调度前以不执行 Provider 源码的方式重新验证 source/entry identity。用户拥有的本地 Provider 只允许已验证的 inspect/status；query 和维护执行保持 `unverified` 且失败关闭，不允许 SelfWorkFlow upgrade。
+  `Manage_SelfWorkFlow_Providers.bat` 只转发到 PowerShell，并把失败日志写到 `%LOCALAPPDATA%\SelfWorkFlow\logs`。管理器展示来源类型、commit、dirty、hash 和计划操作；修改配置使用固定机器根、跨进程锁、临时文件、fsync/replace 和恢复副本。用户拥有的本地 Provider 只允许非执行 inspect；doctor、status、query 和维护执行保持 `unverified` 且失败关闭，不允许 SelfWorkFlow upgrade。
 
 - [x] **Step 4: 修改一键安装和 runtime 打包**
 
   安装器首次运行只询问一次是否显式配置覆写；不得扫描磁盘。runtime 的 core/maintainer profile 包含 V3 schema、pipeline、cpp-core、Provider descriptors 和管理入口；机器配置、日志、索引、缓存、测试临时文件不进入 artifact 或 Git。
 
-- [x] **Step 5: 执行本机 CodeGraph 分操作原生检查**
+- [x] **Step 5: 记录本机 CodeGraph 观察但保持原生操作未验证**
 
-  仅执行只读 `doctor/status/help` 类检查，确认实际 CLI 入口、版本、能力和写边界；这些证据只允许把对应 inspect operation 标记为通过，不能证明 query、freshness、auto-sync 或维护。若要初始化或同步索引，先生成计划并获得显式授权。只有针对精确 sourceIdentity、adapterHash、Windows 平台和具体 operation 的原生合成 C++ 仓库测试，才能升级该 operation；其余保持 `unverified` 并报告人工验证命令。
+  历史本机观察不升级任何当前 operation。生产入口不再执行 `doctor/status/help`；只有针对精确 sourceIdentity、adapterHash、Windows 平台、原子 LaunchSpec 和具体 operation 的原生合成 C++ 仓库测试，才能升级该 operation；其余保持 `unverified` 并报告人工验证方法。
 
 - [x] **Step 6: 运行测试并提交**
 
@@ -602,7 +602,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - V2 全量测试保持通过，V3 仅由显式版本请求启用。
 - C++ 任务可得到稳定、可解释、按需加载的能力路由；非代码任务不会误加载 cpp-core。
-- Provider 的配置、静态选择、source freshness、只读诊断和维护计划形成自动化验证闭环；生产查询、维护执行、授权持久化和收据对账保持 `unverified` 并失败关闭。
+- Provider 的配置、静态选择、非执行 source freshness 检查和维护计划形成自动化验证闭环；生产诊断、查询、维护执行、授权持久化和收据对账保持 `unverified` 并失败关闭。
 - 本地覆写只能显式配置，机器路径不进入仓库；用户 Provider 源码不被 SelfWorkFlow 修改。
 - Grill-me 后同一 Agent 自审无法通过门禁；全新无上下文 SubAgent Review 有结构化证据。
 - 安装、冲突、幂等、失败回滚、升级边界和 runtime 打包均有真实测试。

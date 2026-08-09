@@ -1,4 +1,8 @@
 from io import StringIO
+from pathlib import Path
+import os
+import subprocess
+from tempfile import TemporaryDirectory
 from unittest import mock
 import unittest
 
@@ -13,10 +17,12 @@ class _Manager:
         return {"providers": []}
 
     def doctor(self, provider_id):
-        return {"providerId": provider_id, "status": "healthy", "supportStatus": "unverified"}
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+        raise ProviderManagerError("provider-operation-unverified")
 
     def status(self, provider_id, project_root):
-        return {"providerId": provider_id, "initialized": False, "supportStatus": "unverified"}
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+        raise ProviderManagerError("provider-operation-unverified")
 
     def maintain(self, provider_id, action, project_root, *, plan_only, confirmed_plan_hash=None):
         self.calls.append((provider_id, action, project_root, plan_only, confirmed_plan_hash))
@@ -32,19 +38,22 @@ class _Manager:
 
 
 class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
-    def test_list_and_readonly_diagnostics_are_exposed_by_cli(self):
+    def test_list_is_available_but_unverified_diagnostics_fail_closed(self):
         manager = _Manager()
-        for arguments, expected in (
-            (["provider", "list"], "providers"),
-            (["provider", "doctor"], "unverified"),
-            (["provider", "status", "--project-root", "C:/work/project"], "initialized"),
+        output = StringIO()
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", output):
+            self.assertEqual(main(["provider", "list"]), 0)
+            self.assertIn("providers", output.getvalue())
+        for arguments in (
+            ["provider", "doctor"],
+            ["provider", "status", "--project-root", "C:/work/project"],
         ):
-            output = StringIO()
             with self.subTest(arguments=arguments), mock.patch(
                 "selfworkflow.cli._provider_manager", return_value=manager
-            ), mock.patch("sys.stdout", output):
-                self.assertEqual(main(arguments), 0)
-                self.assertIn(expected, output.getvalue())
+            ), mock.patch("sys.stderr", StringIO()):
+                self.assertEqual(main(arguments), 70)
 
     def test_maintenance_prints_plan_and_requires_exact_confirmation(self):
         manager = _Manager()
@@ -114,6 +123,51 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
             manager_type.call_args.kwargs["source_identity_resolver"],
             cli._inspect_codegraph_source_identity,
         )
+
+    def test_identity_inspection_disables_git_helpers_and_provider_execution(self):
+        from selfworkflow import cli
+
+        with TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            script = source / "dist/bin/codegraph.js"
+            script.parent.mkdir(parents=True)
+            script.write_text("do-not-execute\n", encoding="utf-8")
+            calls = []
+
+            def fake_run(argv, **kwargs):
+                calls.append((tuple(argv), dict(kwargs)))
+                arguments = tuple(argv)
+                if "--show-toplevel" in arguments:
+                    output = (str(source) + "\n").encode()
+                elif "HEAD^{tree}" in arguments:
+                    output = ("b" * 40 + "\n").encode()
+                elif "rev-parse" in arguments:
+                    output = ("a" * 40 + "\n").encode()
+                else:
+                    output = b""
+                return subprocess.CompletedProcess(argv, 0, stdout=output, stderr=b"")
+
+            with mock.patch("selfworkflow.cli.subprocess.run", side_effect=fake_run):
+                report = cli._inspect_codegraph_source_identity(str(source))["report"]
+
+        self.assertRegex(report["sourceHash"], r"^sha256:[0-9a-f]{64}$")
+        self.assertTrue(all(
+            kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+            and kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+            and "core.fsmonitor=false" in argv
+            for argv, kwargs in calls
+        ))
+        diff_call = next(argv for argv, _ in calls if "diff" in argv)
+        self.assertIn("--no-ext-diff", diff_call)
+        self.assertIn("--no-textconv", diff_call)
+
+    def test_public_cli_rejects_provider_config_outside_machine_root(self):
+        from selfworkflow.cli import _provider_config_file
+
+        with TemporaryDirectory() as temporary, self.assertRaisesRegex(
+            ValueError, "provider-config-path-outside-machine-root"
+        ):
+            _provider_config_file(str(Path(temporary).resolve() / "providers.json"))
 
 
 if __name__ == "__main__":

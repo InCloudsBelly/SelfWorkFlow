@@ -270,6 +270,12 @@ class Host:
             raise HostError("post-grill-independent-review-not-required")
         if self._review_services is None:
             raise HostError("post-grill-review-host-services-required")
+        if (
+            type(independent_context_available) is not bool
+            or independent_context_available
+            is not self._review_services.independent_context_available
+        ):
+            raise HostError("post-grill-review-capability-mismatch")
         try:
             from selfworkflow.v3.ledger import assert_valid_ledger
             from selfworkflow.v3.review_dispatch import (

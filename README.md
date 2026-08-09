@@ -100,10 +100,13 @@ Use the thin management entry after installation:
 ```bat
 Manage_SelfWorkFlow_Providers.bat list
 Manage_SelfWorkFlow_Providers.bat configure --codegraph-path <local-codegraph-root>
-Manage_SelfWorkFlow_Providers.bat doctor
-Manage_SelfWorkFlow_Providers.bat status --project-root D:\project
 Manage_SelfWorkFlow_Providers.bat maintain --action sync --project-root D:\project --plan-only
 ```
+
+`doctor` and `status` are reserved names but fail closed with
+`provider-operation-unverified`. No configured Provider source is executed until
+the production Host has an immutable, identity-bound launch port; configuration
+records the version as `unverified`.
 
 Maintenance execution is deliberately disabled in this release: omitting
 `--plan-only`, even with `--confirm-plan-hash`, fails closed with
@@ -125,8 +128,8 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   optional generic Knowledge slots, runtime build, and
   sandbox transaction install/verify/rollback are implemented and automated-tested.
 - V3 adaptive TEA/C++ routing, default Brainstorming for every modification,
-  the post-Grill Host gate, machine-local CodeGraph binding, Provider diagnostics
-  and content-addressed maintenance planning are
+  the post-Grill Host gate, machine-local CodeGraph binding, non-executing source
+  inspection and content-addressed maintenance planning are
   implemented and automated-tested. Real CodeGraph query and mutation operations
   remain `unverified` and are not silently promoted by Fake-port tests.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain

@@ -72,16 +72,16 @@ modules:
     hash: sha256:c47819570eac1f6b5c951488f6fcf6a0fd1fb751addb79a669baf2deebdd3dd3
   - id: tea-test-design
     ref: modules/tea-test-design.yaml
-    hash: sha256:870fb55f025f16619b909fb041b5c4b6d9acb3a0583b443ee540e9a1e591e120
+    hash: sha256:64ab64224f57da446ddbe8577232c6f5ad28a8e24a7c234e8d66d985ef2a7b99
   - id: tea-atdd
     ref: modules/tea-atdd.yaml
-    hash: sha256:b1634835d40dfeb01b4fde4234078ecb7e01fbaf48ce8e8af881c2d674afaf85
+    hash: sha256:d87c9c42f7368c26d432baada7f014ad8cef51699ba97554917bf3ea41aee2ff
   - id: tea-test-review
     ref: modules/tea-test-review.yaml
-    hash: sha256:40f372b99753246205f018aefb286a7bdc5ac13619b990ecce54285e0f811351
+    hash: sha256:df9d5b1ef6fd02bfd92c4b8352fba8a3d368c1d88e651b4cf1d134095fe14ff9
   - id: tea-trace
     ref: modules/tea-trace.yaml
-    hash: sha256:b1e4141f459b9cdc4de02b750f6c37726d41f7db734247308563a111148c3876
+    hash: sha256:aaf5e2d0b52ec5e18de8e7d79e987974e220fff418f37c2d47c29087cfd1759a
   - id: tea-nfr
     ref: modules/tea-nfr.yaml
-    hash: sha256:efe47898d28898ccffd3ea6e209f45771c9502bfb9a33254fbc00b5296206317
+    hash: sha256:301868eb8d5a52c745cd953bf75b6d525b1aa426d2721fd93bbe6b04de1dd142

@@ -68,6 +68,10 @@
     "testLevelFloor": {"enum": ["T0", "T1", "T2", "T3"]},
     "codeSignals": {"$ref": "#/$defs/codeSignals"}
   },
+  "allOf": [
+    {"if": {"properties": {"operationType": {"enum": ["implement", "debug", "document", "install", "publish", "knowledge-write"]}}}, "then": {"properties": {"writeTask": {"const": true}}}},
+    {"if": {"properties": {"operationType": {"enum": ["analyze", "design", "plan", "review", "verify", "knowledge-read"]}}}, "then": {"properties": {"writeTask": {"const": false}}}}
+  ],
   "$defs": {
     "sha256": {
       "type": "string",

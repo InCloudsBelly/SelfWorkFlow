@@ -105,6 +105,7 @@ class HostPostGrillGateTests(unittest.TestCase):
     def _host_with_port(
         self, port, *, fallback_resolver=None, consumer=None,
         summary_attestation=None, grill_completion=None,
+        independent_context_available=True,
     ):
         from selfworkflow.v3.host import Host
         from selfworkflow.v3.review_services import bind_review_host_services
@@ -113,6 +114,7 @@ class HostPostGrillGateTests(unittest.TestCase):
             "schemaVersion": 3, "backendClass": "fake-test",
             "dispatchPortBound": True, "artifactResolversBound": True,
             "replayConsumersBound": True,
+            "independentContextAvailable": independent_context_available,
             "reviewPolicyHash": self.review_policy.policy_hash,
         }
         service_attestation["attestationHash"] = content_hash(service_attestation)
@@ -291,7 +293,10 @@ class HostPostGrillGateTests(unittest.TestCase):
             summary_hash=self.summary["summaryHash"],
         )
         port = _SpyPort(attested=False, same_identity=True)
-        invalid_host = self._host_with_port(port, fallback_resolver=lambda _ref: None)
+        invalid_host = self._host_with_port(
+            port, fallback_resolver=lambda _ref: None,
+            independent_context_available=False,
+        )
         with self.assertRaisesRegex(HostError, "post-grill-review-input-invalid"):
             invalid_host.dispatch_post_grill_review(
                 self.ledger, self.summary["summaryHash"],
@@ -306,7 +311,9 @@ class HostPostGrillGateTests(unittest.TestCase):
 
         consumer = _Consumer()
         self.fallback_store[fallback["authorizationHash"]] = fallback
-        fallback_host = self._host_with_port(port, consumer=consumer)
+        fallback_host = self._host_with_port(
+            port, consumer=consumer, independent_context_available=False,
+        )
         evidence = fallback_host.dispatch_post_grill_review(
             self.ledger, self.summary["summaryHash"],
             implementation_agent_identity="implementation-agent",
@@ -327,6 +334,23 @@ class HostPostGrillGateTests(unittest.TestCase):
                 fallback_authorization_ref=fallback["authorizationHash"],
                 grill_completion_ref=self.grill_completion["attestationHash"],
             )
+
+    def test_caller_cannot_force_fallback_when_sealed_host_supports_independence(self):
+        from selfworkflow.v3.host import HostError
+
+        with self.assertRaisesRegex(
+            HostError, "post-grill-review-capability-mismatch"
+        ):
+            self.host.dispatch_post_grill_review(
+                self.ledger, self.summary["summaryHash"],
+                implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                independent_context_available=False,
+                now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+                fallback_authorization_ref="sha256:" + "8" * 64,
+                grill_completion_ref=self.grill_completion["attestationHash"],
+            )
+        self.assertEqual(self.port.calls, [])
 
     def test_summary_provenance_and_grill_completion_are_host_verified(self):
         from selfworkflow.v3.host import HostError

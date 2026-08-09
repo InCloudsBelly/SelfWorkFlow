@@ -279,6 +279,9 @@ $superpowersReport = [ordered]@{
 }
 $providerReport = [ordered]@{ status = "skipped" }
 $providerSourceReport = $null
+$providerConfigSnapshotTaken = $false
+$providerConfigExisted = $false
+$providerConfigPreimage = $null
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -480,6 +483,11 @@ try {
 
     if ($CodeGraphOverrideChoice -eq "Configure") {
         Set-InstallStage "provider-configure" 75
+        $providerConfigSnapshotTaken = $true
+        $providerConfigExisted = Test-Path -LiteralPath $ProviderConfigFile -PathType Leaf
+        if ($providerConfigExisted) {
+            $providerConfigPreimage = [IO.File]::ReadAllBytes($ProviderConfigFile)
+        }
         $providerArguments = @(
             "provider", "configure",
             "--config-file", $ProviderConfigFile,
@@ -490,6 +498,9 @@ try {
             $providerArguments += "--replace-existing"
         }
         $providerReport = Invoke-SelfWorkflow $providerArguments (Join-Path $script:LogDirectory "provider-configure.json")
+        if ($env:SELFWORKFLOW_TEST_FAIL_AFTER_PROVIDER_CONFIG -eq "1") {
+            throw "injected-failure-after-provider-config"
+        }
     }
 
     $summary = [ordered]@{
@@ -514,6 +525,36 @@ catch {
     Write-InstallLog ("FAILED [{0}]: {1}" -f $script:CurrentStage, $failure)
     $rollbackStatus = "not-required"
     try {
+        if ($providerConfigSnapshotTaken) {
+            $providerParent = Split-Path -Parent $ProviderConfigFile
+            [IO.Directory]::CreateDirectory($providerParent) | Out-Null
+            $providerLockPath = $ProviderConfigFile + ".lock"
+            $providerLock = [IO.File]::Open(
+                $providerLockPath,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None
+            )
+            try {
+                if ($providerConfigExisted) {
+                    $providerRestore = $ProviderConfigFile + ".rollback-" + [Guid]::NewGuid().ToString("N")
+                    [IO.File]::WriteAllBytes($providerRestore, $providerConfigPreimage)
+                    if (Test-Path -LiteralPath $ProviderConfigFile) {
+                        [IO.File]::Replace($providerRestore, $ProviderConfigFile, $null)
+                    }
+                    else {
+                        [IO.File]::Move($providerRestore, $ProviderConfigFile)
+                    }
+                }
+                elseif (Test-Path -LiteralPath $ProviderConfigFile) {
+                    Remove-Item -LiteralPath $ProviderConfigFile -Force
+                }
+            }
+            finally {
+                $providerLock.Dispose()
+            }
+            $rollbackStatus = "rolled-back"
+        }
         if ($stagedSuperpowers -and $stagedSuperpowers.status -eq "staged") {
             $superpowersTarget = Resolve-FullPath (Join-Path $AgentsRoot "skills\superpowers")
             $expectedTarget = Resolve-FullPath $stagedSuperpowers.target

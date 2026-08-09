@@ -58,7 +58,13 @@ class _SubprocessCommandPort:
 def _provider_config_file(value: str | None) -> Path:
     from selfworkflow.v3.provider_config import provider_config_path
 
-    return _absolute_path(value) if value else provider_config_path()
+    expected = provider_config_path().resolve(strict=False)
+    if value is None:
+        return expected
+    candidate = _absolute_path(value).resolve(strict=False)
+    if candidate != expected:
+        raise ValueError("provider-config-path-outside-machine-root")
+    return candidate
 
 
 def _provider_manager(config_file: str | None):
@@ -75,15 +81,26 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
     """Hash a CodeGraph checkout without executing code from that checkout."""
     source = _absolute_path(source_value).resolve(strict=True)
     script = source / "dist" / "bin" / "codegraph.js"
-    if source.is_symlink() or not script.is_file() or script.is_symlink():
+    path_chain = (source, source / "dist", source / "dist" / "bin", script)
+    if (
+        not script.is_file()
+        or any(not item.exists() or _is_reparse(item) for item in path_chain)
+    ):
         raise ValueError("codegraph-source-invalid")
     if script.stat().st_size > 16 * 1024 * 1024:
         raise ValueError("codegraph-source-inspection-failed")
 
     def git_bytes(*arguments: str, limit: int = 16 * 1024 * 1024) -> bytes:
+        environment = os.environ.copy()
+        environment.update({
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_OPTIONAL_LOCKS": "0",
+        })
         result = subprocess.run(
-            ["git", *arguments], cwd=source, check=False,
-            capture_output=True, timeout=120,
+            ["git", "-c", "core.fsmonitor=false", *arguments],
+            cwd=source, check=False, capture_output=True, timeout=120,
+            env=environment,
         )
         if result.returncode != 0 or len(result.stdout) > limit:
             raise ValueError("codegraph-source-inspection-failed")
@@ -99,7 +116,8 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
         limit=1024 * 1024,
     )
     relevant_diff = git_bytes(
-        "diff", "--binary", "HEAD", "--", "dist", "package.json",
+        "diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--",
+        "dist", "package.json",
         "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
     )
     source_material = {
@@ -127,16 +145,9 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
 
 
 def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
-    """Inspect source identity, then run its read-only version probe for setup."""
-    from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
-
+    """Inspect source identity without executing code from the checkout."""
     observation = _inspect_codegraph_source_identity(source_value)
-    adapter = CodeGraphAdapter(
-        command_port=_SubprocessCommandPort(),
-        command_prefix=("node", str(observation["script"])),
-        ownership="user-local",
-    )
-    observation["report"]["version"] = adapter.version()["version"]
+    observation["report"]["version"] = "unverified"
     return observation
 
 

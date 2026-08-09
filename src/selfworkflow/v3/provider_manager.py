@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -52,6 +53,10 @@ class MachineLocalPaths:
     @property
     def backup_file(self) -> Path:
         return self.config_file.with_suffix(self.config_file.suffix + ".bak")
+
+    @property
+    def lock_file(self) -> Path:
+        return self.config_file.with_suffix(self.config_file.suffix + ".lock")
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -129,6 +134,44 @@ class ProviderManager:
         self._logger = logger
         self._replace = replace_operation
         self._adapter_cache: dict[str, tuple[str, CodeGraphAdapter]] = {}
+
+    @contextmanager
+    def _config_lock(self):
+        path = self._paths.lock_file
+        handle = None
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = open(path, "a+b")
+            if path.stat().st_size == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except Exception:
+            try:
+                if handle is not None:
+                    handle.close()
+            except Exception:
+                pass
+            raise ProviderManagerError("provider-config-locked") from None
+        try:
+            yield
+        finally:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
 
     def _log(self, event: str, **fields: object) -> None:
         if self._logger is None:
@@ -344,24 +387,25 @@ class ProviderManager:
                 "source": source,
             }
             provider["bindingHash"] = _hash(provider)
-            config = self._read_config()
-            existing = next(
-                (item for item in config["providers"] if item["providerId"] == provider_id),
-                None,
-            )
-            if (
-                existing is not None
-                and existing != provider
-                and replace_existing is not True
-            ):
-                raise ProviderManagerError("provider-config-conflict")
-            config["providers"] = [
-                item for item in config["providers"]
-                if item["providerId"] != provider_id
-            ] + [provider]
-            config["providers"].sort(key=lambda item: item["providerId"])
-            self._validate_config(config)
-            changed = self._write_config(config)
+            with self._config_lock():
+                config = self._read_config()
+                existing = next(
+                    (item for item in config["providers"] if item["providerId"] == provider_id),
+                    None,
+                )
+                if (
+                    existing is not None
+                    and existing != provider
+                    and replace_existing is not True
+                ):
+                    raise ProviderManagerError("provider-config-conflict")
+                config["providers"] = [
+                    item for item in config["providers"]
+                    if item["providerId"] != provider_id
+                ] + [provider]
+                config["providers"].sort(key=lambda item: item["providerId"])
+                self._validate_config(config)
+                changed = self._write_config(config)
             if changed:
                 self._adapter_cache.pop(provider_id, None)
             status = "configured" if changed else "unchanged"
@@ -440,48 +484,20 @@ class ProviderManager:
             raise ProviderManagerError("provider-adapter-invalid") from None
 
     def doctor(self, provider_id: str) -> dict[str, Any]:
-        try:
-            adapter = self._adapter(provider_id)
-            version = adapter.version()
-            help_result = adapter.help()
-            result = {
-                "providerId": provider_id,
-                "operation": "doctor",
-                "status": "healthy",
-                "readOnly": True,
-                "supportStatus": "unverified",
-                "version": version["version"],
-                "helpAvailable": bool(help_result["summary"]),
-                "commandHash": adapter.command_hash,
-            }
-            self._log(
-                "provider.doctor.completed", providerId=provider_id,
-                operation="doctor", status="healthy",
-            )
-            return result
-        except (CodeGraphAdapterError, ProviderManagerError):
-            self._log(
-                "provider.doctor.failed", providerId=provider_id,
-                operation="doctor", status="failed",
-                reasonCode="provider-operation-failed",
-            )
-            raise ProviderManagerError("provider-operation-failed") from None
+        self._log(
+            "provider.doctor.failed", providerId=provider_id,
+            operation="doctor", status="failed",
+            reasonCode="provider-operation-unverified",
+        )
+        raise ProviderManagerError("provider-operation-unverified")
 
     def status(self, provider_id: str, project_root: str) -> dict[str, Any]:
-        try:
-            result = self._adapter(provider_id).status(project_root)
-            self._log(
-                "provider.status.completed", providerId=provider_id,
-                operation="status", status="succeeded",
-            )
-            return result
-        except (CodeGraphAdapterError, ProviderManagerError):
-            self._log(
-                "provider.status.failed", providerId=provider_id,
-                operation="status", status="failed",
-                reasonCode="provider-operation-failed",
-            )
-            raise ProviderManagerError("provider-operation-failed") from None
+        self._log(
+            "provider.status.failed", providerId=provider_id,
+            operation="status", status="failed",
+            reasonCode="provider-operation-unverified",
+        )
+        raise ProviderManagerError("provider-operation-unverified")
 
     def maintain(
         self,

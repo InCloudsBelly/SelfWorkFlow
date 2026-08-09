@@ -219,6 +219,15 @@ def _utc_datetime(value: str) -> datetime:
 
 
 def _validate_resolve_request(document: dict[str, Any]) -> None:
+    write_operations = {
+        "implement", "debug", "document", "install", "publish", "knowledge-write",
+    }
+    if document["writeTask"] is not (document["operationType"] in write_operations):
+        raise ContractError(
+            "resolve-operation-write-semantics-invalid",
+            ("writeTask",),
+            "semantic",
+        )
     snapshot = document["capabilityEvidenceSnapshot"]
     captured_at = _utc_datetime(snapshot["capturedAt"])
     for index, evidence in enumerate(snapshot["evidence"]):

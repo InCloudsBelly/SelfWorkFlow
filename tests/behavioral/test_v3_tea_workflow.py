@@ -44,6 +44,28 @@ class V3TeaWorkflowBehaviorTests(unittest.TestCase):
             )
         ))
 
+    def test_tea_behavior_support_matches_unverified_lock_and_adapter(self):
+        catalog = compile_catalog().document["catalog"]
+        tea_modules = [
+            item for item in catalog["modules"] if item["id"].startswith("tea-")
+        ]
+        lock = yaml.safe_load(
+            (self.ROOT / "dependencies/locks/tea.lock.yaml").read_text(encoding="utf-8")
+        )
+        adapter = yaml.safe_load(
+            (self.ROOT / "overlays/tea/adapter.yaml").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(lock["status"]["behaviorEvidence"], "unverified")
+        self.assertTrue(all(
+            item["supportEvidence"]["behaviorEvidence"] == "unverified"
+            for item in tea_modules
+        ))
+        self.assertTrue(all(
+            item["support"]["behaviorEvidence"] == "unverified"
+            for item in adapter["workflows"]
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

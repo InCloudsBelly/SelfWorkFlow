@@ -79,6 +79,9 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertIn("codegraphpath", output)
 
     def _run_installer(self, root, *arguments, env=None):
+        environment = (env or os.environ).copy()
+        local_app_data = root / "localappdata"
+        environment["LOCALAPPDATA"] = str(local_app_data)
         return subprocess.run(
             [
                 "powershell.exe",
@@ -95,7 +98,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 "-StateRoot",
                 str(root / "state"),
                 "-ProviderConfigFile",
-                str(root / "machine" / "providers.local.yaml"),
+                str(local_app_data / "SelfWorkFlow/config/providers.local.yaml"),
                 "-DependencyRoot",
                 str(root / "dependencies"),
                 "-LogRoot",
@@ -106,7 +109,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
-            env=env,
+            env=environment,
         )
 
     @staticmethod
@@ -183,16 +186,74 @@ class OneClickInstallerContractTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            config = root / "machine/providers.local.yaml"
+            config = root / "localappdata/SelfWorkFlow/config/providers.local.yaml"
             self.assertTrue(config.is_file())
             value = json.loads(config.read_text(encoding="utf-8"))
             self.assertEqual(value["schemaVersion"], 3)
             self.assertEqual(value["providers"][0]["providerId"], "codegraph")
-            self.assertEqual(value["providers"][0]["source"]["version"], "9.9.9-test")
+            self.assertEqual(value["providers"][0]["source"]["version"], "unverified")
             summary = json.loads(
                 (self._single_log_directory(root) / "summary.json").read_text()
             )
             self.assertEqual(summary["codeGraphOverride"], "configured")
+
+    def test_failure_after_provider_config_restores_exact_preimage(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "codegraph"
+            entry = source / "dist/bin/codegraph.js"
+            entry.parent.mkdir(parents=True)
+            entry.write_text("do-not-execute\n", encoding="utf-8")
+            _commit(source)
+            config = root / "localappdata/SelfWorkFlow/config/providers.local.yaml"
+            config.parent.mkdir(parents=True)
+            original = b'{"providers":[],"schemaVersion":3}\n'
+            config.write_bytes(original)
+            environment = os.environ.copy()
+            environment["SELFWORKFLOW_TEST_FAIL_AFTER_PROVIDER_CONFIG"] = "1"
+
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice", "Skip",
+                "-SuperpowersChoice", "Skip",
+                "-CodeGraphOverrideChoice", "Configure",
+                "-CodeGraphPath", str(source.resolve()),
+                "-ConfirmApply",
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(config.read_bytes(), original)
+            summary = json.loads(
+                (self._single_log_directory(root) / "summary.json").read_text()
+            )
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["rollback"], "rolled-back")
+
+    def test_failure_after_first_provider_config_removes_new_machine_file(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "codegraph"
+            entry = source / "dist/bin/codegraph.js"
+            entry.parent.mkdir(parents=True)
+            entry.write_text("do-not-execute\n", encoding="utf-8")
+            _commit(source)
+            config = root / "localappdata/SelfWorkFlow/config/providers.local.yaml"
+            environment = os.environ.copy()
+            environment["SELFWORKFLOW_TEST_FAIL_AFTER_PROVIDER_CONFIG"] = "1"
+
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice", "Skip",
+                "-SuperpowersChoice", "Skip",
+                "-CodeGraphOverrideChoice", "Configure",
+                "-CodeGraphPath", str(source.resolve()),
+                "-ConfirmApply",
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(config.exists())
 
     def test_noninteractive_apply_requires_confirmation_before_any_publish(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

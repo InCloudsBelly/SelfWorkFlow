@@ -289,6 +289,24 @@ class OrchestrationSchemaTests(unittest.TestCase):
         self.assertEqual(list(errors[0].absolute_path), ["classificationConfidence"])
         self.assertEqual(errors[0].validator, "maximum")
 
+    def test_resolve_request_rejects_forged_operation_write_semantics(self):
+        from selfworkflow.v3.contracts import ContractError, load_contract
+        import json
+
+        for operation in (
+            "implement", "debug", "document", "install", "publish",
+            "knowledge-write",
+        ):
+            request = {**self.RESOLVE_REQUEST, "operationType": operation, "writeTask": False}
+            with self.subTest(operation=operation), self.assertRaises(ContractError):
+                load_contract("resolve-request.schema.json", json.dumps(request))
+        for operation in (
+            "analyze", "design", "plan", "review", "verify", "knowledge-read",
+        ):
+            request = {**self.RESOLVE_REQUEST, "operationType": operation, "writeTask": True}
+            with self.subTest(operation=operation), self.assertRaises(ContractError):
+                load_contract("resolve-request.schema.json", json.dumps(request))
+
     def test_v3_module_schema_is_available(self):
         schema_path = self.ROOT / "schemas" / "v3" / "module.schema.json"
 

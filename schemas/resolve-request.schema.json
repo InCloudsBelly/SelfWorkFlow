@@ -11,6 +11,10 @@
     "projectMinimums": {"type": "object", "additionalProperties": false, "required": ["strength"], "properties": {"strength": {"enum": ["Light", "Full", "Deep"]}}},
     "capabilityEvidenceSnapshot": {"$ref": "#/$defs/snapshot"}
   },
+  "allOf": [
+    {"if": {"properties": {"operationType": {"enum": ["implement", "debug", "document", "install", "publish", "knowledge-write"]}}}, "then": {"properties": {"writeTask": {"const": true}}}},
+    {"if": {"properties": {"operationType": {"enum": ["analyze", "design", "plan", "review", "verify", "knowledge-read"]}}}, "then": {"properties": {"writeTask": {"const": false}}}}
+  ],
   "$defs": {
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
     "idList": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},

@@ -44,6 +44,11 @@ and related-regression verification. Users are prompted only for material scope
 or product choices, sensitive data, irreversible/external effects, protected
 defaults, and formal knowledge publication.
 
+`writeTask` is derived from the closed operation contract, not trusted as a free
+caller assertion. `implement`, `debug`, `document`, `install`, `publish`, and
+`knowledge-write` require `writeTask=true`; all remaining operations require
+`false`. A mismatch is rejected before routing.
+
 Knowledge exposes only optional `knowledge.read`, `knowledge.propose`, and
 `knowledge.update` slots. This version does not implement or enable C7OpenWiki;
 its concrete MCP behavior is a later, separately tested extension.

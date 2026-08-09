@@ -361,6 +361,11 @@ lease/replay、MutationEvidence 与 rollback 端口。只有这些端口接入 H
 配置后的每次 Provider 命令调度前，还必须在不执行 Provider 源码的前提下重新计算 source/entry identity；
 发生漂移时不得启动目标命令。
 
+当前版本进一步禁止所有生产 Provider 进程调度：`doctor`、`status`、query 与维护执行均返回
+`provider-operation-unverified` 或对应的维护失败码。source identity 检查禁用 system/global Git 配置、
+fsmonitor、external diff、textconv 与 optional locks；在 canonical entry、runtime identity 和原子启动被密封
+LaunchSpec 绑定前，不得仅凭 command prefix 开放执行。
+
 项目增量自动同步需要机器配置对 `(providerId, canonicalProjectRoot)` 保存一次性、可撤销授权。项目仓库只能
 提出请求，不能自行授权本机命令执行。
 
@@ -530,6 +535,10 @@ Agent 自报身份不是身份认证。只有 Host attestation 可以把结果�
 取得用户授权，才可由同一 Agent 开启新的结构化 Review；该结果同样固定为
 `independence=unverified`，不得事后补签或声称 independent。
 
+独立上下文是否可用同样来自构造期密封的 `ReviewHostServices` attestation。单次调用传入的布尔值只可与该
+证明做一致性断言，不能选择执行分支；不一致时以 `post-grill-review-capability-mismatch` 失败关闭，不能借此
+强制进入 fallback。
+
 `ReviewFallbackAuthorization` 是独立 typed 工件，绑定 designHash、reviewerPolicyHash、planHash、attemptRef、
 inputSummaryHash、降级原因、精确 `fallbackMode`、固定的 `confirmationSource=user-confirmation`、
 issuedAt/expiresAt、nonce 和 revocationState；`fallbackMode` 是关闭
@@ -567,8 +576,10 @@ hash、许可证、预计写入和冲突，确认后写机器配置。
 Manage_SelfWorkFlow_Providers.bat
 ```
 
-它提供 list、configure、doctor、status、initialize、sync、rebuild、update-check 和日志查看。底层复用 SelfWorkFlow
-已有的事务、锁、计划、确认、回滚和日志实现，不创建第二套非原子配置路径。
+当前薄入口只支持 `list`、`configure`、非执行 source inspection 和维护 `plan-only`。`doctor`、`status` 名称已
+保留但失败关闭；initialize、sync、rebuild、update-check、项目授权和日志查看属于 deferred/unverified，不能
+出现在当前支持清单。机器配置通过固定根路径、跨进程锁、原子替换和安装失败 preimage 恢复维护，不创建
+第二套非原子配置路径。
 
 日志只记录命令 hash、退出码和脱敏摘要，不记录源码正文、完整环境、凭据、Debugger 内存或本地绝对路径。
 
