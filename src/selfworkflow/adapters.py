@@ -45,6 +45,15 @@ _CORE_PATHS = (
     "overlays/superpowers",
     "dependencies/superpowers.lock.yaml",
     "adapters",
+    # V3 is shipped as an explicit, self-contained extension. The lightweight
+    # runtime still loads it only for schemaVersion=3 requests.
+    "workflow/v3",
+    "schemas/v3",
+    "catalog/v3",
+    "skills/cpp-core",
+    "capabilities/cpp",
+    "Manage_SelfWorkFlow_Providers.bat",
+    "scripts/manage-selfworkflow-providers.ps1",
 )
 
 

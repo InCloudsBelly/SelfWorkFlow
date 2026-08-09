@@ -6,12 +6,17 @@ param(
     [ValidateSet("Ask", "Existing", "InstallOfficial", "Skip")]
     [string]$SuperpowersChoice = "Ask",
     [string]$SuperpowersSource,
+    [ValidateSet("Ask", "Configure", "Skip")]
+    [string]$CodeGraphOverrideChoice = "Ask",
+    [string]$CodeGraphPath,
+    [switch]$ReplaceCodeGraphOverride,
     [switch]$AllowDirtySuperpowers,
     [switch]$ConfirmApply,
     [switch]$NonInteractive,
     [string]$AgentsRoot = (Join-Path $env:USERPROFILE ".agents"),
     [string]$CodexRoot = (Join-Path $env:USERPROFILE ".codex"),
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\state"),
+    [string]$ProviderConfigFile = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\config\providers.local.yaml"),
     [string]$DependencyRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\dependencies"),
     [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs")
 )
@@ -27,11 +32,19 @@ Usage:
   Install_SelfWorkFlow.bat [-GrillMeChoice Ask|Install|Skip]
     [-SuperpowersChoice Ask|Existing|InstallOfficial|Skip]
     [-SuperpowersSource <local-git-path>] [-AllowDirtySuperpowers]
+    [-CodeGraphOverrideChoice Ask|Configure|Skip]
+    [-CodeGraphPath <explicit-local-path>]
+    [-ReplaceCodeGraphOverride]
 
 GrillMeChoice:
   Ask      Prompt when Grill-me is missing.
   Install  Install the bundled Grill-me Skill.
   Skip     Continue without Grill-me.
+
+CodeGraphOverrideChoice:
+  Ask        Prompt once during interactive first installation; blank means Skip.
+  Configure  Bind the explicit CodeGraphPath as a user-owned local Provider.
+  Skip       Do not configure a local CodeGraph override.
 
 The installer writes a timestamped diagnostic log, shows the generated plan,
 and requires an explicit APPLY confirmation before publishing files.
@@ -180,7 +193,8 @@ function Ensure-RepositoryEnvironment {
 
 function Invoke-SelfWorkflow {
     param([string[]]$Arguments, [string]$CapturePath)
-    Write-InstallLog ("Running selfworkflow " + ($Arguments -join " "))
+    $operation = @($Arguments | Select-Object -First 2) -join " "
+    Write-InstallLog ("Running selfworkflow " + $operation)
     $hadPythonPath = Test-Path Env:PYTHONPATH
     $oldPythonPath = $env:PYTHONPATH
     try {
@@ -245,6 +259,7 @@ function Inspect-Superpowers {
 $AgentsRoot = Resolve-FullPath $AgentsRoot
 $CodexRoot = Resolve-FullPath $CodexRoot
 $StateRoot = Resolve-FullPath $StateRoot
+$ProviderConfigFile = Resolve-FullPath $ProviderConfigFile
 $DependencyRoot = Resolve-FullPath $DependencyRoot
 $LogRoot = Resolve-FullPath $LogRoot
 [IO.Directory]::CreateDirectory($LogRoot) | Out-Null
@@ -262,6 +277,8 @@ $superpowersReport = [ordered]@{
     supportStatus = "unsupported"
     reason = "unavailable-or-declined"
 }
+$providerReport = [ordered]@{ status = "skipped" }
+$providerSourceReport = $null
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -350,6 +367,34 @@ try {
         $superpowersReport = Inspect-Superpowers $SuperpowersSource
     }
 
+    Set-InstallStage "provider-selection" 30
+    if ($CodeGraphOverrideChoice -eq "Ask") {
+        if ($NonInteractive) {
+            $CodeGraphOverrideChoice = "Skip"
+        }
+        else {
+            $answer = Read-Host "Configure an explicit local CodeGraph override? [y/N]"
+            if ($answer -match "^(y|yes)$") {
+                $CodeGraphOverrideChoice = "Configure"
+                if (-not $CodeGraphPath) {
+                    $CodeGraphPath = Read-Host "Absolute CodeGraph path"
+                }
+            }
+            else {
+                $CodeGraphOverrideChoice = "Skip"
+            }
+        }
+    }
+    if ($CodeGraphOverrideChoice -eq "Configure") {
+        if (-not $CodeGraphPath) {
+            Stop-Install "provider-selection" 30 "codegraph-path-required"
+        }
+        $CodeGraphPath = (Resolve-Path -LiteralPath $CodeGraphPath -ErrorAction Stop).Path
+        $providerSourceReport = Invoke-SelfWorkflow @(
+            "provider", "inspect", "--codegraph-path", $CodeGraphPath
+        ) (Join-Path $script:LogDirectory "provider-source.json")
+    }
+
     Set-InstallStage "plan" 40
     $doctorBefore = Join-Path $script:LogDirectory "doctor-before.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorBefore | Out-Null
@@ -377,6 +422,12 @@ try {
         Write-InstallLog ("Superpowers inventoryHash: " + $superpowersReport.inventoryHash)
         Write-InstallLog ("Superpowers dirty: " + $superpowersReport.dirty)
     }
+    if ($providerSourceReport) {
+        Write-InstallLog ("CodeGraph commit: " + $providerSourceReport.commit)
+        Write-InstallLog ("CodeGraph sourceHash: " + $providerSourceReport.sourceHash)
+        Write-InstallLog ("CodeGraph dirty: " + $providerSourceReport.dirty)
+        Write-InstallLog ("CodeGraph version: " + $providerSourceReport.version)
+    }
     Write-JsonFile (Join-Path $script:LogDirectory "confirmation-summary.json") ([ordered]@{
         planHash = $plan.planHash
         profile = $plan.profile
@@ -386,6 +437,8 @@ try {
         stateRoot = $StateRoot
         grillMeChoice = $GrillMeChoice
         superpowersChoice = $SuperpowersChoice
+        codeGraphOverrideChoice = $CodeGraphOverrideChoice
+        codeGraphSource = $providerSourceReport
         superpowers = $superpowersReport
     })
 
@@ -394,7 +447,7 @@ try {
         if ($NonInteractive) {
             Stop-Install "confirmation" 50 "explicit-apply-confirmation-required"
         }
-        $answer = Read-Host "Type APPLY to publish this exact plan and displayed Superpowers hash"
+        $answer = Read-Host "Type APPLY to publish this exact plan and displayed dependency/provider hashes"
         if ($answer -cne "APPLY") {
             Stop-Install "confirmation" 50 "installation-cancelled"
         }
@@ -425,12 +478,27 @@ try {
     $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
 
+    if ($CodeGraphOverrideChoice -eq "Configure") {
+        Set-InstallStage "provider-configure" 75
+        $providerArguments = @(
+            "provider", "configure",
+            "--config-file", $ProviderConfigFile,
+            "--codegraph-path", $CodeGraphPath,
+            "--expected-source-hash", $providerSourceReport.sourceHash
+        )
+        if ($ReplaceCodeGraphOverride) {
+            $providerArguments += "--replace-existing"
+        }
+        $providerReport = Invoke-SelfWorkflow $providerArguments (Join-Path $script:LogDirectory "provider-configure.json")
+    }
+
     $summary = [ordered]@{
         schemaVersion = 1
         status = "installed"
         profile = "core"
         grillMe = if ($GrillMeChoice -eq "Install") { "installed" } else { "skipped" }
         superpowers = $superpowersReport
+        codeGraphOverride = $providerReport.status
         writeCapability = if ($SuperpowersChoice -eq "Skip") { "paused-superpowers-unavailable" } else { "enabled" }
         manifestPath = $applyResult.manifestPath
         logDirectory = $script:LogDirectory

@@ -35,6 +35,21 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertNotIn("pip install", content)
         self.assertNotIn("git clone", content)
 
+    def test_provider_batch_is_thin_and_powershell_records_failure_logs(self):
+        batch = (self.ROOT / "Manage_SelfWorkFlow_Providers.bat").read_text(
+            encoding="utf-8"
+        ).casefold()
+        script = (self.ROOT / "scripts/manage-selfworkflow-providers.ps1").read_text(
+            encoding="utf-8"
+        ).casefold()
+        self.assertIn("scripts\\manage-selfworkflow-providers.ps1", batch)
+        self.assertIn("%*", batch)
+        self.assertIn("exit /b %errorlevel%", batch)
+        self.assertIn("selfworkflow.cli provider", script)
+        self.assertIn("provider-manager-failed", script)
+        self.assertIn("selfworkflow\\logs", script)
+        self.assertNotIn("invoke-expression", script)
+
     def test_powershell_help_documents_grill_choices_logs_and_explicit_apply(self):
         script = self.ROOT / "scripts" / "install-selfworkflow.ps1"
         self.assertTrue(script.is_file())
@@ -60,6 +75,8 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertIn("skip", output)
         self.assertIn("apply", output)
         self.assertIn("log", output)
+        self.assertIn("codegraphoverridechoice", output)
+        self.assertIn("codegraphpath", output)
 
     def _run_installer(self, root, *arguments, env=None):
         return subprocess.run(
@@ -77,6 +94,8 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 str(root / "codex"),
                 "-StateRoot",
                 str(root / "state"),
+                "-ProviderConfigFile",
+                str(root / "machine" / "providers.local.yaml"),
                 "-DependencyRoot",
                 str(root / "dependencies"),
                 "-LogRoot",
@@ -131,6 +150,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             summary = json.loads((log_directory / "summary.json").read_text())
             self.assertEqual(summary["status"], "installed")
             self.assertEqual(summary["grillMe"], "skipped")
+            self.assertEqual(summary["codeGraphOverride"], "skipped")
             self.assertEqual(summary["writeCapability"], "paused-superpowers-unavailable")
             self.assertFalse((root / "agents/skills/grill-me").exists())
             self.assertTrue((root / "codex/AGENTS.md").is_file())
@@ -143,6 +163,36 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 "doctor-after.json",
             ):
                 self.assertTrue((log_directory / name).is_file(), name)
+
+    def test_explicit_codegraph_override_is_written_to_the_shared_v3_machine_config(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "codegraph"
+            entry = source / "dist/bin/codegraph.js"
+            entry.parent.mkdir(parents=True)
+            entry.write_text("console.log('9.9.9-test');\n", encoding="utf-8")
+            _commit(source)
+
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice", "Skip",
+                "-SuperpowersChoice", "Skip",
+                "-CodeGraphOverrideChoice", "Configure",
+                "-CodeGraphPath", str(source.resolve()),
+                "-ConfirmApply",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            config = root / "machine/providers.local.yaml"
+            self.assertTrue(config.is_file())
+            value = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(value["schemaVersion"], 3)
+            self.assertEqual(value["providers"][0]["providerId"], "codegraph")
+            self.assertEqual(value["providers"][0]["source"]["version"], "9.9.9-test")
+            summary = json.loads(
+                (self._single_log_directory(root) / "summary.json").read_text()
+            )
+            self.assertEqual(summary["codeGraphOverride"], "configured")
 
     def test_noninteractive_apply_requires_confirmation_before_any_publish(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

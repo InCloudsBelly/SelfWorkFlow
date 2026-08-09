@@ -29,6 +29,13 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertFalse((root / "first/extensions").exists())
             self.assertTrue((root / "first/schemas/plan-graph.schema.json").is_file())
             self.assertTrue((root / "first/workflow/pipeline.yaml").is_file())
+            self.assertTrue((root / "first/schemas/v3/resolve-request.schema.json").is_file())
+            self.assertTrue((root / "first/workflow/v3/pipeline.yaml").is_file())
+            self.assertTrue((root / "first/catalog/v3/index.yaml").is_file())
+            self.assertTrue((root / "first/skills/cpp-core/SKILL.md").is_file())
+            self.assertTrue((root / "first/capabilities/cpp/core.yaml").is_file())
+            self.assertTrue((root / "first/Manage_SelfWorkFlow_Providers.bat").is_file())
+            self.assertTrue((root / "first/scripts/manage-selfworkflow-providers.ps1").is_file())
             self.assertFalse((root / "first/workflow/protected-rules.yaml").exists())
             core_catalog = json.loads((root / "first/catalog.json").read_text())
             self.assertEqual(
@@ -45,6 +52,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
             ).lower()
             self.assertNotIn(b"e:\\", content)
             self.assertNotIn(b"d:\\openwikic7", content)
+            for forbidden in ("provider-config.json", ".codegraph", "logs", "cache"):
+                self.assertFalse(any(
+                    forbidden in path.relative_to(root / "first").as_posix().casefold()
+                    for path in (root / "first").rglob("*")
+                ))
 
     def test_runtime_can_explicitly_exclude_grill_me_without_stale_catalog_metadata(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

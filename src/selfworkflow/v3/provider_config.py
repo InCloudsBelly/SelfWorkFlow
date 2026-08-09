@@ -261,6 +261,13 @@ def _validate_explicit_windows_path(
             raise ProviderConfigError("provider-config-path-invalid") from None
 
 
+def validate_provider_source_path(value: object) -> str:
+    """Validate one explicitly selected Provider path without searching for it."""
+
+    _validate_explicit_windows_path(value, require_existing=True)
+    return str(value)
+
+
 def configured_machine_candidates(config: Mapping[str, Any]) -> list[str]:
     """Return enabled IDs from already-loaded config without path discovery."""
 

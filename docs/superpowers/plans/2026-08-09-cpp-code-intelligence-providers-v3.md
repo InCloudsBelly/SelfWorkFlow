@@ -188,7 +188,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [ ] **Step 3: 实现机器私有配置读取与规范化**
 
-  默认路径为 `%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml`，测试通过参数注入临时根目录。配置仅保存路径、provider ID、项目授权和用户选择；日志与收据必须脱敏。仓库内只提交 schema、模板和示例，不提交真实 `E:\kg-code-graph`。
+  默认路径为 `%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml`，测试通过参数注入临时根目录。配置仅保存路径、provider ID、项目授权和用户选择；日志与收据必须脱敏。仓库内只提交 schema、模板和示例，不提交真实本机路径。
 
 - [ ] **Step 4: 实现静态 ProviderBindingSnapshot**
 
@@ -514,7 +514,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <do
 
 - [ ] **Step 2: 实现 CodeGraph 适配器**
 
-  适配器通过注入的命令执行端口调用 CLI，解析 `status/sync/index` 的真实返回；默认查询不得偷偷初始化索引。无法禁止的自动写行为必须反映到 QueryPlan。对 `E:\kg-code-graph` 仅做本机原生验收示例，路径只能进入机器配置，绝不写入 Git。
+  适配器通过注入的命令执行端口调用 CLI，解析 `status/sync/index` 的真实返回；默认查询不得偷偷初始化索引。无法禁止的自动写行为必须反映到 QueryPlan。对用户显式选择的本地 CodeGraph 仅做本机原生验收，路径只能进入机器配置，绝不写入 Git。
 
 - [ ] **Step 3: 实现 Provider CLI 与管理脚本**
 

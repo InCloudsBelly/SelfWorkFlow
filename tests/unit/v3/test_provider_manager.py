@@ -1,0 +1,274 @@
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+
+
+class FakeCommandPort:
+    def __init__(self, *results):
+        self.results = list(results)
+        self.calls = []
+
+    def run(self, argv, *, cwd=None):
+        self.calls.append({"argv": tuple(argv), "cwd": cwd})
+        if not self.results:
+            raise AssertionError("unexpected command")
+        return self.results.pop(0)
+
+
+class RecordingLogger:
+    def __init__(self):
+        self.events = []
+
+    def __call__(self, event, fields):
+        self.events.append({"event": event, **dict(fields)})
+
+
+class ProviderManagerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+
+    def _result(self, exit_code=0, stdout="", stderr=""):
+        from selfworkflow.v3.providers.codegraph import CommandResult
+
+        return CommandResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
+
+    def _manager(self, port=None, logger=None, replace_operation=None):
+        from selfworkflow.v3.provider_manager import MachineLocalPaths, ProviderManager
+
+        kwargs = {
+            "paths": MachineLocalPaths(
+                config_file=self.root / "machine" / "providers.local.yaml"
+            ),
+            "command_port": port or FakeCommandPort(),
+            "logger": logger,
+        }
+        if replace_operation is not None:
+            kwargs["replace_operation"] = replace_operation
+        return ProviderManager(**kwargs)
+
+    def _configure(self, manager, command_suffix="cli.js", *, replace_existing=False):
+        source = self.root / "private" / "codegraph"
+        source.mkdir(parents=True, exist_ok=True)
+        return manager.configure(
+            provider_id="codegraph",
+            source_path=str(source.resolve()),
+            command_prefix=("node", str(self.root / "private" / command_suffix)),
+            ownership="user-local",
+            source_version="1.3.1-local",
+            source_commit="b" * 40,
+            source_hash="sha256:" + "a" * 64,
+            dirty=True,
+            replace_existing=replace_existing,
+        )
+
+    def test_list_is_empty_without_scanning_or_creating_config(self):
+        manager = self._manager()
+
+        self.assertEqual(manager.list_providers(), {"providers": []})
+        self.assertFalse((self.root / "machine" / "providers.local.yaml").exists())
+
+    def test_configure_is_machine_local_atomic_and_list_is_sanitized(self):
+        manager = self._manager()
+
+        result = self._configure(manager)
+        listed = manager.list_providers()
+
+        self.assertEqual(result["status"], "configured")
+        self.assertEqual(listed["providers"][0]["providerId"], "codegraph")
+        self.assertEqual(listed["providers"][0]["ownership"], "user-local")
+        self.assertTrue(listed["providers"][0]["source"]["dirty"])
+        self.assertRegex(listed["providers"][0]["commandHash"], r"^sha256:[0-9a-f]{64}$")
+        self.assertNotIn(str(self.root), json.dumps(listed))
+        self.assertTrue((self.root / "machine" / "providers.local.yaml").exists())
+        from selfworkflow.v3.provider_config import load_provider_config
+        routing_config = load_provider_config(
+            path=self.root / "machine" / "providers.local.yaml",
+            root=self.root / "machine",
+        )
+        self.assertEqual(routing_config["providers"][0]["providerId"], "codegraph")
+        self.assertTrue(routing_config["providers"][0]["enabled"])
+
+    def test_repeated_configure_is_idempotent(self):
+        manager = self._manager()
+        first = self._configure(manager)
+        config = self.root / "machine" / "providers.local.yaml"
+        before = config.read_bytes()
+
+        second = self._configure(manager)
+
+        self.assertEqual(first["configurationHash"], second["configurationHash"])
+        self.assertEqual(second["status"], "unchanged")
+        self.assertEqual(config.read_bytes(), before)
+
+    def test_different_existing_binding_requires_explicit_replace(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        self._configure(manager, "old.js")
+        with self.assertRaises(ProviderManagerError) as caught:
+            self._configure(manager, "new.js")
+        self.assertEqual(caught.exception.reason, "provider-config-conflict")
+        replaced = self._configure(manager, "new.js", replace_existing=True)
+        self.assertEqual(replaced["status"], "configured")
+
+    def test_doctor_and_status_use_configured_adapter(self):
+        port = FakeCommandPort(
+            self._result(stdout="1.3.1"),
+            self._result(stdout="Usage: codegraph"),
+            self._result(stdout='{"initialized":true,"revision":"r9"}'),
+        )
+        manager = self._manager(port=port)
+        self._configure(manager)
+
+        doctor = manager.doctor("codegraph")
+        status = manager.status("codegraph", "C:/work/project")
+
+        self.assertEqual(doctor["status"], "healthy")
+        self.assertEqual(doctor["supportStatus"], "unverified")
+        self.assertTrue(status["initialized"])
+        self.assertEqual(status["revision"], "r9")
+
+    def test_maintain_plan_only_does_not_execute_mutation(self):
+        port = FakeCommandPort()
+        manager = self._manager(port=port)
+        self._configure(manager)
+
+        plan = manager.maintain(
+            "codegraph", "sync", "C:/work/project", plan_only=True
+        )
+
+        self.assertEqual(plan["sideEffectClass"], "local-write")
+        self.assertEqual(plan["supportStatus"], "unverified")
+        self.assertEqual(port.calls, [])
+
+    def test_maintain_exact_hash_executes_once_and_replay_is_rejected(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        port = FakeCommandPort(self._result(stdout='{"ok":true}'))
+        manager = self._manager(port=port)
+        self._configure(manager)
+        plan = manager.maintain(
+            "codegraph", "sync", "C:/work/project", plan_only=True
+        )
+
+        result = manager.maintain(
+            "codegraph",
+            "sync",
+            "C:/work/project",
+            plan_only=False,
+            confirmed_plan_hash=plan["planHash"],
+        )
+        self.assertEqual(result["status"], "succeeded")
+
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.maintain(
+                "codegraph",
+                "sync",
+                "C:/work/project",
+                plan_only=False,
+                confirmed_plan_hash=plan["planHash"],
+            )
+        self.assertEqual(caught.exception.reason, "provider-maintenance-plan-replayed")
+        self.assertEqual(len(port.calls), 1)
+
+    def test_maintain_rejects_hash_mismatch_before_command(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        port = FakeCommandPort()
+        manager = self._manager(port=port)
+        self._configure(manager)
+
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.maintain(
+                "codegraph",
+                "sync",
+                "C:/work/project",
+                plan_only=False,
+                confirmed_plan_hash="sha256:" + "0" * 64,
+            )
+        self.assertEqual(caught.exception.reason, "provider-maintenance-confirmation-mismatch")
+        self.assertEqual(port.calls, [])
+
+    def test_maintain_plan_cannot_be_replayed_by_fresh_manager(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        issuing = self._manager()
+        self._configure(issuing)
+        plan = issuing.maintain(
+            "codegraph", "sync", "C:/work/project", plan_only=True
+        )
+        fresh_port = FakeCommandPort(self._result(stdout='{"ok":true}'))
+        fresh = self._manager(port=fresh_port)
+
+        with self.assertRaises(ProviderManagerError) as caught:
+            fresh.maintain(
+                "codegraph",
+                "sync",
+                "C:/work/project",
+                plan_only=False,
+                confirmed_plan_hash=plan["planHash"],
+            )
+        self.assertEqual(caught.exception.reason, "provider-maintenance-plan-not-issued")
+        self.assertEqual(fresh_port.calls, [])
+
+    def test_user_owned_provider_upgrade_is_always_rejected(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        manager = self._manager()
+        self._configure(manager)
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.maintain(
+                "codegraph",
+                "upgrade-managed-install",
+                "C:/work/project",
+                plan_only=True,
+            )
+        self.assertEqual(caught.exception.reason, "provider-user-owned-upgrade-forbidden")
+
+    def test_failed_atomic_replace_restores_previous_config(self):
+        manager = self._manager()
+        self._configure(manager, "old.js")
+        config = self.root / "machine" / "providers.local.yaml"
+        old = config.read_bytes()
+        calls = []
+
+        def fail_config_replace(source, target):
+            calls.append((Path(source), Path(target)))
+            if Path(target) == config and sum(1 for _, item in calls if item == config) == 1:
+                raise OSError("injected replace failure")
+            os.replace(source, target)
+
+        failing = self._manager(replace_operation=fail_config_replace)
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+        with self.assertRaises(ProviderManagerError) as caught:
+            self._configure(failing, "new.js", replace_existing=True)
+
+        self.assertEqual(caught.exception.reason, "provider-config-write-failed")
+        self.assertEqual(config.read_bytes(), old)
+        self.assertTrue(config.with_suffix(".yaml.bak").exists())
+
+    def test_failures_and_logs_never_expose_command_path_or_provider_output(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        logger = RecordingLogger()
+        secret = "credential-do-not-log"
+        port = FakeCommandPort(self._result(9, stderr=secret))
+        manager = self._manager(port=port, logger=logger)
+        self._configure(manager, secret + ".js")
+
+        with self.assertRaises(ProviderManagerError) as caught:
+            manager.doctor("codegraph")
+
+        serialized = json.dumps(logger.events)
+        self.assertNotIn(secret, serialized)
+        self.assertNotIn(str(self.root), serialized)
+        self.assertNotIn(secret, str(caught.exception))
+        self.assertEqual(caught.exception.reason, "provider-operation-failed")
+
+
+if __name__ == "__main__":
+    unittest.main()

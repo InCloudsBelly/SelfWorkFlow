@@ -1,9 +1,11 @@
 """Command-line entry point for SelfWorkFlow."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -31,6 +33,128 @@ from selfworkflow.transactions import write_json_atomic
 
 
 _REPARSE_POINT = 0x400
+
+
+class _SubprocessCommandPort:
+    """Shell-free process boundary used only by the explicit Provider CLI."""
+
+    def run(self, argv, *, cwd=None):
+        from selfworkflow.v3.providers.codegraph import CommandResult
+
+        try:
+            result = subprocess.run(
+                list(argv), cwd=cwd, check=False, capture_output=True,
+                text=True, timeout=120,
+            )
+        except Exception:
+            return CommandResult(exit_code=9009)
+        return CommandResult(
+            exit_code=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+
+
+def _provider_config_file(value: str | None) -> Path:
+    from selfworkflow.v3.provider_config import provider_config_path
+
+    return _absolute_path(value) if value else provider_config_path()
+
+
+def _provider_manager(config_file: str | None):
+    from selfworkflow.v3.provider_manager import MachineLocalPaths, ProviderManager
+
+    return ProviderManager(
+        paths=MachineLocalPaths(config_file=_provider_config_file(config_file)),
+        command_port=_SubprocessCommandPort(),
+    )
+
+
+def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
+    from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
+
+    source = _absolute_path(source_value).resolve(strict=True)
+    script = source / "dist" / "bin" / "codegraph.js"
+    if source.is_symlink() or not script.is_file() or script.is_symlink():
+        raise ValueError("codegraph-source-invalid")
+    if script.stat().st_size > 16 * 1024 * 1024:
+        raise ValueError("codegraph-source-inspection-failed")
+
+    def git_bytes(*arguments: str, limit: int = 16 * 1024 * 1024) -> bytes:
+        result = subprocess.run(
+            ["git", *arguments], cwd=source, check=False,
+            capture_output=True, timeout=120,
+        )
+        if result.returncode != 0 or len(result.stdout) > limit:
+            raise ValueError("codegraph-source-inspection-failed")
+        return result.stdout
+
+    top = Path(git_bytes("rev-parse", "--show-toplevel").decode("utf-8").strip())
+    if top.resolve(strict=True) != source:
+        raise ValueError("codegraph-source-invalid")
+    commit = git_bytes("rev-parse", "HEAD").decode("ascii").strip().lower()
+    tree = git_bytes("rev-parse", "HEAD^{tree}").decode("ascii").strip().lower()
+    status = git_bytes(
+        "status", "--porcelain=v1", "-z", "--untracked-files=normal",
+        limit=1024 * 1024,
+    )
+    relevant_diff = git_bytes(
+        "diff", "--binary", "HEAD", "--", "dist", "package.json",
+        "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    )
+    source_material = {
+        "commit": commit,
+        "tree": tree,
+        "statusHash": "sha256:" + hashlib.sha256(status).hexdigest(),
+        "relevantDiffHash": "sha256:" + hashlib.sha256(relevant_diff).hexdigest(),
+        "entryHash": "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest(),
+    }
+    source_hash = "sha256:" + hashlib.sha256(
+        json.dumps(source_material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    adapter = CodeGraphAdapter(
+        command_port=_SubprocessCommandPort(),
+        command_prefix=("node", str(script)),
+        ownership="user-local",
+    )
+    version = adapter.version()["version"]
+    return {
+        "source": source,
+        "script": script,
+        "report": {
+            "providerId": "codegraph",
+            "sourceType": "local-git",
+            "commit": commit,
+            "dirty": bool(status),
+            "sourceHash": source_hash,
+            "version": version,
+            "supportStatus": "unverified",
+        },
+    }
+
+
+def _configure_codegraph(
+    manager, source_value: str, *, replace_existing: bool = False,
+    expected_source_hash: str | None = None,
+) -> dict[str, object]:
+    observation = _inspect_codegraph_source(source_value)
+    report = observation["report"]
+    if (
+        expected_source_hash is not None
+        and expected_source_hash != report["sourceHash"]
+    ):
+        raise ValueError("codegraph-source-drift")
+    return manager.configure(
+        provider_id="codegraph",
+        source_path=str(observation["source"]),
+        command_prefix=("node", str(observation["script"])),
+        ownership="user-local",
+        source_version=str(report["version"]),
+        source_commit=str(report["commit"]),
+        source_hash=str(report["sourceHash"]),
+        dirty=bool(report["dirty"]),
+        replace_existing=replace_existing,
+    )
 
 
 def _reject_duplicate_json_keys(
@@ -198,6 +322,35 @@ def main(argv: list[str] | None = None) -> int:
     source_stage.add_argument("--path", required=True)
     source_stage.add_argument("--target", required=True)
     source_stage.add_argument("--expected-inventory-hash", required=True)
+    provider_parser = commands.add_parser("provider")
+    provider_commands = provider_parser.add_subparsers(
+        dest="provider_command", required=True,
+    )
+    provider_list = provider_commands.add_parser("list")
+    provider_list.add_argument("--config-file")
+    provider_inspect = provider_commands.add_parser("inspect")
+    provider_inspect.add_argument("--codegraph-path", required=True)
+    provider_configure = provider_commands.add_parser("configure")
+    provider_configure.add_argument("--config-file")
+    provider_configure.add_argument("--codegraph-path", required=True)
+    provider_configure.add_argument("--replace-existing", action="store_true")
+    provider_configure.add_argument("--expected-source-hash")
+    provider_doctor = provider_commands.add_parser("doctor")
+    provider_doctor.add_argument("--config-file")
+    provider_doctor.add_argument("--provider-id", default="codegraph")
+    provider_status = provider_commands.add_parser("status")
+    provider_status.add_argument("--config-file")
+    provider_status.add_argument("--provider-id", default="codegraph")
+    provider_status.add_argument("--project-root", required=True)
+    provider_maintain = provider_commands.add_parser("maintain")
+    provider_maintain.add_argument("--config-file")
+    provider_maintain.add_argument("--provider-id", default="codegraph")
+    provider_maintain.add_argument(
+        "--action", required=True, choices=("initialize", "sync", "rebuild"),
+    )
+    provider_maintain.add_argument("--project-root", required=True)
+    provider_maintain.add_argument("--plan-only", action="store_true")
+    provider_maintain.add_argument("--confirm-plan-hash")
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -219,6 +372,49 @@ def main(argv: list[str] | None = None) -> int:
     rollback_apply.add_argument("--plan", required=True)
     rollback_apply.add_argument("--confirm-plan-hash", required=True)
     arguments = parser.parse_args(argv)
+    if arguments.command == "provider":
+        try:
+            if arguments.provider_command == "inspect":
+                result = _inspect_codegraph_source(arguments.codegraph_path)["report"]
+            else:
+                manager = _provider_manager(arguments.config_file)
+            if arguments.provider_command == "list":
+                result = manager.list_providers()
+            elif arguments.provider_command == "configure":
+                result = _configure_codegraph(
+                    manager, arguments.codegraph_path,
+                    replace_existing=arguments.replace_existing,
+                    expected_source_hash=arguments.expected_source_hash,
+                )
+            elif arguments.provider_command == "doctor":
+                result = manager.doctor(arguments.provider_id)
+            elif arguments.provider_command == "status":
+                result = manager.status(arguments.provider_id, arguments.project_root)
+            elif arguments.provider_command == "maintain":
+                plan = manager.maintain(
+                    arguments.provider_id, arguments.action,
+                    arguments.project_root, plan_only=True,
+                )
+                if arguments.plan_only:
+                    result = plan
+                else:
+                    if not arguments.confirm_plan_hash:
+                        raise ValueError("provider-maintenance-confirmation-required")
+                    result = manager.maintain(
+                        arguments.provider_id, arguments.action,
+                        arguments.project_root, plan_only=False,
+                        confirmed_plan_hash=arguments.confirm_plan_hash,
+                    )
+            elif arguments.provider_command == "inspect":
+                pass
+            else:
+                raise ValueError("provider-command-invalid")
+        except Exception as error:
+            reason = getattr(error, "reason", "provider-operation-failed")
+            print(f"SelfWorkFlow: provider-operation-failed:{reason}", file=sys.stderr)
+            return 70
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
     if arguments.command == "catalog" and arguments.catalog_command == "compile":
         try:
             catalog_hash = _publish_catalog(arguments.source, arguments.output)

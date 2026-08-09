@@ -18,6 +18,13 @@ Skill when it is missing. Grill-me remains explicit-only after installation. If
 it is skipped, ordinary workflow installation continues but later explicit
 Grill-me requests must pause and report the missing capability.
 
+The same first-install flow asks once whether to bind an explicitly selected
+local CodeGraph checkout. It never scans disks. Blank input skips the optional
+override; unattended installation also skips it unless
+`-CodeGraphOverrideChoice Configure -CodeGraphPath <absolute-path>` is supplied.
+The resulting machine-only configuration is written to
+`%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml` and is excluded from Git.
+
 Installing the official Superpowers dependency has its own earlier authorization;
 the clone is inspected before the final plan and its commit and inventory hash are
 shown in the confirmation summary. Before publishing workflow files, the installer
@@ -79,6 +86,32 @@ Runtime profiles are closed and deterministic:
 - `maintainer`: the complete governance, installation, release, and extension
   snapshot.
 
+The `core` and `maintainer` artifacts include the explicit V3 contracts,
+adaptive TEA/C++ routing, `cpp-core`, Provider descriptors and the Provider
+management entry. These files are loaded only by matching V3 requests; machine
+configuration, logs, indexes and caches are never packaged.
+
+## Optional CodeGraph provider
+
+Use the thin management entry after installation:
+
+```bat
+Manage_SelfWorkFlow_Providers.bat list
+Manage_SelfWorkFlow_Providers.bat configure --codegraph-path <local-codegraph-root>
+Manage_SelfWorkFlow_Providers.bat doctor
+Manage_SelfWorkFlow_Providers.bat status --project-root D:\project
+Manage_SelfWorkFlow_Providers.bat maintain --action sync --project-root D:\project --plan-only
+```
+
+Review the maintenance plan, then repeat the command without `--plan-only` and
+add `--confirm-plan-hash <exact-hash>`. User-owned local overrides are never
+upgraded by SelfWorkFlow. Replacing a different existing binding fails with a
+conflict unless the user explicitly repeats configure with `--replace-existing`
+(or the installer is run with `-ReplaceCodeGraphOverride`). CodeGraph query/sync/index behavior remains
+`unverified` until native per-operation validation; query planning explicitly
+marks the upstream CLI's unavoidable auto-sync possibility as
+`potential-local-write`. See `docs/providers/codegraph.md`.
+
 ## Current capability status
 
 - Deterministic workflow, Pipeline, Catalog v2, PlanGraph/RunLedger validation,
@@ -86,6 +119,10 @@ Runtime profiles are closed and deterministic:
   Skill absorption, adapters,
   optional generic Knowledge slots, runtime build, and
   sandbox transaction install/verify/rollback are implemented and automated-tested.
+- V3 adaptive TEA/C++ routing, the post-Grill Host gate, machine-local CodeGraph
+  binding, Provider diagnostics and hash-confirmed maintenance planning are
+  implemented and automated-tested. Real CodeGraph query and mutation operations
+  remain `unverified` and are not silently promoted by Fake-port tests.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
   `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
   `adapters/unknown/BOOTSTRAP.md`.

@@ -424,7 +424,7 @@ CodeGraph 的 auto-sync 不能绕过维护授权。如果 Adapter 能禁用 auto
 机器级 `(providerId, canonicalProjectRoot)` 授权；它不得标为 `automatic-readonly`。持续授权减少重复询问，
 但每次仍生成 QueryPlan、QueryReceipt 和实际索引变更对账。
 
-用户可将本地 `E:\kg-code-graph` 显式配置为机器级 `code.context` 首选 Provider；共享仓库只保存示例和契约，
+用户可将本地 `<local-codegraph-root>` 显式配置为机器级 `code.context` 首选 Provider；共享仓库只保存示例和契约，
 不保存该路径、索引或个人状态。
 
 ## 10. Pipeline 映射与上下文预算
@@ -488,11 +488,15 @@ reasonCodes:
   - post-grill-review-input-invalid
   - post-grill-review-attestation-missing
   - post-grill-review-user-authorization-required
+  - post-grill-review-changes-required
+  - post-grill-review-authorization-replayed
+  - post-grill-review-attestation-replayed
 ```
 
 显式 Grill-me 完成并确认共同理解后，必须创建新的独立 SubAgent，`fork_context=false`，只传规范化设计摘要、
 约束和验收条件，不传 Grill-me 的盘问记录或推理过程。摘要必须符合关闭的
-`design-review-summary.schema.json`。Host/Collector 从实际 spawn 参数和发送 payload 计算 summary hash，并生成
+`design-review-summary.schema.json`。Agent 只提交摘要的内容 hash；摘要正文、调度端口、证明解析器与一次性消费器
+均由嵌入 Host 在构造时绑定，不能在单次 Agent 调用中替换。Host/Collector 从实际 spawn 参数和发送 payload 计算 summary hash，并生成
 ReviewIndependenceReceipt；Agent 自报字段不能升级独立性。Receipt 绑定：
 
 ```text
@@ -502,6 +506,7 @@ inputMode=summary-only
 parentContextImported=false
 grillReasoningReceived=false
 inputSummaryHash / designHash / reviewerPolicyHash
+planHash / attemptRef / dispatchNonce / issuedAt / expiresAt
 fallbackAuthorizationRef / independence / receiptHash
 ```
 
@@ -523,7 +528,14 @@ union：`independent-context-without-attestation | same-agent-structured-review`
 | 否 | 任意 | 否 | 暂停，原因 `post-grill-review-user-authorization-required` |
 | 否 | 任意 | 是，且 mode 匹配 | 继续同 Agent 结构化 Review，`independence=unverified` |
 
-Fallback authorization 过期、撤销、designHash 或 reviewerPolicyHash 漂移时一律无效。
+Host attestation 与 fallback authorization 都必须一次性消费；重复使用返回稳定的 replay reason code。Fallback
+authorization 过期、撤销、designHash 或 reviewerPolicyHash 漂移时一律无效。结构化 Review 返回
+`changes-required` 时不得签发可通过 designed-stage 的 Host evidence。
+
+信任边界是嵌入 SelfWorkFlow 的 Host/runtime；同一 Python 进程中拥有任意代码执行权的恶意嵌入方不在本契约的
+防护范围。生产路径只接受 `external-host` 服务证明；仓库 Fake 服务仅在显式 test mode 中可绑定。未接入真实
+Host 服务时，V3 会以 `post-grill-review-host-services-required` 失败关闭，因此当前自动测试只证明契约与失败
+路径，不伪称已完成任一厂商宿主的原生适配。
 
 该受保护规则的实现属于破坏性工作流变更，必须同时具备 owner-confirmation、SemVer major、独立 Review 和
 行为测试工件；普通项目规则和 Skill 不得覆盖。
