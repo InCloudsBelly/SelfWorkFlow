@@ -13,6 +13,9 @@ if ($Suite -in @("unit", "conformance", "installer", "behavioral", "automated"))
     if ($Test) {
         & $TestScript -Test $Test
     }
+    elseif ($Suite -eq "unit") {
+        & $TestScript -Test "tests.unit"
+    }
     elseif ($Suite -eq "conformance") {
         & $TestScript -Test "tests.conformance"
     }

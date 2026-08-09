@@ -410,6 +410,7 @@ class VerifyScriptTests(unittest.TestCase):
         verify_script = repository_root / "scripts" / "verify.ps1"
 
         expected = {
+            "unit": ["-m", "unittest", "tests.unit", "-v"],
             "conformance": ["-m", "unittest", "tests.conformance", "-v"],
             "installer": ["-m", "unittest", "tests.installer", "-v"],
             "behavioral": ["-m", "unittest", "tests.behavioral", "-v"],
