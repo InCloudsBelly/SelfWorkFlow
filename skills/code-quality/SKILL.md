@@ -1,13 +1,19 @@
 ---
 name: code-quality
-description: Use when diagnosing or implementing behavior code, bug fixes, refactors, configuration consumers, persistence changes, or cross-layer changes.
+description: Use when reading or explaining behavior code, diagnosing behavior, fixing bugs, refactoring, or changing configuration consumers, persistence, or cross-layer behavior.
 ---
 
 # Code Quality
 
-Use this Skill for behavior code, bug fixes, refactors, configuration consumers, and cross-layer changes. It is standalone and does not depend on any maintainer-local Skill.
+Use this Skill for understanding or changing behavior code, bug fixes, refactors, configuration consumers, and cross-layer behavior. It is standalone and does not depend on any maintainer-local Skill.
 
-## Required loop
+## Read-only reasoning core
+
+For read-only analysis, trace the smallest complete slice from inputs and owners through transforms to observable outputs. Identify invariants, failure ownership, and evidence gaps, then stop with an evidence-backed explanation. Read-only analysis does not activate change rules, TDD, builds, debugger actions, or a full workflow.
+
+## Change rules
+
+Apply this loop only when diagnosing a failure that needs verification or when changing files:
 
 1. Freeze the failure envelope: expected, actual, exact inputs, first observation point, modes, retry/resume state, and current dirty changes.
 2. Build the smallest complete slice: `producer -> persisted state -> transform -> consumer/detection point`.
