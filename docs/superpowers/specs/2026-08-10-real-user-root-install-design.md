@@ -63,6 +63,10 @@ staging 先把 junction 移到备份位置，再原子发布受信任 Git invent
 一键安装器在选择并检查 Superpowers 来源后调用增强 staging；保留现有
 plan → confirm → apply → verify → doctor 顺序以及 Provider 配置事务。迁移回执进入
 日志与 summary，失败路径按相反顺序恢复 Provider、Superpowers 和核心安装事务。
+恢复前必须先验证 journal 路径边界、backup junction 和 staged inventory，任何漂移
+均停止而不删除目标。迁移 `committed` 是最后一个可能导致整体回滚的关键步骤；其后
+Provider 回滚记录的删除只属于可重试清理，失败时保留记录并提示，不得把已经验证且
+提交的安装重新带入不完整的跨事务回滚。
 
 ## 验证
 

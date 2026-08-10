@@ -80,6 +80,202 @@ def _reject_reparse_chain(path: Path) -> None:
         current = current.parent
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _same_volume(left: Path, right: Path) -> bool:
+    left_drive = os.path.splitdrive(str(left))[0].casefold()
+    right_drive = os.path.splitdrive(str(right))[0].casefold()
+    return left_drive == right_drive
+
+
+def _write_json_atomic(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(value, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+
+def _load_migration_journal(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        raise SourceSelectionError("migration-journal-invalid") from None
+    required = {
+        "schemaVersion", "stateRoot", "sourceRoot", "sourceSkills", "targetRoot",
+        "target", "backup", "protectedRoots", "inventoryHash", "phase",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or value.get("schemaVersion") != 1
+        or value.get("phase") not in {"prepared", "link-moved", "staged", "restored", "committed"}
+        or any(
+            not isinstance(value.get(key), str)
+            for key in required - {"schemaVersion", "protectedRoots"}
+        )
+        or not isinstance(value.get("protectedRoots"), list)
+        or any(not isinstance(item, str) for item in value["protectedRoots"])
+    ):
+        raise SourceSelectionError("migration-journal-invalid")
+    return value
+
+
+def _validated_migration_paths(
+    journal: Path, intent: dict[str, object]
+) -> tuple[Path, Path, Path]:
+    state = Path(intent["stateRoot"])
+    source_root = Path(intent["sourceRoot"])
+    source_skills = Path(intent["sourceSkills"])
+    target_root = Path(intent["targetRoot"])
+    target = Path(intent["target"])
+    backup = Path(intent["backup"])
+    protected = tuple(Path(item) for item in intent["protectedRoots"])
+    paths = (state, source_root, source_skills, target_root, target, backup, *protected)
+    if any(not path.is_absolute() for path in paths):
+        raise SourceSelectionError("migration-journal-invalid")
+    expected_journal = state / "source-migrations" / "superpowers.json"
+    expected_backup_root = state / "source-migrations" / "backups"
+    if (
+        journal != expected_journal
+        or source_skills != source_root / "skills"
+        or target != target_root / "skills" / "superpowers"
+        or not _is_within(backup, expected_backup_root)
+        or backup == expected_backup_root
+        or not _same_volume(target, backup)
+        or _is_within(state, source_root)
+        or _is_within(source_root, state)
+        or _is_within(backup, target_root)
+        or any(_is_within(backup, item) for item in (source_root, *protected))
+    ):
+        raise SourceSelectionError("migration-journal-invalid")
+    _reject_reparse_chain(state)
+    _reject_reparse_chain(journal)
+    _reject_reparse_chain(backup.parent)
+    _reject_reparse_chain(source_root)
+    _reject_reparse_chain(source_skills)
+    _reject_reparse_chain(target_root)
+    _reject_reparse_chain(target.parent)
+    for item in protected:
+        _reject_reparse_chain(item)
+    return target, backup, source_skills
+
+
+def _verify_source_link(path: Path, expected: Path) -> bool:
+    return (
+        os.path.lexists(path)
+        and _is_reparse(path)
+        and path.is_dir()
+        and path.resolve(strict=True) == expected
+    )
+
+
+def recover_superpowers_migration(
+    migration_journal: str | Path, *, if_exists: bool = False
+) -> dict[str, object]:
+    """Restore a non-committed compatible-link migration without guessing."""
+
+    journal = Path(migration_journal)
+    if not journal.is_absolute():
+        raise SourceSelectionError("absolute-migration-path-required")
+    if not journal.exists():
+        if if_exists:
+            return {"status": "not-required", "journal": str(journal)}
+        raise SourceSelectionError("migration-journal-missing")
+    _reject_reparse_chain(journal)
+    journal = journal.absolute()
+    intent = _load_migration_journal(journal)
+    target, backup, source_skills = _validated_migration_paths(journal, intent)
+    if intent["phase"] in {"committed", "restored"}:
+        return {"status": intent["phase"], "journal": str(journal)}
+    inventory_hash = intent["inventoryHash"]
+    if _verify_source_link(target, source_skills):
+        if os.path.lexists(backup):
+            raise SourceSelectionError("migration-backup-drift")
+        intent["phase"] = "restored"
+        _write_json_atomic(journal, intent)
+        return {"status": "restored", "journal": str(journal)}
+    if not _verify_source_link(backup, source_skills):
+        raise SourceSelectionError("migration-backup-drift")
+    if os.path.lexists(target) and _verify_staged_target(target, inventory_hash):
+        shutil.rmtree(target)
+    elif os.path.lexists(target):
+        if not _verify_source_link(target, source_skills):
+            raise SourceSelectionError("migration-target-drift")
+        intent["phase"] = "restored"
+        _write_json_atomic(journal, intent)
+        return {"status": "restored", "journal": str(journal)}
+    os.replace(backup, target)
+    intent["phase"] = "restored"
+    _write_json_atomic(journal, intent)
+    return {"status": "restored", "journal": str(journal)}
+
+
+def commit_superpowers_migration(migration_journal: str | Path) -> dict[str, object]:
+    """Close a staged migration only after the caller's final verification."""
+
+    journal = Path(migration_journal)
+    if not journal.is_absolute() or not journal.exists():
+        raise SourceSelectionError("migration-journal-missing")
+    _reject_reparse_chain(journal)
+    journal = journal.absolute()
+    intent = _load_migration_journal(journal)
+    target, backup, source_skills = _validated_migration_paths(journal, intent)
+    if intent["phase"] == "committed":
+        return {"status": "committed", "journal": str(journal)}
+    if intent["phase"] != "staged" or not _verify_staged_target(
+        target, intent["inventoryHash"]
+    ):
+        raise SourceSelectionError("migration-not-staged")
+    if not _verify_source_link(backup, source_skills):
+        raise SourceSelectionError("migration-backup-drift")
+    intent["phase"] = "committed"
+    _write_json_atomic(journal, intent)
+    return {
+        "status": "committed",
+        "journal": str(journal),
+        "backup": intent["backup"],
+    }
+
+
+def remove_staged_superpowers_source(
+    target: str | Path, expected_inventory_hash: str
+) -> dict[str, object]:
+    """Remove only an exact staged snapshot; refuse user or concurrent drift."""
+
+    destination = Path(target)
+    if not destination.is_absolute():
+        raise SourceSelectionError("absolute-target-required")
+    _reject_reparse_chain(destination.parent)
+    if not os.path.lexists(destination):
+        return {"status": "not-present", "target": str(destination)}
+    if _is_reparse(destination) or not _verify_staged_target(
+        destination, expected_inventory_hash
+    ):
+        raise SourceSelectionError("staged-target-drift")
+    shutil.rmtree(destination)
+    return {
+        "status": "removed",
+        "target": str(destination),
+        "inventoryHash": expected_inventory_hash,
+    }
+
+
 def _inventory_hash(entries: list[dict[str, str]]) -> str:
     encoded = json.dumps(
         entries, sort_keys=True, separators=(",", ":")
@@ -289,6 +485,12 @@ def stage_superpowers_source(
     source: str | Path,
     target: str | Path,
     expected_inventory_hash: str,
+    *,
+    allow_compatible_link: bool = False,
+    state_root: str | Path | None = None,
+    migration_journal: str | Path | None = None,
+    migration_backup: str | Path | None = None,
+    protected_roots: tuple[str | Path, ...] = (),
 ) -> dict[str, object]:
     """Atomically stage only Git-tracked Superpowers Skill files."""
 
@@ -297,9 +499,9 @@ def stage_superpowers_source(
     if not destination_path.is_absolute():
         raise SourceSelectionError("absolute-target-required")
     _reject_reparse_chain(source_path.absolute())
-    _reject_reparse_chain(destination_path)
+    _reject_reparse_chain(destination_path.parent)
     root = source_path.resolve(strict=True)
-    destination = destination_path.resolve(strict=False)
+    destination = destination_path.absolute()
     if destination == root or destination in root.parents or root in destination.parents:
         raise SourceSelectionError("source-target-overlap")
     report = inspect_superpowers_source(root)
@@ -308,7 +510,60 @@ def stage_superpowers_source(
         or report.get("inventoryHash") != expected_inventory_hash
     ):
         raise SourceSelectionError("source-drift")
-    if destination.exists() or destination.is_symlink():
+    migration: dict[str, object] | None = None
+    if os.path.lexists(destination_path) and _is_reparse(destination_path):
+        if not allow_compatible_link:
+            raise SourceSelectionError("target-conflict")
+        if state_root is None or migration_journal is None or migration_backup is None:
+            raise SourceSelectionError("migration-path-required")
+        state = Path(state_root)
+        journal = Path(migration_journal)
+        backup = Path(migration_backup)
+        if not all(path.is_absolute() for path in (state, journal, backup)):
+            raise SourceSelectionError("absolute-migration-path-required")
+        _reject_reparse_chain(state)
+        _reject_reparse_chain(journal)
+        _reject_reparse_chain(backup)
+        protected_values = tuple(Path(path) for path in protected_roots)
+        for item in protected_values:
+            if not item.is_absolute():
+                raise SourceSelectionError("absolute-migration-path-required")
+            _reject_reparse_chain(item)
+        state = state.absolute()
+        journal = journal.absolute()
+        backup = backup.absolute()
+        protected = tuple(path.absolute() for path in protected_values)
+        if (
+            not _is_within(journal, state)
+            or not _is_within(backup, state)
+            or backup == state
+            or not _same_volume(destination_path, backup)
+            or _is_within(state, root)
+            or _is_within(root, state)
+            or any(_is_within(backup, item) for item in (root, *protected))
+            or os.path.lexists(backup)
+        ):
+            raise SourceSelectionError("migration-path-invalid")
+        _reject_reparse_chain(state)
+        _reject_reparse_chain(journal.parent)
+        _reject_reparse_chain(backup.parent)
+        source_skills = (root / "skills").resolve(strict=True)
+        if not _verify_source_link(destination_path, source_skills):
+            raise SourceSelectionError("target-conflict")
+        migration = {
+            "schemaVersion": 1,
+            "stateRoot": str(state),
+            "sourceRoot": str(root),
+            "sourceSkills": str(source_skills),
+            "targetRoot": str(destination_path.parent.parent),
+            "target": str(destination_path),
+            "backup": str(backup),
+            "protectedRoots": [str(item) for item in protected],
+            "inventoryHash": expected_inventory_hash,
+            "phase": "prepared",
+        }
+        _validated_migration_paths(journal, migration)
+    elif destination.exists() or destination.is_symlink():
         if destination.is_dir() and _verify_staged_target(
             destination, expected_inventory_hash
         ):
@@ -354,12 +609,34 @@ def stage_superpowers_source(
         )
         if inspect_superpowers_source(root).get("inventoryHash") != expected_inventory_hash:
             raise SourceSelectionError("source-drift")
+        if migration is not None:
+            journal = Path(migration_journal)
+            backup = Path(migration_backup)
+            _write_json_atomic(journal, migration)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(destination_path, backup)
+            migration["phase"] = "link-moved"
+            _write_json_atomic(journal, migration)
         os.replace(temporary, destination)
+        if migration is not None:
+            migration["phase"] = "staged"
+            _write_json_atomic(Path(migration_journal), migration)
+    except BaseException:
+        if migration is not None and Path(migration_journal).exists():
+            recover_superpowers_migration(Path(migration_journal))
+        raise
     finally:
         if temporary.exists():
             shutil.rmtree(temporary, ignore_errors=True)
-    return {
+    result = {
         "status": "staged",
         "target": str(destination),
         "inventoryHash": expected_inventory_hash,
     }
+    if migration is not None:
+        result.update({
+            "migrationStatus": "staged",
+            "migrationJournal": str(Path(migration_journal)),
+            "migrationBackup": str(Path(migration_backup)),
+        })
+    return result

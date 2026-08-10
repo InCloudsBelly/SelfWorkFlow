@@ -8,6 +8,9 @@ import unittest
 from unittest import mock
 
 from selfworkflow.sources import (
+    commit_superpowers_migration,
+    recover_superpowers_migration,
+    remove_staged_superpowers_source,
     SourceSelectionError,
     inspect_superpowers_source,
     lock_superpowers_source,
@@ -239,6 +242,352 @@ class SuperpowersSourceTests(unittest.TestCase):
                     stage_superpowers_source(
                         source, target, report["inventoryHash"]
                     )
+            self.assertFalse(target.exists())
+
+    def test_compatible_link_migration_is_explicit_hash_bound_and_recoverable(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(source / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            state = root / "state"
+            journal = state / "source-migrations/superpowers.json"
+            backup = state / "source-migrations/backups/superpowers-link"
+
+            with self.assertRaisesRegex(SourceSelectionError, "target-conflict"):
+                stage_superpowers_source(source, target, report["inventoryHash"])
+
+            staged = stage_superpowers_source(
+                source,
+                target,
+                report["inventoryHash"],
+                allow_compatible_link=True,
+                state_root=state,
+                migration_journal=journal,
+                migration_backup=backup,
+                protected_roots=(root / "agents", root / "codex", root / "artifact"),
+            )
+
+            self.assertEqual(staged["migrationStatus"], "staged")
+            self.assertFalse(target.is_symlink())
+            self.assertTrue((target / "brainstorming/SKILL.md").is_file())
+            self.assertTrue(backup.is_symlink())
+            restored = recover_superpowers_migration(journal)
+            self.assertEqual(restored["status"], "restored")
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.resolve(), (source / "skills").resolve())
+
+    def test_compatible_link_migration_rejects_wrong_source_and_unsafe_backup(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            wrong = root / "wrong"
+            wrong.mkdir()
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(wrong, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            state = root / "state"
+            with self.assertRaisesRegex(SourceSelectionError, "target-conflict"):
+                stage_superpowers_source(
+                    source,
+                    target,
+                    report["inventoryHash"],
+                    allow_compatible_link=True,
+                    state_root=state,
+                    migration_journal=state / "source-migrations/superpowers.json",
+                    migration_backup=state / "source-migrations/backups/link",
+                )
+
+            target.unlink()
+            target.symlink_to(source / "skills", target_is_directory=True)
+            with self.assertRaisesRegex(SourceSelectionError, "migration-path-invalid"):
+                stage_superpowers_source(
+                    source,
+                    target,
+                    report["inventoryHash"],
+                    allow_compatible_link=True,
+                    state_root=state,
+                    migration_journal=state / "source-migrations/superpowers.json",
+                    migration_backup=source / "backup-link",
+                )
+
+            with mock.patch("selfworkflow.sources._same_volume", return_value=False):
+                with self.assertRaisesRegex(SourceSelectionError, "migration-path-invalid"):
+                    stage_superpowers_source(
+                        source,
+                        target,
+                        report["inventoryHash"],
+                        allow_compatible_link=True,
+                        state_root=state,
+                        migration_journal=state / "source-migrations/superpowers.json",
+                        migration_backup=state / "source-migrations/backups/link",
+                    )
+
+    def test_migration_failure_restores_link_and_commit_closes_recovery(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            state = root / "state"
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(source / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            journal = state / "source-migrations/superpowers.json"
+            backup = state / "source-migrations/backups/link"
+
+            with mock.patch(
+                "selfworkflow.sources.shutil.copyfile",
+                side_effect=OSError("copy failed"),
+            ):
+                with self.assertRaises(OSError):
+                    stage_superpowers_source(
+                        source,
+                        target,
+                        report["inventoryHash"],
+                        allow_compatible_link=True,
+                        state_root=state,
+                        migration_journal=journal,
+                        migration_backup=backup,
+                    )
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.resolve(), (source / "skills").resolve())
+
+            stage_superpowers_source(
+                source,
+                target,
+                report["inventoryHash"],
+                allow_compatible_link=True,
+                state_root=state,
+                migration_journal=journal,
+                migration_backup=backup,
+            )
+            committed = commit_superpowers_migration(journal)
+            self.assertEqual(committed["status"], "committed")
+            self.assertEqual(
+                recover_superpowers_migration(journal)["status"], "committed"
+            )
+            self.assertFalse(target.is_symlink())
+
+    def test_recovery_validates_backup_before_removing_staged_target(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            state = root / "state"
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(source / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            journal = state / "source-migrations/superpowers.json"
+            backup = state / "source-migrations/backups/link"
+            stage_superpowers_source(
+                source,
+                target,
+                report["inventoryHash"],
+                allow_compatible_link=True,
+                state_root=state,
+                migration_journal=journal,
+                migration_backup=backup,
+                protected_roots=(root / "agents", root / "codex", root / "artifact"),
+            )
+            backup.unlink()
+
+            with self.assertRaisesRegex(SourceSelectionError, "migration-backup-drift"):
+                recover_superpowers_migration(journal)
+
+            self.assertTrue((target / "brainstorming/SKILL.md").is_file())
+
+    def test_recovery_rejects_tampered_journal_paths_without_touching_target(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            state = root / "state"
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(source / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            journal = state / "source-migrations/superpowers.json"
+            stage_superpowers_source(
+                source,
+                target,
+                report["inventoryHash"],
+                allow_compatible_link=True,
+                state_root=state,
+                migration_journal=journal,
+                migration_backup=state / "source-migrations/backups/link",
+                protected_roots=(root / "agents", root / "codex", root / "artifact"),
+            )
+            intent = json.loads(journal.read_text(encoding="utf-8"))
+            intent["backup"] = str(source / "hostile-backup")
+            journal.write_text(json.dumps(intent), encoding="utf-8")
+
+            with self.assertRaisesRegex(SourceSelectionError, "migration-journal-invalid"):
+                recover_superpowers_migration(journal)
+
+            self.assertTrue((target / "brainstorming/SKILL.md").is_file())
+
+    def test_prepared_intent_with_original_link_is_safely_closed(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            state = root / "state"
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(source / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            journal = state / "source-migrations/superpowers.json"
+            backup = state / "source-migrations/backups/link"
+            stage_superpowers_source(
+                source,
+                target,
+                report["inventoryHash"],
+                allow_compatible_link=True,
+                state_root=state,
+                migration_journal=journal,
+                migration_backup=backup,
+            )
+            recover_superpowers_migration(journal)
+            intent = json.loads(journal.read_text(encoding="utf-8"))
+            intent["phase"] = "prepared"
+            journal.write_text(json.dumps(intent), encoding="utf-8")
+
+            result = recover_superpowers_migration(journal)
+
+            self.assertEqual(result["status"], "restored")
+            self.assertTrue(target.is_symlink())
+
+    def test_recovery_and_staging_reject_lexical_reparse_paths(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            state = root / "state"
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(source / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            journal = state / "source-migrations/superpowers.json"
+            stage_superpowers_source(
+                source,
+                target,
+                report["inventoryHash"],
+                allow_compatible_link=True,
+                state_root=state,
+                migration_journal=journal,
+                migration_backup=state / "source-migrations/backups/link",
+            )
+            alias = root / "journal-alias"
+            alias.symlink_to(state / "source-migrations", target_is_directory=True)
+            with self.assertRaisesRegex(SourceSelectionError, "reparse-path-rejected"):
+                recover_superpowers_migration(alias / "superpowers.json")
+            self.assertTrue((target / "brainstorming/SKILL.md").is_file())
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            real_state = root / "real-state"
+            real_state.mkdir()
+            state_alias = root / "state-alias"
+            try:
+                state_alias.symlink_to(real_state, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            target.symlink_to(source / "skills", target_is_directory=True)
+            with self.assertRaisesRegex(SourceSelectionError, "reparse-path-rejected"):
+                stage_superpowers_source(
+                    source,
+                    target,
+                    report["inventoryHash"],
+                    allow_compatible_link=True,
+                    state_root=state_alias,
+                    migration_journal=state_alias / "source-migrations/superpowers.json",
+                    migration_backup=state_alias / "source-migrations/backups/link",
+                )
+            self.assertTrue(target.is_symlink())
+
+    def test_remove_staged_target_requires_exact_inventory_and_refuses_drift(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            skill = source / "skills/brainstorming/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("brainstorm\n", encoding="utf-8")
+            _commit(source)
+            report = inspect_superpowers_source(source)
+            target = root / "agents/skills/superpowers"
+            stage_superpowers_source(source, target, report["inventoryHash"])
+            (target / "brainstorming/SKILL.md").write_text(
+                "user drift\n", encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(SourceSelectionError, "staged-target-drift"):
+                remove_staged_superpowers_source(target, report["inventoryHash"])
+            self.assertTrue(target.exists())
+
+            (target / "brainstorming/SKILL.md").write_text(
+                "brainstorm\n", encoding="utf-8"
+            )
+            removed = remove_staged_superpowers_source(
+                target, report["inventoryHash"]
+            )
+            self.assertEqual(removed["status"], "removed")
             self.assertFalse(target.exists())
 
 

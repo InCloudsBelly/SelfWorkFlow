@@ -72,8 +72,8 @@ class InstallApplyTests(unittest.TestCase):
             self.assertEqual(applied["status"], "applied")
             self.assertTrue((root / "agents-b/skills/sample-skill/SKILL.md").is_file())
 
-    def test_apply_rejects_wrong_confirmation_and_target_or_artifact_drift(self):
-        for drift in ("target", "artifact"):
+    def test_apply_rejects_wrong_confirmation_and_managed_target_or_artifact_drift(self):
+        for drift in ("target", "state", "artifact"):
             with self.subTest(drift=drift):
                 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
                     root = Path(temporary)
@@ -83,12 +83,32 @@ class InstallApplyTests(unittest.TestCase):
                     with self.assertRaises(InstallerError):
                         apply_install_plan(plan, "sha256:" + "0" * 64)
                     if drift == "target":
-                        agents.mkdir()
-                        (agents / "drift.txt").write_text("drift\n", encoding="utf-8")
+                        managed = agents / "skills/sample-skill/SKILL.md"
+                        managed.parent.mkdir(parents=True)
+                        managed.write_text("drift\n", encoding="utf-8")
+                    elif drift == "state":
+                        state.mkdir()
+                        (state / "current-manifest.json").write_text(
+                            "{}\n", encoding="utf-8"
+                        )
                     else:
                         (artifact / "WORKFLOW.md").write_text("drift\n", encoding="utf-8")
                     with self.assertRaises(InstallerError):
                         apply_install_plan(plan, plan["planHash"])
+
+    def test_apply_allows_unmanaged_target_drift(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            codex.mkdir()
+            (codex / "session.jsonl").write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+
+            result = apply_install_plan(plan, plan["planHash"])
+
+            self.assertEqual(result["status"], "applied")
+            self.assertTrue((codex / "session.jsonl").is_file())
 
     def test_apply_rechecks_artifact_and_target_after_lock_acquisition(self):
         from selfworkflow import installer
@@ -108,8 +128,9 @@ class InstallApplyTests(unittest.TestCase):
                     @contextmanager
                     def drift_while_waiting(_state):
                         if drift == "target":
-                            agents.mkdir(parents=True, exist_ok=True)
-                            (agents / "concurrent.txt").write_text(
+                            managed = agents / "skills/sample-skill/SKILL.md"
+                            managed.parent.mkdir(parents=True, exist_ok=True)
+                            managed.write_text(
                                 "concurrent\n", encoding="utf-8"
                             )
                         else:
@@ -128,9 +149,13 @@ class InstallApplyTests(unittest.TestCase):
                         ):
                             apply_install_plan(plan, plan["planHash"])
 
-                    self.assertFalse(
-                        (agents / "skills/sample-skill/SKILL.md").exists()
-                    )
+                    managed = agents / "skills/sample-skill/SKILL.md"
+                    if drift == "target":
+                        self.assertEqual(
+                            managed.read_text(encoding="utf-8"), "concurrent\n"
+                        )
+                    else:
+                        self.assertFalse(managed.exists())
 
     def test_apply_failure_after_first_write_automatically_restores_targets(self):
         from selfworkflow import installer

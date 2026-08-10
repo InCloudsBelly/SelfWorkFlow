@@ -83,6 +83,45 @@ class InstallPlanTests(unittest.TestCase):
                 self.assertEqual(main(arguments), 0)
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "ready")
 
+    def test_plan_ignores_unmanaged_large_file_and_reparse_subtree(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            codex.mkdir()
+            (codex / "session.jsonl").write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+            external = root / "plugin-cache"
+            external.mkdir()
+            link = codex / "plugins"
+            try:
+                link.symlink_to(external, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+
+            self.assertEqual(plan["status"], "ready")
+            self.assertIn("stateRoot", plan["baselineHashes"])
+
+    def test_plan_rejects_invalid_exact_managed_target_and_nested_roots(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            codex.mkdir()
+            (codex / "AGENTS.md").write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+            with self.assertRaisesRegex(InstallerError, "managed-file-invalid"):
+                create_install_plan(artifact, agents, codex, state, "0.1.0")
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents = root / "agents"
+            with self.assertRaisesRegex(InstallerError, "roots-overlap"):
+                create_install_plan(
+                    artifact, agents, agents / "codex", root / "state", "0.1.0"
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -321,6 +321,8 @@ $superpowersReport = [ordered]@{
 $providerReport = [ordered]@{ status = "skipped" }
 $providerSourceReport = $null
 $providerRollbackToken = $null
+$superpowersMigrationJournal = Join-Path $StateRoot "source-migrations\superpowers.json"
+$superpowersMigrationBackup = Join-Path $StateRoot "source-migrations\backups\superpowers-link"
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -331,6 +333,13 @@ try {
         Stop-Install "preflight" 20 "git-required"
     }
     $script:PythonExecutable = Ensure-RepositoryEnvironment
+
+    Set-InstallStage "migration-recovery" 25
+    Invoke-SelfWorkflow @(
+        "source", "recover-migration",
+        "--journal", $superpowersMigrationJournal,
+        "--if-exists"
+    ) (Join-Path $script:LogDirectory "superpowers-recovery-before.json") | Out-Null
 
     Set-InstallStage "submodules" 25
     Write-InstallLog "Preparing the path-limited normal submodule profile."
@@ -518,7 +527,15 @@ try {
             "source", "stage",
             "--path", $SuperpowersSource,
             "--target", $superpowersTarget,
-            "--expected-inventory-hash", $superpowersReport.inventoryHash
+            "--expected-inventory-hash", $superpowersReport.inventoryHash,
+            "--allow-compatible-link",
+            "--state-root", $StateRoot,
+            "--migration-journal", $superpowersMigrationJournal,
+            "--migration-backup", $superpowersMigrationBackup,
+            "--protected-root", $AgentsRoot,
+            "--protected-root", $CodexRoot,
+            "--protected-root", $runtime,
+            "--protected-root", $SuperpowersSource
         ) (Join-Path $script:LogDirectory "superpowers-stage.json")
         foreach ($skill in $RequiredSuperpowersSkills) {
             $entry = Join-Path $superpowersTarget ("{0}\SKILL.md" -f $skill)
@@ -563,13 +580,32 @@ try {
     }
     Write-JsonFile (Join-Path $script:LogDirectory "summary.json") $summary
     Write-InstallLog ("Installation verification completed; finalizing transaction. Logs: " + $script:LogDirectory)
-    if ($providerRollbackToken) {
+    $hasStagedMigration = (
+        $stagedSuperpowers -and
+        $stagedSuperpowers.PSObject.Properties.Name -contains "migrationStatus" -and
+        $stagedSuperpowers.migrationStatus -eq "staged"
+    )
+    if ($hasStagedMigration) {
         Invoke-SelfWorkflow @(
-            "provider", "commit-config",
-            "--config-file", $ProviderConfigFile,
-            "--rollback-token", $providerRollbackToken
-        ) (Join-Path $script:LogDirectory "provider-config-commit.json") | Out-Null
-        $providerRollbackToken = $null
+            "source", "commit-migration",
+            "--journal", $superpowersMigrationJournal
+        ) (Join-Path $script:LogDirectory "superpowers-migration-commit.json") | Out-Null
+    }
+    if ($providerRollbackToken) {
+        try {
+            if ($env:SELFWORKFLOW_TEST_FAIL_PROVIDER_COMMIT -eq "1") {
+                throw "injected-provider-commit-cleanup-failure"
+            }
+            Invoke-SelfWorkflow @(
+                "provider", "commit-config",
+                "--config-file", $ProviderConfigFile,
+                "--rollback-token", $providerRollbackToken
+            ) (Join-Path $script:LogDirectory "provider-config-commit.json") | Out-Null
+            $providerRollbackToken = $null
+        }
+        catch {
+            Write-Host "Provider configuration is verified; rollback-record cleanup is pending."
+        }
     }
     Write-Host "Installation verified."
     Write-Host "Restart Codex before relying on newly discovered Skills."
@@ -594,12 +630,37 @@ catch {
                 throw "provider-config-rollback-status-invalid"
             }
         }
-        if ($stagedSuperpowers -and $stagedSuperpowers.status -eq "staged") {
+        $hasStagedMigration = (
+            $stagedSuperpowers -and
+            $stagedSuperpowers.PSObject.Properties.Name -contains "migrationStatus" -and
+            $stagedSuperpowers.migrationStatus -eq "staged"
+        )
+        $migrationRecovery = $null
+        if (Test-Path -LiteralPath $superpowersMigrationJournal -PathType Leaf) {
+            $migrationRecovery = Invoke-SelfWorkflow @(
+                "source", "recover-migration",
+                "--journal", $superpowersMigrationJournal,
+                "--if-exists"
+            ) (Join-Path $script:LogDirectory "superpowers-migration-rollback.json")
+            if ($migrationRecovery.status -eq "restored") {
+                $rollbackStatus = "rolled-back"
+            }
+        }
+        if (
+            $stagedSuperpowers -and
+            $stagedSuperpowers.status -eq "staged" -and
+            -not $hasStagedMigration
+        ) {
             $superpowersTarget = Resolve-FullPath (Join-Path $AgentsRoot "skills\superpowers")
             $expectedTarget = Resolve-FullPath $stagedSuperpowers.target
-            if ($superpowersTarget -eq $expectedTarget -and (Test-Path -LiteralPath $superpowersTarget)) {
-                Remove-Item -LiteralPath $superpowersTarget -Recurse -Force
+            if ($superpowersTarget -ne $expectedTarget) {
+                throw "staged-superpowers-target-invalid"
             }
+            Invoke-SelfWorkflow @(
+                "source", "remove-stage",
+                "--target", $superpowersTarget,
+                "--expected-inventory-hash", $stagedSuperpowers.inventoryHash
+            ) (Join-Path $script:LogDirectory "superpowers-stage-rollback.json") | Out-Null
         }
         if ($applyResult -and $applyResult.status -eq "applied") {
             $rollbackPlanPath = Join-Path $script:LogDirectory "rollback-plan.json"

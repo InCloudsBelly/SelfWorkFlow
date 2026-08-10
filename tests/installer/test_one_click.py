@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from selfworkflow.installer import tree_hash
+from selfworkflow.installer import doctor
 
 
 def _commit(root):
@@ -406,7 +406,9 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 (log_directory / "doctor-after.json").read_text(encoding="utf-8")
             )
             self.assertEqual(
-                doctor_after["agentsRoot"]["treeHash"], tree_hash(root / "agents")
+                doctor_after["agentsRoot"]["treeHash"],
+                doctor(root / "agents", root / "codex", root / "state")
+                ["agentsRoot"]["treeHash"],
             )
             summary = json.loads(
                 (log_directory / "summary.json").read_text()
@@ -426,6 +428,109 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 "-ConfirmApply",
             )
             self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+
+    def test_compatible_superpowers_link_is_restored_after_late_failure(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            superpowers = root / "selected-superpowers"
+            for name in (
+                "brainstorming",
+                "writing-plans",
+                "test-driven-development",
+                "systematic-debugging",
+                "requesting-code-review",
+                "receiving-code-review",
+                "verification-before-completion",
+            ):
+                skill = superpowers / "skills" / name / "SKILL.md"
+                skill.parent.mkdir(parents=True, exist_ok=True)
+                skill.write_text(name + "\n", encoding="utf-8")
+            _commit(superpowers)
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(superpowers / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            codegraph = root / "codegraph"
+            entry = codegraph / "dist/bin/codegraph.js"
+            entry.parent.mkdir(parents=True)
+            entry.write_text("do-not-execute\n", encoding="utf-8")
+            _commit(codegraph)
+            environment = os.environ.copy()
+            environment["SELFWORKFLOW_TEST_FAIL_AFTER_PROVIDER_CONFIG"] = "1"
+
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice", "Skip",
+                "-SuperpowersChoice", "Existing",
+                "-SuperpowersSource", str(superpowers),
+                "-CodeGraphOverrideChoice", "Configure",
+                "-CodeGraphPath", str(codegraph),
+                "-ConfirmApply",
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            summary = json.loads(
+                (self._single_log_directory(root) / "summary.json").read_text()
+            )
+            self.assertEqual(summary["stage"], "provider-configure")
+            self.assertEqual(summary["rollback"], "rolled-back")
+            self.assertTrue(target.is_symlink())
+            self.assertEqual(target.resolve(), (superpowers / "skills").resolve())
+            self.assertFalse((root / "codex/AGENTS.md").exists())
+
+    def test_provider_cleanup_failure_after_migration_commit_is_nonfatal(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            superpowers = root / "selected-superpowers"
+            for name in (
+                "brainstorming", "writing-plans", "test-driven-development",
+                "systematic-debugging", "requesting-code-review",
+                "receiving-code-review", "verification-before-completion",
+            ):
+                skill = superpowers / "skills" / name / "SKILL.md"
+                skill.parent.mkdir(parents=True, exist_ok=True)
+                skill.write_text(name + "\n", encoding="utf-8")
+            _commit(superpowers)
+            target = root / "agents/skills/superpowers"
+            target.parent.mkdir(parents=True)
+            try:
+                target.symlink_to(superpowers / "skills", target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            codegraph = root / "codegraph"
+            entry = codegraph / "dist/bin/codegraph.js"
+            entry.parent.mkdir(parents=True)
+            entry.write_text("do-not-execute\n", encoding="utf-8")
+            _commit(codegraph)
+            environment = os.environ.copy()
+            environment["SELFWORKFLOW_TEST_FAIL_PROVIDER_COMMIT"] = "1"
+
+            result = self._run_installer(
+                root,
+                "-GrillMeChoice", "Skip",
+                "-SuperpowersChoice", "Existing",
+                "-SuperpowersSource", str(superpowers),
+                "-CodeGraphOverrideChoice", "Configure",
+                "-CodeGraphPath", str(codegraph),
+                "-ConfirmApply",
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            summary = json.loads(
+                (self._single_log_directory(root) / "summary.json").read_text()
+            )
+            self.assertEqual(summary["status"], "installed")
+            self.assertFalse(target.is_symlink())
+            journal = root / "state/source-migrations/superpowers.json"
+            self.assertEqual(json.loads(journal.read_text())["phase"], "committed")
+            transactions = (
+                root / "localappdata/SelfWorkFlow/config/.provider-transactions"
+            )
+            self.assertTrue(any(transactions.glob("*.json")))
 
     def test_untracked_required_superpowers_skills_cannot_enable_write_capability(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

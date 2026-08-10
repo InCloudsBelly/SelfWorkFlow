@@ -16,8 +16,8 @@
     "artifactFiles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "baselineHashes": {
       "type": "object", "additionalProperties": false,
-      "required": ["agentsRoot", "codexRoot"],
-      "properties": {"agentsRoot": {"type": "string"}, "codexRoot": {"type": "string"}}
+      "required": ["agentsRoot", "codexRoot", "stateRoot"],
+      "properties": {"agentsRoot": {"type": "string"}, "codexRoot": {"type": "string"}, "stateRoot": {"type": "string"}}
     },
     "status": {"enum": ["ready", "paused", "already-installed"]},
     "issues": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

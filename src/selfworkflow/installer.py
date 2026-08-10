@@ -94,10 +94,112 @@ def tree_hash(root: str | Path) -> str:
     return _canonical_hash(_manifest(path))
 
 
-def _root_report(path: Path) -> dict[str, str]:
+def _relative_target(value: str) -> PurePosixPath:
+    relative = PurePosixPath(value)
+    if relative.is_absolute() or not relative.parts or any(
+        part in {"", ".", ".."} for part in relative.parts
+    ):
+        raise InstallerError("managed-target-invalid")
+    return relative
+
+
+def _managed_target_state(root: Path, relative_value: str) -> dict[str, object]:
+    relative = _relative_target(relative_value)
+    target = root / Path(*relative.parts)
+    current = root
+    for part in relative.parts:
+        current /= part
+        if not os.path.lexists(current):
+            continue
+        metadata = current.lstat()
+        if current.is_symlink() or getattr(metadata, "st_file_attributes", 0) & _REPARSE:
+            raise InstallerError("reparse-path-rejected")
+    if not os.path.lexists(target):
+        return {"path": relative.as_posix(), "status": "missing"}
+    if not target.is_file():
+        raise InstallerError("managed-file-invalid")
+    size = target.stat().st_size
+    if size > _MAX_FILE_BYTES:
+        raise InstallerError("managed-file-invalid")
+    return {
+        "path": relative.as_posix(),
+        "status": "file",
+        "size": size,
+        "sha256": _path_hash(target),
+    }
+
+
+def _managed_surface_hash(root: Path, relative_values: list[str]) -> str:
+    values = sorted(set(relative_values))
+    if len(values) > _MAX_FILES:
+        raise InstallerError("tree-too-large")
+    return _canonical_hash(
+        [_managed_target_state(root, relative) for relative in values]
+    )
+
+
+def _path_relative_to(path: Path, root: Path) -> str | None:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return None
+
+
+def _plan_managed_surfaces(
+    *, version: str, artifact_hash: str, artifact_files: list[str]
+) -> dict[str, list[str]]:
+    snapshot_prefix = PurePosixPath(
+        "selfworkflow", "versions", version, artifact_hash.removeprefix("sha256:")
+    )
+    agents = [
+        (snapshot_prefix / _relative_target(relative)).as_posix()
+        for relative in artifact_files
+    ]
+    agents.extend(
+        relative for relative in artifact_files if relative.startswith("skills/")
+    )
+    agents.append("selfworkflow/current.json")
+    return {
+        "agentsRoot": agents,
+        "codexRoot": ["AGENTS.md"],
+        "stateRoot": ["current-manifest.json"],
+    }
+
+
+def _doctor_surfaces(
+    agents: Path, codex: Path, state: Path
+) -> dict[str, list[str]]:
+    surfaces = {
+        "agentsRoot": ["selfworkflow/current.json"],
+        "codexRoot": ["AGENTS.md"],
+        "stateRoot": ["current-manifest.json"],
+    }
+    manifest = _load_current_manifest(state)
+    if not manifest:
+        return surfaces
+    roots = (("agentsRoot", agents), ("codexRoot", codex), ("stateRoot", state))
+    for operation in manifest.get("operations", []):
+        if not isinstance(operation, dict) or not isinstance(operation.get("target"), str):
+            continue
+        target = Path(operation["target"]).resolve(strict=False)
+        for key, root in roots:
+            relative = _path_relative_to(target, root)
+            if relative:
+                surfaces[key].append(relative)
+                break
+    return surfaces
+
+
+def _root_report(path: Path, managed_targets: list[str]) -> dict[str, str]:
     if not path.exists():
-        return {"path": str(path), "status": "missing", "treeHash": "missing"}
-    return {"path": str(path), "status": "present", "treeHash": tree_hash(path)}
+        status = "missing"
+    else:
+        status = "present"
+    return {
+        "path": str(path),
+        "status": status,
+        "treeHash": _managed_surface_hash(path, managed_targets),
+    }
 
 
 def doctor(
@@ -108,11 +210,12 @@ def doctor(
     agents = _safe_root(agents_root)
     codex = _safe_root(codex_root)
     state = _safe_root(state_root)
+    surfaces = _doctor_surfaces(agents, codex, state)
     return {
         "schemaVersion": 1,
-        "agentsRoot": _root_report(agents),
-        "codexRoot": _root_report(codex),
-        "stateRoot": _root_report(state),
+        "agentsRoot": _root_report(agents, surfaces["agentsRoot"]),
+        "codexRoot": _root_report(codex, surfaces["codexRoot"]),
+        "stateRoot": _root_report(state, surfaces["stateRoot"]),
         "incompleteTransactions": recover_transactions(state),
         "securityStatus": "unverified",
     }
@@ -131,11 +234,27 @@ def _load_current_manifest(state: Path) -> dict[str, object] | None:
     if not current.is_file():
         return None
     try:
+        _managed_target_state(state, "current-manifest.json")
         value = json.loads(current.read_text(encoding="utf-8"))
         manifest_path = Path(value["manifestPath"])
+        relative = _path_relative_to(manifest_path.resolve(strict=False), state)
+        if relative is None or not relative.startswith("manifests/"):
+            return None
+        _managed_target_state(state, relative)
         return json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, KeyError, TypeError, ValueError):
+    except (InstallerError, OSError, KeyError, TypeError, ValueError):
         return None
+
+
+def _validate_disjoint_roots(roots: tuple[Path, ...]) -> None:
+    for index, left in enumerate(roots):
+        for right in roots[index + 1:]:
+            if (
+                left == right
+                or _path_relative_to(left, right) is not None
+                or _path_relative_to(right, left) is not None
+            ):
+                raise InstallerError("roots-overlap")
 
 
 def _artifact_profile(artifact: Path) -> str:
@@ -216,13 +335,22 @@ def create_install_plan(
     codex = _safe_root(codex_root)
     state = _safe_root(state_root)
     roots = (artifact, agents, codex, state)
-    if len({str(path).casefold() for path in roots}) != len(roots):
-        raise InstallerError("roots-overlap")
+    _validate_disjoint_roots(roots)
     files = _manifest(artifact)
     if not files or not (artifact / "WORKFLOW.md").is_file():
         raise InstallerError("artifact-invalid")
     artifact_hash = _canonical_hash(files)
     profile = _artifact_profile(artifact)
+    surfaces = _plan_managed_surfaces(
+        version=version,
+        artifact_hash=artifact_hash,
+        artifact_files=[item["path"] for item in files],
+    )
+    baseline_hashes = {
+        "agentsRoot": _managed_surface_hash(agents, surfaces["agentsRoot"]),
+        "codexRoot": _managed_surface_hash(codex, surfaces["codexRoot"]),
+        "stateRoot": _managed_surface_hash(state, surfaces["stateRoot"]),
+    }
     issues: list[str] = []
     agents_file = codex / "AGENTS.md"
     snapshot = _snapshot_root(agents, version, artifact_hash)
@@ -272,10 +400,7 @@ def create_install_plan(
         "stateRoot": str(state),
         "artifactHash": artifact_hash,
         "artifactFiles": [item["path"] for item in files],
-        "baselineHashes": {
-            "agentsRoot": tree_hash(agents),
-            "codexRoot": tree_hash(codex),
-        },
+        "baselineHashes": baseline_hashes,
         "status": status,
         "issues": sorted(set(issues)),
         "securityStatus": "unverified",
@@ -383,13 +508,26 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
 
 
 def _validate_ready_plan_baseline(
-    plan: dict[str, object], artifact: Path, agents: Path, codex: Path,
+    plan: dict[str, object], artifact: Path, agents: Path, codex: Path, state: Path,
 ) -> None:
-    if _canonical_hash(_manifest(artifact)) != plan["artifactHash"]:
-        raise InstallerError("artifact-drift")
+    manifest = _manifest(artifact)
     if (
-        tree_hash(agents) != plan["baselineHashes"]["agentsRoot"]
-        or tree_hash(codex) != plan["baselineHashes"]["codexRoot"]
+        _canonical_hash(manifest) != plan["artifactHash"]
+        or [item["path"] for item in manifest] != plan["artifactFiles"]
+    ):
+        raise InstallerError("artifact-drift")
+    surfaces = _plan_managed_surfaces(
+        version=plan["version"],
+        artifact_hash=plan["artifactHash"],
+        artifact_files=plan["artifactFiles"],
+    )
+    if (
+        _managed_surface_hash(agents, surfaces["agentsRoot"])
+        != plan["baselineHashes"]["agentsRoot"]
+        or _managed_surface_hash(codex, surfaces["codexRoot"])
+        != plan["baselineHashes"]["codexRoot"]
+        or _managed_surface_hash(state, surfaces["stateRoot"])
+        != plan["baselineHashes"]["stateRoot"]
     ):
         raise InstallerError("target-drift")
 
@@ -427,7 +565,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     agents = _safe_root(plan["agentsRoot"])
     codex = _safe_root(plan["codexRoot"])
     state = _safe_root(plan["stateRoot"])
-    _validate_ready_plan_baseline(plan, artifact, agents, codex)
+    _validate_ready_plan_baseline(plan, artifact, agents, codex, state)
     transaction_id = uuid4().hex
     transaction_path = state / "transactions" / f"{transaction_id}.json"
     backup_root = state / "backups" / transaction_id
@@ -435,7 +573,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     operations: list[dict[str, object]] = []
     try:
         with exclusive_install_lock(state):
-            _validate_ready_plan_baseline(plan, artifact, agents, codex)
+            _validate_ready_plan_baseline(plan, artifact, agents, codex, state)
             transaction = {
                 "schemaVersion": 1,
                 "transactionId": transaction_id,

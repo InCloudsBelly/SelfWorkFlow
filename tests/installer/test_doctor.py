@@ -43,6 +43,28 @@ class InstallerFixtureTests(unittest.TestCase):
             self.assertEqual(report["stateRoot"]["status"], "missing")
             self.assertEqual(report["incompleteTransactions"], [])
 
+    def test_doctor_ignores_large_and_reparse_entries_outside_managed_surface(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            codex.mkdir()
+            (codex / "session.jsonl").write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+            external = root / "plugin-cache"
+            external.mkdir()
+            link = codex / "plugins"
+            try:
+                link.symlink_to(external, target_is_directory=True)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+
+            report = doctor(agents, codex, state)
+
+            self.assertEqual(report["agentsRoot"]["status"], "missing")
+            self.assertEqual(report["codexRoot"]["status"], "present")
+            self.assertRegex(report["codexRoot"]["treeHash"], r"^sha256:[0-9a-f]{64}$")
+
 
 if __name__ == "__main__":
     unittest.main()

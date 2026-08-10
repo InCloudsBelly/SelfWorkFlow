@@ -39,10 +39,18 @@ environment dump or credential values.
 Superpowers may come from an explicitly selected local Git checkout (including an
 authorized dirty checkout) or, after a separate prompt, the official repository.
 Codex receives a hash-bound copy of Git-tracked `skills/**` files plus a source
-lock. It deliberately does not receive a junction because reparse points would
-invalidate the transaction doctor's full-tree safety check. Restart Codex after a
-successful install. The restart and native Skill activation remain `unverified`
-until exercised in the real host.
+lock. Doctor and install plans hash only SelfWorkFlow's exact managed targets, so
+unrelated Codex sessions, databases, executables, logs, caches, large files and
+plugin junctions are not read or claimed as installer state. A pre-existing
+`AgentsRoot/skills/superpowers` junction is migrated only when it resolves exactly
+to the selected source's `skills` directory. The installer records a durable intent,
+keeps the original junction under StateRoot, and restores it if staging or a later
+installation stage fails. Other links and unmanaged target directories remain hard
+conflicts. Rollback validates the journal, backup link and staged inventory before
+removing anything. A failure to delete an already verified Provider rollback receipt
+is reported as pending cleanup and does not tear down a committed installation.
+Restart Codex after a successful install. The restart and native Skill
+activation remain `unverified` until exercised in the real host.
 
 For unattended sandboxing or diagnostics, inspect all parameters first:
 
@@ -187,8 +195,11 @@ authentication or native-host proof. `paused` must not be silently promoted.
 Review the complete plan and its `planHash`, then pass that exact hash to
 `install apply`. Use the returned manifest for `install verify`; use the returned
 transaction path for `install rollback-plan`, review its hash, then run `install
-rollback`. Plans fail on artifact/target drift, damaged managed blocks, reparse
-targets, unmanaged Skill collisions, or unmanaged version snapshots.
+rollback`. Plans bind the exact snapshot files, mapped Skill files, current pointer,
+Codex `AGENTS.md`, and StateRoot current manifest. They fail on managed-target or
+artifact drift, damaged managed blocks, reparse targets, nested install roots,
+unmanaged Skill collisions, or unmanaged version snapshots; unrelated runtime files
+do not invalidate a confirmed plan.
 
 ## Development environment
 

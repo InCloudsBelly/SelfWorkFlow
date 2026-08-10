@@ -25,6 +25,9 @@ from selfworkflow.resolver import resolve_task
 from selfworkflow.ledger import validate_ledger
 from selfworkflow.git_policy import check_repository
 from selfworkflow.sources import (
+    commit_superpowers_migration,
+    recover_superpowers_migration,
+    remove_staged_superpowers_source,
     SourceSelectionError,
     inspect_superpowers_source,
     stage_superpowers_source,
@@ -342,6 +345,19 @@ def main(argv: list[str] | None = None) -> int:
     source_stage.add_argument("--path", required=True)
     source_stage.add_argument("--target", required=True)
     source_stage.add_argument("--expected-inventory-hash", required=True)
+    source_stage.add_argument("--allow-compatible-link", action="store_true")
+    source_stage.add_argument("--state-root")
+    source_stage.add_argument("--migration-journal")
+    source_stage.add_argument("--migration-backup")
+    source_stage.add_argument("--protected-root", action="append", default=[])
+    source_recover = source_commands.add_parser("recover-migration")
+    source_recover.add_argument("--journal", required=True)
+    source_recover.add_argument("--if-exists", action="store_true")
+    source_commit = source_commands.add_parser("commit-migration")
+    source_commit.add_argument("--journal", required=True)
+    source_remove = source_commands.add_parser("remove-stage")
+    source_remove.add_argument("--target", required=True)
+    source_remove.add_argument("--expected-inventory-hash", required=True)
     provider_parser = commands.add_parser("provider")
     provider_commands = provider_parser.add_subparsers(
         dest="provider_command", required=True,
@@ -529,6 +545,11 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.path,
                 arguments.target,
                 arguments.expected_inventory_hash,
+                allow_compatible_link=arguments.allow_compatible_link,
+                state_root=arguments.state_root,
+                migration_journal=arguments.migration_journal,
+                migration_backup=arguments.migration_backup,
+                protected_roots=tuple(arguments.protected_root),
             )
         except SourceSelectionError as error:
             print(f"SelfWorkFlow: source-stage-failed:{error}", file=sys.stderr)
@@ -539,6 +560,29 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
+            )
+        )
+        return 0
+    if arguments.command == "source" and arguments.source_command in {
+        "recover-migration", "commit-migration", "remove-stage",
+    }:
+        try:
+            if arguments.source_command == "recover-migration":
+                result = recover_superpowers_migration(
+                    arguments.journal, if_exists=arguments.if_exists
+                )
+            elif arguments.source_command == "commit-migration":
+                result = commit_superpowers_migration(arguments.journal)
+            else:
+                result = remove_staged_superpowers_source(
+                    arguments.target, arguments.expected_inventory_hash
+                )
+        except SourceSelectionError as error:
+            print(f"SelfWorkFlow: source-migration-failed:{error}", file=sys.stderr)
+            return 62
+        print(
+            json.dumps(
+                result, ensure_ascii=False, sort_keys=True, separators=(",", ":")
             )
         )
         return 0

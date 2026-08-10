@@ -19,12 +19,12 @@
 - Modify: `tests/installer/test_plan.py`
 - Modify: `tests/installer/test_apply.py`
 
-- [ ] Add tests whose unrelated Codex files exceed 8 MiB and whose unrelated subtree is a reparse point.
-- [ ] Assert doctor/plan can inspect the roots without reading those unrelated entries.
-- [ ] Add negative tests proving a reparse or oversized exact managed target remains rejected.
-- [ ] Replace the obsolete whole-root drift assertion with paired tests: unrelated changes are allowed; every exact managed target and `StateRoot/current-manifest.json` still fail on pre-lock and in-lock drift.
-- [ ] Add pairwise root containment rejection tests.
-- [ ] Run the exact tests and confirm RED from `file-too-large` / `reparse-path-rejected`.
+- [x] Add tests whose unrelated Codex files exceed 8 MiB and whose unrelated subtree is a reparse point.
+- [x] Assert doctor/plan can inspect the roots without reading those unrelated entries.
+- [x] Add negative tests proving a reparse or oversized exact managed target remains rejected.
+- [x] Replace the obsolete whole-root drift assertion with paired tests: unrelated changes are allowed; every exact managed target and `StateRoot/current-manifest.json` still fail on pre-lock and in-lock drift.
+- [x] Add pairwise root containment rejection tests.
+- [x] Run the exact tests and confirm RED from `file-too-large` / `reparse-path-rejected`.
 
 ### Task 2: Implement scoped target snapshots
 
@@ -34,11 +34,11 @@
 - Modify: `tests/installer/test_plan.py`
 - Modify: `tests/installer/test_apply.py`
 
-- [ ] Add bounded helpers that hash only exact managed targets and reject reparse in their target chain.
-- [ ] Derive plan baselines from snapshot files, mapped Skill files, current pointer, Codex `AGENTS.md` and StateRoot `current-manifest.json`.
-- [ ] Reject equality or ancestor/descendant overlap among artifact, AgentsRoot, CodexRoot and StateRoot.
-- [ ] Make doctor report root presence plus managed-surface hashes without traversing unrelated runtime content.
-- [ ] Run focused tests to GREEN, then run all installer plan/doctor tests.
+- [x] Add bounded helpers that hash only exact managed targets and reject reparse in their target chain.
+- [x] Derive plan baselines from snapshot files, mapped Skill files, current pointer, Codex `AGENTS.md` and StateRoot `current-manifest.json`.
+- [x] Reject equality or ancestor/descendant overlap among artifact, AgentsRoot, CodexRoot and StateRoot.
+- [x] Make doctor report root presence plus managed-surface hashes without traversing unrelated runtime content.
+- [x] Run focused tests to GREEN, then run all installer plan/doctor tests.
 
 ## Chunk 2: Superpowers junction migration
 
@@ -48,11 +48,11 @@
 - Modify: `tests/unit/test_superpowers_overlay.py`
 - Modify: `tests/installer/test_one_click.py`
 
-- [ ] Add a compatible-link test bound to the selected source `skills` directory.
-- [ ] Add wrong-target and missing-explicit-authorization rejection tests.
-- [ ] Add backup-in-source, reparse-parent and cross-volume rejection tests.
-- [ ] Add restoration tests for staging failure, lost CLI output, simulated process interruption and later one-click failure.
-- [ ] Run focused tests and confirm RED.
+- [x] Add a compatible-link test bound to the selected source `skills` directory.
+- [x] Add wrong-target and missing-explicit-authorization rejection tests.
+- [x] Add backup-in-source, reparse-parent and cross-volume rejection tests.
+- [x] Add restoration tests for staging failure, lost CLI output, simulated process interruption and later one-click failure.
+- [x] Run focused tests and confirm RED.
 
 ### Task 4: Implement source-bound migration and rollback
 
@@ -63,11 +63,11 @@
 - Modify: `tests/unit/test_superpowers_overlay.py`
 - Modify: `tests/installer/test_one_click.py`
 
-- [ ] Extend `source stage` with explicit compatible-link, StateRoot migration-journal and backup arguments; add recover/commit operations over the durable journal.
-- [ ] Validate resolved link target, same-volume backup, disjoint source/managed roots, reparse-free parent chains and source inventory before moving anything.
-- [ ] Persist intent before moving; restore the junction inside staging on publication/output failure and on the next run for every non-committed phase.
-- [ ] Record migration receipt, restore it from the one-click catch path after removing only the verified staged target, and mark committed only after final doctor/provider verification.
-- [ ] Run focused tests to GREEN.
+- [x] Extend `source stage` with explicit compatible-link, StateRoot migration-journal and backup arguments; add recover/commit operations over the durable journal.
+- [x] Validate resolved link target, same-volume backup, disjoint source/managed roots, reparse-free parent chains and source inventory before moving anything.
+- [x] Persist intent before moving; restore the junction inside staging on publication/output failure and on the next run for every non-committed phase.
+- [x] Record migration receipt, restore it from the one-click catch path after removing only the verified staged target, and mark committed only after final doctor/provider verification.
+- [x] Run focused tests to GREEN.
 
 ## Chunk 3: Verification and live installation
 
@@ -77,9 +77,9 @@
 - Modify if required by changed output contracts: `schemas/install-plan.schema.json`
 - Modify: `README.md`
 
-- [ ] Document managed-surface ownership and compatible junction migration.
-- [ ] Run installer, unit, conformance and automated verification suites.
-- [ ] Review the complete diff for unrelated changes, unsafe path handling and rollback asymmetry.
+- [x] Document managed-surface ownership and compatible junction migration.
+- [x] Run installer, unit, conformance and automated verification suites.
+- [x] Review the complete diff for unrelated changes, unsafe path handling and rollback asymmetry.
 
 ### Task 6: Install and verify the approved local configuration
 
