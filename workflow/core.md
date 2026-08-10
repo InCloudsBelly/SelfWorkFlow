@@ -17,6 +17,8 @@
 
 ## 按需能力
 
+- 流程深度与能力 Skill 选择相互独立：复杂度、风险和副作用决定流程深度；显式请求以及语言、文件和任务语义决定是否加载通用能力 Skill。明显相关时加载 compact core，中等相关时先看元数据，专项引用只在直接信号命中时读取。
+- 加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。只读任务只应用 reasoning core；实际修改才应用 change rules；真实副作用、高成本或高风险操作继续遵循既有授权护栏。
 - 设计、计划、实现、调试、Review 和验证阶段只读取当前阶段需要的 Superpowers Skill。
 - Grill-me 只在用户明确要求时启用；结束后用独立 Brainstorming 交叉检查结论。
 - 项目规则可以提高要求，不能降低本文件的安全底线。
