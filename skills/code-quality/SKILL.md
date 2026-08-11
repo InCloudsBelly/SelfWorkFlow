@@ -27,6 +27,14 @@ Apply this loop only when diagnosing a failure that needs verification or when c
 
 For batch or side-effecting configuration changes, enforce `plan -> review -> confirm -> apply -> reread`, plus rollback evidence. Do not silently downgrade when a required capability is unavailable.
 
+## Implementation contract
+
+Before the first test or production-code edit, present an implementation contract and obtain explicit implementation confirmation. Until then, restrict work to read-only analysis and design, test-design, or plan documents; do not write tests, shaders, build scripts, behavior configuration, or production code.
+
+The contract records the expected owner-layer changes and main files/symbols, at least one alternative, impact radius, test seam, unverified evidence, and the trade-offs for safety, performance, compatibility, maintenance, and rollback. Light uses a compact inline contract. Full/Deep records the code boundary in the design, direct/failure paths and performance evidence in test design, and exact files, no-go boundaries, TDD, rollback, and verification in the implementation plan; independent whole-package Review precedes user confirmation.
+
+If implementation crosses the approved owner/module boundary, adds public API/ABI/schema, persistent formats, a global build macro or variant, or materially increases any approved risk or cost, the contract becomes invalid. Stop editing, revise and re-review the documents, then obtain a new explicit implementation confirmation. Equivalent private details inside the approved budget do not require another prompt; report them in final Review.
+
 ## Intrusion budget
 
 Judge intrusion by impact radius, not changed-line count. Public headers, APIs or public enum values, ABI/schema/persistent formats, a global build macro or build variant, cross-module infrastructure, shared hot paths, and test-originated production changes are high-intrusion signals.
