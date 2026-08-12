@@ -35,6 +35,14 @@ The contract records the expected owner-layer changes and main files/symbols, at
 
 If implementation crosses the approved owner/module boundary, adds public API/ABI/schema, persistent formats, a global build macro or variant, expands a shared hot path or test-originated production change, changes a key test seam, or materially increases any approved risk or cost, the contract becomes invalid. Stop editing, revise and re-review the documents, then obtain a new explicit implementation confirmation. Equivalent private details inside the approved budget do not require another prompt; report them in final Review.
 
+## Convergence and stability
+
+Allow design exploration to diverge; require implementation convergence after approval. Every code, test, tool, document, or process change must directly serve the primary goal, an acceptance criterion, or an indispensable failure path. Discovering a problem does not authorize solving it: handle blockers and directly required findings at the narrowest owner, but record and defer adjacent improvements.
+
+Before support work creates a separate interface, state, lifecycle, build variant, or changes consumers whose behavior need not change, perform one bounded convergence check: prove it is indispensable to the primary goal, root-cause repair, or acceptance; compare the narrower existing-path design; and identify any new long-lived owner, maintenance surface, or compatibility risk. Prefer the narrower design, defer adjacent work, and stop for renewed user confirmation only when the necessary change creates a new responsibility domain, changes a public contract, or materially expands stable paths.
+
+Keep stable existing callers unchanged by default. Make a new feature depend on the stable path; do not reverse old callers onto a feature-owned new abstraction for naming consistency, one-line reuse, testing convenience, or hypothetical future use. A bounded migration is eligible only when the abstraction owns a real shared invariant, the owner already governs all affected callers, no narrower design works, and the approved intrusion budget covers it.
+
 ## Intrusion budget
 
 Judge intrusion by impact radius, not changed-line count. Public headers, APIs or public enum values, ABI/schema/persistent formats, a global build macro or build variant, cross-module infrastructure, shared hot paths, and test-originated production changes are high-intrusion signals.
