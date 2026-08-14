@@ -1,3 +1,6 @@
 [submodule "dependencies/upstream/tea"]
 	path = dependencies/upstream/tea
 	url = https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise.git
+[submodule "dependencies/upstream/matt-pocock-skills"]
+	path = dependencies/upstream/matt-pocock-skills
+	url = https://github.com/mattpocock/skills.git
