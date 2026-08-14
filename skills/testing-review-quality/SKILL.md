@@ -1,6 +1,6 @@
 ---
 name: testing-review-quality
-description: Use for behavior-changing implementation, Full or Deep review, post-landing review, verification, and completion. Enforces real TDD, identical-package independent Standards/Spec review, and fresh fail-closed completion evidence.
+description: Use for behavior-changing implementation, mode-appropriate post-landing review, verification, and completion. Enforces real TDD, workflow-mode-bound review evidence, independent Standards/Spec review for Full or Deep, and fresh fail-closed completion evidence.
 ---
 
 # Testing and Review Quality
@@ -17,9 +17,9 @@ For features, bug fixes, behavioral refactors, architecture changes, migrations,
 
 Pre-implementation Review receives the final design, test design, plan, rules, and package hash. Post-landing Review uses one readable package containing the approved request, acceptance criteria, final documents, applicable rules, and actual task delta including committed, staged, unstaged, untracked, deleted, binary-hash, and Git file-mode entries. Worktree and index bytes plus modes are bound separately so staged-only and mode-only changes cannot evade Review.
 
-Run Standards and Spec reviews in two distinct independent contexts against that same package. Both receipts must return its hash and distinct execution IDs. Preserve the two axes. Map `critical` to Critical, `high`/`medium` to Important, and `low`/`info` to Minor. Critical and Important must be resolved; each Minor needs a disposition.
+Bind the package and every receipt to the same `workflowMode`. Light uses one structured `self_attested` review against the current package. Full and Deep run Standards and Spec reviews in two distinct independent contexts against that same package; both `host_attested` receipts must return its hash and distinct execution IDs. Reject missing or cross-mode evidence. Preserve the two axes for Full/Deep. Map `critical` to Critical, `high`/`medium` to Important, and `low`/`info` to Minor. Critical and Important must be resolved; each Minor needs a disposition.
 
-Receipts are `host_attested` workflow evidence. They are not identity, model, or cryptographic proof. If the Host cannot provide two genuinely independent contexts and their observed execution IDs, stop as `unverified`; do not manufacture identifiers.
+Review receipts are workflow evidence, not identity, model, or cryptographic proof. If Full/Deep cannot obtain two genuinely independent Host contexts and their observed execution IDs, stop as `unverified`; do not manufacture identifiers.
 
 ## Fresh verification and completion
 
