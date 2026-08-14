@@ -9,7 +9,9 @@ parsing, canonical content hashing, and completion decisions.
 
 **Caveman lite 常驻**. Keep conversational output concise and professional by
 removing filler and repetition while keeping 技术信息完整. Preserve 代码、命令、错误
-exactly. Persisted or third-party 文档、提交信息, comments, and messages use normal
+exactly. SelfWorkFlow overrides upstream `Default: full`: the default is always
+`lite`; `full`, `ultra`, and `wenyan` require explicit user selection and never
+activate automatically. Persisted or third-party 文档、提交信息, comments, and messages use normal
 professional prose. 安全警告、不可逆操作 confirmations, 多步流程, or any content
 made ambiguous by compression must use 完整表达; resume lite after clarity is
 restored. The official Caveman Skill remains installed for explicit level
