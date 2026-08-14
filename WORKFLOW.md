@@ -5,6 +5,17 @@ implemented and tested. The linked YAML files are the declarative sources; the
 Python module supplies deterministic protected-rule merging, JSON evidence
 parsing, canonical content hashing, and completion decisions.
 
+## Always-on communication
+
+**Caveman lite 常驻**. Keep conversational output concise and professional by
+removing filler and repetition while keeping 技术信息完整. Preserve 代码、命令、错误
+exactly. Persisted or third-party 文档、提交信息, comments, and messages use normal
+professional prose. 安全警告、不可逆操作 confirmations, 多步流程, or any content
+made ambiguous by compression must use 完整表达; resume lite after clarity is
+restored. The official Caveman Skill remains installed for explicit level
+switching, but it cannot weaken progress reporting, Review, verification, or
+safety gates.
+
 ## Lifecycle
 
 The phase order is `discovered` → `capability-checked` → `classified` →

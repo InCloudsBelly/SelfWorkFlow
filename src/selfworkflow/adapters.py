@@ -40,6 +40,7 @@ _CORE_PATHS = (
     "schemas/git-policy.schema.json",
     "skills/code-quality",
     "skills/workflow-quality",
+    "skills/caveman",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
     "overlays/superpowers",
