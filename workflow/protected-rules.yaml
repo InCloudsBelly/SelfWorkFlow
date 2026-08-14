@@ -1,5 +1,5 @@
 schemaVersion: 1
-policyVersion: 2.0.0
+policyVersion: 3.0.0
 mergeOrder:
   - protected
   - skill
@@ -24,7 +24,7 @@ rules:
     strength: agent-policy
   - id: require-fresh-verification-before-completion
     strength: enforced
-  - id: require-independent-post-grill-brainstorming-review
+  - id: require-independent-post-grill-review
     strength: enforced
     gate: design.post-grill-review
     evaluator: post-grill-review-independence-v1
