@@ -12,7 +12,7 @@ from selfworkflow.catalog import compile_catalog
 class SuperpowersOverlayTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
-    def test_checked_in_overlay_and_grill_skill_are_stable_and_vendor_neutral(self):
+    def test_legacy_overlay_remains_isolated_and_grill_comes_from_matt_foundation(self):
         stage_map = yaml.safe_load(
             (self.ROOT / "overlays/superpowers/stage-map.yaml").read_text(
                 encoding="utf-8"
@@ -31,29 +31,37 @@ class SuperpowersOverlayTests(unittest.TestCase):
         self.assertTrue(
             policies["grillMe"]["postReview"]["independentContextRequired"]
         )
-        skill = (self.ROOT / "skills/grill-me/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("description: Use when ", skill)
-        self.assertIn("independent", skill.casefold())
-        self.assertNotIn("codex", skill.casefold())
+        self.assertFalse((self.ROOT / "skills/grill-me/SKILL.md").exists())
+        skill = (
+            self.ROOT
+            / "dependencies/upstream/matt-pocock-skills/skills/productivity/grill-me/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("grill", skill.casefold())
 
     def test_catalog_registers_new_skills_without_overstating_behavior_support(self):
         envelope = json.loads(compile_catalog(self.ROOT / "catalog").content)
         entries = {
             item["id"]: item for item in envelope["catalog"]["entries"]
         }
-        for skill_id in ("grill-me", "code-quality", "workflow-quality"):
+        for skill_id in ("code-quality", "workflow-quality"):
             self.assertIn(skill_id, entries)
             self.assertEqual(entries[skill_id]["source"]["kind"], "skill")
             self.assertEqual(entries[skill_id]["supportStatus"], "unverified")
+        self.assertNotIn("grill-me", entries)
+        self.assertEqual(
+            entries["matt-skills-foundation"]["supportStatus"], "supported"
+        )
 
     def test_catalog_is_the_only_runtime_stage_mapping(self):
         source = (self.ROOT / "src/selfworkflow/superpowers.py").read_text(encoding="utf-8")
         self.assertNotIn("_STAGE_MAP", source)
         envelope = json.loads(compile_catalog(self.ROOT / "catalog").content)
         modules = {module["id"]: module for module in envelope["catalog"]["modules"]}
-        self.assertEqual(modules["design-brainstorming"]["slot"], "design.primary")
-        self.assertEqual(modules["plan-writing-plans"]["slot"], "plan.primary")
-        self.assertEqual(modules["implement-tdd"]["slot"], "implement.method")
+        self.assertEqual(modules["design-core"]["slot"], "design.primary")
+        self.assertEqual(modules["design-grilling"]["activation"], "full-default")
+        self.assertEqual(modules["design-grill-me"]["activation"], "deep-default")
+        self.assertEqual(modules["plan-core"]["slot"], "plan.primary")
+        self.assertEqual(modules["implement-tdd"]["slot"], "implement.tdd")
         self.assertEqual(modules["verify-execution"]["slot"], "verify.execution")
 
     def test_staging_copies_only_selected_skills_and_never_mutates_source(self):

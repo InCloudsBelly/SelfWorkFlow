@@ -6,17 +6,17 @@ entries:
     source:
       kind: skill
       path: skills/code-quality/SKILL.md
-      revision: git:0d666311f775f435e915cc3a4d9187e7b1f5d198
-      contentHash: sha256:beede9c039f5ec6e6626ce9e6e826baeb4193d2a35e8d2801ae68264e97d80fd
+      revision: git:03dd1c3895331934d7edaf3e9bfe6cafd995a3fd
+      contentHash: sha256:2105324b91017a635f413ea07a27dc1e71e39be4d6a76ba97211f00bca06c3d9
     aliases:
       - name: owner-first-code-quality
         target: code-quality
-    triggers: [bug fix, root cause, persistence, invalidation, shared regression]
+    triggers: [read code, explain code, behavior analysis, bug fix, root cause, persistence, invalidation, shared regression]
     exclusions: [pure content generation]
     selectors:
       fileExtensions: [.py, .ps1, .ts, .js, .cpp, .h, .yaml, .json]
-      operationTypes: [implement, debug, review, verify]
-      semanticTerms: [bug fix, root cause, persistence, invalidation, shared regression]
+      operationTypes: [analyze, implement, debug, review, verify]
+      semanticTerms: [read code, explain code, behavior analysis, bug fix, root cause, persistence, invalidation, shared regression]
     stages: [implemented, reviewed, verified]
     requiredCapabilities: [filesystem-read, test-execution]
     dependencies: [workflow-core, workflow-quality]

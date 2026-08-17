@@ -442,12 +442,30 @@ class V3CatalogCompilerTests(unittest.TestCase):
         self.assertNotIn("provider", serialized.lower())
         tea = [module for module in modules if module["id"].startswith("tea-")]
         self.assertEqual(len(tea), 5)
-        self.assertTrue(all(module["selectionMode"] == "bounded-runtime" for module in tea))
+        self.assertEqual(
+            {module["id"]: module["selectionMode"] for module in tea},
+            {
+                "tea-atdd": "bounded-runtime",
+                "tea-nfr": "bounded-runtime",
+                "tea-test-design": "static",
+                "tea-test-review": "static",
+                "tea-trace": "bounded-runtime",
+            },
+        )
         self.assertTrue(all(module["invocation"]["kind"] == "skill" for module in tea))
-        self.assertTrue(all(
-            module["supportEvidence"]["runtimeCapability"] == "unverified"
-            for module in tea
-        ))
+        self.assertEqual(
+            {
+                module["id"]: module["supportEvidence"]["runtimeCapability"]
+                for module in tea
+            },
+            {
+                "tea-atdd": "supported",
+                "tea-nfr": "supported",
+                "tea-test-design": "supported",
+                "tea-test-review": "supported",
+                "tea-trace": "supported",
+            },
+        )
         cpp = [module for module in modules if module["id"] == "cpp-core" or module["id"].startswith("cpp.")]
         self.assertEqual(len(cpp), 10)
         self.assertTrue(all(module["selectionMode"] == "bounded-runtime" for module in cpp))
@@ -455,6 +473,42 @@ class V3CatalogCompilerTests(unittest.TestCase):
             module["supportEvidence"]["runtimeCapability"] == "unverified"
             for module in cpp
         ))
+        knowledge = [
+            module for module in modules if module["id"].startswith("knowledge-")
+        ]
+        self.assertEqual(
+            {module["id"] for module in knowledge},
+            {"knowledge-read", "knowledge-propose", "knowledge-update"},
+        )
+        self.assertTrue(all(
+            module["selectionMode"] == "bounded-runtime"
+            and module["invocation"] == {"kind": "skill", "ref": "knowledge-backend"}
+            and module["supportEvidence"]["runtimeCapability"] == "unverified"
+            and module["supportEvidence"]["behaviorEvidence"] == "unverified"
+            for module in knowledge
+        ))
+        self.assertTrue(all(module["dependencies"] == [] for module in knowledge))
+        import hashlib
+        frozen_hash = "sha256:" + hashlib.sha256(
+            (root / "skills/knowledge-backend/SKILL.md").read_bytes()
+        ).hexdigest()
+        self.assertEqual(
+            {module["sourceHash"] for module in knowledge}, {frozen_hash}
+        )
+        integrated = next(
+            module for module in modules
+            if module["id"] == "plan-integrated-review"
+        )
+        self.assertEqual(integrated["stage"], "planned")
+        self.assertEqual(integrated["slot"], "plan.integrated-review")
+        self.assertEqual(integrated["selectionMode"], "static")
+        self.assertEqual(integrated["invocation"], {
+            "kind": "skill", "ref": "selfworkflow:testing-review-quality",
+        })
+        self.assertEqual(
+            integrated["supportEvidence"]["runtimeCapability"],
+            "supported",
+        )
 
     def test_checked_in_unbound_core_modules_do_not_claim_source_integrity(self):
         CatalogError, compile_catalog = _compiler()
@@ -466,8 +520,7 @@ class V3CatalogCompilerTests(unittest.TestCase):
         }
         unbound = {
             "discover-context", "capability-check", "classify-task",
-            "design-precheck", "plan-primary", "implement-tdd",
-            "review-self", "verify-execution", "complete-gate",
+            "plan-core",
         }
         self.assertEqual(
             {

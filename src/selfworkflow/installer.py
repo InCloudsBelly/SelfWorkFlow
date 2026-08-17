@@ -7,7 +7,6 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
-import shutil
 import tempfile
 from uuid import uuid4
 
@@ -146,7 +145,8 @@ def _path_relative_to(path: Path, root: Path) -> str | None:
 
 
 def _plan_managed_surfaces(
-    *, version: str, artifact_hash: str, artifact_files: list[str]
+    *, version: str, artifact_hash: str, artifact_files: list[str],
+    retired_skill_files: list[str] | None = None,
 ) -> dict[str, list[str]]:
     snapshot_prefix = PurePosixPath(
         "selfworkflow", "versions", version, artifact_hash.removeprefix("sha256:")
@@ -158,6 +158,7 @@ def _plan_managed_surfaces(
     agents.extend(
         relative for relative in artifact_files if relative.startswith("skills/")
     )
+    agents.extend(retired_skill_files or [])
     agents.append("selfworkflow/current.json")
     return {
         "agentsRoot": agents,
@@ -273,15 +274,29 @@ def _artifact_profile(artifact: Path) -> str:
     return profile
 
 
-def _managed_instruction(snapshot: Path) -> str:
-    workflow = snapshot / "WORKFLOW.md"
+def _managed_instruction(
+    snapshot: Path,
+    workflow_text: str,
+    *,
+    profile: str,
+    artifact_hash: str,
+) -> str:
     return (
-        f"Read the vendor-neutral workflow at `{workflow}`. "
-        "For ordinary tasks, follow that lightweight policy directly and do not "
-        "create a PlanGraph or RunLedger. Use a repository-provided resolver only "
-        "for an explicitly contract-managed task or through a conforming Host; "
-        "if that capability is unavailable, pause only the contract-managed mode "
-        "and never invent resolution evidence."
+        "## SelfWorkflow bootstrap\n\n"
+        "SelfWorkflow is loaded from the installed, hash-bound artifact.\n\n"
+        f"- profile: `{profile}`\n"
+        f"- artifact: `{artifact_hash}`\n"
+        f"- snapshot: `{snapshot}`\n\n"
+        "Apply the embedded lightweight policy before any substantive response "
+        "or task action. For ordinary tasks, follow it directly and do not create "
+        "a PlanGraph or RunLedger. Use the snapshot only for an explicitly "
+        "contract-managed task or through a conforming Host; if that capability "
+        "is unavailable, pause only the contract-managed mode and never invent "
+        "resolution evidence.\n\n"
+        "When a task uses tools, changes files, or performs side effects, report "
+        f"`SelfWorkflow active: {profile}` in the first progress update.\n\n"
+        "### Embedded lightweight policy\n\n"
+        f"{workflow_text.strip()}"
     )
 
 
@@ -321,6 +336,37 @@ def _same_install_identity(
     )
 
 
+def _retired_skill_files(
+    manifest: dict[str, object] | None,
+    agents: Path,
+    desired_skill_files: set[str],
+) -> tuple[list[str], list[str]]:
+    if manifest is None or manifest.get("agentsRoot") != str(agents):
+        return [], []
+    retired: list[str] = []
+    issues: list[str] = []
+    for operation in manifest.get("operations", []):
+        if not isinstance(operation, dict):
+            continue
+        target_value = operation.get("target")
+        after_hash = operation.get("afterHash")
+        if not isinstance(target_value, str) or not isinstance(after_hash, str):
+            continue
+        target = Path(target_value).resolve(strict=False)
+        relative = _path_relative_to(target, agents)
+        if (
+            relative is None
+            or not relative.startswith("skills/")
+            or relative in desired_skill_files
+        ):
+            continue
+        if not target.is_file() or _path_hash(target) != after_hash:
+            issues.append(f"managed-skill-drift:{relative}")
+        else:
+            retired.append(relative)
+    return sorted(set(retired)), sorted(set(issues))
+
+
 def create_install_plan(
     artifact_root: str | Path,
     agents_root: str | Path,
@@ -341,27 +387,38 @@ def create_install_plan(
         raise InstallerError("artifact-invalid")
     artifact_hash = _canonical_hash(files)
     profile = _artifact_profile(artifact)
+    current_manifest = _load_current_manifest(state)
+    retired_skill_files, retirement_issues = _retired_skill_files(
+        current_manifest,
+        agents,
+        {item["path"] for item in files if item["path"].startswith("skills/")},
+    )
     surfaces = _plan_managed_surfaces(
         version=version,
         artifact_hash=artifact_hash,
         artifact_files=[item["path"] for item in files],
+        retired_skill_files=retired_skill_files,
     )
     baseline_hashes = {
         "agentsRoot": _managed_surface_hash(agents, surfaces["agentsRoot"]),
         "codexRoot": _managed_surface_hash(codex, surfaces["codexRoot"]),
         "stateRoot": _managed_surface_hash(state, surfaces["stateRoot"]),
     }
-    issues: list[str] = []
+    issues: list[str] = list(retirement_issues)
     agents_file = codex / "AGENTS.md"
     snapshot = _snapshot_root(agents, version, artifact_hash)
     try:
         render_managed_block(
             _read_text(agents_file),
-            _managed_instruction(snapshot),
+            _managed_instruction(
+                snapshot,
+                _read_text(artifact / "WORKFLOW.md"),
+                profile=profile,
+                artifact_hash=artifact_hash,
+            ),
         )
     except (ManagedBlockError, UnicodeError):
         issues.append("managed-block-invalid")
-    current_manifest = _load_current_manifest(state)
     managed_targets = {
         item["target"] for item in current_manifest.get("operations", [])
     } if current_manifest else set()
@@ -400,6 +457,7 @@ def create_install_plan(
         "stateRoot": str(state),
         "artifactHash": artifact_hash,
         "artifactFiles": [item["path"] for item in files],
+        "retiredSkillFiles": retired_skill_files,
         "baselineHashes": baseline_hashes,
         "status": status,
         "issues": sorted(set(issues)),
@@ -409,8 +467,27 @@ def create_install_plan(
     return plan
 
 
-def _atomic_write(path: Path, content: bytes) -> None:
+def _target_matches(path: Path, exists: bool, expected_hash: str | None) -> bool:
+    _safe_root(path.parent, allow_missing=False)
+    present = os.path.lexists(path)
+    if not exists:
+        return not present
+    if not present:
+        return False
+    metadata = path.lstat()
+    if path.is_symlink() or getattr(metadata, "st_file_attributes", 0) & _REPARSE:
+        raise InstallerError("reparse-path-rejected")
+    return path.is_file() and _path_hash(path) == expected_hash
+
+
+def _atomic_write(
+    path: Path,
+    content: bytes,
+    *,
+    expected_state: tuple[bool, str | None] | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    _safe_root(path.parent, allow_missing=False)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
@@ -419,6 +496,8 @@ def _atomic_write(path: Path, content: bytes) -> None:
             handle.write(content)
             handle.flush()
             os.fsync(handle.fileno())
+        if expected_state is not None and not _target_matches(path, *expected_state):
+            raise InstallerError("operation-preimage-drift")
         os.replace(temporary_name, path)
     finally:
         if os.path.exists(temporary_name):
@@ -429,12 +508,23 @@ def _prepare_operation(
     target: Path, content: bytes, backup_root: Path,
 ) -> dict[str, object]:
     before_exists = target.is_file()
-    before_hash = _path_hash(target) if before_exists else None
+    before_bytes = target.read_bytes() if before_exists else None
+    before_hash = (
+        "sha256:" + hashlib.sha256(before_bytes).hexdigest()
+        if before_bytes is not None
+        else None
+    )
     backup_path = None
     if before_exists:
         backup_path = backup_root / f"{len(list(backup_root.glob('*'))):06d}.bak"
         backup_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(target, backup_path)
+        _atomic_write(
+            backup_path,
+            before_bytes,
+            expected_state=(False, None),
+        )
+        if _path_hash(backup_path) != before_hash:
+            raise InstallerError("operation-backup-invalid")
     return {
         "target": str(target),
         "beforeExists": before_exists,
@@ -449,7 +539,24 @@ def _publish_operation(operation: dict[str, object], content: bytes) -> None:
     expected = "sha256:" + hashlib.sha256(content).hexdigest()
     if operation.get("afterHash") != expected or operation.get("phase") != "prepared":
         raise InstallerError("operation-intent-invalid")
-    _atomic_write(Path(operation["target"]), content)
+    _atomic_write(
+        Path(operation["target"]),
+        content,
+        expected_state=(operation.get("beforeExists") is True, operation.get("beforeHash")),
+    )
+    operation["phase"] = "applied"
+
+
+def _publish_delete(operation: dict[str, object]) -> None:
+    target = Path(operation["target"])
+    if (
+        operation.get("phase") != "prepared"
+        or operation.get("beforeExists") is not True
+        or operation.get("afterHash") is not None
+        or not _target_matches(target, True, operation.get("beforeHash"))
+    ):
+        raise InstallerError("operation-intent-invalid")
+    target.unlink()
     operation["phase"] = "applied"
 
 
@@ -478,8 +585,15 @@ def _restore_operations(operations: list[dict[str, object]]) -> None:
             backup = Path(item["backupPath"])
             if not backup.is_file() or _path_hash(backup) != item["beforeHash"]:
                 raise InstallerError("automatic-rollback-backup-invalid")
-            _atomic_write(target, backup.read_bytes())
+            after_exists = item["afterHash"] is not None
+            _atomic_write(
+                target,
+                backup.read_bytes(),
+                expected_state=(after_exists, item["afterHash"]),
+            )
         else:
+            if not _target_matches(target, True, item["afterHash"]):
+                raise InstallerError("automatic-rollback-target-drift")
             target.unlink()
         item["phase"] = "rolled-back"
 
@@ -491,6 +605,7 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
         "install": {
             "schemaVersion", "operation", "version", "profile", "artifactRoot", "agentsRoot",
             "codexRoot", "stateRoot", "artifactHash", "artifactFiles",
+            "retiredSkillFiles",
             "baselineHashes", "status", "issues", "securityStatus", "planHash",
         },
         "rollback": {
@@ -520,6 +635,7 @@ def _validate_ready_plan_baseline(
         version=plan["version"],
         artifact_hash=plan["artifactHash"],
         artifact_files=plan["artifactFiles"],
+        retired_skill_files=plan["retiredSkillFiles"],
     )
     if (
         _managed_surface_hash(agents, surfaces["agentsRoot"])
@@ -597,10 +713,22 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                     transaction["operations"] = operations
                     write_json_atomic(transaction_path, transaction)
 
+                def record_delete(target: Path) -> None:
+                    operation = _prepare_operation(target, b"", backup_root)
+                    operation["afterHash"] = None
+                    operations.append(operation)
+                    transaction["operations"] = operations
+                    write_json_atomic(transaction_path, transaction)
+                    _publish_delete(operation)
+                    transaction["operations"] = operations
+                    write_json_atomic(transaction_path, transaction)
+
                 snapshot = _snapshot_root(agents, plan["version"], plan["artifactHash"])
                 for item in _manifest(artifact):
                     source = artifact / Path(*PurePosixPath(item["path"]).parts)
                     record(snapshot / item["path"], source.read_bytes())
+                for relative in plan["retiredSkillFiles"]:
+                    record_delete(agents / Path(*PurePosixPath(relative).parts))
                 for item in _manifest(artifact):
                     if item["path"].startswith("skills/"):
                         source = artifact / Path(*PurePosixPath(item["path"]).parts)
@@ -608,7 +736,12 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 agents_path = codex / "AGENTS.md"
                 agents_content = render_managed_block(
                     _read_text(agents_path),
-                    _managed_instruction(snapshot),
+                    _managed_instruction(
+                        snapshot,
+                        _read_text(artifact / "WORKFLOW.md"),
+                        profile=plan["profile"],
+                        artifact_hash=plan["artifactHash"],
+                    ),
                 ).encode("utf-8")
                 record(agents_path, agents_content)
                 pointer = (json.dumps(
@@ -679,7 +812,10 @@ def verify_install(manifest_path: str | Path) -> dict[str, object]:
         raise InstallerError("manifest-invalid") from None
     for operation in manifest.get("operations", []):
         target = Path(operation["target"])
-        if not target.is_file() or _path_hash(target) != operation["afterHash"]:
+        if operation.get("afterHash") is None:
+            if target.exists():
+                raise InstallerError("installed-file-drift")
+        elif not target.is_file() or _path_hash(target) != operation["afterHash"]:
             raise InstallerError("installed-file-drift")
     return {"status": "verified", "manifestPath": str(path)}
 
@@ -692,7 +828,7 @@ def create_rollback_plan(
         transaction = json.loads(transaction_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise InstallerError("transaction-invalid") from None
-    if transaction.get("state") != "completed":
+    if transaction.get("state") not in {"completed", "rolling-back"}:
         raise InstallerError("transaction-not-complete")
     operations = [
         {
@@ -703,6 +839,7 @@ def create_rollback_plan(
             "backupPath": item["backupPath"],
         }
         for item in transaction["operations"]
+        if item.get("phase") != "rolled-back"
     ]
     state_root = transaction_file.parents[1]
     plan = {
@@ -730,20 +867,55 @@ def apply_rollback_plan(plan: dict[str, object], confirmed_hash: str) -> dict[st
         raise InstallerError("rollback-transaction-drift")
     for item in plan["operations"]:
         target = Path(item["target"])
-        if not target.is_file() or _path_hash(target) != item["expectedHash"]:
+        if item["expectedHash"] is None:
+            drifted = target.exists()
+        else:
+            drifted = not target.is_file() or _path_hash(target) != item["expectedHash"]
+        if drifted:
             raise InstallerError("rollback-target-drift")
     try:
         with exclusive_install_lock(state):
+            if (
+                not transaction_path.is_file()
+                or _path_hash(transaction_path) != plan["transactionHash"]
+            ):
+                raise InstallerError("rollback-transaction-drift")
+            for item in plan["operations"]:
+                target = Path(item["target"])
+                expected_exists = item["expectedHash"] is not None
+                if not _target_matches(target, expected_exists, item["expectedHash"]):
+                    raise InstallerError("rollback-target-drift")
+            transaction = json.loads(transaction_path.read_text(encoding="utf-8"))
+            if transaction.get("state") not in {"completed", "rolling-back"}:
+                raise InstallerError("rollback-transaction-drift")
+            transaction["state"] = "rolling-back"
+            write_json_atomic(transaction_path, transaction)
             for item in reversed(plan["operations"]):
                 target = Path(item["target"])
+                expected_exists = item["expectedHash"] is not None
                 if item["beforeExists"]:
                     backup = Path(item["backupPath"])
                     if not backup.is_file() or _path_hash(backup) != item["beforeHash"]:
                         raise InstallerError("rollback-backup-invalid")
-                    _atomic_write(target, backup.read_bytes())
+                    _atomic_write(
+                        target,
+                        backup.read_bytes(),
+                        expected_state=(expected_exists, item["expectedHash"]),
+                    )
                 else:
+                    if not _target_matches(target, True, item["expectedHash"]):
+                        raise InstallerError("rollback-target-drift")
                     target.unlink()
-            transaction = json.loads(transaction_path.read_text(encoding="utf-8"))
+                matches = [
+                    operation
+                    for operation in transaction["operations"]
+                    if operation.get("target") == item["target"]
+                    and operation.get("afterHash") == item["expectedHash"]
+                ]
+                if len(matches) != 1:
+                    raise InstallerError("rollback-transaction-drift")
+                matches[0]["phase"] = "rolled-back"
+                write_json_atomic(transaction_path, transaction)
             transaction["state"] = "rolled-back"
             write_json_atomic(transaction_path, transaction)
     except TransactionError as error:

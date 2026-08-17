@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: review-code-review
+sourceHash: sha256:e32441ce3f64628daeb6270bf56104f461b1341aa472cc3968424e90ece17bc4
+stage: reviewed
+slot: review.independent
+selectionMode: static
+invocation: {kind: skill, ref: matt-pocock:code-review}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 1024, estimatedExecutionCost: 512}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

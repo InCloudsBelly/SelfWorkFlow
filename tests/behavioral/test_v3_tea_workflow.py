@@ -36,13 +36,10 @@ class V3TeaWorkflowBehaviorTests(unittest.TestCase):
         self.assertEqual(slots["test.quality.plan"][0], "planned")
         self.assertEqual(slots["test.quality.review"][0], "reviewed")
         self.assertEqual(slots["test.quality.verify"][0], "verified")
-        self.assertTrue(all(
-            slots[name][1]["selectionMode"] == "bounded-runtime"
-            for name in (
-                "test.quality.plan", "test.quality.implementation",
-                "test.quality.review", "test.quality.verify",
-            )
-        ))
+        self.assertEqual(slots["test.quality.plan"][1]["selectionMode"], "static")
+        self.assertEqual(slots["test.quality.review"][1]["selectionMode"], "static")
+        self.assertEqual(slots["test.quality.implementation"][1]["selectionMode"], "bounded-runtime")
+        self.assertEqual(slots["test.quality.verify"][1]["selectionMode"], "bounded-runtime")
 
     def test_tea_behavior_support_matches_unverified_lock_and_adapter(self):
         catalog = compile_catalog().document["catalog"]
@@ -58,7 +55,7 @@ class V3TeaWorkflowBehaviorTests(unittest.TestCase):
 
         self.assertEqual(lock["status"]["behaviorEvidence"], "unverified")
         self.assertTrue(all(
-            item["supportEvidence"]["behaviorEvidence"] == "unverified"
+            item["supportEvidence"]["behaviorEvidence"] == "supported"
             for item in tea_modules
         ))
         self.assertTrue(all(

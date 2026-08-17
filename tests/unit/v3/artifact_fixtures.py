@@ -31,6 +31,8 @@ def load_test_artifacts(
     cardinality: str = "exactly-one",
     mode: str = "bounded-runtime",
     condition: dict | None = None,
+    target_stage: str = "reviewed",
+    target_slot: str = "review.primary",
 ):
     """Compile real files and load a complete nine-stage pipeline."""
 
@@ -67,7 +69,7 @@ def load_test_artifacts(
             ):
                 if module_stage != stage_id:
                     continue
-                is_target = stage_id == "reviewed" and slot_id == "review.primary"
+                is_target = stage_id == target_stage and slot_id == target_slot
                 slot = {
                     "id": slot_id,
                     "cardinality": cardinality if is_target else "zero-or-many",

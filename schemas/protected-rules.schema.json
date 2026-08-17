@@ -109,7 +109,7 @@
           "additionalProperties": false,
           "required": ["id", "strength", "gate", "evaluator", "reasonCodes"],
           "properties": {
-            "id": {"const": "require-independent-post-grill-brainstorming-review"},
+            "id": {"const": "require-independent-post-grill-review"},
             "strength": {"const": "enforced"},
             "gate": {"const": "design.post-grill-review"},
             "evaluator": {"const": "post-grill-review-independence-v1"},

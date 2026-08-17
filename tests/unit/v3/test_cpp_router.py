@@ -278,7 +278,8 @@ class CppRouterTests(unittest.TestCase):
         }
         required = {
             "discover-context", "capability-check", "classify-task",
-            "design-precheck", "plan-primary", "implement-tdd",
+            "design-grilling", "plan-core",
+            "implement-matt", "implement-tdd",
             "review-self", "verify-execution", "complete-gate",
         }
         request["explicitModuleIds"] = sorted(required)
@@ -322,7 +323,8 @@ class CppRouterTests(unittest.TestCase):
         }
         required = {
             "discover-context", "capability-check", "classify-task",
-            "design-precheck", "plan-primary", "implement-tdd",
+            "design-grilling", "plan-core",
+            "implement-matt", "implement-tdd",
             "review-self", "verify-execution", "complete-gate",
         }
         request["explicitModuleIds"] = sorted(required)

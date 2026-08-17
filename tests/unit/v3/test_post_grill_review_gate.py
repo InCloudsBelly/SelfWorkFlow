@@ -35,7 +35,7 @@ def _fallback(
 
 def _receipt(*, attested=True, same_agent=False, fallback_ref=None, verdict="approve"):
     value = {
-        "schemaVersion": 3, "reviewMode": "brainstorming-cross-review",
+        "schemaVersion": 3, "reviewMode": "independent-design-review",
         "dispatchId": "dispatch-1", "forkContext": same_agent,
         "dispatchNonce": "dispatch-nonce-1", "planHash": PLAN_HASH,
         "attemptRef": "attempt-designed",

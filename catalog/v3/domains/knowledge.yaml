@@ -1,0 +1,6 @@
+schemaVersion: 3
+id: knowledge
+modules:
+  - knowledge-read
+  - knowledge-propose
+  - knowledge-update

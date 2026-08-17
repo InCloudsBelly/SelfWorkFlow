@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: implement-matt
+sourceHash: sha256:30cd7bc1ebfb3891e85a1eed3b3b81aea0fa4ad4553a784de7f8e421b2d223e0
+stage: implemented
+slot: implement.orchestrator
+selectionMode: static
+invocation: {kind: skill, ref: matt-pocock:implement}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 192, estimatedExecutionCost: 64}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

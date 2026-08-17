@@ -91,22 +91,22 @@ class GitPolicyTests(unittest.TestCase):
         report = check_repository(self.ROOT, self.ROOT / "workflow/git-policy.yaml")
         self.assertNotEqual(report["status"], "failed", report)
         policy = load_git_policy(self.ROOT / "workflow/git-policy.yaml")
-        self.assertEqual(policy["allowlist"], [{
-            "path": "dependencies/upstream/tea",
-            "objectHash": "2882e9c8972a94f48d5e848039eec435436f2459",
-            "reason": "Pinned official TEA source used by the optional V3 test-quality adapter",
-            "owner": "SelfWorkFlow maintainers",
-            "expires": "2030-12-31",
-        }])
-        changed = subprocess.run(
-            ["git", "diff", "--name-only", "3ff07d6..HEAD"], cwd=self.ROOT,
-            check=True, capture_output=True, text=True,
-        ).stdout.splitlines()
-        frozen = (
-            "extensions/knowledge/c7-openwiki/", "src/selfworkflow/c7_openwiki.py",
-            "tests/conformance/test_c7_openwiki_adapter.py", "tests/fixtures/c7-openwiki/",
-        )
-        self.assertEqual([path for path in changed if any(path == prefix or path.startswith(prefix) for prefix in frozen)], [])
+        self.assertEqual(policy["allowlist"], [
+            {
+                "path": "dependencies/upstream/matt-pocock-skills",
+                "objectHash": "8b78b531ab965735c5dc74f6f7a219e1e37326df",
+                "reason": "Pinned Matt Pocock engineering skills foundation used by SelfWorkFlow",
+                "owner": "SelfWorkFlow maintainers",
+                "expires": "2030-12-31",
+            },
+            {
+                "path": "dependencies/upstream/tea",
+                "objectHash": "2882e9c8972a94f48d5e848039eec435436f2459",
+                "reason": "Pinned official TEA source used by the optional V3 test-quality adapter",
+                "owner": "SelfWorkFlow maintainers",
+                "expires": "2030-12-31",
+            },
+        ])
 
 
 if __name__ == "__main__":

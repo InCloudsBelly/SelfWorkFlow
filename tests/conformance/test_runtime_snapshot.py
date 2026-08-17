@@ -22,16 +22,39 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertEqual(first["features"], {"grillMe": True})
             self.assertTrue((root / "first/WORKFLOW.md").is_file())
             self.assertTrue((root / "first/skills/code-quality/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/caveman/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/matt-pocock/grilling/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/matt-pocock/tdd/SKILL.md").is_file())
+            self.assertFalse((root / "first/skills/grill-me").exists())
             self.assertEqual(
                 (root / "first/WORKFLOW.md").read_bytes(),
-                (self.ROOT / "workflow/core.md").read_bytes(),
+                (self.ROOT / "WORKFLOW.md").read_bytes(),
             )
+            workflow_text = (root / "first/WORKFLOW.md").read_text(encoding="utf-8")
+            for phrase in (
+                "SelfWorkflow active: <profile>",
+                "mode: <Light|Full|Deep>",
+                "已完成主阶段/总主阶段",
+                "独立 SubAgent",
+                "至少两份正式文档",
+                "侵入性预算",
+                "影响半径",
+                "测试覆盖不能反向驱动生产架构",
+                "代码实施契约",
+                "第一次编辑测试或生产代码前",
+                "明确实施确认",
+                "Review → 用户确认 → TDD",
+                "确认失效",
+            ):
+                self.assertIn(phrase, workflow_text)
             self.assertFalse((root / "first/extensions").exists())
             self.assertTrue((root / "first/schemas/plan-graph.schema.json").is_file())
             self.assertTrue((root / "first/workflow/pipeline.yaml").is_file())
             self.assertTrue((root / "first/schemas/v3/resolve-request.schema.json").is_file())
             self.assertTrue((root / "first/workflow/v3/pipeline.yaml").is_file())
             self.assertTrue((root / "first/catalog/v3/index.yaml").is_file())
+            self.assertFalse((root / "first/catalog/v3/domains/knowledge.yaml").exists())
+            self.assertFalse((root / "first/catalog/v3/modules/knowledge-update.yaml").exists())
             self.assertTrue((root / "first/skills/cpp-core/SKILL.md").is_file())
             self.assertTrue((root / "first/capabilities/cpp/core.yaml").is_file())
             self.assertFalse((root / "first/Manage_SelfWorkFlow_Providers.bat").exists())
@@ -40,7 +63,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
             core_catalog = json.loads((root / "first/catalog.json").read_text())
             self.assertEqual(
                 {entry["id"] for entry in core_catalog["catalog"]["entries"]},
-                {"workflow-core", "workflow-quality", "code-quality", "grill-me"},
+                {
+                    "workflow-core", "workflow-quality", "code-quality",
+                    "matt-skills-foundation", "testing-review-quality",
+                    "tea-quality-foundation",
+                },
             )
             core_ids = {entry["id"] for entry in core_catalog["catalog"]["entries"]}
             self.assertTrue(all(
@@ -69,10 +96,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
             )
 
             self.assertEqual(manifest["features"], {"grillMe": False})
-            self.assertFalse((root / "runtime/skills/grill-me").exists())
+            self.assertFalse((root / "runtime/skills/matt-pocock/grill-me").exists())
+            self.assertTrue((root / "runtime/skills/matt-pocock/grilling/SKILL.md").is_file())
             catalog = json.loads((root / "runtime/catalog.json").read_text())
-            self.assertNotIn(
-                "grill-me",
+            self.assertIn(
+                "matt-skills-foundation",
                 {entry["id"] for entry in catalog["catalog"]["entries"]},
             )
 
@@ -87,7 +115,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
             )
             self.assertEqual(knowledge["profile"], "knowledge")
             self.assertTrue((root / "knowledge/extensions/knowledge/contract.yaml").is_file())
-            self.assertFalse((root / "knowledge/extensions/knowledge/c7-openwiki").exists())
+            self.assertTrue((root / "knowledge/extensions/knowledge/selfopenwiki/tool-contract.json").is_file())
+            self.assertTrue((root / "knowledge/skills/knowledge-backend/SKILL.md").is_file())
+            self.assertTrue((root / "knowledge/skills/kg-selfopenwiki/SKILL.md").is_file())
+            self.assertTrue((root / "knowledge/catalog/v3/domains/knowledge.yaml").is_file())
+            self.assertTrue((root / "knowledge/catalog/v3/modules/knowledge-update.yaml").is_file())
             self.assertFalse((root / "knowledge/workflow/protected-rules.yaml").exists())
             knowledge_catalog = json.loads((root / "knowledge/catalog.json").read_text())
             self.assertIn(

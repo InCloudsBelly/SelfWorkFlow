@@ -105,6 +105,30 @@
         "receiptHash": {"$ref": "#/$defs/sha256"}
       }
     },
+    "teaReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion", "planHash", "attemptRef", "stageId", "slotId", "moduleId",
+        "workflowId", "referenceHash", "inputHash", "outputRelative", "outputHash",
+        "status", "receiptHash"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "planHash": {"$ref": "#/$defs/sha256"},
+        "attemptRef": {"$ref": "#/$defs/stableId"},
+        "stageId": {"$ref": "#/$defs/stableId"},
+        "slotId": {"$ref": "#/$defs/stableId"},
+        "moduleId": {"$ref": "#/$defs/stableId"},
+        "workflowId": {"enum": ["test-design", "atdd", "test-review", "trace", "nfr"]},
+        "referenceHash": {"$ref": "#/$defs/sha256"},
+        "inputHash": {"$ref": "#/$defs/sha256"},
+        "outputRelative": {"type": "string", "pattern": "^[^./][^:]*[^./]$"},
+        "outputHash": {"$ref": "#/$defs/sha256"},
+        "status": {"const": "validated"},
+        "receiptHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "stage": {
       "type": "object",
       "additionalProperties": false,
@@ -145,6 +169,13 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/selectionReceiptRef"}
         },
+        "teaReceipts": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/teaReceipt"}
+        },
+        "teaReceiptHashes": {"$ref": "#/$defs/hashList"},
         "reviewAggregateHashes": {"$ref": "#/$defs/hashList"},
         "coverageResultHashes": {"$ref": "#/$defs/hashList"},
         "artifactHashes": {"$ref": "#/$defs/hashList"}

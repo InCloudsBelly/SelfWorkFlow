@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "backend": "selfopenwiki",
+  "status": {
+    "firstCall": "openwiki_status",
+    "required": {
+      "version.contractSchema": 2,
+      "executionMode": "external_agent",
+      "authRequired": false,
+      "externalAgent.ready": true,
+      "capabilities": [
+        "update.external-agent.begin",
+        "update.external-agent.reviewed-finalize"
+      ]
+    }
+  },
+  "externalUpdate": {
+    "begin": "openwiki_begin_external_update",
+    "finalize": "openwiki_finalize_external_update",
+    "sequence": [
+      "writer-begin-start",
+      "candidate-only-write",
+      "prepare-review",
+      "independent-reviewer",
+      "reviewed-finalize-publish"
+    ],
+    "legacyFallback": false,
+    "clarificationRequiresUserConfirmation": true,
+    "automaticCommit": false,
+    "automaticPush": false
+  },
+  "installation": {
+    "setup": ["Setup.bat"],
+    "setupWithMcp": ["Setup.bat", "--with-mcp"],
+    "install": [
+      "Install.bat",
+      "--wiki-root",
+      "<absolute>",
+      "--confirm-data-safety"
+    ],
+    "gitInstallExtra": "--confirm-git-authorization",
+    "configRoot": "%LOCALAPPDATA%/SelfOpenWiki",
+    "wikiGitMutation": false
+  },
+  "visualizer": {
+    "entry": ".work/openwiki/dist/cli/cli.js",
+    "args": ["visualize", "<wiki-root>", "--port", "4321", "--no-open"],
+    "loopbackOnly": true
+  },
+  "forbiddenPersistence": [
+    "personal wiki path",
+    "private receipt",
+    "local runtime evidence",
+    "credentials"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "kind": "owner-review",
+  "status": "passed",
+  "subjectId": "protected-rules-change",
+  "subjectHash": "sha256:74079b7dbd94a734807d1e17c772cacaf1d180ef28c3047ac19d0ed07f4d18ab",
+  "actorId": "01a0008c-cfdd-74d0-82f6-45211ba8e862",
+  "contextId": "independent-owner-review-01a0008c-cfdd-74d0-82f6-45211ba8e862",
+  "relatedIds": [],
+  "recordedAt": "2026-08-14T13:55:30Z",
+  "attributes": {
+    "provider": "codex-multi-agent-v1",
+    "receiptId": "01a0008c-cfdd-74d0-82f6-45211ba8e862",
+    "inputHash": "sha256:74079b7dbd94a734807d1e17c772cacaf1d180ef28c3047ac19d0ed07f4d18ab",
+    "outputHash": "sha256:1584e609cfb8aa8a151059f85c5122d2bcbbf69048eab107712b12825dff1023",
+    "decision": "passed",
+    "level": "L2",
+    "implementationActor": "codex-implementation-agent",
+    "implementationContext": "selfworkflow-matt-quality-hardening"
+  }
+}

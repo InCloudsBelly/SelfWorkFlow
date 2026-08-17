@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: design-codebase
+sourceHash: sha256:22d3815e5629ddea7ed7c9f8e7c330f6a1559466ee904e58371e1e8a10be0c4b
+stage: designed
+slot: design.specialists
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: matt-pocock:codebase-design}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 512, estimatedExecutionCost: 128}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

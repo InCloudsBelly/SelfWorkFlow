@@ -6,7 +6,7 @@
   "required": ["schemaVersion", "reviewMode", "dispatchId", "dispatchNonce", "planHash", "attemptRef", "issuedAt", "expiresAt", "forkContext", "implementationAgentIdentity", "implementationContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "hostAgentIdentity", "hostContextIdentity", "hostAttestationRef", "inputMode", "parentContextImported", "grillReasoningReceived", "payloadHash", "inputSummaryHash", "designHash", "reviewerPolicyHash", "resultHash", "reviewVerdict", "reviewLevel", "fallbackAuthorizationRef", "independence", "receiptHash"],
   "properties": {
     "schemaVersion": {"const": 3},
-    "reviewMode": {"const": "brainstorming-cross-review"},
+    "reviewMode": {"const": "independent-design-review"},
     "dispatchId": {"$ref": "#/$defs/id"},
     "dispatchNonce": {"$ref": "#/$defs/id"},
     "planHash": {"$ref": "#/$defs/hash"},

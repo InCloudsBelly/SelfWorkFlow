@@ -14,6 +14,7 @@ from typing import Any
 
 from selfworkflow.v3.contracts import ContractError, validate_run_ledger
 from selfworkflow.v3.plan_graph import PlanGraphArtifact
+from selfworkflow.v3.tea_adapter import is_tea_module_id, validate_tea_receipt
 
 
 _HASH = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -75,11 +76,13 @@ def _validate_or_raise(
     receipts: Sequence[Mapping[str, Any]] = (),
     *,
     successor: str | None = None,
+    tea_runtime_root: str | None = None,
 ) -> None:
     try:
         validate_run_ledger(
             dict(ledger), dict(plan), tuple(dict(item) for item in receipts),
             expected_successor_plan_hash=successor,
+            tea_runtime_root=tea_runtime_root,
         )
     except ContractError as error:
         raise LedgerError(error.reason) from None
@@ -135,6 +138,8 @@ def new_ledger(plan: PlanGraphArtifact | Mapping[str, Any]) -> dict[str, Any]:
             "gateResults": [],
             "runtimeSkips": [],
             "selectionReceiptRefs": [],
+            "teaReceipts": [],
+            "teaReceiptHashes": [],
             "reviewAggregateHashes": [],
             "coverageResultHashes": [],
             "artifactHashes": [],
@@ -247,6 +252,8 @@ def apply_stage_result(
     plan: PlanGraphArtifact | Mapping[str, Any],
     stage_result: Mapping[str, Any],
     receipts: Sequence[Any] = (),
+    *,
+    tea_runtime_root: str | None = None,
 ) -> dict[str, Any]:
     """Commit one typed stage result as a new ledger value."""
 
@@ -269,7 +276,7 @@ def apply_stage_result(
         "slotResults", "gateResults", "runtimeSkips", "artifactHashes", "status",
         "completedAt",
     }
-    allowed = required | {"selectionReceipts"}
+    allowed = required | {"selectionReceipts", "teaReceipts"}
     if set(stage_result) - allowed:
         raise LedgerError("v3-stage-result-unknown-field")
     if stage_result["planHash"] != plan_document["planHash"]:
@@ -307,6 +314,11 @@ def apply_stage_result(
     slot_results = copy.deepcopy(stage_result["slotResults"])
     gate_results = copy.deepcopy(stage_result["gateResults"])
     runtime_skips = copy.deepcopy(stage_result["runtimeSkips"])
+    tea_receipts = stage_result.get("teaReceipts", [])
+    if type(tea_receipts) is not list:
+        raise LedgerError("v3-stage-result-tea-receipts-invalid")
+    if tea_receipts and tea_runtime_root is None:
+        raise LedgerError("v3-tea-runtime-reference-required")
     if not all(type(item) is dict for item in slot_results + gate_results + runtime_skips):
         raise LedgerError("v3-stage-result-artifact-invalid")
     seen_slot_results: set[tuple[str, str]] = set()
@@ -325,6 +337,47 @@ def apply_stage_result(
         slot = slots.get(item["slotId"])
         if slot is None or item["moduleId"] not in set(slot["selectedModules"]):
             raise LedgerError("v3-stage-result-module-not-selected")
+    tea_receipt_hashes: list[str] = []
+    tea_receipt_keys: set[tuple[str, str]] = set()
+    slot_result_by_key = {
+        (item["slotId"], item["moduleId"]): item
+        for item in slot_results
+    }
+    for raw_receipt in tea_receipts:
+        if type(raw_receipt) is not dict:
+            raise LedgerError("v3-stage-result-tea-receipt-invalid")
+        key = (raw_receipt.get("slotId"), raw_receipt.get("moduleId"))
+        slot_result = slot_result_by_key.get(key)
+        if slot_result is None:
+            raise LedgerError("v3-stage-result-tea-receipt-binding-invalid")
+        try:
+            receipt = validate_tea_receipt(
+                raw_receipt,
+                plan_hash=plan_document["planHash"],
+                stage_id=active["stageId"],
+                attempt_ref=stage_result["attemptRef"],
+                slot_id=slot_result["slotId"],
+                module_id=slot_result["moduleId"],
+                output_hash=slot_result["artifactHash"],
+                runtime_root=tea_runtime_root,
+            )
+        except Exception as error:
+            raise LedgerError(getattr(error, "reason", "v3-stage-result-tea-receipt-invalid")) from None
+        receipt_key = (receipt["slotId"], receipt["moduleId"])
+        if receipt_key in tea_receipt_keys:
+            raise LedgerError("v3-stage-result-tea-receipt-duplicate")
+        tea_receipt_keys.add(receipt_key)
+        tea_receipt_hashes.append(receipt["receiptHash"])
+    if stage_result["status"] == "passed":
+        required_tea_keys = {
+            (slot["slotId"], module_id)
+            for slot in slots.values()
+            if slot["selectionMode"] == "static"
+            for module_id in slot["selectedModules"]
+            if is_tea_module_id(module_id)
+        }
+        if required_tea_keys - tea_receipt_keys:
+            raise LedgerError("v3-stage-result-tea-receipt-missing")
     seen_gate_results: set[str] = set()
     for item in gate_results:
         if set(item) != {"gateId", "outcome", "artifactHash"}:
@@ -380,7 +433,11 @@ def apply_stage_result(
         {"attemptRef": stage_result["attemptRef"], **item}
         for item in runtime_skips
     ])
+    target.setdefault("teaReceipts", []).extend(copy.deepcopy(tea_receipts))
     target["selectionReceiptRefs"].extend(receipt_refs)
+    target["teaReceiptHashes"] = sorted(set(
+        target.get("teaReceiptHashes", []) + tea_receipt_hashes
+    ))
     target["artifactHashes"] = sorted(set(
         target["artifactHashes"] + artifact_hashes
     ))
@@ -392,7 +449,10 @@ def apply_stage_result(
         result["status"] = "completed"
     else:
         result["status"] = "pending"
-    _validate_or_raise(result, plan_document, receipt_documents)
+    _validate_or_raise(
+        result, plan_document, receipt_documents,
+        tea_runtime_root=tea_runtime_root,
+    )
     return result
 
 

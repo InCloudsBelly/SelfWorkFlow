@@ -1245,7 +1245,7 @@ def _parse_rule(
     protected: bool,
 ) -> MergedRule:
     entries = dict(_mapping_entries(value, code))
-    if entries.get("id") == "require-independent-post-grill-brainstorming-review":
+    if entries.get("id") == "require-independent-post-grill-review":
         rule = _closed_mapping(
             value,
             ("id", "strength", "gate", "evaluator", "reasonCodes"),

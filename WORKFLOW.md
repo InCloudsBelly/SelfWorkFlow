@@ -40,7 +40,9 @@ Discover -> Capability Check -> Classify -> Design -> Plan
 -> Implement/Debug -> Review -> Verify -> optional Knowledge -> Complete
 ```
 
-The Host calls `selfworkflow resolve` with a normalized request and fresh,
+Ordinary tasks follow this lightweight policy directly and do not create a
+PlanGraph or RunLedger. Only an explicitly contract-managed request may ask a
+conforming Host to invoke the resolver with normalized input and fresh,
 identity-bound capability evidence. An `active` result contains an immutable
 PlanGraph; `paused` must never be promoted or silently degraded. Only modules in
 the current PlanGraph stage are loaded. Runtime attempts, Gate results, skips,
@@ -48,23 +50,51 @@ and failures belong in a RunLedger bound to the exact `planHash`, `requestHash`,
 and capability snapshot. Changed or expired evidence requires a new plan and
 supersedes the old ledger.
 
-All modifying tasks use Brainstorming; Light keeps it bounded and uses an inline
-Plan, while Full and Deep also use Writing Plans. Deep recommends Grill-me but never enables
-it automatically; when the user selects it, Grill-me is followed by an
-independent-context Brainstorming cross-review. Every modifying task still
+Modifying tasks use the core design contract for bounded alignment. Light does
+not auto-start Grill; Full automatically uses Matt `grilling` for a bounded
+frontier; Deep automatically uses Matt `grill-me`, whose upstream workflow runs
+the more comprehensive `grilling` frontier. Deep covers hidden assumptions,
+boundaries, and failure paths without duplicating a second Grill round. Users
+may explicitly select either module at any strength. Full and Deep use the
+SelfWorkflow Plan contract and must load TEA. Grill completion is followed by
+the applicable vendor-neutral independent design or integrated Review. Every modifying task still
 requires complete-diff Review and the narrowest sufficient direct, failure-path,
 and related-regression verification. Users are prompted only for material scope
 or product choices, sensitive data, irreversible/external effects, protected
-defaults, and formal knowledge publication.
+defaults, formal knowledge publication, and the implementation-contract
+confirmation required before code edits.
+
+Behavior-changing `implement`/`debug`, feature, bugfix, behavioral-refactor,
+architecture, and migration tasks must load Matt `tdd` and record real RED and
+GREEN commands. RED proves the expected missing behavior rather than an
+environment or syntax error; GREEN reruns the same path and the narrowest
+affected regression. Conflicting operation/archetype classification pauses.
+
+Full has a T2 floor and Deep a T3 floor. Their TEA workflows run through the
+installed `tea-quality` adapter without requiring a project `_bmad` directory.
+Post-landing Standards and Spec reviewers receive the same readable package:
+approved request, acceptance criteria, final documents, applicable rules, and
+actual committed/staged/unstaged/untracked/deleted/binary/file-mode task delta,
+with worktree and index bytes plus modes bound separately. Both
+return the package hash and distinct execution IDs. Severity maps as
+`critical -> Critical`, `high/medium -> Important`, `low/info -> Minor`.
+Completion requires zero open Critical/Important, a disposition for every
+Minor, and fresh verification receipts containing command, time range, exit
+code, failure count, and consumer result. Package drift invalidates all Review
+and Verify evidence.
 
 `writeTask` is derived from the closed operation contract, not trusted as a free
 caller assertion. `implement`, `debug`, `document`, `install`, `publish`, and
 `knowledge-write` require `writeTask=true`; all remaining operations require
 `false`. A mismatch is rejected before routing.
 
-Knowledge exposes only optional `knowledge.read`, `knowledge.propose`, and
-`knowledge.update` slots. This version does not implement or enable C7OpenWiki;
-its concrete MCP behavior is a later, separately tested extension.
+Knowledge exposes only optional, vendor-neutral `knowledge.read`,
+`knowledge.propose`, and `knowledge.update` slots. A concrete backend is an
+explicit adapter under `extensions/knowledge/<backend>` with its own contract,
+capability checks, failure semantics, and Skill. The `knowledge` profile carries
+the generic backend Skill and the optional SelfOpenWiki adapter, but the core
+workflow does not depend on either. An adapter must fail closed on missing or
+drifted capabilities and cannot invent provider, model, or database behavior.
 
 ## Review and decision closure
 
@@ -81,6 +111,92 @@ plan hash before implementation continues. A document that is itself the final
 deliverable still lands through `document`, post-landing Review, and Verify.
 Writing a plan never completes an implementation request.
 
+### 代码实施契约
+
+Any task that adds, changes, or deletes behavior code forms a 代码实施契约 before
+the **第一次编辑测试或生产代码前** boundary. Before confirmation, only 只读分析和文档修订
+are allowed; test code, shaders, build scripts, behavior configuration, and
+production code remain untouched. The contract states 修改预期, owner layer,
+main files/symbols, alternatives, 影响半径/侵入性, 安全、性能、可维护性,
+compatibility, rollback, test seams, and `unverified` evidence.
+
+Light uses a 紧凑 inline summary and does not create formal documents or a
+SubAgent. Full 和 Deep 必须加载 TEA. For Full/Deep, **设计/规格** records alternatives and code boundaries,
+**TEA/测试设计** records direct/failure paths, invariants, performance evidence,
+and non-invasive test seams, and the **实施计划** records expected files/behavior,
+no-go boundaries, the 批准的侵入性预算, TDD, 回滚, and verification commands. After the complete
+package passes independent Review and is corrected, present the final contract
+to the user. The fixed order is `Review → 用户确认 → TDD`; only an **明确实施确认**
+permits code edits.
+
+Crossing the approved owner/module boundary; adding public API/ABI/Schema,
+persistent formats, a global macro, or a Build variant; expanding a 共享热路径 or
+测试来源的生产改动; changing a 关键测试接缝; or materially increasing safety,
+performance, maintenance, rollback, or test-intrusion cost makes the old
+Review and **确认失效**. Stop editing, revise the package, rerun Review, and obtain
+new confirmation. Private local details inside the approved budget do not prompt
+again, but post-landing Review reports them.
+
+### Progress reporting
+
+For tasks that use tools, change files, or perform side effects, 首条进度更新同时包含
+`SelfWorkflow active: <profile>；mode: <Light|Full|Deep>` and the progress plus
+initial-estimate line
+`进度 <已完成主阶段/总主阶段>（约 <粗略区间>%）｜当前：<阶段>｜剩余：<关键阶段>｜预计：<时间区间或重估点>`.
+Later updates reuse the second line.
+Report only at start, main-stage transitions, meaningful checkpoints in a long
+stage, blockers, or material estimate changes; 不得按每个命令机械刷屏. Both
+percentage and time are 粗略区间. A 单点精确百分比 such as `50%` or an exact
+countdown is forbidden. Normal progress must 保持单调; scope-driven regressions
+must explain the cause and 重新估算. When evidence is insufficient, state
+`暂无法可靠估算` and name the checkpoint after which the estimate will be
+revised. Progress never replaces Review or verification evidence.
+
+### Integrated pre-implementation Review
+
+`Full/Deep` tasks, and tasks that produce 至少两份正式文档 among the design,
+test design, and implementation plan, require a new 独立 SubAgent before
+implementation. The latter is upgraded to Full; a Light inline task remains
+lightweight. The reviewer receives the accepted scope, acceptance criteria,
+project rules, complete final documents, and the 最终文档包 hash, but not the
+main Agent's private reasoning. Chunk Review or 同一 Agent self-review cannot
+replace this 完整文档包 Review.
+
+Critical and Important findings must be resolved; every Minor finding receives
+an explicit disposition. Any reviewed-document change invalidates the old
+result and requires a fresh whole-package Review. If independent SubAgent
+capability is unavailable, record `unverified` and 暂停实施; same-Agent fallback
+is forbidden. This gate does not replace TDD, `post-landing Review`, or Verify.
+
+### Intrusion budget
+
+Judge code-design intrusion by **影响半径**, not line count. Public headers,
+APIs or 公共枚举, ABI/Schema/persistent formats, 全局编译宏 and Build variants,
+cross-module infrastructure, shared hot paths, and test-originated production
+changes are high-intrusion signals. Design and plan must define an 侵入性预算,
+compare at least one narrower alternative, and choose the narrowest owner-layer
+solution that satisfies acceptance. If a narrower solution exists, the heavier
+one is forbidden. Crossing a high-intrusion boundary with no narrower solution
+is a critical decision requiring 用户明确确认.
+
+Treat existing callers without current-feature ownership/tag whose behavior
+need not change as stable boundaries. Make the new feature depend on the stable
+path; do not reverse old callers onto a feature-owned abstraction for naming
+consistency, one-line reuse, testing convenience, or hypothetical future use.
+Migration is eligible only when the abstraction owns a real shared invariant,
+the owner already governs all affected callers, no narrower design works, and
+the approved budget covers the change.
+
+测试覆盖不能反向驱动生产架构. Prefer a test-owned translation unit/module,
+existing extension point, narrow injected seam, capture tool, or black-box
+verification. A local test macro may stay inside a test-owned boundary, but it
+must not by default change a public enum or its `Num`, a registration matrix,
+object layout, or spread test-only branches through shared production paths.
+Evidence unavailable within the approved budget is `unverified` with risk and
+manual-verification guidance. Pre-implementation Review checks the budget;
+`post-landing Review` compares the final `intrusion delta`. A diff that 超出预算
+invalidates the old design and Review and returns to design/user decision.
+
 Ask the user for every critical decision: scope or acceptance changes,
 public/API/Schema/compatibility or persistent-data changes, security or
 sensitive data, external or irreversible effects, protected defaults,
@@ -95,6 +211,38 @@ independence as `unverified`. Any failed criterion or desired deviation becomes
 a critical decision and returns to the user. Store conclusions and evidence,
 never private model reasoning. Usage is `agent-policy`; only the record contract
 is mechanically validated.
+
+**任务外异常隔离**：当前任务自身的根因或完成当前目标必需的故障仍按任务内问题诊断；执行中若发现与当前目标无关的工作流、安装或环境意外，必须立即停止当前任务并向用户报告现象、影响和已有最小证据。不得在原任务对话中擅自搁置原目标，继续调查、修复、重构工作流，启动 SubAgent 扩大旁路分析，或为此大量消耗上下文；只有用户明确回复授权后，才能另行处理该任务外问题。
+
+### Convergence and stability budget
+
+**设计阶段允许发散，实施阶段必须收敛**. After a design is accepted, every
+code, test, tool, document, or workflow change must directly serve the primary
+goal, an acceptance criterion, or an indispensable failure path.
+
+**Plan 是实施边界**. The Plan freezes the objective, acceptance criteria, owner
+layer, **允许修改的组件**, intrusion budget, and no-go boundaries. Implementation
+may choose equivalent private local details needed to realize the same planned
+behavior, but it must not add a behavior objective, owner, component, or
+maintenance surface.
+
+**发现问题不等于获得解决授权，计划外发现不得自动进入实现**. Root-cause
+proximity, a broad regression failure, small size, schedule pressure, or sunk
+work cannot authorize an unplanned change. If it does not affect current
+acceptance, record it as **相邻改进** and **完成当前目标** first. If it **阻塞当前验收**,
+stop the affected edits, report minimal evidence, **修订 Plan**, test scope, and
+intrusion budget, then obtain **重新确认** before handling it.
+**相邻改进只记录并延后，不实施**; complete the approved objective, Review, and
+verification before considering another problem.
+
+When support work starts to create an **独立接口、状态、生命周期或构建变体**, or
+changes consumers whose behavior need not change, perform one **有界的收敛检查**:
+is it already in the Plan and indispensable to the **主目标、根因修复或验收条件**,
+is there a **更窄方案** through the existing path, and does it create a long-lived
+owner, maintenance surface, or compatibility risk? If it is not planned, treat
+it as an unplanned finding; return to the narrower design when possible. Any
+necessary scope change stops implementation until the Plan is revised and
+**重新取得用户确认**.
 
 ## Phase capability contract
 
@@ -236,6 +384,30 @@ collector, receipt, and trusted-store boundary is in
 
 ## On-demand loading
 
+流程深度与能力 Skill 选择相互独立：复杂度、风险和副作用决定流程深度；显式请求以及语言、文件和任务语义决定是否加载通用能力 Skill。加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程；只读任务只应用 reasoning core，修改和副作用规则只在对应行为实际发生时启用。
+
+The default engineering foundation is the pinned `mattpocock/skills` Submodule.
+Full design automatically uses `grilling`; Deep design automatically uses
+`grill-me`, whose upstream workflow runs `grilling` with deeper frontier
+coverage. Light does not auto-start either module, and explicit selection is
+allowed at any strength. Code design uses `codebase-design` when justified. Implementation
+uses `implement` plus `tdd`; debugging uses `diagnosing-bugs`; Full/Deep Review
+uses `code-review`. `to-spec`, `to-tickets`, and `grill-with-docs` remain
+explicit modules. SelfWorkflow owns Plan structure, authorization, scope and
+intrusion gates, real verification commands, and evidence; no Skill can replace
+those host responsibilities. User-invoked upstream wrappers are orchestration
+templates inside these gates: their commit, issue publication, document write,
+or other side-effect steps require the corresponding SelfWorkflow/user
+authorization. In particular, `implement` does not grant automatic commit.
+
+C/C++/Unreal tasks load the compact `cpp-core` by default and only the specialist
+references justified by code signals. Code tasks try the configured CodeGraph
+provider. A commit/index/version mismatch makes its output stale reference only;
+the Agent reports the mismatch and may ask whether the user wants an explicit
+sync or rebuild. Missing or stale CodeGraph never becomes fresh evidence.
+
+任务完成 Review 和验证后，若形成可复用的技术知识，主动提示一次是否沉淀到已配置的知识后端；简单问答、机械修改、临时状态和未形成稳定结论的任务不提示。每个任务最多提示一次，用户拒绝后不再重复；用户明确要求维护知识库时直接进入知识流程。
+
 Load only the source needed for the current phase: lifecycle and policy for
 capability checking or classification, protected rules for merging or governed
 changes, and evidence rules for Review or completion. Load
@@ -243,16 +415,18 @@ changes, and evidence rules for Review or completion. Load
 auditing those deterministic checks. This keeps unrelated phase material out of
 the active context while preserving direct links to every implemented contract.
 
-## Superpowers source support
+## Engineering Skill source support
 
-Modifying tasks require a user-selected, inspected Superpowers source. Missing
-or declined sources pause writes; read-only analysis may continue only with an
-explicit limitation. Catalog v2 loads only Skills mapped to the current Pipeline slot.
-Grill-me is explicit-only; a high complexity/risk classification recommends it
-but never activates it. A completed Grill-me design requires a separate-context
-Brainstorming cross-review before implementation. Source selection, dirty-state
-authorization, stage mappings, and runtime loading are deterministic contracts
-in `dependencies/superpowers.lock.yaml` and `overlays/superpowers/`.
+SelfWorkflow installs only the curated Matt Skills named in
+`dependencies/locks/matt-pocock-skills.lock.yaml` from the pinned
+`dependencies/upstream/matt-pocock-skills` Gitlink. It does not copy or load the
+whole upstream repository into task context, and updates require an explicit
+Submodule revision change plus new hashes and tests. The upstream `grilling` and
+`grill-me` are routed by workflow strength as stated above; they remain
+capability- and confirmation-gated. SelfWorkflow does not require, install, route to, or silently
+fall back to Superpowers. A user may explicitly request an already available
+Superpowers Skill for one task; that choice does not replace protected workflow
+gates or make Superpowers a default dependency.
 
 ## Adapters, knowledge, and release governance
 

@@ -6,6 +6,10 @@ stages:
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native]
         selectionMode: static
+      - id: knowledge.read
+        cardinality: zero-or-one
+        allowedInvocationKinds: [mcp, skill]
+        selectionMode: bounded-runtime
   - id: capability-checked
     slots:
       - id: capability.check
@@ -24,7 +28,30 @@ stages:
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
         selectionMode: static
-        condition: {eq: [writeTask, true]}
+        condition:
+          any:
+            - all:
+                - {eq: [writeTask, true]}
+                - any:
+                    - {gte: [complexity, C2]}
+                    - {gte: [risk, R2]}
+                    - {gte: [projectMinimums, Full]}
+                - not:
+                    any:
+                      - {gte: [complexity, C3]}
+                      - {gte: [risk, R3]}
+                      - {gte: [projectMinimums, Deep]}
+            - {contains: [explicitModuleIds, design-grilling]}
+      - id: design.deep-grill
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          any:
+            - {gte: [complexity, C3]}
+            - {gte: [risk, R3]}
+            - {gte: [projectMinimums, Deep]}
+            - {contains: [explicitModuleIds, design-grill-me]}
       - id: code.reasoning
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]
@@ -32,7 +59,7 @@ stages:
       - id: design.specialists
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]
-        selectionMode: static
+        selectionMode: bounded-runtime
   - id: planned
     slots:
       - id: plan.primary
@@ -40,16 +67,48 @@ stages:
         allowedInvocationKinds: [agent-native]
         selectionMode: static
       - id: test.quality.plan
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition: {gte: [testLevelFloor, T2]}
+      - id: plan.integrated-review
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          any:
+            - {gte: [complexity, C2]}
+            - {gte: [risk, R2]}
+            - {gte: [projectMinimums, Full]}
+  - id: implemented
+    slots:
+      - id: implement.orchestrator
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - {eq: [operationType, implement]}
+      - id: implement.method
         cardinality: zero-or-one
         allowedInvocationKinds: [skill]
         selectionMode: bounded-runtime
-        condition: {gte: [testLevelFloor, T2]}
-  - id: implemented
-    slots:
-      - id: implement.method
+      - id: implement.tdd
         cardinality: exactly-one
-        allowedInvocationKinds: [agent-native]
+        allowedInvocationKinds: [skill]
         selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - any:
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+                - {eq: [taskArchetype, bounded-feature]}
+                - {eq: [taskArchetype, bugfix]}
+                - {eq: [taskArchetype, behavioral-refactor]}
+                - {eq: [taskArchetype, architecture-change]}
+                - {eq: [taskArchetype, migration]}
       - id: test.quality.implementation
         cardinality: zero-or-one
         allowedInvocationKinds: [skill]
@@ -59,18 +118,33 @@ stages:
     slots:
       - id: review.self
         cardinality: exactly-one
-        allowedInvocationKinds: [agent-native]
-        selectionMode: static
-      - id: test.quality.review
-        cardinality: zero-or-one
         allowedInvocationKinds: [skill]
-        selectionMode: bounded-runtime
-        condition: {gte: [testLevelFloor, T2]}
+        selectionMode: static
+        condition: {eq: [writeTask, true]}
+      - id: review.independent
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - any:
+                - {gte: [complexity, C2]}
+                - {gte: [risk, R2]}
+                - {gte: [projectMinimums, Full]}
+      - id: test.quality.review
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - {gte: [testLevelFloor, T2]}
   - id: verified
     slots:
       - id: verify.execution
         cardinality: exactly-one
-        allowedInvocationKinds: [agent-native]
+        allowedInvocationKinds: [skill]
         selectionMode: static
       - id: test.quality.verify
         cardinality: zero-or-many
@@ -83,7 +157,15 @@ stages:
         selectionMode: bounded-runtime
   - id: completed
     slots:
+      - id: knowledge.propose
+        cardinality: zero-or-one
+        allowedInvocationKinds: [agent-native, mcp, skill]
+        selectionMode: bounded-runtime
+      - id: knowledge.update
+        cardinality: zero-or-one
+        allowedInvocationKinds: [mcp, skill]
+        selectionMode: bounded-runtime
       - id: complete.gate
         cardinality: exactly-one
-        allowedInvocationKinds: [agent-native]
+        allowedInvocationKinds: [skill]
         selectionMode: static

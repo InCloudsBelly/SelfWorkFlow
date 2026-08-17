@@ -7,6 +7,8 @@ description: Use for reading, designing, implementing, debugging, maintaining, o
 
 提供不依赖任何本地工具或厂商 Agent 的 C++ 推理核心。外部 CodeGraph、LSP、编译器、Sanitizer、调试器和深度审计器都是可选 Provider；缺失时不得伪造其结果。
 
+只读分析只应用推理核心和直接命中的按需参考；不会因此进入修改、构建、调试器或完整 Design/Plan/Review 流程。
+
 ## 核心流程
 
 1. 固定目标、平台、标准版本、编译器/构建模式与用户已有改动。

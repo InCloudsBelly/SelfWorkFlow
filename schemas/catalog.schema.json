@@ -182,7 +182,7 @@
         "contractVersion": {"const": 2},
         "stage": {"enum": ["discovered", "capability-checked", "classified", "designed", "planned", "implemented", "reviewed", "verified", "completed"]},
         "slot": {"$ref": "#/$defs/identifier"},
-        "activation": {"enum": ["mandatory", "default", "explicit", "deterministic"]},
+        "activation": {"enum": ["mandatory", "default", "explicit", "deterministic", "full-default", "deep-default"]},
         "invocation": {"type": "object", "additionalProperties": false, "required": ["kind", "ref"], "properties": {"kind": {"enum": ["agent-native", "skill", "mcp"]}, "ref": {"type": "string", "minLength": 1, "maxLength": 512}}},
         "inputContract": {"type": "string", "minLength": 1, "maxLength": 256},
         "outputContract": {"type": "string", "minLength": 1, "maxLength": 256},

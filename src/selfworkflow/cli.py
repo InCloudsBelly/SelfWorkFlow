@@ -21,6 +21,12 @@ from selfworkflow.installer import (
     doctor,
     verify_install,
 )
+from selfworkflow.quality import (
+    build_review_package,
+    capture_review_baseline,
+    run_verification,
+    validate_completion,
+)
 from selfworkflow.resolver import resolve_task
 from selfworkflow.ledger import validate_ledger
 from selfworkflow.git_policy import check_repository
@@ -415,7 +421,68 @@ def main(argv: list[str] | None = None) -> int:
     rollback_apply = install_commands.add_parser("rollback")
     rollback_apply.add_argument("--plan", required=True)
     rollback_apply.add_argument("--confirm-plan-hash", required=True)
+    quality = commands.add_parser("quality")
+    quality_commands = quality.add_subparsers(dest="quality_command", required=True)
+    quality_capture = quality_commands.add_parser("capture")
+    quality_capture.add_argument("--repository", required=True)
+    quality_capture.add_argument("--path", action="append", required=True)
+    quality_capture.add_argument("--output", required=True)
+    quality_package = quality_commands.add_parser("package")
+    quality_package.add_argument("--repository", required=True)
+    quality_package.add_argument("--baseline", required=True)
+    quality_package.add_argument("--specification", required=True)
+    quality_package.add_argument("--verification-plans", required=True)
+    quality_package.add_argument("--output", required=True)
+    quality_verify = quality_commands.add_parser("verify")
+    quality_verify.add_argument("--repository", required=True)
+    quality_verify.add_argument("--package", required=True)
+    quality_verify.add_argument("--plan-id", required=True)
+    quality_verify.add_argument("--output", required=True)
+    quality_complete = quality_commands.add_parser("complete")
+    quality_complete.add_argument("--repository", required=True)
+    quality_complete.add_argument("--baseline", required=True)
+    quality_complete.add_argument("--specification", required=True)
+    quality_complete.add_argument("--package", required=True)
+    quality_complete.add_argument("--reviews", required=True)
     arguments = parser.parse_args(argv)
+    if arguments.command == "quality":
+        try:
+            if arguments.quality_command == "capture":
+                result = capture_review_baseline(arguments.repository, arguments.path)
+                write_json_atomic(_absolute_path(arguments.output), result)
+            elif arguments.quality_command == "package":
+                plans = _read_json(arguments.verification_plans, reject_duplicates=True)
+                result = build_review_package(
+                    arguments.repository,
+                    _read_json(arguments.baseline, reject_duplicates=True),
+                    _read_json(arguments.specification, reject_duplicates=True),
+                    plans.get("plans"),
+                )
+                write_json_atomic(_absolute_path(arguments.output), result)
+            elif arguments.quality_command == "verify":
+                result = run_verification(
+                    arguments.repository,
+                    _read_json(arguments.package, reject_duplicates=True),
+                    arguments.plan_id,
+                )
+                write_json_atomic(_absolute_path(arguments.output), result)
+            elif arguments.quality_command == "complete":
+                reviews = _read_json(arguments.reviews, reject_duplicates=True)
+                result = validate_completion(
+                    arguments.repository,
+                    _read_json(arguments.baseline, reject_duplicates=True),
+                    _read_json(arguments.specification, reject_duplicates=True),
+                    _read_json(arguments.package, reject_duplicates=True),
+                    reviews.get("reviews"),
+                )
+            else:
+                raise ValueError("quality-command-invalid")
+        except Exception as error:
+            reason = getattr(error, "reason", "quality-operation-failed")
+            print(f"SelfWorkFlow: quality-operation-failed:{reason}", file=sys.stderr)
+            return 73
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
     if arguments.command == "provider":
         try:
             if arguments.provider_command == "inspect":

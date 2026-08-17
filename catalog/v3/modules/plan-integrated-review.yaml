@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: plan-integrated-review
+sourceHash: sha256:ce696499c73a855c9586aef69206bba95b0203826af52effa61536de30964008
+stage: planned
+slot: plan.integrated-review
+selectionMode: static
+invocation: {kind: skill, ref: selfworkflow:testing-review-quality}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 128, estimatedExecutionCost: 64}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

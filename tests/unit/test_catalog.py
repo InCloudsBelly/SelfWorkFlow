@@ -5,9 +5,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import unittest
 from unittest import mock
@@ -32,6 +34,28 @@ STANDARD_CAPABILITIES = (
 )
 SECOND_SOURCE_BYTES = b"second controlled source\n"
 SECOND_SOURCE_HASH = "sha256:" + hashlib.sha256(SECOND_SOURCE_BYTES).hexdigest()
+
+
+def _remove_readonly(function, path, _error):
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    function(path)
+
+
+@contextmanager
+def _repository_temporary_directory():
+    temporary_directory = tempfile.mkdtemp(dir=REPOSITORY_ROOT)
+    try:
+        yield temporary_directory
+    finally:
+        if os.path.lexists(temporary_directory):
+            for attempt in range(20):
+                try:
+                    shutil.rmtree(temporary_directory, onerror=_remove_readonly)
+                    break
+                except PermissionError:
+                    if attempt == 19:
+                        raise
+                    time.sleep(0.05)
 
 
 def _open_object_schema_paths(schema):
@@ -68,7 +92,7 @@ def _catalog_source(
     mutate_index=None,
     extra_sources=None,
 ):
-    with tempfile.TemporaryDirectory(dir=REPOSITORY_ROOT) as temporary_directory:
+    with _repository_temporary_directory() as temporary_directory:
         repository_root = Path(temporary_directory)
         source = repository_root / "catalog"
         domain_root = source / "domains"
@@ -124,6 +148,10 @@ def _catalog_source(
         subprocess.run(
             [
                 "git",
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
                 "-c",
                 "user.name=SelfWorkFlow Tests",
                 "-c",
@@ -206,7 +234,7 @@ class CatalogPublicApiTests(unittest.TestCase):
 
 class CatalogCliTests(unittest.TestCase):
     def test_cli_compiles_twice_atomically_with_relative_and_absolute_paths(self):
-        with tempfile.TemporaryDirectory(dir=REPOSITORY_ROOT) as temporary_directory:
+        with _repository_temporary_directory() as temporary_directory:
             output = Path(temporary_directory) / "missing-parent" / "catalog.json"
             relative_output = output.relative_to(REPOSITORY_ROOT)
             base_command = [
@@ -279,7 +307,7 @@ class CatalogCliTests(unittest.TestCase):
             self.assertFalse(never_created.parent.exists())
 
     def test_cli_rejects_reparse_output_parent_even_when_target_is_inside_repo(self):
-        with tempfile.TemporaryDirectory(dir=REPOSITORY_ROOT) as temporary_directory:
+        with _repository_temporary_directory() as temporary_directory:
             temporary_root = Path(temporary_directory)
             real_parent = temporary_root / "real-parent"
             real_parent.mkdir()
@@ -375,8 +403,10 @@ class CatalogCompilationTests(unittest.TestCase):
             [
                 "code-quality",
                 "code-quality-verification-contract",
-                "grill-me",
                 "knowledge-on-demand-loading",
+                "matt-skills-foundation",
+                "tea-quality-foundation",
+                "testing-review-quality",
                 "workflow-core",
                 "workflow-protected-rules",
                 "workflow-quality",

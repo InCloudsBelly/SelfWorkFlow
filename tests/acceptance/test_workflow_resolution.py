@@ -62,7 +62,7 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
 
             cases = (
                 ("implement", "C1", "R1", "implement-tdd"),
-                ("implement", "C2", "R2", "review-independent"),
+                ("implement", "C2", "R2", "review-code-review"),
                 ("implement", "C1", "R1", "verify-execution"),
                 ("document", "C1", "R1", "implement-documentation"),
             )

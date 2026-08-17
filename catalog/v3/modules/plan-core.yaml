@@ -1,11 +1,11 @@
 schemaVersion: 3
-id: plan-primary
+id: plan-core
 sourceHash: sha256:4444444444444444444444444444444444444444444444444444444444444444
 stage: planned
 slot: plan.primary
 selectionMode: static
-invocation: {kind: agent-native, ref: plan-primary}
+invocation: {kind: agent-native, ref: selfworkflow-plan}
 dependencies: []
 conflicts: []
-contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
+contextCost: {estimatedContextCost: 96, estimatedExecutionCost: 32}
 supportEvidence: {sourceIntegrity: unverified, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}

@@ -1,11 +1,11 @@
 schemaVersion: 3
 id: implement-tdd
-sourceHash: sha256:5555555555555555555555555555555555555555555555555555555555555555
+sourceHash: sha256:4bc06151a5d5c37af1ee5613dc07b67ecf18b2e22e6a26e8538a3a995a8aafca
 stage: implemented
-slot: implement.method
+slot: implement.tdd
 selectionMode: static
-invocation: {kind: agent-native, ref: implement-tdd}
+invocation: {kind: skill, ref: matt-pocock:tdd}
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
-supportEvidence: {sourceIntegrity: unverified, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

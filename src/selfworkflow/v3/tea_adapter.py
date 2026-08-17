@@ -23,12 +23,100 @@ _STAGES = {"plan", "implementation", "review", "verify", "release"}
 _MAX_CONFIG_BYTES = 1024 * 1024
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 _HASH = re.compile(r"sha256:[0-9a-f]{64}")
+_UNRESOLVED_TEMPLATE = re.compile(
+    r"\{\{|\$\{|(?<!\{)\{[A-Za-z][A-Za-z0-9_.-]*\}(?!\})"
+)
+_PACKAGED_WORKFLOWS = {
+    "test-design": {
+        "directory": "bmad-testarch-test-design", "output": "test-design.md",
+        "fields": ("requirements", "acceptanceCriteria", "design", "risk"),
+        "headings": ("Scope", "Risks", "Coverage", "Cases"),
+    },
+    "atdd": {
+        "directory": "bmad-testarch-atdd", "output": "atdd.md",
+        "fields": ("requirements", "acceptanceCriteria", "implementationPlan", "testDesign"),
+        "headings": ("Red Evidence", "Acceptance Tests", "Fixtures"),
+    },
+    "test-review": {
+        "directory": "bmad-testarch-test-review", "output": "test-review.md",
+        "fields": ("acceptanceCriteria", "implementationDelta", "testDesign", "verificationEvidence"),
+        "headings": ("Coverage Review", "Failure Paths", "Findings"),
+    },
+    "trace": {
+        "directory": "bmad-testarch-trace", "output": "trace.md",
+        "fields": ("acceptanceCriteria", "testInventory", "verificationEvidence"),
+        "headings": ("Trace Matrix", "Gaps"),
+    },
+    "nfr": {
+        "directory": "bmad-testarch-nfr", "output": "nfr.md",
+        "fields": ("design", "nfrRequirements", "verificationEvidence"),
+        "headings": ("Performance", "Security", "Reliability"),
+    },
+}
+
+# A packaged TEA workflow is only a completion artifact when its output is
+# bound to the exact V3 stage slot and selected module that consumed it.
+_TEA_BINDINGS = {
+    "test-design": {
+        "stageId": "planned",
+        "slotId": "test.quality.plan",
+        "moduleId": "tea-test-design",
+    },
+    "atdd": {
+        "stageId": "implemented",
+        "slotId": "test.quality.implementation",
+        "moduleId": "tea-atdd",
+    },
+    "test-review": {
+        "stageId": "reviewed",
+        "slotId": "test.quality.review",
+        "moduleId": "tea-test-review",
+    },
+    "trace": {
+        "stageId": "verified",
+        "slotId": "test.quality.verify",
+        "moduleId": "tea-trace",
+    },
+    "nfr": {
+        "stageId": "verified",
+        "slotId": "test.quality.verify",
+        "moduleId": "tea-nfr",
+    },
+}
+TEA_MODULE_IDS = frozenset(item["moduleId"] for item in _TEA_BINDINGS.values())
+_TEA_RECEIPT_FIELDS = {
+    "schemaVersion", "planHash", "attemptRef", "stageId", "slotId", "moduleId",
+    "workflowId", "referenceHash", "inputHash", "outputRelative", "outputHash",
+    "status", "receiptHash",
+}
+_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
 
 class TeaAdapterError(ValueError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
+
+
+def _is_reparse_point(path: Path) -> bool:
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return path.is_symlink() or bool(attributes & 0x400)
+
+
+def _assert_no_reparse(path: Path, boundary: Path) -> None:
+    current = path
+    while True:
+        if _is_reparse_point(current):
+            raise ValueError
+        if current == boundary:
+            return
+        if current.parent == current:
+            raise ValueError
+        current = current.parent
+
+
+def _contains_unresolved_template(value: str) -> bool:
+    return _UNRESOLVED_TEMPLATE.search(value) is not None
 
 
 def _run(command: list[str], cwd: Path, *, allow_missing: bool = False) -> subprocess.CompletedProcess[str]:
@@ -227,3 +315,260 @@ def load_jit_artifact(
         "content": text,
         "contentHash": hash_bytes(content),
     }
+
+
+def _runtime_reference(runtime_root: str | Path, workflow_id: str) -> tuple[Path, dict[str, Any], str]:
+    spec = _PACKAGED_WORKFLOWS.get(workflow_id)
+    if spec is None:
+        raise TeaAdapterError("tea-runtime-workflow-invalid")
+    try:
+        raw_root = Path(runtime_root)
+        if _is_reparse_point(raw_root):
+            raise ValueError
+        root = raw_root.resolve(strict=True)
+        skill_root = root / "skills" / "tea-quality"
+        raw_reference = skill_root / "references" / spec["directory"]
+        _assert_no_reparse(raw_reference, root)
+        reference = raw_reference.resolve(strict=True)
+        reference.relative_to(skill_root)
+        if not reference.is_dir() or _is_reparse_point(reference):
+            raise ValueError
+        entries: list[dict[str, str]] = []
+        for path in sorted(reference.rglob("*")):
+            if _is_reparse_point(path):
+                raise ValueError
+            if path.is_file():
+                relative = path.relative_to(reference).as_posix()
+                entries.append({"path": relative, "hash": hash_bytes(path.read_bytes())})
+        if not entries or not (reference / "SKILL.md").is_file():
+            raise ValueError
+    except (OSError, ValueError):
+        raise TeaAdapterError("tea-runtime-reference-invalid") from None
+    return reference, spec, content_hash(entries)
+
+
+def _output_relative(value: object, expected_name: str) -> str:
+    if not isinstance(value, str):
+        raise TeaAdapterError("tea-runtime-output-invalid")
+    try:
+        path = PurePosixPath(value.replace("\\", "/"))
+        if (
+            path.is_absolute()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or path.name != expected_name
+        ):
+            raise ValueError
+    except ValueError:
+        raise TeaAdapterError("tea-runtime-output-invalid") from None
+    return path.as_posix()
+
+
+def build_packaged_invocation(
+    runtime_root: str | Path,
+    workflow_id: str,
+    context: Mapping[str, str],
+    output_relative: str,
+) -> dict[str, Any]:
+    """Build one deterministic, project-config-independent TEA invocation."""
+
+    _reference, spec, reference_hash = _runtime_reference(runtime_root, workflow_id)
+    if not isinstance(context, Mapping) or set(context) != set(spec["fields"]):
+        raise TeaAdapterError("tea-runtime-context-invalid")
+    normalized: dict[str, str] = {}
+    for field in spec["fields"]:
+        value = context.get(field)
+        if (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value.encode("utf-8")) > _MAX_ARTIFACT_BYTES
+            or _contains_unresolved_template(value)
+        ):
+            raise TeaAdapterError("tea-runtime-context-invalid")
+        normalized[field] = value
+    relative = _output_relative(output_relative, str(spec["output"]))
+    material = {
+        "schemaVersion": 1,
+        "workflowId": workflow_id,
+        "referenceHash": reference_hash,
+        "context": normalized,
+        "outputRelative": relative,
+    }
+    return {**material, "inputHash": content_hash(material)}
+
+
+def validate_packaged_output(
+    runtime_root: str | Path,
+    project_root: str | Path,
+    invocation: Mapping[str, Any],
+    *,
+    binding: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Validate one Agent-produced TEA Markdown artifact and issue a receipt."""
+
+    if not isinstance(invocation, Mapping) or set(invocation) != {
+        "schemaVersion", "workflowId", "referenceHash", "context",
+        "outputRelative", "inputHash",
+    }:
+        raise TeaAdapterError("tea-runtime-invocation-invalid")
+    workflow_id = invocation.get("workflowId")
+    _reference, spec, reference_hash = _runtime_reference(runtime_root, str(workflow_id))
+    material = {key: invocation[key] for key in (
+        "schemaVersion", "workflowId", "referenceHash", "context", "outputRelative",
+    )}
+    if (
+        invocation.get("schemaVersion") != 1
+        or invocation.get("referenceHash") != reference_hash
+        or invocation.get("inputHash") != content_hash(material)
+    ):
+        raise TeaAdapterError("tea-runtime-invocation-invalid")
+    build_packaged_invocation(
+        runtime_root, str(workflow_id), invocation.get("context"),
+        str(invocation.get("outputRelative")),
+    )
+    relative = _output_relative(invocation.get("outputRelative"), str(spec["output"]))
+    try:
+        raw_root = Path(project_root)
+        if _is_reparse_point(raw_root):
+            raise ValueError
+        root = raw_root.resolve(strict=True)
+        if not root.is_dir() or _is_reparse_point(root):
+            raise ValueError
+        target = root.joinpath(*PurePosixPath(relative).parts)
+        _assert_no_reparse(target, root)
+        resolved = target.resolve(strict=True)
+        resolved.relative_to(root)
+        current = target
+        while current != root:
+            if _is_reparse_point(current):
+                raise ValueError
+            current = current.parent
+        if not resolved.is_file() or resolved.stat().st_size > _MAX_ARTIFACT_BYTES:
+            raise ValueError
+        data = resolved.read_bytes()
+        text = data.decode("utf-8", errors="strict")
+    except (OSError, UnicodeError, ValueError):
+        raise TeaAdapterError("tea-runtime-output-invalid") from None
+    heading_set = {
+        line.lstrip("#").strip() for line in text.splitlines()
+        if line.startswith("#")
+    }
+    if (
+        not set(spec["headings"]) <= heading_set
+        or _contains_unresolved_template(text)
+    ):
+        raise TeaAdapterError("tea-runtime-output-invalid")
+    receipt = {
+        "workflowId": workflow_id,
+        "referenceHash": invocation["referenceHash"],
+        "inputHash": invocation["inputHash"],
+        "outputRelative": relative,
+        "outputHash": hash_bytes(data),
+        "status": "validated",
+    }
+    if binding is None:
+        return receipt
+    return _issue_tea_receipt(receipt, binding=binding)
+
+
+def _issue_tea_receipt(
+    validated_output: Mapping[str, Any],
+    *,
+    binding: Mapping[str, str],
+) -> dict[str, Any]:
+    """Bind one adapter-validated output to a V3 plan attempt and TEA slot."""
+
+    if type(validated_output) is not dict or set(validated_output) != {
+        "workflowId", "referenceHash", "inputHash", "outputRelative",
+        "outputHash", "status",
+    }:
+        raise TeaAdapterError("tea-receipt-output-invalid")
+    if type(binding) is not dict or set(binding) != {
+        "planHash", "attemptRef", "stageId", "slotId", "moduleId",
+    }:
+        raise TeaAdapterError("tea-receipt-binding-invalid")
+    workflow_id = validated_output["workflowId"]
+    if type(workflow_id) is not str:
+        raise TeaAdapterError("tea-receipt-output-invalid")
+    expected = _TEA_BINDINGS.get(workflow_id)
+    if expected is None or any(binding[key] != expected[key] for key in expected):
+        raise TeaAdapterError("tea-receipt-binding-invalid")
+    if (
+        type(binding["planHash"]) is not str or _HASH.fullmatch(binding["planHash"]) is None
+        or type(binding["attemptRef"]) is not str or _ID.fullmatch(binding["attemptRef"]) is None
+    ):
+        raise TeaAdapterError("tea-receipt-binding-invalid")
+    for key in ("referenceHash", "inputHash", "outputHash"):
+        if type(validated_output[key]) is not str or _HASH.fullmatch(validated_output[key]) is None:
+            raise TeaAdapterError("tea-receipt-output-invalid")
+    if validated_output["status"] != "validated":
+        raise TeaAdapterError("tea-receipt-output-invalid")
+    try:
+        if _output_relative(
+            validated_output["outputRelative"],
+            str(_PACKAGED_WORKFLOWS[workflow_id]["output"]),
+        ) != validated_output["outputRelative"]:
+            raise ValueError
+    except (KeyError, TeaAdapterError, ValueError):
+        raise TeaAdapterError("tea-receipt-output-invalid") from None
+    material = {
+        "schemaVersion": 1,
+        **binding,
+        **validated_output,
+    }
+    return {**material, "receiptHash": content_hash(material)}
+
+
+def validate_tea_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    plan_hash: str,
+    stage_id: str,
+    attempt_ref: str,
+    slot_id: str,
+    module_id: str,
+    output_hash: str,
+    runtime_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Fail closed on forged, stale, or misrouted TEA execution evidence."""
+
+    if type(receipt) is not dict or set(receipt) != _TEA_RECEIPT_FIELDS:
+        raise TeaAdapterError("tea-receipt-invalid")
+    if receipt["schemaVersion"] != 1 or receipt["status"] != "validated":
+        raise TeaAdapterError("tea-receipt-invalid")
+    expected = {
+        "planHash": plan_hash,
+        "stageId": stage_id,
+        "attemptRef": attempt_ref,
+        "slotId": slot_id,
+        "moduleId": module_id,
+        "outputHash": output_hash,
+    }
+    if any(receipt.get(key) != value for key, value in expected.items()):
+        raise TeaAdapterError("tea-receipt-binding-invalid")
+    workflow_id = receipt["workflowId"]
+    if type(workflow_id) is not str:
+        raise TeaAdapterError("tea-receipt-invalid")
+    mapping = _TEA_BINDINGS.get(workflow_id)
+    if mapping is None or any(receipt.get(key) != value for key, value in mapping.items()):
+        raise TeaAdapterError("tea-receipt-binding-invalid")
+    if runtime_root is not None:
+        _reference, _spec, reference_hash = _runtime_reference(runtime_root, workflow_id)
+        if receipt["referenceHash"] != reference_hash:
+            raise TeaAdapterError("tea-runtime-reference-stale")
+    for key in ("planHash", "referenceHash", "inputHash", "outputHash", "receiptHash"):
+        if type(receipt[key]) is not str or _HASH.fullmatch(receipt[key]) is None:
+            raise TeaAdapterError("tea-receipt-invalid")
+    if type(receipt["attemptRef"]) is not str or _ID.fullmatch(receipt["attemptRef"]) is None:
+        raise TeaAdapterError("tea-receipt-invalid")
+    if _output_relative(receipt["outputRelative"], str(_PACKAGED_WORKFLOWS[workflow_id]["output"])) != receipt["outputRelative"]:
+        raise TeaAdapterError("tea-receipt-invalid")
+    material = {key: receipt[key] for key in _TEA_RECEIPT_FIELDS if key != "receiptHash"}
+    if content_hash(material) != receipt["receiptHash"]:
+        raise TeaAdapterError("tea-receipt-hash-invalid")
+    return json.loads(json.dumps(receipt))
+
+
+def is_tea_module_id(module_id: object) -> bool:
+    """Return whether a selected module is one of the pinned TEA modules."""
+
+    return type(module_id) is str and module_id in TEA_MODULE_IDS

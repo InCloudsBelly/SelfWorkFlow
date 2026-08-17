@@ -10,13 +10,16 @@ After cloning the repository, run this from Explorer or a terminal:
 
 ```bat
 Install_SelfWorkFlow.bat
+Install_SelfWorkFlow.bat -Profile knowledge
 ```
 
-The installer checks or prepares the repository Python environment, asks which
-Superpowers Git source to use, and asks whether to install the bundled Grill-me
-Skill when it is missing. Grill-me remains explicit-only after installation. If
-it is skipped, ordinary workflow installation continues but later explicit
-Grill-me requests must pause and report the missing capability.
+The installer checks or prepares the repository Python environment, initializes
+the pinned Git Submodules, and packages only the curated Matt Pocock Skills
+listed in `dependencies/locks/matt-pocock-skills.lock.yaml`. The upstream
+`grilling` and `grill-me` are installed with that curated set. Full automatically
+routes to `grilling`; Deep routes to `grill-me`, whose upstream workflow runs the
+deeper `grilling` frontier. Light remains explicit-only.
+SelfWorkflow does not require, install, or default-route to Superpowers.
 
 The same first-install flow asks once whether to bind an explicitly selected
 local CodeGraph checkout. It never scans disks. Blank input skips the optional
@@ -25,29 +28,23 @@ override; unattended installation also skips it unless
 The resulting machine-only configuration is written to
 `%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml` and is excluded from Git.
 
-Installing the official Superpowers dependency has its own earlier authorization;
-the clone and all Git source inspection ignore inherited system/global configuration,
-URL rewrites, hooks, system attributes and fsmonitor integration. The clone is inspected
-before the final plan and its commit and inventory hash are shown in the confirmation
-summary. Before publishing workflow files, the installer shows the generated plan
+The Matt Skills source is the repository's fixed
+`dependencies/upstream/matt-pocock-skills` Gitlink. Upgrades are explicit source
+changes and require refreshed lock hashes and tests; installation never follows
+the upstream branch automatically. Before publishing workflow files, the installer shows the generated plan
 and requires the exact confirmation `APPLY`. It uses a write-ahead transactional
 installer, verifies the manifest, and rolls back the current publication if a later
 verification step fails. Detailed diagnostics and machine-readable artifacts are written under
 `%LOCALAPPDATA%\SelfWorkFlow\logs\install-<timestamp>`. Logs do not include an
 environment dump or credential values.
 
-Superpowers may come from an explicitly selected local Git checkout (including an
-authorized dirty checkout) or, after a separate prompt, the official repository.
-Codex receives a hash-bound copy of Git-tracked `skills/**` files plus a source
-lock. Doctor and install plans hash only SelfWorkFlow's exact managed targets, so
+Codex receives a hash-bound copy of only the selected Matt Skill directories plus
+the source lock. A pre-existing user-level Superpowers installation remains
+untouched and unmanaged; it is used only when the user explicitly asks for it.
+Doctor and install plans hash only SelfWorkFlow's exact managed targets, so
 unrelated Codex sessions, databases, executables, logs, caches, large files and
-plugin junctions are not read or claimed as installer state. A pre-existing
-`AgentsRoot/skills/superpowers` junction is migrated only when it resolves exactly
-to the selected source's `skills` directory. The installer records a durable intent,
-keeps the original junction under StateRoot, and restores it if staging or a later
-installation stage fails. Other links and unmanaged target directories remain hard
-conflicts. Rollback validates the journal, backup link and staged inventory before
-removing anything. A failure to delete an already verified Provider rollback receipt
+plugin junctions are not read or claimed as installer state. Unmanaged target
+directories remain hard conflicts. A failure to delete an already verified Provider rollback receipt
 is reported as pending cleanup and does not tear down a committed installation.
 Restart Codex after a successful install. The restart and native Skill
 activation remain `unverified` until exercised in the real host.
@@ -60,16 +57,18 @@ For unattended sandboxing or diagnostics, inspect all parameters first:
 
 ## Default workflow
 
-Ordinary work loads only `workflow/core.md` and the capability needed for the
-current stage:
+Ordinary work loads the installed root `WORKFLOW.md` and only the capability
+needed for the current stage:
 
 ```text
 classify briefly
 -> locate the owning layer
--> Brainstorming for every modification; deeper Plan only when needed
--> implement the smallest safe change
--> review the complete diff
--> run the narrowest sufficient verification
+-> Light: bounded core Design; Full: Matt grilling; Deep: Matt grill-me with a deeper frontier
+-> SelfWorkflow Plan; Full/Deep require TEA test design and pre-implementation Review
+-> Matt TDD RED/GREEN for behavior changes; diagnosing-bugs may compose with it
+-> implement only the approved smallest safe change
+-> review the complete task package; Full/Deep use independent Standards + Spec axes
+-> execute package-bound verification and rebuild the package before Complete
 ```
 
 The conceptual sequence is `Discover -> Capability Check -> Classify -> Design ->
@@ -79,11 +78,13 @@ manufacture a PlanGraph or RunLedger. `selfworkflow resolve` is an opt-in
 contract-management interface for an explicit V3 request or a conforming Host
 that can provide fresh capability evidence; when used, the Host refuses paused
 plans, loads only current-stage modules, and records runtime facts in a
-plan-bound RunLedger. Grill-me is explicit-only and is followed by independent
-Brainstorming cross-review. The Host verifies typed Grill completion, clean-summary
+plan-bound RunLedger. Automatic or explicit Grill remains subject to the
+applicable independent design/integrated Review. The Host verifies typed Grill completion, clean-summary
 provenance, the repository review-policy hash, and plan/attempt/summary-bound fallback
 authorization before that gate can pass. Knowledge persistence is optional and confirmation
-gated. C7OpenWiki execution is deliberately deferred to a later extension.
+gated. The explicit `knowledge` profile provides the generic knowledge contract
+and optional backend adapters; ordinary
+code tasks and the default `core` profile do not load it.
 
 Every landed change, including a document-only delivery, receives post-landing
 Review and verification. Intermediate design and plan documents are reviewed
@@ -96,8 +97,9 @@ Runtime profiles are closed and deterministic:
 
 - `core` (default): compact workflow, code-quality sources, stage routing, and thin
   Agent adapters;
-- `knowledge`: `core` plus only the generic Knowledge contract; it does not
-  enable a C7OpenWiki adapter;
+- `knowledge`: `core` plus the generic Knowledge contract and optional backend
+  adapters. The SelfOpenWiki adapter/Skill is one explicit option and requires
+  an external Wiki root; the generic workflow does not depend on it;
 - `maintainer`: the complete governance, installation, release, and extension
   snapshot.
 
@@ -145,7 +147,7 @@ marks the upstream CLI's unavoidable auto-sync possibility as
   sandbox transaction install/verify/rollback are implemented and automated-tested.
 - V3 schemas, versioned Catalog/Pipeline loaders, immutable PlanGraph/RunLedger
   validation, bounded selector kernel, TEA candidate routing, C++ content-addressed
-  routing, default Brainstorming policy, the fail-closed post-Grill contract gate,
+  routing, the Matt Skills foundation, the fail-closed post-Grill contract gate,
   machine-local CodeGraph binding, non-executing source inspection, write-ahead
   CAS-protected installer and one-click Provider rollback, and content-addressed maintenance planning are implemented
   and automated-tested. The checked-in V3 request intentionally remains `paused`
@@ -157,8 +159,9 @@ marks the upstream CLI's unavoidable auto-sync possibility as
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
   `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
   `adapters/unknown/BOOTSTRAP.md`.
-- C7OpenWiki MCP behavior is not implemented or enabled by this release. Frozen
-  legacy contract files do not constitute support evidence.
+- The generic knowledge lifecycle and optional SelfOpenWiki adapter are packaged.
+  Backend capability evidence and current-host activation remain unverified until
+  exercised against the selected backend.
 - Installer manifests currently record `securityStatus: unverified`; do not use the
   sandbox result as proof of production ACL hardening.
 - Native login, model/OAuth calls and formal global installation remain unverified
@@ -176,6 +179,11 @@ The detailed design-to-implementation audit is recorded in
 
 Use `--profile knowledge` or `--profile maintainer` only when the requested task
 actually needs those boundaries.
+
+Knowledge backends are selected explicitly and own their installation and MCP
+binding contracts. SelfOpenWiki, for example, validates an external Wiki root
+before its own Install flow; SelfWorkFlow does not guess a backend command,
+write a Wiki, or modify a Wiki repository.
 
 Resolve a complete static workflow plan without starting a long-lived orchestrator:
 

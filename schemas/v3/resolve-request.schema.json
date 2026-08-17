@@ -70,7 +70,14 @@
   },
   "allOf": [
     {"if": {"properties": {"operationType": {"enum": ["implement", "debug", "document", "install", "publish", "knowledge-write"]}}}, "then": {"properties": {"writeTask": {"const": true}}}},
-    {"if": {"properties": {"operationType": {"enum": ["analyze", "design", "plan", "review", "verify", "knowledge-read"]}}}, "then": {"properties": {"writeTask": {"const": false}}}}
+    {"if": {"properties": {"operationType": {"enum": ["analyze", "design", "plan", "review", "verify", "knowledge-read"]}}}, "then": {"properties": {"writeTask": {"const": false}}}},
+    {"if": {"properties": {"projectMinimums": {"properties": {"strength": {"const": "Full"}}}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
+    {"if": {"properties": {"projectMinimums": {"properties": {"strength": {"const": "Deep"}}}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
+    {"if": {"properties": {"complexity": {"const": "C2"}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
+    {"if": {"properties": {"risk": {"const": "R2"}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
+    {"if": {"properties": {"complexity": {"const": "C3"}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
+    {"if": {"properties": {"risk": {"const": "R3"}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
+    {"if": {"properties": {"writeTask": {"const": true}, "taskArchetype": {"enum": ["bounded-feature", "bugfix", "behavioral-refactor", "architecture-change", "migration"]}}}, "then": {"properties": {"operationType": {"enum": ["implement", "debug"]}}}}
   ],
   "$defs": {
     "sha256": {

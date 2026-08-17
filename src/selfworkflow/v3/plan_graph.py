@@ -30,7 +30,11 @@ class PlanGraphError(ValueError):
         super().__init__(reason)
 
 
-_EXPLICIT_ONLY_MODULE_IDS = frozenset({"design-grill-me"})
+_BEHAVIOR_OPERATIONS = {"implement", "debug"}
+_BEHAVIOR_ARCHETYPES = {
+    "bounded-feature", "bugfix", "behavioral-refactor",
+    "architecture-change", "migration",
+}
 
 
 @dataclass(frozen=True)
@@ -148,12 +152,17 @@ def build_plan_graph(
         "executionPolicyHash": _value_hash(execution_policy_snapshot),
     }
 
+    if (
+        request_document.get("writeTask") is True
+        and
+        request_document.get("taskArchetype") in _BEHAVIOR_ARCHETYPES
+        and request_document.get("operationType") not in _BEHAVIOR_OPERATIONS
+    ):
+        raise PlanGraphError("v3-classification-conflict")
     explicit = _unique_ids(request_document["explicitModuleIds"], "explicit")
     project_defaults = _unique_ids(
         request_document["projectDefaultModuleIds"], "project-default",
     )
-    if project_defaults & _EXPLICIT_ONLY_MODULE_IDS:
-        raise PlanGraphError("v3-explicit-only-module-default-invalid")
     if capability_route is not None and type(capability_route) is not CppRouteResult:
         raise PlanGraphError("v3-capability-route-not-typed")
     routed = (
@@ -195,7 +204,7 @@ def build_plan_graph(
                 raise PlanGraphError("v3-explicit-module-inapplicable")
             eligible = (
                 _closed_eligible_modules(
-                    slot_modules, modules, allow_unverified, requested,
+                    slot_modules, modules, allow_unverified, requested, explicit,
                 )
                 if applicable else []
             )
@@ -483,6 +492,7 @@ def _closed_eligible_modules(
     all_modules: Mapping[str, Mapping[str, Any]],
     allow_unverified: set[str],
     requested: set[str],
+    explicit: set[str],
 ) -> list[dict[str, Any]]:
     slot_module_ids = {module["id"] for module in slot_modules}
     eligible = {
@@ -601,7 +611,6 @@ def _static_selection(
         closure = _spec_closure(module_id, specs, eligible_ids)
         if (
             closure is None
-            or (closure & _EXPLICIT_ONLY_MODULE_IDS) - explicit
             or _spec_selection_conflicts(closure, specs)
         ):
             continue
@@ -617,8 +626,6 @@ def _static_selection(
     if not required_explicit <= set(selected):
         raise PlanGraphError("v3-static-selection-unavailable")
     if cardinality in {"exactly-one", "gate"} and not selected:
-        if eligible_ids & _EXPLICIT_ONLY_MODULE_IDS:
-            raise PlanGraphError("v3-explicit-only-module-required")
         raise PlanGraphError("v3-static-selection-unavailable")
     return selected
 

@@ -113,6 +113,8 @@ class InstallSandboxAcceptanceTests(unittest.TestCase):
                 (Path(knowledge_pointer["snapshot"]) / "extensions/knowledge/contract.yaml")
                 .is_file()
             )
+            selfopenwiki_skill = agents / "skills/kg-selfopenwiki/SKILL.md"
+            self.assertTrue(selfopenwiki_skill.is_file())
 
             core_plan = create_install_plan(core, agents, codex, state, "0.1.0.dev0")
             self.assertEqual(core_plan["profile"], "core")
@@ -123,6 +125,36 @@ class InstallSandboxAcceptanceTests(unittest.TestCase):
             )
             self.assertNotEqual(core_pointer["snapshot"], knowledge_pointer["snapshot"])
             self.assertFalse((Path(core_pointer["snapshot"]) / "extensions").exists())
+            self.assertFalse(selfopenwiki_skill.exists())
+
+            rollback = create_rollback_plan(applied["transactionPath"])
+            apply_rollback_plan(rollback, rollback["planHash"])
+            self.assertTrue(selfopenwiki_skill.is_file())
+
+    def test_profile_switch_refuses_to_retire_a_user_modified_owned_skill(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            knowledge = root / "knowledge"
+            core = root / "core"
+            build_runtime(self.ROOT, knowledge, "0.1.0.dev0", profile="knowledge")
+            build_runtime(self.ROOT, core, "0.1.0.dev0", profile="core")
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+
+            plan = create_install_plan(
+                knowledge, agents, codex, state, "0.1.0.dev0"
+            )
+            apply_install_plan(plan, plan["planHash"])
+            skill = agents / "skills/kg-selfopenwiki/SKILL.md"
+            skill.write_text("user-local override\n", encoding="utf-8")
+
+            switch = create_install_plan(core, agents, codex, state, "0.1.0.dev0")
+
+            self.assertEqual(switch["status"], "paused")
+            self.assertIn(
+                "managed-skill-drift:skills/kg-selfopenwiki/SKILL.md",
+                switch["issues"],
+            )
+            self.assertEqual(skill.read_text(encoding="utf-8"), "user-local override\n")
 
 
 if __name__ == "__main__":

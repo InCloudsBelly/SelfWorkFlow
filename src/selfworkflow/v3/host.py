@@ -18,7 +18,10 @@ from selfworkflow.v3.ledger import (
     supersede_ledger,
 )
 from selfworkflow.v3.pipeline import LoadedPipeline
-from selfworkflow.v3.plan_graph import PlanGraphArtifact, build_plan_graph
+from selfworkflow.v3.plan_graph import (
+    PlanGraphArtifact,
+    build_plan_graph,
+)
 from selfworkflow.v3.selector import SelectionResult
 
 
@@ -240,12 +243,16 @@ class Host:
         receipts: tuple[Any, ...] = (),
         *,
         post_grill_review_evidence: PostGrillReviewEvidence | None = None,
+        tea_runtime_root: str | None = None,
     ) -> dict[str, Any]:
         self._validate_post_grill_stage_gate(
             ledger, stage_result, post_grill_review_evidence,
         )
         try:
-            result = apply_stage_result(ledger, self._plan, stage_result, receipts)
+            result = apply_stage_result(
+                ledger, self._plan, stage_result, receipts,
+                tea_runtime_root=tea_runtime_root,
+            )
         except Exception as error:
             raise HostError(getattr(error, "reason", "v3-host-stage-result-failed")) from None
         if post_grill_review_evidence is not None:
@@ -390,8 +397,6 @@ class Host:
             for stage in document["stages"]
             for slot in stage["slots"]
         )
-        if selected and "design-grill-me" not in self._request["explicitModuleIds"]:
-            raise HostError("post-grill-review-input-invalid")
         return selected
 
     def _validate_post_grill_stage_gate(
@@ -595,8 +600,10 @@ def handoff_stage(
     host: Host, ledger: Mapping[str, Any], stage_result: Mapping[str, Any],
     receipts: tuple[Any, ...] = (), *,
     post_grill_review_evidence: PostGrillReviewEvidence | None = None,
+    tea_runtime_root: str | None = None,
 ) -> dict[str, Any]:
     return host.apply_stage_result(
         ledger, stage_result, receipts,
         post_grill_review_evidence=post_grill_review_evidence,
+        tea_runtime_root=tea_runtime_root,
     )

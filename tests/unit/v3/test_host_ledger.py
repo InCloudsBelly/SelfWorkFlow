@@ -276,6 +276,38 @@ class HostLedgerTests(unittest.TestCase):
         self.assertEqual(extension.new_request["explicitModuleIds"], ["review-extra"])
         self.assertEqual(ledger["status"], "active")
 
+    def test_next_stage_request_can_promote_grill_module(self):
+        from selfworkflow.v3.host import Host
+        from selfworkflow.v3.plan_graph import build_plan_graph
+        from selfworkflow.v3.selector import SelectionInput, select_modules
+
+        catalog, pipeline = load_test_artifacts([
+            {**_module("review-a"), "selectionMode": "bounded-runtime"},
+            {
+                **_module("design-grill-me", requested=True),
+                "stage": "planned", "slot": "plan.primary",
+                "selectionMode": "static",
+            },
+        ], mode="bounded-runtime")
+        plan = build_plan_graph(REQUEST, catalog, pipeline)
+        resolver = Mock(return_value=_fresh_snapshots())
+        host = Host(plan, REQUEST, catalog, pipeline, snapshot_resolver=resolver)
+        ledger = self._advance_to_review(host, plan, host.new_ledger())
+        outcome = select_modules(
+            plan, "reviewed", "review.primary", "attempt-review",
+            SelectionInput(
+                artifact_id="signal", artifact_hash=INPUT_A,
+                requested_module_ids=("design-grill-me",),
+            ),
+        )
+
+        self.assertEqual(outcome.status, "next-stage-request")
+        extension = host.extend_from_next_stage_request(
+            ledger, outcome, superseded_at="2026-08-09T01:01:00Z",
+        )
+        self.assertEqual(extension.new_request["explicitModuleIds"], ["design-grill-me"])
+        resolver.assert_called_once()
+
     def test_next_stage_request_rejects_stale_attempt_and_unregistered_input(self):
         from selfworkflow.v3.host import Host, HostError
         from selfworkflow.v3.plan_graph import build_plan_graph

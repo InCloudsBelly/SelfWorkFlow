@@ -141,7 +141,7 @@ class TaskResolverV2Tests(unittest.TestCase):
         self.assertNotEqual(first["planGraph"]["requestHash"], changed["planGraph"]["requestHash"])
         self.assertNotEqual(first["planGraph"]["planHash"], changed["planGraph"]["planHash"])
 
-    def test_explicit_grill_precedes_independent_brainstorming_cross_review(self):
+    def test_explicit_grill_augments_default_design_without_implicit_cross_review(self):
         from selfworkflow.resolver import resolve_task
 
         result = resolve_task(
@@ -150,7 +150,9 @@ class TaskResolverV2Tests(unittest.TestCase):
         )
         design = next(stage for stage in result["planGraph"]["stages"] if stage["stageId"] == "designed")
         selected = [module for slot in design["slots"] for module in slot["selectedModules"]]
-        self.assertLess(selected.index("design-grill-me"), selected.index("design-cross-review"))
+        self.assertIn("design-core", selected)
+        self.assertIn("design-grill-me", selected)
+        self.assertNotIn("design-cross-review", selected)
 
     def test_missing_required_capability_returns_paused_reason_without_downgrade(self):
         from selfworkflow.resolver import resolve_task
@@ -227,7 +229,7 @@ class TaskResolverV2Tests(unittest.TestCase):
             module for module in envelope["catalog"]["modules"]
             if module["id"] == "design-grill-me"
         )
-        grill["conflicts"] = ["design-brainstorming"]
+        grill["conflicts"] = ["design-core"]
         envelope["catalogHash"] = canonical_hash(envelope["catalog"])
 
         result = resolve_task(

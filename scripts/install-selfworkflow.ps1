@@ -1,16 +1,14 @@
 [CmdletBinding()]
 param(
     [switch]$Help,
-    [ValidateSet("Ask", "Install", "Skip")]
-    [string]$GrillMeChoice = "Ask",
+    [ValidateSet("core", "knowledge", "maintainer")]
+    [string]$Profile = "core",
     [ValidateSet("Ask", "Existing", "InstallOfficial", "Skip")]
-    [string]$SuperpowersChoice = "Ask",
-    [string]$SuperpowersSource,
+    [string]$SuperpowersChoice = "Skip",
     [ValidateSet("Ask", "Configure", "Skip")]
     [string]$CodeGraphOverrideChoice = "Ask",
     [string]$CodeGraphPath,
     [switch]$ReplaceCodeGraphOverride,
-    [switch]$AllowDirtySuperpowers,
     [switch]$ConfirmApply,
     [switch]$NonInteractive,
     [string]$AgentsRoot = (Join-Path $env:USERPROFILE ".agents"),
@@ -18,8 +16,7 @@ param(
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\state"),
     [string]$ProviderConfigFile = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\config\providers.local.yaml"),
     [string]$DependencyRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\dependencies"),
-    [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs"),
-    [string]$OfficialSuperpowersTestRemote
+    [string]$LogRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\logs")
 )
 
 Set-StrictMode -Version Latest
@@ -30,17 +27,14 @@ if ($Help) {
 SelfWorkFlow Windows one-click installer
 
 Usage:
-  Install_SelfWorkFlow.bat [-GrillMeChoice Ask|Install|Skip]
-    [-SuperpowersChoice Ask|Existing|InstallOfficial|Skip]
-    [-SuperpowersSource <local-git-path>] [-AllowDirtySuperpowers]
+  Install_SelfWorkFlow.bat [-Profile core|knowledge|maintainer]
     [-CodeGraphOverrideChoice Ask|Configure|Skip]
     [-CodeGraphPath <explicit-local-path>]
     [-ReplaceCodeGraphOverride]
 
-GrillMeChoice:
-  Ask      Prompt when Grill-me is missing.
-  Install  Install the bundled Grill-me Skill.
-  Skip     Continue without Grill-me.
+The pinned Matt Pocock Skills foundation, including strength-routed grilling and
+grill-me, is installed from the repository Submodule. Superpowers is external-only and is
+never installed or enabled by this script.
 
 CodeGraphOverrideChoice:
   Ask        Prompt once during interactive first installation; blank means Skip.
@@ -55,16 +49,7 @@ and requires an explicit APPLY confirmation before publishing files.
 
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $Version = "0.1.0.dev0"
-$OfficialSuperpowers = "https://github.com/obra/superpowers.git"
-$RequiredSuperpowersSkills = @(
-    "brainstorming",
-    "writing-plans",
-    "test-driven-development",
-    "systematic-debugging",
-    "requesting-code-review",
-    "receiving-code-review",
-    "verification-before-completion"
-)
+$MattSkillsLockPath = Join-Path $RepositoryRoot "dependencies\locks\matt-pocock-skills.lock.yaml"
 
 function Write-JsonFile {
     param([string]$Path, [object]$Value)
@@ -273,30 +258,6 @@ function Invoke-SelfWorkflow {
     return $output | ConvertFrom-Json
 }
 
-function Inspect-Superpowers {
-    param([string]$Source)
-    $report = Invoke-SelfWorkflow @("source", "inspect", "--path", $Source) (Join-Path $script:LogDirectory "superpowers-source.json")
-    if ($report.supportStatus -ne "supported") {
-        Stop-Install "superpowers-selection" 30 "superpowers-source-unsupported"
-    }
-    foreach ($skill in $RequiredSuperpowersSkills) {
-        if (@($report.trackedSkillIds) -notcontains $skill) {
-            Stop-Install "superpowers-selection" 30 ("superpowers-skill-untracked:{0}" -f $skill)
-        }
-    }
-    if ($report.dirty -and -not $AllowDirtySuperpowers) {
-        if ($NonInteractive) {
-            Stop-Install "superpowers-selection" 30 "dirty-superpowers-requires-authorization"
-        }
-        Write-Host ("The selected Superpowers source is dirty: {0}" -f $report.sourceLocator)
-        $answer = Read-Host "Use this dirty source for this installation? [Y/N]"
-        if ($answer -notmatch "^(y|yes)$") {
-            Stop-Install "superpowers-selection" 30 "dirty-superpowers-declined"
-        }
-    }
-    return $report
-}
-
 $AgentsRoot = Resolve-FullPath $AgentsRoot
 $CodexRoot = Resolve-FullPath $CodexRoot
 $StateRoot = Resolve-FullPath $StateRoot
@@ -312,17 +273,10 @@ $script:CurrentStage = "preflight"
 $script:FailureExitCode = 20
 $script:PythonExecutable = $null
 $applyResult = $null
-$stagedSuperpowers = $null
-$createdOfficialClone = $false
-$superpowersReport = [ordered]@{
-    supportStatus = "unsupported"
-    reason = "unavailable-or-declined"
-}
+$mattSkillsReport = $null
 $providerReport = [ordered]@{ status = "skipped" }
 $providerSourceReport = $null
 $providerRollbackToken = $null
-$superpowersMigrationJournal = Join-Path $StateRoot "source-migrations\superpowers.json"
-$superpowersMigrationBackup = Join-Path $StateRoot "source-migrations\backups\superpowers-link"
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -332,14 +286,10 @@ try {
     if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) {
         Stop-Install "preflight" 20 "git-required"
     }
+    if ($SuperpowersChoice -ne "Skip") {
+        Stop-Install "preflight" 20 "superpowers-external-only"
+    }
     $script:PythonExecutable = Ensure-RepositoryEnvironment
-
-    Set-InstallStage "migration-recovery" 25
-    Invoke-SelfWorkflow @(
-        "source", "recover-migration",
-        "--journal", $superpowersMigrationJournal,
-        "--if-exists"
-    ) (Join-Path $script:LogDirectory "superpowers-recovery-before.json") | Out-Null
 
     Set-InstallStage "submodules" 25
     Write-InstallLog "Preparing the path-limited normal submodule profile."
@@ -351,81 +301,26 @@ try {
     if ($submoduleExit -ne 0) {
         Stop-Install "submodules" 25 "normal-submodule-profile-failed"
     }
-
-    Set-InstallStage "grill-selection" 30
-    $grillTarget = Join-Path $AgentsRoot "skills\grill-me\SKILL.md"
-    if ($GrillMeChoice -eq "Ask") {
-        if (Test-Path -LiteralPath $grillTarget -PathType Leaf) {
-            $GrillMeChoice = "Install"
-            Write-InstallLog "Existing Grill-me detected; compatibility will be checked by the install plan."
-        }
-        elseif ($NonInteractive) {
-            Stop-Install "grill-selection" 30 "grill-me-choice-required"
-        }
-        else {
-            Write-Host "Grill-me is not installed. SelfWorkFlow contains a bundled, explicit-only version."
-            $answer = Read-Host "Install bundled Grill-me? [Y/N] (recommended: Y)"
-            $GrillMeChoice = if ($answer -match "^(y|yes)$") { "Install" } else { "Skip" }
-        }
+    if (-not (Test-Path -LiteralPath $MattSkillsLockPath -PathType Leaf)) {
+        Stop-Install "submodules" 25 "matt-skills-lock-missing"
     }
-
-    Set-InstallStage "superpowers-selection" 30
-    if (-not $SuperpowersSource) {
-        $sourceCandidates = @(
-            (Join-Path $CodexRoot "superpowers"),
-            (Join-Path $DependencyRoot "superpowers")
-        )
-        foreach ($defaultSource in $sourceCandidates) {
-            if (Test-Path -LiteralPath $defaultSource -PathType Container) {
-                $SuperpowersSource = $defaultSource
-                break
-            }
-        }
+    $mattLockText = Get-Content -Raw -LiteralPath $MattSkillsLockPath
+    if ($mattLockText -notmatch '(?m)^gitlinkCommit:\s*([0-9a-f]{40})\s*$') {
+        Stop-Install "submodules" 25 "matt-skills-lock-invalid"
     }
-    if ($SuperpowersChoice -eq "Ask") {
-        if ($NonInteractive) {
-            Stop-Install "superpowers-selection" 30 "superpowers-choice-required"
-        }
-        if ($SuperpowersSource) {
-            $answer = Read-Host ("Use Superpowers source '{0}'? [Y/N]" -f $SuperpowersSource)
-            $SuperpowersChoice = if ($answer -match "^(y|yes)$") { "Existing" } else { "Skip" }
-        }
-        else {
-            Write-Host "Superpowers is required for Brainstorming, Plan, TDD, Review, and completion verification."
-            $answer = Read-Host "Install the official obra/superpowers repository? [Y/N]"
-            $SuperpowersChoice = if ($answer -match "^(y|yes)$") { "InstallOfficial" } else { "Skip" }
-        }
+    $mattSkillsReport = [ordered]@{
+        commit = $Matches[1]
+        lockHash = "sha256:" + (Get-FileHash -LiteralPath $MattSkillsLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
     }
-    if ($SuperpowersChoice -eq "Existing") {
-        if (-not $SuperpowersSource) {
-            Stop-Install "superpowers-selection" 30 "superpowers-source-required"
-        }
-        $SuperpowersSource = (Resolve-Path -LiteralPath $SuperpowersSource -ErrorAction Stop).Path
-        $superpowersReport = Inspect-Superpowers $SuperpowersSource
-    }
-    elseif ($SuperpowersChoice -eq "InstallOfficial") {
-        $SuperpowersSource = Join-Path $DependencyRoot "superpowers"
-        if (Test-Path -LiteralPath $SuperpowersSource) {
-            Stop-Install "superpowers-selection" 30 "official-superpowers-target-exists"
-        }
-        [IO.Directory]::CreateDirectory($DependencyRoot) | Out-Null
-        $createdOfficialClone = $true
-        $cloneRemote = $OfficialSuperpowers
-        if ($OfficialSuperpowersTestRemote) {
-            if ($env:SELFWORKFLOW_TEST_MODE -ne "1") {
-                Stop-Install "superpowers-selection" 30 "official-test-transport-forbidden"
-            }
-            $cloneRemote = $OfficialSuperpowersTestRemote
-            Write-InstallLog "Cloning the approved official Superpowers source through an explicit test transport."
-        }
-        else {
-            Write-InstallLog "Cloning the approved official Superpowers source."
-        }
-        $cloneExit = Invoke-GitSanitized @("clone", "--depth", "1", "--", $cloneRemote, $SuperpowersSource)
-        if ($cloneExit -ne 0) {
-            Stop-Install "superpowers-selection" 30 "official-superpowers-clone-failed"
-        }
-        $superpowersReport = Inspect-Superpowers $SuperpowersSource
+    $gitlinkOutput = (& git.exe -C $RepositoryRoot ls-files --stage -- "dependencies/upstream/matt-pocock-skills" 2>&1 | Out-String).Trim()
+    $gitlinkFields = @($gitlinkOutput -split '\s+')
+    if (
+        $LASTEXITCODE -ne 0 -or
+        $gitlinkFields.Count -lt 2 -or
+        $gitlinkFields[0] -ne "160000" -or
+        $gitlinkFields[1] -ne $mattSkillsReport.commit
+    ) {
+        Stop-Install "submodules" 25 "matt-skills-gitlink-lock-mismatch"
     }
 
     Set-InstallStage "provider-selection" 30
@@ -461,10 +356,7 @@ try {
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorBefore | Out-Null
     $runtime = Join-Path $script:LogDirectory "runtime"
     $runtimeManifest = Join-Path $script:LogDirectory "runtime-manifest.json"
-    $buildArguments = @("build", "--repository", $RepositoryRoot, "--output", $runtime, "--version", $Version, "--profile", "core")
-    if ($GrillMeChoice -eq "Skip") {
-        $buildArguments += "--without-grill-me"
-    }
+    $buildArguments = @("build", "--repository", $RepositoryRoot, "--output", $runtime, "--version", $Version, "--profile", $Profile)
     Invoke-SelfWorkflow $buildArguments $runtimeManifest | Out-Null
     $planPath = Join-Path $script:LogDirectory "install-plan.json"
     Invoke-SelfWorkflow @("install", "plan", "--artifact", $runtime, "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot, "--version", $Version, "--output", $planPath) $null | Out-Null
@@ -473,16 +365,12 @@ try {
         Stop-Install "plan" 40 ("install-plan-paused:" + ($plan.issues -join ","))
     }
     Write-InstallLog ("Plan status: {0}; planHash: {1}" -f $plan.status, $plan.planHash)
-    Write-InstallLog ("Grill-me: {0}; Superpowers: {1}" -f $GrillMeChoice, $SuperpowersChoice)
+    Write-InstallLog ("Matt Skills commit: {0}; lock: {1}" -f $mattSkillsReport.commit, $mattSkillsReport.lockHash)
+    Write-InstallLog "Superpowers: external-only; not managed by SelfWorkflow."
     Write-InstallLog ("Agents root: " + $AgentsRoot)
     Write-InstallLog ("Codex root: " + $CodexRoot)
     Write-InstallLog ("State root: " + $StateRoot)
     Write-InstallLog ("Profile: {0}; Artifact files: {1}" -f $plan.profile, @($plan.artifactFiles).Count)
-    if ($SuperpowersChoice -ne "Skip") {
-        Write-InstallLog ("Superpowers commit: " + $superpowersReport.commit)
-        Write-InstallLog ("Superpowers inventoryHash: " + $superpowersReport.inventoryHash)
-        Write-InstallLog ("Superpowers dirty: " + $superpowersReport.dirty)
-    }
     if ($providerSourceReport) {
         Write-InstallLog ("CodeGraph commit: " + $providerSourceReport.commit)
         Write-InstallLog ("CodeGraph sourceHash: " + $providerSourceReport.sourceHash)
@@ -496,11 +384,10 @@ try {
         agentsRoot = $AgentsRoot
         codexRoot = $CodexRoot
         stateRoot = $StateRoot
-        grillMeChoice = $GrillMeChoice
-        superpowersChoice = $SuperpowersChoice
+        mattSkills = $mattSkillsReport
+        superpowers = "external-only"
         codeGraphOverrideChoice = $CodeGraphOverrideChoice
         codeGraphSource = $providerSourceReport
-        superpowers = $superpowersReport
     })
 
     Set-InstallStage "confirmation" 50
@@ -521,29 +408,6 @@ try {
     $verifyPath = Join-Path $script:LogDirectory "verify-result.json"
     Invoke-SelfWorkflow @("install", "verify", "--manifest", $applyResult.manifestPath) $verifyPath | Out-Null
 
-    if ($SuperpowersChoice -ne "Skip") {
-        $superpowersTarget = Join-Path $AgentsRoot "skills\superpowers"
-        $stagedSuperpowers = Invoke-SelfWorkflow @(
-            "source", "stage",
-            "--path", $SuperpowersSource,
-            "--target", $superpowersTarget,
-            "--expected-inventory-hash", $superpowersReport.inventoryHash,
-            "--allow-compatible-link",
-            "--state-root", $StateRoot,
-            "--migration-journal", $superpowersMigrationJournal,
-            "--migration-backup", $superpowersMigrationBackup,
-            "--protected-root", $AgentsRoot,
-            "--protected-root", $CodexRoot,
-            "--protected-root", $runtime,
-            "--protected-root", $SuperpowersSource
-        ) (Join-Path $script:LogDirectory "superpowers-stage.json")
-        foreach ($skill in $RequiredSuperpowersSkills) {
-            $entry = Join-Path $superpowersTarget ("{0}\SKILL.md" -f $skill)
-            if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
-                Stop-Install "verify" 70 ("staged-superpowers-skill-missing:{0}" -f $skill)
-            }
-        }
-    }
     $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
 
@@ -569,28 +433,17 @@ try {
     $summary = [ordered]@{
         schemaVersion = 1
         status = "installed"
-        profile = "core"
-        grillMe = if ($GrillMeChoice -eq "Install") { "installed" } else { "skipped" }
-        superpowers = $superpowersReport
+        profile = $Profile
+        mattSkills = $mattSkillsReport
+        superpowers = "external-only"
         codeGraphOverride = $providerReport.status
-        writeCapability = if ($SuperpowersChoice -eq "Skip") { "paused-superpowers-unavailable" } else { "enabled" }
+        writeCapability = "enabled"
         manifestPath = $applyResult.manifestPath
         logDirectory = $script:LogDirectory
         nativeAgentVerification = "unverified-restart-required"
     }
     Write-JsonFile (Join-Path $script:LogDirectory "summary.json") $summary
     Write-InstallLog ("Installation verification completed; finalizing transaction. Logs: " + $script:LogDirectory)
-    $hasStagedMigration = (
-        $stagedSuperpowers -and
-        $stagedSuperpowers.PSObject.Properties.Name -contains "migrationStatus" -and
-        $stagedSuperpowers.migrationStatus -eq "staged"
-    )
-    if ($hasStagedMigration) {
-        Invoke-SelfWorkflow @(
-            "source", "commit-migration",
-            "--journal", $superpowersMigrationJournal
-        ) (Join-Path $script:LogDirectory "superpowers-migration-commit.json") | Out-Null
-    }
     if ($providerRollbackToken) {
         try {
             if ($env:SELFWORKFLOW_TEST_FAIL_PROVIDER_COMMIT -eq "1") {
@@ -630,50 +483,12 @@ catch {
                 throw "provider-config-rollback-status-invalid"
             }
         }
-        $hasStagedMigration = (
-            $stagedSuperpowers -and
-            $stagedSuperpowers.PSObject.Properties.Name -contains "migrationStatus" -and
-            $stagedSuperpowers.migrationStatus -eq "staged"
-        )
-        $migrationRecovery = $null
-        if (Test-Path -LiteralPath $superpowersMigrationJournal -PathType Leaf) {
-            $migrationRecovery = Invoke-SelfWorkflow @(
-                "source", "recover-migration",
-                "--journal", $superpowersMigrationJournal,
-                "--if-exists"
-            ) (Join-Path $script:LogDirectory "superpowers-migration-rollback.json")
-            if ($migrationRecovery.status -eq "restored") {
-                $rollbackStatus = "rolled-back"
-            }
-        }
-        if (
-            $stagedSuperpowers -and
-            $stagedSuperpowers.status -eq "staged" -and
-            -not $hasStagedMigration
-        ) {
-            $superpowersTarget = Resolve-FullPath (Join-Path $AgentsRoot "skills\superpowers")
-            $expectedTarget = Resolve-FullPath $stagedSuperpowers.target
-            if ($superpowersTarget -ne $expectedTarget) {
-                throw "staged-superpowers-target-invalid"
-            }
-            Invoke-SelfWorkflow @(
-                "source", "remove-stage",
-                "--target", $superpowersTarget,
-                "--expected-inventory-hash", $stagedSuperpowers.inventoryHash
-            ) (Join-Path $script:LogDirectory "superpowers-stage-rollback.json") | Out-Null
-        }
         if ($applyResult -and $applyResult.status -eq "applied") {
             $rollbackPlanPath = Join-Path $script:LogDirectory "rollback-plan.json"
             Invoke-SelfWorkflow @("install", "rollback-plan", "--transaction", $applyResult.transactionPath, "--output", $rollbackPlanPath) $null | Out-Null
             $rollbackPlan = Get-Content -Raw -LiteralPath $rollbackPlanPath | ConvertFrom-Json
             Invoke-SelfWorkflow @("install", "rollback", "--plan", $rollbackPlanPath, "--confirm-plan-hash", $rollbackPlan.planHash) (Join-Path $script:LogDirectory "rollback-result.json") | Out-Null
             $rollbackStatus = "rolled-back"
-        }
-        if ($createdOfficialClone -and (Test-Path -LiteralPath $SuperpowersSource)) {
-            $expectedClone = Resolve-FullPath (Join-Path $DependencyRoot "superpowers")
-            if ((Resolve-FullPath $SuperpowersSource) -eq $expectedClone) {
-                Remove-Item -LiteralPath $SuperpowersSource -Recurse -Force
-            }
         }
     }
     catch {

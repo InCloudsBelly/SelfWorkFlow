@@ -26,7 +26,7 @@ def _manifest():
             "claude-code": "experimental-unverified", "cursor": "experimental-unverified",
             "opencode": "experimental-unverified", "copilot": "instructions-only",
         },
-        "knowledgeEvidence": {"c7-openwiki": "experimental-unverified"},
+        "knowledgeEvidence": {"selfopenwiki": "experimental-unverified"},
         "skipped": [],
         "residualRisks": [],
     }

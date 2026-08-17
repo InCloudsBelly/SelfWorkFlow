@@ -6,6 +6,7 @@ import yaml
 
 from selfworkflow.v3.cpp_router import CppRouteRequest, route_cpp_capabilities
 from selfworkflow.v3.catalog import compile_catalog
+from selfworkflow.v3.plan_graph import _condition_matches
 from selfworkflow.v3.pipeline import load_pipeline
 
 
@@ -89,6 +90,24 @@ class V3CppWorkflowTests(unittest.TestCase):
         self.assertNotIn("debug.execute", route.capability_ids)
         self.assertIn("runtime-debugger-not-authorized", route.unverified_items)
 
+    def test_cpp_read_only_analysis_loads_reasoning_without_change_execution(self):
+        text = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(encoding="utf-8")
+        route = route_cpp_capabilities(CppRouteRequest(
+            operation_type="analyze",
+            languages=("cpp",),
+            file_extensions=(".cpp",),
+            task_signals=(),
+            risk="R0",
+            explicit_module_ids=(),
+            user_confirmed_heavy=False,
+            project_allows_execution=False,
+        ))
+
+        self.assertIn("只读分析只应用推理核心", text)
+        self.assertEqual(route.selected_module_ids, ("cpp-core",))
+        self.assertEqual(route.capability_ids, ("cpp.reasoning",))
+        self.assertNotIn("debug.execute", route.capability_ids)
+
     def test_repository_catalog_and_pipeline_expose_bounded_cpp_reasoning(self):
         catalog = compile_catalog().document["catalog"]
         pipeline = load_pipeline().document
@@ -111,11 +130,11 @@ class V3CppWorkflowTests(unittest.TestCase):
             for item in cpp_modules
         ))
 
-    def test_every_v3_modification_routes_design_through_brainstorming(self):
+    def test_v3_routes_grilling_and_deep_grill_me_by_strength(self):
         catalog = compile_catalog().document["catalog"]
         pipeline = load_pipeline().document
         design = next(
-            item for item in catalog["modules"] if item["id"] == "design-precheck"
+            item for item in catalog["modules"] if item["id"] == "design-grilling"
         )
         slot = next(
             slot
@@ -125,10 +144,58 @@ class V3CppWorkflowTests(unittest.TestCase):
 
         self.assertEqual(
             design["invocation"],
-            {"kind": "skill", "ref": "superpowers:brainstorming"},
+            {"kind": "skill", "ref": "matt-pocock:grilling"},
         )
         self.assertEqual(slot["allowedInvocationKinds"], ["skill"])
-        self.assertEqual(slot["condition"], {"eq": ["writeTask", True]})
+        self.assertEqual(slot["cardinality"], "exactly-one")
+        self.assertEqual(slot["selectionMode"], "static")
+        self.assertIn("any", slot["condition"])
+
+        deep_slot = next(
+            slot
+            for stage in pipeline["stages"] if stage["id"] == "designed"
+            for slot in stage["slots"] if slot["id"] == "design.deep-grill"
+        )
+        deep = next(
+            item for item in catalog["modules"] if item["id"] == "design-grill-me"
+        )
+        self.assertEqual(deep["slot"], "design.deep-grill")
+        self.assertEqual(deep_slot["cardinality"], "exactly-one")
+        self.assertEqual(deep_slot["selectionMode"], "static")
+        self.assertIn("any", deep_slot["condition"])
+
+        def condition(slot_id, **values):
+            slot = next(
+                slot
+                for stage in pipeline["stages"] if stage["id"] == "designed"
+                for slot in stage["slots"] if slot["id"] == slot_id
+            )
+            return _condition_matches(slot.get("condition"), values)
+
+        self.assertTrue(condition(
+            "design.precheck", writeTask=True, complexity="C2", risk="R2",
+            projectMinimums={"strength": "Full"}, explicitModuleIds=[],
+        ))
+        self.assertFalse(condition(
+            "design.deep-grill", writeTask=True, complexity="C2", risk="R2",
+            projectMinimums={"strength": "Full"}, explicitModuleIds=[],
+        ))
+        self.assertFalse(condition(
+            "design.precheck", writeTask=True, complexity="C3", risk="R3",
+            projectMinimums={"strength": "Deep"}, explicitModuleIds=[],
+        ))
+        self.assertTrue(condition(
+            "design.deep-grill", writeTask=True, complexity="C3", risk="R3",
+            projectMinimums={"strength": "Deep"}, explicitModuleIds=[],
+        ))
+        self.assertFalse(condition(
+            "design.precheck", writeTask=True, complexity="C1", risk="R1",
+            projectMinimums={"strength": "Light"}, explicitModuleIds=[],
+        ))
+        self.assertFalse(condition(
+            "design.deep-grill", writeTask=True, complexity="C1", risk="R1",
+            projectMinimums={"strength": "Light"}, explicitModuleIds=[],
+        ))
 
 
 if __name__ == "__main__":

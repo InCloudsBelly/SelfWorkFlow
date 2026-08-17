@@ -229,6 +229,34 @@ class V3PipelineLoaderTests(unittest.TestCase):
         self.assertNotIn("provider", serialized.lower())
         self.assertNotIn("tea", serialized.lower())
         self.assertNotIn("c++", serialized.lower())
+        slots = {
+            slot["id"]: slot
+            for stage in loaded.document["stages"]
+            for slot in stage["slots"]
+        }
+        self.assertEqual(slots["knowledge.read"]["cardinality"], "zero-or-one")
+        self.assertEqual(slots["knowledge.propose"]["cardinality"], "zero-or-one")
+        self.assertEqual(slots["knowledge.update"]["cardinality"], "zero-or-one")
+        self.assertIn("mcp", slots["knowledge.update"]["allowedInvocationKinds"])
+        readiness = slots["plan.integrated-review"]
+        self.assertEqual(readiness["cardinality"], "exactly-one")
+        self.assertEqual(readiness["selectionMode"], "static")
+        self.assertEqual(readiness["allowedInvocationKinds"], ["skill"])
+        self.assertEqual(
+            readiness["condition"],
+            {"any": [
+                {"gte": ["complexity", "C2"]},
+                {"gte": ["risk", "R2"]},
+                {"gte": ["projectMinimums", "Full"]},
+            ]},
+        )
+        self.assertEqual(
+            slots["implement.orchestrator"]["condition"],
+            {"all": [
+                {"eq": ["writeTask", True]},
+                {"eq": ["operationType", "implement"]},
+            ]},
+        )
 
 
 if __name__ == "__main__":

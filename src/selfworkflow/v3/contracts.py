@@ -1176,6 +1176,8 @@ def _validate_run_ledger(
     plan: dict[str, Any] | None = None,
     receipts: tuple[dict[str, Any], ...] = (),
     expected_successor_plan_hash: str | None = None,
+    *,
+    tea_runtime_root: str | Path | None = None,
 ) -> None:
     status = document["status"]
     if status == "superseded":
@@ -1277,7 +1279,9 @@ def _validate_run_ledger(
             "selectionReceiptRefs", "reviewAggregateHashes",
             "coverageResultHashes", "artifactHashes",
         )
-        if stage["status"] == "skipped" and any(stage[field] for field in execution_fields):
+        execution_values = [stage[field] for field in execution_fields]
+        execution_values.append(stage.get("teaReceiptHashes", []))
+        if stage["status"] == "skipped" and any(execution_values):
             _raise_semantic("ledger-skipped-stage-has-execution", ("stages", stage_index))
 
         attempts = stage["attempts"]
@@ -1365,6 +1369,45 @@ def _validate_run_ledger(
                     "ledger-slot-result-artifact-unregistered",
                     base + ("artifactHash",),
                 )
+        tea_receipt_keys: set[tuple[str, str, str]] = set()
+        tea_receipt_hashes_from_receipts: list[str] = []
+        if plan is not None and stage.get("teaReceipts"):
+            from selfworkflow.v3.tea_adapter import validate_tea_receipt
+
+            for receipt_index, receipt in enumerate(stage["teaReceipts"]):
+                base = ("stages", stage_index, "teaReceipts", receipt_index)
+                matches = [
+                    item for item in stage["slotResults"]
+                    if item["attemptRef"] == receipt["attemptRef"]
+                    and item["slotId"] == receipt["slotId"]
+                    and item["moduleId"] == receipt["moduleId"]
+                ]
+                if len(matches) != 1:
+                    _raise_semantic("ledger-tea-receipt-slot-result-mismatch", base)
+                try:
+                    validate_tea_receipt(
+                        receipt,
+                        plan_hash=document["planHash"],
+                        stage_id=stage["stageId"],
+                        attempt_ref=receipt["attemptRef"],
+                        slot_id=receipt["slotId"],
+                        module_id=receipt["moduleId"],
+                        output_hash=matches[0]["artifactHash"],
+                        runtime_root=tea_runtime_root,
+                    )
+                except Exception as error:
+                    _raise_semantic(
+                        getattr(error, "reason", "ledger-tea-receipt-invalid"), base,
+                    )
+                key = (receipt["attemptRef"], receipt["slotId"], receipt["moduleId"])
+                if key in tea_receipt_keys:
+                    _raise_semantic("ledger-tea-receipt-duplicate", base)
+                tea_receipt_keys.add(key)
+                tea_receipt_hashes_from_receipts.append(receipt["receiptHash"])
+            if sorted(set(tea_receipt_hashes_from_receipts)) != sorted(stage.get("teaReceiptHashes", [])):
+                _raise_semantic("ledger-tea-receipt-hash-list-invalid", base)
+        elif plan is not None and stage.get("teaReceiptHashes"):
+            _raise_semantic("ledger-tea-receipt-hash-list-invalid", ("stages", stage_index, "teaReceiptHashes"))
         gates = {gate for slot in slots.values() for gate in slot["gates"]}
         seen_gate_results: set[tuple[str, str]] = set()
         for item_index, item in enumerate(stage["gateResults"]):
@@ -1392,6 +1435,13 @@ def _validate_run_ledger(
             required = {module for slot in plan_stage["slots"] if slot["selectionMode"] == "static" for module in slot["selectedModules"]}
             if required - current_results:
                 _raise_semantic("ledger-current-attempt-incomplete", ("stages", stage_index, "slotResults"))
+            from selfworkflow.v3.tea_adapter import is_tea_module_id
+            required_tea = {module for module in required if is_tea_module_id(module)}
+            current_tea_receipt_keys = {
+                key for key in tea_receipt_keys if key[0] == current_ref
+            }
+            if len(current_tea_receipt_keys) < len(required_tea):
+                _raise_semantic("ledger-tea-receipt-missing", ("stages", stage_index, "teaReceiptHashes"))
 
     if status == "completed" and plan is not None:
         actual = {stage["stageId"]: stage["status"] for stage in document["stages"]}
@@ -1425,6 +1475,7 @@ def validate_run_ledger(
     receipts: tuple[dict[str, Any], ...] = (),
     *,
     expected_successor_plan_hash: str | None = None,
+    tea_runtime_root: str | Path | None = None,
 ) -> None:
     """Validate a V3 RunLedger, optionally against a plan and receipt set."""
 
@@ -1435,6 +1486,7 @@ def validate_run_ledger(
     _validate_run_ledger(
         document, plan, receipts,
         expected_successor_plan_hash,
+        tea_runtime_root=tea_runtime_root,
     )
 
 

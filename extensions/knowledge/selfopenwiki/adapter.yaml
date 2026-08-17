@@ -1,0 +1,40 @@
+schemaVersion: 1
+id: selfopenwiki
+supportStatus: experimental-unverified
+transport: mcp-stdio
+contractSchema: 2
+executionMode: external_agent
+selection: explicit-knowledge-backend
+repository:
+  officialOpenWikiSubmodule: upstream/openwiki
+  privateIntegrationOutsideSubmodule: true
+personalWiki:
+  requiredExternalRoot: true
+  runtimeSuffix: .selfopenwiki
+  forbidPublicCheckoutWrites: true
+  forbidPrivateRuntimeEvidenceInGit: true
+installation:
+  setup: [Setup.bat]
+  setupWithMcp: [Setup.bat, --with-mcp]
+  install: [Install.bat, --wiki-root, <absolute>, --confirm-data-safety]
+  gitInstallExtra: --confirm-git-authorization
+  configRoot: "%LOCALAPPDATA%/SelfOpenWiki"
+  modifiesWikiGit: false
+mcp:
+  entry: self-openwiki/mcp-server/dist/index.js
+  firstCall: openwiki_status
+  requiredStatus:
+    contractSchema: 2
+    executionMode: external_agent
+    authRequired: false
+  requiredCapabilities:
+    - update.external-agent.begin
+    - update.external-agent.reviewed-finalize
+  externalUpdate:
+    begin: openwiki_begin_external_update
+    finalize: openwiki_finalize_external_update
+    legacyDefault: disabled
+visualizer:
+  command: [node, .work/openwiki/dist/cli/cli.js, visualize, <wiki-root>, --port, "4321", --no-open]
+  loopbackOnly: true
+  autoOpen: false

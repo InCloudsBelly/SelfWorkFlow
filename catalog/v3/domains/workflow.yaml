@@ -4,10 +4,15 @@ modules:
   - discover-context
   - capability-check
   - classify-task
-  - design-precheck
+  - design-grilling
+  - design-codebase
   - design-grill-me
-  - plan-primary
+  - plan-core
+  - plan-integrated-review
+  - implement-matt
   - implement-tdd
+  - implement-diagnosing-bugs
   - review-self
+  - review-code-review
   - verify-execution
   - complete-gate

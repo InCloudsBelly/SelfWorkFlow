@@ -7,12 +7,14 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 
 from jsonschema import Draft202012Validator
 import yaml
 
 from selfworkflow.catalog import compile_catalog
+from selfworkflow.v3.tea_adapter import verify_tea_source
 
 
 class AdapterError(RuntimeError):
@@ -23,8 +25,10 @@ _RUNTIME_PROFILES = {"core", "knowledge", "maintainer"}
 _CORE_CATALOG_IDS = {
     "workflow-core",
     "workflow-quality",
+    "testing-review-quality",
+    "tea-quality-foundation",
     "code-quality",
-    "grill-me",
+    "matt-skills-foundation",
 }
 _CORE_PATHS = (
     "workflow/core.md",
@@ -40,11 +44,14 @@ _CORE_PATHS = (
     "schemas/git-policy.schema.json",
     "skills/code-quality",
     "skills/workflow-quality",
+    "skills/testing-review-quality",
     "skills/caveman",
+    "skills/tea-quality",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
-    "overlays/superpowers",
-    "dependencies/superpowers.lock.yaml",
+    "dependencies/locks/matt-pocock-skills.lock.yaml",
+    "dependencies/locks/tea.lock.yaml",
+    "overlays/tea",
     "adapters",
     # V3 is shipped as an explicit, self-contained extension. The lightweight
     # runtime still loads it only for schemaVersion=3 requests.
@@ -54,6 +61,15 @@ _CORE_PATHS = (
     "skills/cpp-core",
     "capabilities/cpp",
 )
+
+_MATT_LOCK_PATH = "dependencies/locks/matt-pocock-skills.lock.yaml"
+_TEA_RUNTIME_WORKFLOWS = {
+    "bmad-testarch-test-design": "src/workflows/testarch/bmad-testarch-test-design",
+    "bmad-testarch-atdd": "src/workflows/testarch/bmad-testarch-atdd",
+    "bmad-testarch-test-review": "src/workflows/testarch/bmad-testarch-test-review",
+    "bmad-testarch-trace": "src/workflows/testarch/bmad-testarch-trace",
+    "bmad-testarch-nfr": "src/workflows/testarch/bmad-testarch-nfr",
+}
 
 
 def load_adapters(adapter_root: str | Path, schema_path: str | Path) -> list[dict[str, object]]:
@@ -101,32 +117,165 @@ def _copy_runtime_path(source: Path, destination: Path, relative: str) -> None:
         raise AdapterError("runtime-source-invalid")
 
 
+def _copy_matt_skills(
+    source: Path, destination: Path, *, include_grill_me: bool
+) -> None:
+    lock_path = source / _MATT_LOCK_PATH
+    try:
+        lock = yaml.safe_load(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise AdapterError("matt-skills-lock-invalid") from None
+    if (
+        not isinstance(lock, dict)
+        or lock.get("schemaVersion") != 1
+        or lock.get("canonicalUrl") != "https://github.com/mattpocock/skills.git"
+        or lock.get("path") != "dependencies/upstream/matt-pocock-skills"
+        or not isinstance(lock.get("gitlinkCommit"), str)
+        or len(lock["gitlinkCommit"]) != 40
+        or not isinstance(lock.get("gitTree"), str)
+        or len(lock["gitTree"]) != 40
+        or not isinstance(lock.get("license"), dict)
+        or not isinstance(lock.get("selectedSkills"), list)
+    ):
+        raise AdapterError("matt-skills-lock-invalid")
+
+    upstream = source / lock["path"]
+    if upstream.is_symlink() or not upstream.is_dir():
+        raise AdapterError("matt-skills-source-invalid")
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=upstream, check=True,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        ).stdout.strip()
+        tree = subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=upstream, check=True,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=upstream, check=True, capture_output=True, text=True,
+            encoding="utf-8", timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        raise AdapterError("matt-skills-source-invalid") from None
+    if commit != lock["gitlinkCommit"] or tree != lock["gitTree"] or dirty:
+        raise AdapterError("matt-skills-source-drift")
+    selected: set[str] = set()
+    for item in lock["selectedSkills"]:
+        if not isinstance(item, dict) or set(item) != {"id", "path", "hash"}:
+            raise AdapterError("matt-skills-lock-invalid")
+        skill_id = item["id"]
+        relative = Path(item["path"])
+        expected_hash = item["hash"]
+        if (
+            not isinstance(skill_id, str)
+            or not skill_id
+            or skill_id in selected
+            or not isinstance(item["path"], str)
+            or relative.is_absolute()
+            or ".." in relative.parts
+            or not isinstance(expected_hash, str)
+            or not expected_hash.startswith("sha256:")
+        ):
+            raise AdapterError("matt-skills-lock-invalid")
+        selected.add(skill_id)
+        if skill_id == "grill-me" and not include_grill_me:
+            continue
+        skill_root = upstream / relative
+        entry = skill_root / "SKILL.md"
+        if skill_root.is_symlink() or not entry.is_file() or entry.is_symlink():
+            raise AdapterError("matt-skills-source-invalid")
+        actual_hash = "sha256:" + hashlib.sha256(entry.read_bytes()).hexdigest()
+        if actual_hash != expected_hash:
+            raise AdapterError("matt-skills-source-drift")
+        _copy_tree(skill_root, destination / "skills" / "matt-pocock" / skill_id)
+
+    license_path = upstream / "LICENSE"
+    license_lock = lock["license"]
+    if (
+        set(license_lock) != {"path", "spdx", "hash"}
+        or license_lock.get("path") != "LICENSE"
+        or license_lock.get("spdx") != "MIT"
+        or not isinstance(license_lock.get("hash"), str)
+        or not license_path.is_file()
+        or license_path.is_symlink()
+        or "sha256:" + hashlib.sha256(license_path.read_bytes()).hexdigest()
+        != license_lock["hash"]
+    ):
+        raise AdapterError("matt-skills-source-invalid")
+    license_target = destination / "skills" / "matt-pocock" / "LICENSE"
+    license_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(license_path, license_target)
+
+
+def _copy_tea_quality(source: Path, destination: Path) -> None:
+    """Copy only the pinned TEA workflow closures used by the local adapter."""
+
+    try:
+        verify_tea_source(source)
+    except ValueError:
+        raise AdapterError("tea-source-invalid") from None
+    upstream = source / "dependencies/upstream/tea"
+    target = destination / "skills/tea-quality/references"
+    if not (destination / "skills/tea-quality/SKILL.md").is_file():
+        raise AdapterError("tea-adapter-missing")
+    for workflow_id, relative in sorted(_TEA_RUNTIME_WORKFLOWS.items()):
+        workflow = upstream / relative
+        if workflow.is_symlink() or not (workflow / "SKILL.md").is_file():
+            raise AdapterError("tea-source-invalid")
+        _copy_tree(workflow, target / workflow_id)
+    license_path = upstream / "LICENSE"
+    if license_path.is_symlink() or not license_path.is_file():
+        raise AdapterError("tea-source-invalid")
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(license_path, target / "LICENSE")
+
+
+def _exclude_c7_v3_catalog(runtime_root: Path) -> None:
+    index_path = runtime_root / "catalog/v3/index.yaml"
+    document = yaml.safe_load(index_path.read_text(encoding="utf-8"))
+    document["domains"] = [
+        item for item in document["domains"] if item["id"] != "knowledge"
+    ]
+    document["modules"] = [
+        item
+        for item in document["modules"]
+        if not item["id"].startswith("knowledge-")
+    ]
+    index_path.write_text(
+        yaml.safe_dump(document, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    for relative in (
+        "catalog/v3/domains/knowledge.yaml",
+        "catalog/v3/modules/knowledge-read.yaml",
+        "catalog/v3/modules/knowledge-propose.yaml",
+        "catalog/v3/modules/knowledge-update.yaml",
+    ):
+        (runtime_root / relative).unlink()
+
+
 def _profile_catalog(
     source: Path, profile: str, *, include_grill_me: bool
 ) -> bytes:
     compiled = compile_catalog(source / "catalog")
-    if profile == "maintainer" and include_grill_me:
+    if profile == "maintainer":
         return compiled.content
     envelope = json.loads(compiled.content)
     catalog = envelope["catalog"]
-    if profile == "maintainer":
-        catalog["entries"] = [
-            entry for entry in catalog["entries"] if entry["id"] != "grill-me"
-        ]
-    else:
-        allowed = set(_CORE_CATALOG_IDS)
-        if not include_grill_me:
-            allowed.remove("grill-me")
-        if profile == "knowledge":
-            allowed.add("knowledge-on-demand-loading")
-        catalog["entries"] = [
-            entry for entry in catalog["entries"] if entry["id"] in allowed
-        ]
+    allowed = set(_CORE_CATALOG_IDS)
+    if profile == "knowledge":
+        allowed.add("knowledge-on-demand-loading")
+    catalog["entries"] = [
+        entry for entry in catalog["entries"] if entry["id"] in allowed
+    ]
     selected_ids = {entry["id"] for entry in catalog["entries"]}
     modules = [
         module
         for module in catalog.get("modules", [])
         if module["sourceEntryId"] in selected_ids
+        and (include_grill_me or module["id"] != "design-grill-me")
     ]
     selected_module_ids = {module["id"] for module in modules}
     catalog["modules"] = [
@@ -197,16 +346,46 @@ def build_runtime(
                 candidate = source / directory
                 if candidate.is_dir():
                     _copy_tree(candidate, temporary / directory)
-            if not include_grill_me:
-                shutil.rmtree(temporary / "skills/grill-me")
+            copied_upstream = temporary / "dependencies/upstream/matt-pocock-skills"
+            if copied_upstream.exists():
+                shutil.rmtree(copied_upstream)
+            copied_tea = temporary / "dependencies/upstream/tea"
+            if copied_tea.exists():
+                shutil.rmtree(copied_tea)
+            for legacy in (
+                temporary / "skills/grill-me",
+                temporary / "overlays/superpowers",
+                temporary / "dependencies/superpowers.lock.yaml",
+            ):
+                if legacy.is_dir():
+                    shutil.rmtree(legacy)
+                elif legacy.exists():
+                    legacy.unlink()
         else:
-            shutil.copyfile(source / "workflow/core.md", temporary / "WORKFLOW.md")
+            shutil.copyfile(source / "WORKFLOW.md", temporary / "WORKFLOW.md")
             for relative in _CORE_PATHS:
                 _copy_runtime_path(source, temporary, relative)
-            if include_grill_me:
-                _copy_runtime_path(source, temporary, "skills/grill-me")
+            if profile != "knowledge":
+                _exclude_c7_v3_catalog(temporary)
             if profile == "knowledge":
                 _copy_runtime_path(source, temporary, "extensions/knowledge/contract.yaml")
+                _copy_runtime_path(source, temporary, "extensions/knowledge/selfopenwiki")
+                generic_skill = temporary / "skills" / "knowledge-backend" / "SKILL.md"
+                generic_skill.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(
+                    source / "skills/knowledge-backend/SKILL.md",
+                    generic_skill,
+                )
+                selfopenwiki_skill = temporary / "skills" / "kg-selfopenwiki" / "SKILL.md"
+                selfopenwiki_skill.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(
+                    source / "skills/kg-selfopenwiki/SKILL.md",
+                    selfopenwiki_skill,
+                )
+        _copy_matt_skills(
+            source, temporary, include_grill_me=include_grill_me
+        )
+        _copy_tea_quality(source, temporary)
         catalog_output = temporary / "catalog.json"
         catalog_output.write_bytes(
             _profile_catalog(

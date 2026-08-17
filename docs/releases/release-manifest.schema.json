@@ -52,9 +52,8 @@
       }
     },
     "knowledgeEvidence": {
-      "type": "object", "additionalProperties": false,
-      "required": ["c7-openwiki"],
-      "properties": {"c7-openwiki": {"enum": ["supported", "experimental-unverified", "disabled"]}}
+      "type": "object",
+      "additionalProperties": {"enum": ["supported", "experimental-unverified", "disabled"]}
     },
     "skipped": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "residualRisks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}

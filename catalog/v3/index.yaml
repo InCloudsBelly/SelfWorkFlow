@@ -5,14 +5,17 @@ domains:
     hash: sha256:53aa8c0af43e386fff2facec0dee006759f8e785424b928c7121cf28b50bc275
   - id: workflow
     ref: domains/workflow.yaml
-    hash: sha256:8b5ef3c14e7706076c2fdead47490eff9c4c70ef7d3067cbcea0604d6e94d70a
+    hash: sha256:11b893c8a7d33787b3eda915781928ffa29ebcfb0da44a278f86540554e5f3bc
+  - id: knowledge
+    ref: domains/knowledge.yaml
+    hash: sha256:9d6f0954024a17f7913cc92d52e387deae2d55fe9b2a397ac974ecc882d82b19
   - id: test-quality
     ref: domains/test-quality.yaml
     hash: sha256:3f4fa0d84cd2bdf2bdd4dcefa988b347bc0712550be8f08f791956185a3017d2
 modules:
   - id: cpp-core
     ref: modules/cpp-core.yaml
-    hash: sha256:714c58a1df82c30e4fc8586a4414981eeb6d6f16d2bfb9339355e0615f943ac6
+    hash: sha256:964000674821f4f6db21b6a66d65f32bd5c10cbabf5536188355be858c04cc60
   - id: cpp.ownership
     ref: modules/cpp.ownership.yaml
     hash: sha256:808e549e26498e21fd7c2f1cdfe2bdac247b492cb6fda516bd95097e3d12bd53
@@ -49,39 +52,63 @@ modules:
   - id: classify-task
     ref: modules/classify-task.yaml
     hash: sha256:d178f51628a47e7e9b77e4b5c11b3909abada1cdaa846f436a3ea61aad7cf3bd
-  - id: design-precheck
-    ref: modules/design-precheck.yaml
-    hash: sha256:319332e3711b4089d8cb92b024b946913c95e7696a84275555e4db0624729176
+  - id: design-grilling
+    ref: modules/design-grilling.yaml
+    hash: sha256:f50dce056745cdbe71feb3c810cf7b547cdde967e05d3ddff4bc7dba8b1b18a8
+  - id: design-codebase
+    ref: modules/design-codebase.yaml
+    hash: sha256:89431368cc08175c79462d294d869c131872aa8d862ceffcda261ac196ce53a5
   - id: design-grill-me
     ref: modules/design-grill-me.yaml
-    hash: sha256:0539a51e32e57f964b4e13e6fa0e56ffdf38192f355a0f605cea77ea28ce6bec
-  - id: plan-primary
-    ref: modules/plan-primary.yaml
-    hash: sha256:4695660ed184ff5628a51574866282c505ab0d50fda55848f2d956bc60eae0bf
+    hash: sha256:b4bedcb30919019089848fb8731e893ad673b7affb6a22675f2b3cc3c72693a1
+  - id: plan-core
+    ref: modules/plan-core.yaml
+    hash: sha256:2545c9d445c807f4b182c85b200fdde868b200ce6cef57e37ab9cee0cd44ed18
+  - id: plan-integrated-review
+    ref: modules/plan-integrated-review.yaml
+    hash: sha256:e8707b33a1a7f92d30c9bb329f8310453464bbc1e3cc5feb5f674fae499d365e
+  - id: implement-matt
+    ref: modules/implement-matt.yaml
+    hash: sha256:6b8d3d70cd0244a20df6eca610a1772a282b35c37597588bb9de9fb0a3578550
   - id: implement-tdd
     ref: modules/implement-tdd.yaml
-    hash: sha256:3c2baabf42cc2f856420f12e9c545431d9894b71bd2938babc202524db7b508e
+    hash: sha256:a1feb93490a74393cb8606ed7c90d394837a97137c43d1251c90149506d66d59
+  - id: implement-diagnosing-bugs
+    ref: modules/implement-diagnosing-bugs.yaml
+    hash: sha256:b592f0ec9235f3d10dce9f9defb4f4d16080694bab402ee0a5f05fffcdb8da0b
   - id: review-self
     ref: modules/review-self.yaml
-    hash: sha256:aaf8008a16adc725659d241e3f129a9d68f0ce890e2fd6766c312d663591453e
+    hash: sha256:9fc3ebf5b078dd6c6db9d04fc0a7e3045c33ed8cfa07186bcc3e1820df3ea7d8
+  - id: review-code-review
+    ref: modules/review-code-review.yaml
+    hash: sha256:eab4edb7d7abd00a12b1904336b280c85ba85efab0bdb8784e696350f213409d
   - id: verify-execution
     ref: modules/verify-execution.yaml
-    hash: sha256:dd881b8c4d2be28bd46db4a9ef30e7e9619438dac87875ce1a9639600a62d1c6
+    hash: sha256:5de03ac8840ca52da40eae1c17a05572dbc8a9065b6880093937abaa74a60a37
   - id: complete-gate
     ref: modules/complete-gate.yaml
-    hash: sha256:dd407a4166b7af3a0688805c15ec4c398048acbfe1a968e79240446bbe19be08
+    hash: sha256:27ff102134bad7456484cc163e15ed4fe252c070a671bbd944c35b61e262b1bf
   - id: tea-test-design
     ref: modules/tea-test-design.yaml
-    hash: sha256:64ab64224f57da446ddbe8577232c6f5ad28a8e24a7c234e8d66d985ef2a7b99
+    hash: sha256:5abe5539cb58bf9d113185d41af5fea4e20c6f64a875b589d0573277086ca278
   - id: tea-atdd
     ref: modules/tea-atdd.yaml
-    hash: sha256:d87c9c42f7368c26d432baada7f014ad8cef51699ba97554917bf3ea41aee2ff
+    hash: sha256:cbf95cc0b51616be35b0f554fcb99293c5d2a500b3a945583e8137dd8f87ac81
   - id: tea-test-review
     ref: modules/tea-test-review.yaml
-    hash: sha256:df9d5b1ef6fd02bfd92c4b8352fba8a3d368c1d88e651b4cf1d134095fe14ff9
+    hash: sha256:3e90d95035df682553941033e774dcf0f7cfa5706c16d15e1000937441f0169d
   - id: tea-trace
     ref: modules/tea-trace.yaml
-    hash: sha256:aaf5e2d0b52ec5e18de8e7d79e987974e220fff418f37c2d47c29087cfd1759a
+    hash: sha256:9afa6e8e2ba63c4f80b518a3f258132bc557348933a8cd39ac9415d3a2dea9e4
   - id: tea-nfr
     ref: modules/tea-nfr.yaml
-    hash: sha256:301868eb8d5a52c745cd953bf75b6d525b1aa426d2721fd93bbe6b04de1dd142
+    hash: sha256:c43c40410a02a892675f199f2ca1a5dd91ac1ec84e40fb47fb45ee0e742c4737
+  - id: knowledge-read
+    ref: modules/knowledge-read.yaml
+    hash: sha256:796ab068d57568c6acc2c279b94c051578c7bcf6cf645ae073e713e8ce7ed757
+  - id: knowledge-propose
+    ref: modules/knowledge-propose.yaml
+    hash: sha256:3d7a55aaefaae8391995bc6698c5bebda311429d9aa93cdcc10f3c582bd79b79
+  - id: knowledge-update
+    ref: modules/knowledge-update.yaml
+    hash: sha256:2c0169a87d09a4c20d245f16da96ab4fc772b40e5cea48d355d0f6c577bb1ce7

@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: knowledge-propose
+sourceHash: sha256:bef75bc171d7e957e2211005882e5fa2235434b85eeb8873075feecabb4d79fd
+stage: completed
+slot: knowledge.propose
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: knowledge-backend}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 384, estimatedExecutionCost: 2048}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

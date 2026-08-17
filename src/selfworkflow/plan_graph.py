@@ -34,11 +34,15 @@ def _condition(value: object, request: Mapping[str, object], states: Mapping[str
         return not _condition(operand, request, states)
     field, expected = operand
     actual = states if field == "capabilityStates" else request[field]
+    if field == "projectMinimums":
+        actual = actual["strength"]
     if operator == "eq":
         return actual == expected
     if operator == "contains":
         return expected in actual
     if operator == "gte":
+        if field == "projectMinimums":
+            return _LEVEL[actual] >= _LEVEL[expected]
         return _CLASS_LEVEL.get(actual, actual) >= _CLASS_LEVEL.get(expected, expected)
     raise ValueError("condition-invalid")
 

@@ -1,11 +1,11 @@
 schemaVersion: 3
 id: verify-execution
-sourceHash: sha256:7777777777777777777777777777777777777777777777777777777777777777
+sourceHash: sha256:ce696499c73a855c9586aef69206bba95b0203826af52effa61536de30964008
 stage: verified
 slot: verify.execution
 selectionMode: static
-invocation: {kind: agent-native, ref: verify-execution}
+invocation: {kind: skill, ref: selfworkflow:testing-review-quality}
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 64, estimatedExecutionCost: 16}
-supportEvidence: {sourceIntegrity: unverified, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

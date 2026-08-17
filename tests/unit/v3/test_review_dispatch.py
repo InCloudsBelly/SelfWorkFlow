@@ -170,7 +170,7 @@ class ReviewDispatchTests(unittest.TestCase):
         )
         self.assertEqual(len(port.calls), 1)
         call = port.calls[0]
-        self.assertEqual(call["review_mode"], "brainstorming-cross-review")
+        self.assertEqual(call["review_mode"], "independent-design-review")
         self.assertIs(call["fork_context"], False)
         self.assertEqual(set(call["payload"]), {"schemaVersion", "reviewMode", "designReviewSummary"})
         self.assertEqual(receipt["independence"], "independent")

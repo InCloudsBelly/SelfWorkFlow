@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: design-grilling
+sourceHash: sha256:00d2ccb00b7c02e448330f6405077a9cee664b92e5734228323b164abb9b8dbb
+stage: designed
+slot: design.precheck
+selectionMode: static
+invocation: {kind: skill, ref: matt-pocock:grilling}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 384, estimatedExecutionCost: 128}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

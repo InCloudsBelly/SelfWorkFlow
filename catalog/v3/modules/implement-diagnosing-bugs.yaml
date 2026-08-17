@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: implement-diagnosing-bugs
+sourceHash: sha256:7ff486208dfcad5ec4d27ed0c091eee4183f3812581f55638e9ddf6fcf7aba1a
+stage: implemented
+slot: implement.method
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: matt-pocock:diagnosing-bugs}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 768, estimatedExecutionCost: 256}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

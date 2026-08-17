@@ -58,7 +58,7 @@ class AdapterContractTests(unittest.TestCase):
                 for phrase in (
                     "paused", "PlanGraph", "RunLedger", "current-stage",
                     "critical decisions", "agent-policy", "Knowledge",
-                    "C7OpenWiki execution is deferred",
+                    "select and load a concrete backend adapter",
                     "post-landing Review", "minor decisions", "decision-record",
                 ):
                     self.assertIn(phrase, content)

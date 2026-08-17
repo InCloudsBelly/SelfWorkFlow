@@ -440,6 +440,11 @@ def route_modules(
                 rank = 400
             elif module_id in explicit:
                 rank = 300
+            elif activation in {"full-default", "deep-default"} and request.strength == {
+                "full-default": "Full",
+                "deep-default": "Deep",
+            }[activation]:
+                rank = 250
             elif activation == "default":
                 rank = 250 if module_id in defaults else 200
             elif activation == "deterministic" and set(module["dependencies"]) <= set(explicit):

@@ -5,6 +5,7 @@ from selfworkflow.v3.catalog import CompiledCatalog
 from selfworkflow.v3.contracts import validate_plan_graph
 from selfworkflow.v3.pipeline import LoadedPipeline
 from selfworkflow.v3.plan_graph import PlanGraphArtifact, PlanGraphError, build_plan_graph
+from selfworkflow.v3.selector import SelectionInput, select_modules
 from tests.unit.v3.artifact_fixtures import STAGES, load_test_artifacts
 
 def _review_slot(graph):
@@ -56,7 +57,7 @@ class PlanGraphTests(unittest.TestCase):
             "capturedAt": "2026-08-09T00:00:00Z",
             "evidence": [],
         },
-        "taskArchetype": "bounded-feature",
+        "taskArchetype": "mechanical-change",
         "requirementsMaturity": "approved",
         "scopeShape": "single-module",
         "durableSpec": True,
@@ -170,22 +171,59 @@ class PlanGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(PlanGraphError, "unsupported"):
             build_plan_graph(unsupported, unsupported_catalog, unsupported_pipeline)
 
-    def test_grill_me_cannot_be_selected_as_a_project_default(self):
-        catalog, pipeline = self._artifacts([_module("design-grill-me")])
-        request = copy.deepcopy(self.REQUEST)
-        request["projectDefaultModuleIds"] = ["design-grill-me"]
-        with self.assertRaisesRegex(PlanGraphError, "explicit-only"):
-            build_plan_graph(request, catalog, pipeline)
+    def test_grill_modules_allow_project_defaults_and_explicit_selection(self):
+        for module_id in ("design-grilling", "design-grill-me"):
+            with self.subTest(module_id=module_id):
+                catalog, pipeline = self._artifacts(
+                    [_module(module_id)], cardinality="zero-or-many",
+                )
+                unrequested = build_plan_graph(self.REQUEST, catalog, pipeline)
+                self.assertIn(module_id, _review_slot(unrequested)["eligibleModules"])
+                selection_input = SelectionInput(
+                    artifact_id="design-signal",
+                    artifact_hash="sha256:" + "c" * 64,
+                    candidate_module_ids=None,
+                    preferred_module_ids=(),
+                    signal_evidence_refs=("signal.design",),
+                    context_budget=100,
+                    execution_budget=100,
+                    requested_module_ids=(),
+                )
+                unrequested_selection = select_modules(
+                    unrequested, "reviewed", "review.primary",
+                    f"unrequested-{module_id}", selection_input,
+                )
+                self.assertEqual(
+                    unrequested_selection.receipt.document["selectedModuleIds"],
+                    [module_id],
+                )
 
-    def test_required_static_slot_cannot_auto_select_explicit_only_grill(self):
+                project_default = copy.deepcopy(self.REQUEST)
+                project_default["projectDefaultModuleIds"] = [module_id]
+                project_graph = build_plan_graph(project_default, catalog, pipeline)
+                self.assertIn(module_id, _review_slot(project_graph)["eligibleModules"])
+
+                explicit = copy.deepcopy(self.REQUEST)
+                explicit["explicitModuleIds"] = [module_id]
+                graph = build_plan_graph(explicit, catalog, pipeline)
+                self.assertIn(module_id, _review_slot(graph)["eligibleModules"])
+                explicit_selection = select_modules(
+                    graph, "reviewed", "review.primary",
+                    f"explicit-{module_id}", selection_input,
+                )
+                self.assertEqual(
+                    explicit_selection.receipt.document["selectedModuleIds"], [module_id],
+                )
+
+    def test_required_static_slot_auto_selects_grill_module(self):
         catalog, pipeline = self._artifacts(
             [_module("design-grill-me", mode="static")],
             cardinality="exactly-one", mode="static",
         )
-        with self.assertRaisesRegex(PlanGraphError, "explicit-only"):
-            build_plan_graph(self.REQUEST, catalog, pipeline)
+        graph = build_plan_graph(self.REQUEST, catalog, pipeline)
+        self.assertEqual(_review_slot(graph)["selectedModules"], ["design-grill-me"])
 
-    def test_gate_cannot_auto_select_module_that_depends_on_explicit_only_grill(self):
+    def test_gate_can_auto_select_module_that_depends_on_grill(self):
         catalog, pipeline = self._artifacts(
             [
                 _module("design-grill-me", mode="static"),
@@ -196,8 +234,11 @@ class PlanGraphTests(unittest.TestCase):
             ],
             cardinality="gate", mode="static",
         )
-        with self.assertRaisesRegex(PlanGraphError, "explicit-only"):
-            build_plan_graph(self.REQUEST, catalog, pipeline)
+        graph = build_plan_graph(self.REQUEST, catalog, pipeline)
+        self.assertEqual(
+            set(_review_slot(graph)["selectedModules"]),
+            {"design-grill-me", "review-wrapper"},
+        )
 
     def test_dependencies_are_closed_and_inapplicable_slot_is_empty(self):
         catalog, pipeline = self._artifacts([
@@ -382,6 +423,114 @@ class PlanGraphTests(unittest.TestCase):
         slots = {slot["slotId"]: slot for slot in designed["slots"]}
         self.assertEqual(slots["design.precheck"]["selectedModules"], ["design-precheck"])
         self.assertEqual(slots["code.reasoning"]["eligibleModules"], ["cpp-core"])
+
+    def test_integrated_review_is_lightweight_and_fails_closed_until_approved(self):
+        integrated = "plan-integrated-review"
+        unverified = {
+            "sourceIntegrity": "unverified", "adapterSupport": "unverified",
+            "runtimeCapability": "unverified", "behaviorEvidence": "unverified",
+        }
+        condition = {"any": [
+            {"gte": ["complexity", "C2"]},
+            {"gte": ["risk", "R2"]},
+            {"gte": ["projectMinimums", "Full"]},
+        ]}
+        catalog, pipeline = load_test_artifacts(
+            [_module(
+                integrated, stage="planned", slot="plan.integrated-review",
+                mode="static", support=unverified,
+            )],
+            cardinality="exactly-one", mode="static", condition=condition,
+            target_stage="planned", target_slot="plan.integrated-review",
+        )
+
+        light = copy.deepcopy(self.REQUEST)
+        light.update({
+            "operationType": "implement", "writeTask": True,
+            "complexity": "C1", "risk": "R1",
+            "projectMinimums": {"strength": "Light"},
+            "testLevelFloor": "T1",
+            "explicitModuleIds": [],
+        })
+        light_graph = build_plan_graph(
+            light, catalog, pipeline,
+            execution_policy_snapshot={"allowUnverifiedModuleIds": []},
+        )
+        planned = next(
+            stage for stage in light_graph.document["stages"]
+            if stage["stageId"] == "planned"
+        )
+        readiness = next(
+            slot for slot in planned["slots"]
+            if slot["slotId"] == "plan.integrated-review"
+        )
+        self.assertEqual(readiness["applicability"], "not-applicable")
+
+        variants = (
+            {"complexity": "C2"},
+            {"risk": "R2"},
+            {"projectMinimums": {"strength": "Full"}},
+        )
+        for override in variants:
+            with self.subTest(override=override):
+                full = copy.deepcopy(light)
+                full.update(override)
+                full["testLevelFloor"] = "T2"
+                with self.assertRaisesRegex(
+                    PlanGraphError, "v3-required-module-unavailable",
+                ):
+                    build_plan_graph(
+                        full, catalog, pipeline,
+                        execution_policy_snapshot={"allowUnverifiedModuleIds": []},
+                    )
+
+                requested = copy.deepcopy(full)
+                requested["explicitModuleIds"] = [integrated]
+                with self.assertRaisesRegex(
+                    PlanGraphError, "v3-explicit-module-unsupported",
+                ):
+                    build_plan_graph(
+                        requested, catalog, pipeline,
+                        execution_policy_snapshot={"allowUnverifiedModuleIds": []},
+                    )
+
+                approved = build_plan_graph(
+                    requested, catalog, pipeline,
+                    execution_policy_snapshot={
+                        "allowUnverifiedModuleIds": [integrated],
+                    },
+                )
+                planned = next(
+                    stage for stage in approved.document["stages"]
+                    if stage["stageId"] == "planned"
+                )
+                readiness = next(
+                    slot for slot in planned["slots"]
+                    if slot["slotId"] == "plan.integrated-review"
+                )
+                self.assertEqual(readiness["selectedModules"], [integrated])
+
+        project_default = copy.deepcopy(light)
+        project_default.update({
+            "projectMinimums": {"strength": "Full"},
+            "testLevelFloor": "T2",
+            "projectDefaultModuleIds": [integrated],
+        })
+        project_default_graph = build_plan_graph(
+            project_default, catalog, pipeline,
+            execution_policy_snapshot={
+                "allowUnverifiedModuleIds": [integrated],
+            },
+        )
+        planned = next(
+            stage for stage in project_default_graph.document["stages"]
+            if stage["stageId"] == "planned"
+        )
+        readiness = next(
+            slot for slot in planned["slots"]
+            if slot["slotId"] == "plan.integrated-review"
+        )
+        self.assertEqual(readiness["selectedModules"], [integrated])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Host-owned dispatch boundary for post-Grill Brainstorming review."""
+"""Host-owned dispatch boundary for post-Grill independent design review."""
 
 from __future__ import annotations
 
@@ -173,12 +173,12 @@ def _dispatch_review(
     normalized = verified_input.summary
     payload = {
         "schemaVersion": 3,
-        "reviewMode": "brainstorming-cross-review",
+        "reviewMode": "independent-design-review",
         "designReviewSummary": clone(normalized),
     }
     try:
         observation = port.dispatch_review(
-            review_mode="brainstorming-cross-review",
+            review_mode="independent-design-review",
             fork_context=fork_context,
             payload=clone(payload),
             implementation_agent_identity=implementation_agent_identity,
@@ -197,7 +197,7 @@ def _dispatch_review(
     except (HashingError, TypeError, ValueError, OverflowError):
         raise ReviewDispatchError("review-dispatch-observation-invalid") from None
     if (
-        observation.review_mode != "brainstorming-cross-review"
+        observation.review_mode != "independent-design-review"
         or observation.fork_context is not fork_context
         or observed_payload != payload
     ):
@@ -244,7 +244,7 @@ def _dispatch_review(
     independence = "independent" if attestation is not None else "unverified"
     receipt = {
         "schemaVersion": 3,
-        "reviewMode": "brainstorming-cross-review",
+        "reviewMode": "independent-design-review",
         "dispatchId": observation.dispatch_id,
         "dispatchNonce": observation.dispatch_nonce,
         "planHash": plan_hash,

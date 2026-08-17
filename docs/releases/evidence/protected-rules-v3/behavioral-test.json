@@ -1,0 +1,36 @@
+{
+  "kind": "behavioral-test",
+  "status": "passed",
+  "subjectId": "protected-rules-change",
+  "subjectHash": "sha256:74079b7dbd94a734807d1e17c772cacaf1d180ef28c3047ac19d0ed07f4d18ab",
+  "actorId": "selfworkflow-test-runner",
+  "contextId": "protected-rules-v3-behavioral-test",
+  "relatedIds": [],
+  "recordedAt": "2026-08-14T13:49:00Z",
+  "attributes": {
+    "provider": "python-unittest",
+    "receiptId": "protected-rules-v3-focused-20260814",
+    "inputHash": "sha256:74079b7dbd94a734807d1e17c772cacaf1d180ef28c3047ac19d0ed07f4d18ab",
+    "outputHash": "sha256:76f1805001bc4f155c8efa5651c57c4f1858af1f6786cbe4596214a4b64375a6",
+    "invocation": {
+      "executable": ".venv\\Scripts\\python.exe",
+      "module": null,
+      "argv": [
+        "-m",
+        "unittest",
+        "tests.behavioral.test_workflow_matrix.WorkflowMatrixTests.test_post_grill_policy_is_an_enforced_host_gate",
+        "tests.conformance.test_testing_review_hardening.TestingReviewHardeningTests.test_active_policies_have_no_superpowers_or_brainstorming_stage",
+        "tests.unit.test_protected_rules.ProtectedRulesTests.test_checked_in_contract_is_closed_and_exact",
+        "-v"
+      ],
+      "cwd": ".",
+      "environmentKeys": [],
+      "environmentHash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "inputHash": "sha256:d26e968053bd1dd4be0e397a5779e5d142f21e8c99817b07371693d850358fff"
+    },
+    "invocationHash": "sha256:cc7fc83a72f59a2ebad653fd4f42ec49fc6745ea2b249f9d13993abfce333427",
+    "checkType": "behavioral-test",
+    "exitCode": 0,
+    "suite": "protected-rules"
+  }
+}

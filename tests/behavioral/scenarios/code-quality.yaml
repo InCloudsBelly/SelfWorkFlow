@@ -21,6 +21,30 @@ scenarios:
   - id: application-layer-intrusion
     expected: Keep application policy out of stable lower-layer public contracts.
     critical: [boundary-owner, minimal-intrusion, compatibility]
+  - id: test-driven-production-intrusion
+    expected: Reject test-only public enum slots, build-matrix changes, and test macro branches in shared production paths when a narrower test seam exists; otherwise require explicit user approval or mark the evidence unverified.
+    critical: [impact-radius, intrusion-budget, narrower-alternative, user-approval, honest-evidence]
+  - id: local-test-seam
+    expected: Allow a test macro confined to a test-owned translation unit when it does not alter public contracts, ABI, registration matrices, or production runtime paths.
+    critical: [local-boundary, no-blanket-ban, compatibility]
+  - id: implementation-contract-boundary-drift
+    expected: Stop code edits, revise the documents and intrusion budget, rerun independent Review, and obtain a new explicit implementation confirmation when a local design expands into a public enum or global build macro.
+    critical: [implementation-contract, boundary-drift, stop-editing, fresh-review, user-reconfirmation]
+  - id: in-budget-private-detail
+    expected: Allow an equivalent private-helper rename inside the approved owner layer and risk budget without another user prompt, then report it in post-landing Review.
+    critical: [approved-budget, local-detail, no-prompt-loop, final-delta]
+  - id: adjacent-diagnostic-subsystem
+    expected: Record and defer a useful diagnostic subsystem that is not required to fix or verify the primary bug; do not implement it as supporting work.
+    critical: [primary-goal, adjacent-finding, implementation-convergence, no-speculative-subsystem]
+  - id: unplanned-regression-blocker
+    expected: Do not repair an unplanned private defect merely because it blocks a broad regression; stop the affected implementation, report the evidence, revise the Plan and test scope, and obtain confirmation before editing that behavior.
+    critical: [plan-boundary, unplanned-finding, no-scope-rationalization, replan, user-confirmation]
+  - id: stable-callers-reverse-dependency
+    expected: Reject changing stable existing callers solely to adopt a new feature-owned wrapper, and keep the new feature dependent on the stable path instead.
+    critical: [stable-callers, ownership-direction, no-formal-reuse-migration]
+  - id: shared-invariant-owner-migration
+    expected: Allow a bounded migration when the abstraction owns a real shared invariant, the owner already governs every affected caller, no narrower design works, and the approved intrusion budget covers it.
+    critical: [shared-invariant, owner-layer, bounded-convergence-check, approved-budget]
   - id: batch-configuration-write
     expected: Use plan, review, confirm, apply, and reread with rollback evidence.
     critical: [plan, review, confirm, apply, reread, rollback]

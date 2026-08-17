@@ -2,10 +2,10 @@ schemaVersion: 3
 policyId: post-grill-review-independence-v1
 trigger:
   requiresAll:
-    - explicit-grill-me-completed
+    - grill-me-completed
     - common-understanding-confirmed
 dispatch:
-  reviewMode: brainstorming-cross-review
+  reviewMode: independent-design-review
   forkContext: false
   inputMode: summary-only
   hostServicesBoundAtConstruction: true

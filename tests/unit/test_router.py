@@ -250,16 +250,31 @@ class RouterTests(unittest.TestCase):
         with self.assertRaises(RouteError):
             route_skills(bytes(tampered), self._request())
 
-    def test_checked_in_catalog_routes_only_verified_core_entries(self):
+    def test_checked_in_catalog_routes_only_verified_engineering_entries(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.router import route_skills
 
         compiled = compile_catalog(REPOSITORY_ROOT / "catalog")
-        result = route_skills(compiled.content, self._request())
+        result = route_skills(
+            compiled.content,
+            self._request(
+                capability_states={
+                    "filesystem-read": "supported",
+                    "filesystem-write": "supported",
+                    "test-execution": "supported",
+                    "skill-discovery": "supported",
+                }
+            ),
+        )
         self.assertEqual(result.status, "routed")
         self.assertEqual(
             result.selected,
-            ("workflow-core",),
+            (
+                "workflow-core",
+                "testing-review-quality",
+                "tea-quality-foundation",
+                "matt-skills-foundation",
+            ),
         )
         self.assertEqual(result.catalog_hash, compiled.catalog_hash)
         self.assertEqual(
@@ -311,7 +326,7 @@ class RouterTests(unittest.TestCase):
         )
         self.assertIn("workflow-core", document.selected)
 
-    def test_v2_routes_modules_by_slot_without_semantic_activation(self):
+    def test_v2_routes_strength_defaults_without_duplicate_grill_loading(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.router import ModuleRouteRequest, route_modules
 
@@ -328,7 +343,7 @@ class RouterTests(unittest.TestCase):
             ),
         )
         self.assertEqual(design.status, "routed")
-        self.assertEqual(design.selected_modules, ("design-brainstorming",))
+        self.assertEqual(design.selected_modules, ("design-core",))
 
         light_design = route_modules(
             compiled.content,
@@ -341,7 +356,58 @@ class RouterTests(unittest.TestCase):
                 capability_states={"skill-discovery": "supported"},
             ),
         )
-        self.assertEqual(light_design.selected_modules, ("design-brainstorming",))
+        self.assertEqual(light_design.selected_modules, ("design-core",))
+
+        light_grill = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="design.specialists", cardinality="zero-or-many",
+                operation_type="implement", strength="Light", write_task=True,
+                capability_states={"skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(light_grill.selected_modules, ())
+
+        full_grill = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="design.specialists", cardinality="zero-or-many",
+                operation_type="implement", strength="Full", write_task=True,
+                capability_states={"skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(full_grill.selected_modules, ("design-grilling",))
+
+        deep_grill = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="design.specialists", cardinality="zero-or-many",
+                operation_type="implement", strength="Deep", write_task=True,
+                capability_states={
+                    "skill-discovery": "supported",
+                    "user-confirmation": "supported",
+                },
+            ),
+        )
+        self.assertEqual(deep_grill.selected_modules, ("design-grill-me",))
+
+        deep_without_confirmation = route_modules(
+            compiled.content,
+            ModuleRouteRequest(
+                slot_id="design.specialists", cardinality="zero-or-many",
+                operation_type="implement", strength="Deep", write_task=True,
+                capability_states={"skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(deep_without_confirmation.status, "paused")
+        self.assertEqual(
+            deep_without_confirmation.missing_capabilities,
+            ("user-confirmation",),
+        )
+        self.assertEqual(
+            deep_without_confirmation.selected_modules,
+            ("design-grill-me",),
+        )
 
         knowledge = route_modules(
             compiled.content,
@@ -358,7 +424,7 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(knowledge.status, "routed")
         self.assertEqual(knowledge.selected_modules, ())
 
-    def test_explicit_grill_deterministically_adds_cross_review(self):
+    def test_explicit_grill_does_not_invent_a_hidden_cross_review_module(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.router import ModuleRouteRequest, route_modules
 
@@ -383,22 +449,37 @@ class RouterTests(unittest.TestCase):
             ModuleRouteRequest(slot_id="design.cross-review", cardinality="zero-or-one", **common),
         )
         self.assertEqual(grill.selected_modules, ("design-grill-me",))
-        self.assertEqual(cross_review.selected_modules, ("design-cross-review",))
+        self.assertEqual(cross_review.selected_modules, ())
 
-    def test_project_default_cannot_activate_explicit_only_grill(self):
+    def test_strength_defaults_do_not_depend_on_project_default_lists(self):
         from selfworkflow.catalog import compile_catalog
         from selfworkflow.router import ModuleRouteRequest, route_modules
 
-        result = route_modules(
-            compile_catalog(REPOSITORY_ROOT / "catalog").content,
+        catalog = compile_catalog(REPOSITORY_ROOT / "catalog").content
+        full = route_modules(
+            catalog,
+            ModuleRouteRequest(
+                slot_id="design.specialists", cardinality="zero-or-many",
+                operation_type="implement", strength="Full", write_task=True,
+                project_default_module_ids=("design-grill-me",),
+                capability_states={"skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(full.selected_modules, ("design-grilling",))
+
+        deep = route_modules(
+            catalog,
             ModuleRouteRequest(
                 slot_id="design.specialists", cardinality="zero-or-many",
                 operation_type="implement", strength="Deep", write_task=True,
-                project_default_module_ids=("design-grill-me",),
-                capability_states={"skill-discovery": "supported", "independent-context": "supported", "user-confirmation": "supported"},
+                project_default_module_ids=("design-grilling",),
+                capability_states={
+                    "skill-discovery": "supported",
+                    "user-confirmation": "supported",
+                },
             ),
         )
-        self.assertEqual(result.selected_modules, ())
+        self.assertEqual(deep.selected_modules, ("design-grill-me",))
 
 
 if __name__ == "__main__":

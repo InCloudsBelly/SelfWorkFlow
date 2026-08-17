@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://selfworkflow.local/schemas/v3/grill-completion-attestation.schema.json",
-  "title": "SelfWorkFlow V3 explicit Grill completion attestation",
+  "title": "SelfWorkFlow V3 Grill completion attestation",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,7 +13,7 @@
   "properties": {
     "schemaVersion": {"const": 3},
     "moduleId": {"const": "design-grill-me"},
-    "triggerSource": {"const": "explicit-user-request"},
+    "triggerSource": {"enum": ["automatic-deep", "explicit-user-request"]},
     "grillStatus": {"const": "completed"},
     "commonUnderstandingConfirmed": {"const": true},
     "confirmationSource": {"const": "user-confirmation"},

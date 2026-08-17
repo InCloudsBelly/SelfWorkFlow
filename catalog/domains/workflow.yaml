@@ -6,8 +6,8 @@ entries:
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:43198a0b9a31d050266014a148af77a74ec5dc35
-      contentHash: sha256:37d9fab232b063f731e701bc35cfaa0f2bb5961408c12cfd2a054ecd3575daba
+      revision: git:71f60bbbacf460a6e4ca4b0d5ed7bf6b3b8ee528
+      contentHash: sha256:f20f17c2ecb54e51b10fa91778f7768aca0bd12593a13efa3d16f4a1d51424bf
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -76,24 +76,86 @@ entries:
     contextCost: 180
     supportStatus: unverified
     protectedRuleOperations: []
-  - id: grill-me
-    displayName: Explicit design pressure test
+  - id: testing-review-quality
+    displayName: Deterministic testing and review quality gate
     source:
       kind: skill
-      path: skills/grill-me/SKILL.md
-      revision: git:74a1c05eff442000cd2ed898776f470ff15166df
-      contentHash: sha256:1d1177c1611eb6fa61516a3e5dacf138c75baaa7f8b836c558b342858de8c150
+      path: skills/testing-review-quality/SKILL.md
+      revision: git:4fb10d86dd9df940b1c7b24c6fbe6df7ea0b418a
+      contentHash: sha256:ce696499c73a855c9586aef69206bba95b0203826af52effa61536de30964008
     aliases:
-      - name: grill
-        target: grill-me
-    triggers: [grill-me, pressure test, hidden assumptions, adversarial challenge]
-    exclusions: [implicit activation, ordinary brainstorming]
+      - name: testing-review-gate
+        target: testing-review-quality
+    triggers: [behavior change, test design, independent review, completion evidence]
+    exclusions: [pure read-only lookup]
     selectors:
       fileExtensions: []
-      operationTypes: [design, plan]
-      semanticTerms: [grill-me, pressure test, hidden assumptions, adversarial challenge]
-    stages: [designed, planned]
-    requiredCapabilities: [independent-context, user-confirmation]
+      operationTypes: [implement, debug, review, verify]
+      semanticTerms: [tdd, test design, independent review, completion evidence]
+    stages: [planned, implemented, reviewed, verified, completed]
+    requiredCapabilities: [filesystem-read, test-execution]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 900
+    contextCost: 240
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: tea-quality-foundation
+    displayName: Pinned TEA quality workflow source
+    source:
+      kind: workflow
+      path: dependencies/locks/tea.lock.yaml
+      revision: git:b28121c9a6fcbf458c3f921f48cd2e2b06444782
+      contentHash: sha256:2bcce328502b73f05967421ae62a102fc6549674f12e3a2499b6d2e015f4afe3
+    aliases:
+      - name: tea-quality
+        target: tea-quality-foundation
+    triggers: [test design, acceptance tests, test review, traceability, nfr]
+    exclusions: [Light test level]
+    selectors:
+      fileExtensions: []
+      operationTypes: [implement, debug, review, verify]
+      semanticTerms: [test design, atdd, test review, traceability, nfr]
+    stages: [planned, implemented, reviewed, verified]
+    requiredCapabilities: [skill-discovery]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 875
+    contextCost: 260
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: matt-skills-foundation
+    displayName: Matt Pocock engineering skills foundation
+    source:
+      kind: workflow
+      path: dependencies/locks/matt-pocock-skills.lock.yaml
+      revision: git:71f60bbbacf460a6e4ca4b0d5ed7bf6b3b8ee528
+      contentHash: sha256:62a961a9c318b73a767f886df5ab3ed2853a31b4a4cd12fab875a8c8c1c5ef08
+    aliases:
+      - name: matt-skills
+        target: matt-skills-foundation
+    triggers: [design, plan, implement, debug, review]
+    exclusions: [pure read-only lookup]
+    selectors:
+      fileExtensions: []
+      operationTypes: [design, plan, implement, debug, review]
+      semanticTerms: [engineering workflow, design, tdd, debugging, code review]
+    stages: [designed, planned, implemented, reviewed]
+    requiredCapabilities: [skill-discovery]
     dependencies: [workflow-core]
     conflicts: []
     composition: augment
@@ -104,16 +166,16 @@ entries:
       fileExtensions: []
       operationTypes: []
     priority: 800
-    contextCost: 240
-    supportStatus: unverified
+    contextCost: 320
+    supportStatus: supported
     protectedRuleOperations: []
   - id: workflow-protected-rules
     displayName: Protected rule contract
     source:
       kind: workflow
       path: workflow/protected-rules.yaml
-      revision: git:e3c6da43da78c751e267e230798bf2c2e50cc80a
-      contentHash: sha256:31a7b239187f194a2ceaebb0d61cc4d36158beb42a21bc4e0dd9c32b98e8e288
+      revision: git:8e79afb787a9915d745c22588abac45e5ca6e6aa
+      contentHash: sha256:9518381e45639b86ab03de56145e0bd89fc1f21bd3a5e5c101ed40e93df448bf
     aliases:
       - name: protected-rules
         target: workflow-protected-rules

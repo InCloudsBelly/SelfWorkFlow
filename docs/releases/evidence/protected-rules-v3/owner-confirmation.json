@@ -1,0 +1,18 @@
+{
+  "kind": "owner-confirmation",
+  "status": "passed",
+  "subjectId": "protected-rules-change",
+  "subjectHash": "sha256:74079b7dbd94a734807d1e17c772cacaf1d180ef28c3047ac19d0ed07f4d18ab",
+  "actorId": "repository-owner-user",
+  "contextId": "selfworkflow-matt-quality-hardening",
+  "relatedIds": [],
+  "recordedAt": "2026-08-14T13:46:00Z",
+  "attributes": {
+    "provider": "codex-conversation-confirmation",
+    "receiptId": "approved-testing-review-hardening-20260814",
+    "inputHash": "sha256:74079b7dbd94a734807d1e17c772cacaf1d180ef28c3047ac19d0ed07f4d18ab",
+    "outputHash": "sha256:18fbd12e4e99a5bee61777dba2771b36d7b5d3b1ccf4d96d83a7c57f63241155",
+    "decision": "authorized",
+    "scope": "replace-protected-rules"
+  }
+}

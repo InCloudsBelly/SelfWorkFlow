@@ -43,12 +43,17 @@ class KnowledgeContractTests(unittest.TestCase):
     def test_propose_never_publishes_but_may_disclose_runtime_side_effects(self):
         result = normalize_result("propose", {
             "status": "proposed", "published": False, "expectedBase": "rev-1",
+            "proposal": "Candidate knowledge.",
+            "contentHash": "sha256:" + "a" * 64,
             "runtimeSideEffects": ["oauth-refresh", "temporary-transaction"],
         })
         self.assertFalse(result["published"])
+        self.assertEqual(result["proposal"], "Candidate knowledge.")
         with self.assertRaises(KnowledgeContractError):
             normalize_result("propose", {
                 "status": "proposed", "published": True, "expectedBase": "rev-1",
+                "proposal": "Candidate knowledge.",
+                "contentHash": "sha256:" + "a" * 64,
                 "runtimeSideEffects": [],
             })
 
@@ -62,9 +67,25 @@ class KnowledgeContractTests(unittest.TestCase):
             "reviewStatus": "passed",
         })
         self.assertEqual(result["status"], "published")
+        conflict = normalize_result("update", {
+            "status": "conflict", "confirmedByUser": True,
+            "expectedBase": "rev-1", "actualBase": "rev-2",
+            "reviewStatus": "not-run",
+        })
+        self.assertEqual(conflict["actualBase"], "rev-2")
+        follow_up = normalize_result("update", {
+            "status": "published-with-follow-up", "confirmedByUser": True,
+            "expectedBase": "rev-1", "actualBase": "rev-1",
+            "reviewStatus": "follow-up",
+            "nativeResult": {"status": "published_with_follow_up"},
+        })
+        self.assertEqual(follow_up["reviewStatus"], "follow-up")
+        self.assertEqual(
+            follow_up["nativeResult"]["status"], "published_with_follow_up"
+        )
         for payload in (
             {"status": "published", "confirmedByUser": False, "expectedBase": "rev-1", "actualBase": "rev-1", "reviewStatus": "passed"},
-            {"status": "published", "confirmedByUser": True, "expectedBase": "rev-1", "actualBase": "rev-2", "reviewStatus": "passed"},
+            {"status": "conflict", "confirmedByUser": True, "expectedBase": "rev-1", "actualBase": "rev-1", "reviewStatus": "not-run"},
             {"status": "invented", "confirmedByUser": True, "expectedBase": "rev-1", "actualBase": "rev-1", "reviewStatus": "passed"},
         ):
             with self.subTest(payload=payload):
@@ -84,6 +105,75 @@ class KnowledgeContractTests(unittest.TestCase):
             normalize_result("read", {
                 "status": "ok", "knowledge": [], "privateReasoning": "hidden"
             })
+
+    def test_generic_execution_preserves_bounded_structured_remote_failure(self):
+        class StructuredFailure(RuntimeError):
+            error = {
+                "code": "capability_unverified",
+                "details": {"lock": "wiki", "paths": ["docs/page.md"]},
+                "message": "Capability evidence is stale.",
+                "retryable": False,
+            }
+            recovery = {"action": "verify_capabilities"}
+
+        class FailingBackend:
+            def execute(self, request):
+                raise StructuredFailure("remote")
+
+        result = execute_knowledge(
+            FailingBackend(), KnowledgeRequest(action="read"), code_task=True
+        )
+
+        self.assertEqual(result["status"], "knowledge-sync-todo")
+        self.assertEqual(result["error"], StructuredFailure.error)
+        self.assertEqual(result["recovery"], StructuredFailure.recovery)
+
+    def test_generic_failure_details_preserve_only_current_bounded_backend_diagnostics(self):
+        def execute(details):
+            class StructuredFailure(RuntimeError):
+                error = {
+                    "code": "process_failure",
+                    "details": details,
+                    "message": "The isolated model result could not be consumed.",
+                    "retryable": False,
+                }
+                recovery = {"action": "retry"}
+
+            class FailingBackend:
+                def execute(self, request):
+                    raise StructuredFailure("remote")
+
+            return execute_knowledge(
+                FailingBackend(), KnowledgeRequest(action="read"), code_task=True
+            )
+
+        stages = (
+            "result_missing",
+            "result_json_invalid",
+            "result_schema_invalid",
+            "result_binding_mismatch",
+        )
+        for stage in stages:
+            with self.subTest(stage=stage):
+                details = {"diagnostic": "x", "failureStage": stage}
+                self.assertEqual(execute(details)["error"]["details"], details)
+        diagnostic = "x" * 4_096
+        self.assertEqual(
+            execute({"diagnostic": diagnostic})["error"]["details"]["diagnostic"],
+            diagnostic,
+        )
+        for details in (
+            {"diagnostic": ""},
+            {"diagnostic": "   "},
+            {"diagnostic": 1},
+            {"diagnostic": "x" * 4_097},
+            {"failureStage": "unknown"},
+            {"failureStage": []},
+            {"failureStage": {}},
+            {"unknown": "field"},
+        ):
+            with self.subTest(invalid=details):
+                self.assertNotIn("error", execute(details))
 
 
 if __name__ == "__main__":

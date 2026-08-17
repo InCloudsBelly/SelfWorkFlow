@@ -10,13 +10,13 @@
     "policyId": {"const": "post-grill-review-independence-v1"},
     "trigger": {
       "type": "object", "additionalProperties": false, "required": ["requiresAll"],
-      "properties": {"requiresAll": {"const": ["explicit-grill-me-completed", "common-understanding-confirmed"]}}
+      "properties": {"requiresAll": {"const": ["grill-me-completed", "common-understanding-confirmed"]}}
     },
     "dispatch": {
       "type": "object", "additionalProperties": false,
       "required": ["reviewMode", "forkContext", "inputMode", "hostServicesBoundAtConstruction", "summaryResolvedByHostReference", "summaryProvenanceAttestedByHost", "allowedPayloadFields", "forbiddenInputClasses"],
       "properties": {
-        "reviewMode": {"const": "brainstorming-cross-review"},
+        "reviewMode": {"const": "independent-design-review"},
         "forkContext": {"const": false},
         "inputMode": {"const": "summary-only"},
         "hostServicesBoundAtConstruction": {"const": true},

@@ -1,10 +1,10 @@
 schemaVersion: 3
 id: design-grill-me
-sourceHash: sha256:1d1177c1611eb6fa61516a3e5dacf138c75baaa7f8b836c558b342858de8c150
+sourceHash: sha256:9c71927d4f0fd32d815247b4ca1fc782d4c5f2f3c1d6d023d188d4a7e0299b21
 stage: designed
-slot: design.specialists
+slot: design.deep-grill
 selectionMode: static
-invocation: {kind: skill, ref: skills/grill-me/SKILL.md}
+invocation: {kind: skill, ref: matt-pocock:grill-me}
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 512, estimatedExecutionCost: 256}
