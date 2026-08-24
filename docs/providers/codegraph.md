@@ -53,9 +53,24 @@ no production Provider process dispatch. That boundary remains closed until an
 immutable LaunchSpec binds the canonical entry, runtime identity, source hash,
 and atomic launch operation.
 
-`query` is intentionally plan-only in this version. The inspected CodeGraph CLI
-does not expose a `--no-sync` option for query/explore, so the plan is marked
-`potential-local-write`; SelfWorkFlow does not initialize an index implicitly.
+`query` is intentionally plan-only in this version. When a fresh provider is
+available, its symbol/call/dependency/navigation results are the preferred
+structural reading evidence; `rg` remains the complementary exact-text and
+unindexed-file path. The inspected CodeGraph CLI does not expose a `--no-sync`
+option for query/explore, so the plan is marked `potential-local-write`;
+SelfWorkFlow does not initialize or rebuild an index implicitly.
+
+## Conversation preflight
+
+On the first code task of a new conversation, the Host performs one read-only
+freshness check for the current project binding. If the binding exists but the
+index is stale, it asks once whether to update and use CodeGraph, use the
+existing index as stale read-only reference, or omit CodeGraph for this
+conversation. Update/rebuild is a separate side effect and requires explicit
+user confirmation. The choice is conversation-scoped and is reused until the
+project or Provider identity changes, or the user changes it. A failed or
+unsupported update remains `unverified`; the Host continues with exact-text or
+unindexed-file reads as needed without claiming fresh CodeGraph evidence.
 
 `initialize`, `sync` and `rebuild` are maintenance operations. First create a
 plan:

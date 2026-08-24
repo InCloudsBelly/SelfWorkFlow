@@ -158,6 +158,21 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertIn("Caveman lite 常驻", workflow)
         self.assertNotIn("只读取当前阶段需要的 Superpowers Skill", workflow)
 
+        active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        self.assertIn("primary code-reading", active_workflow)
+        self.assertIn("`rg` for exact literal searches", active_workflow)
+        cpp_skill = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("代码阅读优先级", cpp_skill)
+        self.assertIn("CodeGraph 缺失、过期", cpp_skill)
+        self.assertIn("新对话第一次命中代码任务", cpp_skill)
+        self.assertIn("本对话偏好", cpp_skill)
+        provider_doc = (self.ROOT / "docs/providers/codegraph.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Conversation preflight", provider_doc)
+
     def test_installer_defaults_to_matt_without_superpowers_or_duplicate_grill(self):
         installer = (self.ROOT / "scripts/install-selfworkflow.ps1").read_text(
             encoding="utf-8-sig"

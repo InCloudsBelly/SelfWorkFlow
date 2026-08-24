@@ -134,9 +134,17 @@ ports required by the V3 contract. User-owned local overrides are never upgraded
 by SelfWorkFlow. Replacing a different existing binding fails with a
 conflict unless the user explicitly repeats configure with `--replace-existing`
 (or the installer is run with `-ReplaceCodeGraphOverride`). CodeGraph query/sync/index behavior remains
-`unverified` until native per-operation validation; query planning explicitly
-marks the upstream CLI's unavoidable auto-sync possibility as
-`potential-local-write`. See `docs/providers/codegraph.md`.
+`unverified` until native per-operation validation. For code reading, a fresh
+project-bound CodeGraph is preferred for structural navigation and dependency
+understanding; `rg` remains for exact text and files outside the graph. Query
+planning explicitly marks the upstream CLI's unavoidable auto-sync possibility
+as `potential-local-write`. See `docs/providers/codegraph.md`.
+
+For a new conversation's first code task, SelfWorkFlow checks the bound
+CodeGraph index once. If stale, it asks whether to update and use it, use the
+stale index read-only, or omit it for that conversation. The choice is reused
+for the conversation; index updates still require explicit side-effect
+confirmation.
 
 ## Current capability status
 

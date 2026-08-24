@@ -7,6 +7,16 @@ description: Use for reading, designing, implementing, debugging, maintaining, o
 
 提供不依赖任何本地工具或厂商 Agent 的 C++ 推理核心。外部 CodeGraph、LSP、编译器、Sanitizer、调试器和深度审计器都是可选 Provider；缺失时不得伪造其结果。
 
+代码阅读优先级：若当前工作目录已绑定且索引新鲜的 CodeGraph，先用 CodeGraph
+进行符号、调用关系、依赖和导航查询，再用 `rg` 做精确字面搜索、读取未纳入索引的文件和最终文本核对。
+CodeGraph 缺失、过期、未覆盖目标文件或运行时不可用时，明确标记限制并回退 `rg`；不得隐式同步/重建，也不得把过期结果当作新鲜证据。
+
+新对话第一次命中代码任务时，先做一次当前工作目录的 CodeGraph 状态检查。
+若绑定存在但索引过期，向用户提供“更新并使用”“不更新但使用现有索引（过期只读）”
+和“本对话不使用 CodeGraph”三个选项；更新/重建必须单独确认。用户选择后绑定为本对话偏好，
+后续代码理解优先使用 CodeGraph，不重复询问，除非项目或 Provider 身份变化或用户主动切换。
+更新失败或能力未验证时保留 `unverified`/过期标记，不能静默把 `rg` 结果冒充 CodeGraph 证据。
+
 只读分析只应用推理核心和直接命中的按需参考；不会因此进入修改、构建、调试器或完整 Design/Plan/Review 流程。
 
 ## 核心流程

@@ -401,10 +401,29 @@ or other side-effect steps require the corresponding SelfWorkflow/user
 authorization. In particular, `implement` does not grant automatic commit.
 
 C/C++/Unreal tasks load the compact `cpp-core` by default and only the specialist
-references justified by code signals. Code tasks try the configured CodeGraph
-provider. A commit/index/version mismatch makes its output stale reference only;
-the Agent reports the mismatch and may ask whether the user wants an explicit
-sync or rebuild. Missing or stale CodeGraph never becomes fresh evidence.
+references justified by code signals. When the current work directory has a
+configured, project-bound, fresh CodeGraph that covers the target files, use its
+symbol, call, dependency, and navigation queries as the primary code-reading
+path before broad text scans. Keep `rg` for exact literal searches, files outside
+the graph, and final text-level confirmation; it is complementary, not the
+default substitute for an available fresh graph. Check the binding and index
+freshness first. A commit/index/version mismatch makes CodeGraph stale reference
+only; report the mismatch and may ask whether the user wants an explicit
+sync/rebuild. Missing, stale, or runtime-unavailable CodeGraph falls back to
+`rg` without blocking basic analysis and never becomes fresh evidence.
+
+At the first code task in a new conversation, perform one CodeGraph preflight
+for the current work directory. If a bound provider exists but its index is
+stale, tell the user and offer three explicit choices: update/rebuild then use
+CodeGraph, use the existing index as stale read-only reference, or use no
+CodeGraph for this conversation. Updating or rebuilding requires the user's
+side-effect confirmation. Record the selected choice as conversation-scoped
+state and do not ask again in the same conversation unless the user changes it
+or the project/provider identity changes. When the user chooses CodeGraph, use
+it for every available structural code-reading query in that conversation;
+after an unsuccessful or unsupported update, keep the stale/unavailable label
+and use `rg` only for uncovered or exact-text work, never as a silently fresh
+replacement.
 
 任务完成 Review 和验证后，若形成可复用的技术知识，主动提示一次是否沉淀到已配置的知识后端；简单问答、机械修改、临时状态和未形成稳定结论的任务不提示。每个任务最多提示一次，用户拒绝后不再重复；用户明确要求维护知识库时直接进入知识流程。
 
