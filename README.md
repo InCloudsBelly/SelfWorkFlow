@@ -93,6 +93,21 @@ easy-to-rollback minor decisions may adopt an independent SubAgent recommendatio
 through a validated `decision-record`; all critical decisions still return to
 the user.
 
+Projects may opt into additional Review expertise with a checked-in
+`.selfworkflow/review.yaml`. It is an explicit, hash-bound manifest of
+project-relative Skill files. A missing profile is harmless and is not replaced
+by directory scanning. A Host is given the project root and conversation ID;
+on the first matching Full/Deep code Review it creates the bound session and
+passes the same ordered manifest and verified Skill bytes to both independent
+Standards and Spec reviewers;
+the Host code route uses an explicit `independent-code-review` payload and receipt
+contract, while the Grill design route remains `independent-design-review`;
+required Skill drift or an unavailable independent context is `unverified` and
+cannot be presented as a passed Review. The profile cannot override protected
+workflow rules. The schema and read-only validator are in
+`schemas/project-review-profile.schema.json` and `selfworkflow project-review
+validate --project-root <project-root>`.
+
 Runtime profiles are closed and deterministic:
 
 - `core` (default): compact workflow, code-quality sources, stage routing, and thin

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/code-review-independence-receipt.schema.json",
+  "title": "SelfWorkFlow V3 code review independence receipt",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "reviewMode", "dispatchId", "dispatchNonce", "planHash", "attemptRef", "issuedAt", "expiresAt", "forkContext", "implementationAgentIdentity", "implementationContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "hostAgentIdentity", "hostContextIdentity", "hostAttestationRef", "inputMode", "parentContextImported", "grillReasoningReceived", "payloadHash", "reviewSubjectHash", "reviewerPolicyHash", "resultHash", "reviewVerdict", "reviewLevel", "fallbackAuthorizationRef", "independence", "receiptHash"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "reviewMode": {"const": "independent-code-review"},
+    "dispatchId": {"$ref": "#/$defs/id"},
+    "dispatchNonce": {"$ref": "#/$defs/id"},
+    "planHash": {"$ref": "#/$defs/hash"},
+    "attemptRef": {"$ref": "#/$defs/id"},
+    "issuedAt": {"type": "string", "format": "utc-date-time"},
+    "expiresAt": {"type": "string", "format": "utc-date-time"},
+    "forkContext": {"const": false},
+    "implementationAgentIdentity": {"$ref": "#/$defs/id"},
+    "implementationContextIdentity": {"$ref": "#/$defs/id"},
+    "reviewerAgentIdentity": {"$ref": "#/$defs/id"},
+    "reviewerContextIdentity": {"$ref": "#/$defs/id"},
+    "hostAgentIdentity": {"$ref": "#/$defs/id"},
+    "hostContextIdentity": {"$ref": "#/$defs/id"},
+    "hostAttestationRef": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+    "inputMode": {"const": "code-review-subject-only"},
+    "parentContextImported": {"const": false},
+    "grillReasoningReceived": {"const": false},
+    "payloadHash": {"$ref": "#/$defs/hash"},
+    "reviewSubjectHash": {"$ref": "#/$defs/hash"},
+    "reviewerPolicyHash": {"$ref": "#/$defs/hash"},
+    "resultHash": {"$ref": "#/$defs/hash"},
+    "reviewVerdict": {"enum": ["approve", "changes-required"]},
+    "reviewLevel": {"enum": ["L2", "L3"]},
+    "fallbackAuthorizationRef": {"const": null},
+    "independence": {"enum": ["independent", "unverified"]},
+    "receiptHash": {"$ref": "#/$defs/hash"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

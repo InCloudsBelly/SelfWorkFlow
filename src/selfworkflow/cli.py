@@ -30,6 +30,10 @@ from selfworkflow.quality import (
 from selfworkflow.resolver import resolve_task
 from selfworkflow.ledger import validate_ledger
 from selfworkflow.git_policy import check_repository
+from selfworkflow.project_review import (
+    ProjectReviewProfileError,
+    load_project_review_profile,
+)
 from selfworkflow.sources import (
     commit_superpowers_migration,
     recover_superpowers_migration,
@@ -444,7 +448,21 @@ def main(argv: list[str] | None = None) -> int:
     quality_complete.add_argument("--specification", required=True)
     quality_complete.add_argument("--package", required=True)
     quality_complete.add_argument("--reviews", required=True)
+    project_review = commands.add_parser("project-review")
+    project_review_commands = project_review.add_subparsers(
+        dest="project_review_command", required=True,
+    )
+    project_review_validate = project_review_commands.add_parser("validate")
+    project_review_validate.add_argument("--project-root", required=True)
     arguments = parser.parse_args(argv)
+    if arguments.command == "project-review":
+        try:
+            result = load_project_review_profile(arguments.project_root).as_dict()
+        except ProjectReviewProfileError:
+            print("SelfWorkFlow: project-review-profile-invalid", file=sys.stderr)
+            return 53
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 53 if result["status"] == "unverified" and result["blocking"] else 0
     if arguments.command == "quality":
         try:
             if arguments.quality_command == "capture":

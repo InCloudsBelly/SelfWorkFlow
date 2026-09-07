@@ -150,13 +150,21 @@ def _require_json_data(value: Any, active_containers: set[int] | None = None) ->
         active.remove(identity)
 
 
-def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
-    """Load YAML from explicit paths and validate it as Draft 2020-12 JSON Schema."""
+def _load_config_text(
+    document_text: str,
+    schema_path: str | Path,
+    *,
+    schema_text_override: str | None = None,
+) -> Any:
+    """Validate already-read YAML text against an explicit JSON Schema."""
 
-    try:
-        schema_text = Path(schema_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        raise ConfigError("schema-read-failed") from None
+    if schema_text_override is None:
+        try:
+            schema_text = Path(schema_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            raise ConfigError("schema-read-failed") from None
+    else:
+        schema_text = schema_text_override
     try:
         schema = json.loads(
             schema_text,
@@ -177,10 +185,6 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
     except (SchemaError, RecursionError):
         raise ConfigError("schema-invalid") from None
     try:
-        document_text = Path(document_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        raise ConfigError("document-read-failed") from None
-    try:
         document = yaml.load(document_text, Loader=_StrictSafeLoader)
     except Exception:
         raise ConfigError("document-invalid") from None
@@ -198,3 +202,40 @@ def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
     if validation_error is not None:
         raise ConfigError("configuration-invalid") from None
     return _freeze(document)
+
+
+def load_config(document_path: str | Path, schema_path: str | Path) -> Any:
+    """Load YAML from explicit paths and validate it as Draft 2020-12 JSON Schema."""
+
+    try:
+        document_text = Path(document_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        raise ConfigError("document-read-failed") from None
+    return _load_config_text(document_text, schema_path)
+
+
+def load_config_bytes(
+    document_bytes: bytes,
+    schema_path: str | Path,
+    *,
+    schema_bytes: bytes | None = None,
+) -> Any:
+    """Validate bytes already bound by a caller without rereading their path."""
+
+    if type(document_bytes) is not bytes:
+        raise ConfigError("document-read-failed")
+    try:
+        document_text = document_bytes.decode("utf-8")
+    except UnicodeError:
+        raise ConfigError("document-read-failed") from None
+    if schema_bytes is None:
+        return _load_config_text(document_text, schema_path)
+    if type(schema_bytes) is not bytes:
+        raise ConfigError("schema-read-failed")
+    try:
+        schema_text = schema_bytes.decode("utf-8")
+    except UnicodeError:
+        raise ConfigError("schema-read-failed") from None
+    return _load_config_text(
+        document_text, schema_path, schema_text_override=schema_text
+    )

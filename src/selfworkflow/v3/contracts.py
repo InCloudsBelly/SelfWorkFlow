@@ -55,6 +55,8 @@ _SCHEMA_NAMES = (
     "review-host-attestation.schema.json",
     "review-fallback-authorization.schema.json",
     "review-independence-receipt.schema.json",
+    "code-review-result.schema.json",
+    "code-review-independence-receipt.schema.json",
 )
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "v3"
 _FORMAT_CHECKER = FormatChecker()

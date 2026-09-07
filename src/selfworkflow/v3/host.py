@@ -177,6 +177,8 @@ class Host:
         ] | None = None,
         review_services: object = None,
         review_test_mode: bool = False,
+        project_root: str | None = None,
+        conversation_id: str | None = None,
     ) -> None:
         if type(plan) is not PlanGraphArtifact:
             raise HostError("v3-host-plan-not-typed")
@@ -206,6 +208,18 @@ class Host:
             ):
                 raise HostError("review-host-services-invalid")
         self._review_services = review_services
+        if (project_root is None) != (conversation_id is None):
+            raise HostError("project-review-session-identity-incomplete")
+        if project_root is not None and (
+            type(project_root) is not str
+            or not project_root
+            or type(conversation_id) is not str
+            or not conversation_id
+        ):
+            raise HostError("project-review-session-identity-invalid")
+        self._project_root = project_root
+        self._conversation_id = conversation_id
+        self._project_review_session = None
 
     @property
     def plan(self) -> PlanGraphArtifact:
@@ -389,6 +403,94 @@ class Host:
             raise HostError(
                 getattr(error, "reason", "post-grill-review-input-invalid")
             ) from None
+
+    def build_project_review_context(self) -> Mapping[str, object] | None:
+        """Build the project Skill bundle for this Host's code Review.
+
+        The profile is read lazily on the first Full/Deep code Review and the
+        resulting session is reused until its bound files drift.
+        """
+
+        if self._project_root is None or self._conversation_id is None:
+            return None
+        strength = self._review_strength()
+        if strength not in {"Full", "Deep"}:
+            return None
+        if self._request["operationType"] not in {"implement", "debug", "review"}:
+            return None
+        try:
+            from selfworkflow.project_review import (
+                ProjectReviewProfileError,
+                start_project_review_session,
+            )
+
+            if self._project_review_session is None:
+                self._project_review_session = start_project_review_session(
+                    self._project_root, self._conversation_id,
+                )
+            try:
+                return self._project_review_session.code_review_context(
+                    strength=strength, is_code_task=True,
+                )
+            except ProjectReviewProfileError:
+                # The old binding is no longer valid.  Do not reuse it after
+                # the caller fixes the profile/Skill; the next code Review
+                # must create a fresh session and binding.
+                self._project_review_session = None
+                raise
+        except ProjectReviewProfileError as error:
+            raise HostError(str(error)) from None
+
+    def dispatch_code_review(
+        self,
+        verified_input: object,
+        *,
+        implementation_agent_identity: str,
+        implementation_context_identity: str,
+        attempt_ref: str,
+    ) -> dict[str, Any]:
+        """Dispatch a non-Grill independent code Review with project Skills."""
+
+        if self._review_services is None:
+            raise HostError("code-review-host-services-required")
+        if not self._review_services.independent_context_available:
+            raise HostError("code-review-independent-context-required")
+        try:
+            from selfworkflow.v3.review_dispatch import dispatch_dual_code_review
+
+            return dispatch_dual_code_review(
+                verified_input,
+                implementation_agent_identity=implementation_agent_identity,
+                implementation_context_identity=implementation_context_identity,
+                port=self._review_services.dispatch_port,
+                plan_hash=self._plan.plan_hash,
+                attempt_ref=attempt_ref,
+                project_review_context=self.build_project_review_context(),
+            )
+        except HostError:
+            raise
+        except Exception as error:
+            raise HostError(
+                getattr(error, "reason", "code-review-dispatch-failed")
+            ) from None
+
+    def _review_strength(self) -> str:
+        """Resolve the plan's effective strength from its immutable request."""
+
+        requested = self._request["projectMinimums"]["strength"]
+        if (
+            self._request["complexity"] == "C3"
+            or self._request["risk"] == "R3"
+            or requested == "Deep"
+        ):
+            return "Deep"
+        if (
+            self._request["complexity"] == "C2"
+            or self._request["risk"] == "R2"
+            or requested == "Full"
+        ):
+            return "Full"
+        return "Light"
 
     def _requires_post_grill_review(self) -> bool:
         document = self._plan.as_dict()

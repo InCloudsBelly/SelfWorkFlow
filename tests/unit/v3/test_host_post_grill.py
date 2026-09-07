@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests.unit.v3.test_cpp_router import _v3_request
 from tests.unit.v3.test_review_dispatch import _SpyPort, _summary
@@ -217,6 +221,128 @@ class HostPostGrillGateTests(unittest.TestCase):
             passed, "planned", "attempt-planned", "2026-08-09T00:21:00Z"
         )
         self.assertEqual(rebound["stages"][4]["status"], "active")
+
+    def test_host_builds_and_caches_project_review_context_for_full_code_tasks(self):
+        from selfworkflow.v3.host import Host, HostError
+        from selfworkflow.v3.plan_graph import build_plan_graph
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "review.md"
+            skill.write_text("project review", encoding="utf-8")
+            (root / ".selfworkflow").mkdir()
+            digest = "sha256:" + hashlib.sha256(b"project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            request = self.request
+            request["projectMinimums"] = {"strength": "Full"}
+            request["complexity"] = "C2"
+            request["testLevelFloor"] = "T2"
+            plan = build_plan_graph(request, self.catalog, self.pipeline)
+            host = Host(
+                plan, request, self.catalog, self.pipeline,
+                project_root=str(root), conversation_id="project-conversation",
+            )
+            first = host.build_project_review_context()
+            second = host.build_project_review_context()
+            self.assertEqual(first, second)
+            self.assertEqual(
+                first["reviewers"]["standards"]["manifest"],
+                first["reviewers"]["spec"]["manifest"],
+            )
+            skill.write_text("drifted", encoding="utf-8")
+            with self.assertRaisesRegex(HostError, "project-review-profile-invalid"):
+                host.build_project_review_context()
+
+            skill.write_text("new project review", encoding="utf-8")
+            digest = "sha256:" + hashlib.sha256(b"new project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            rebound = host.build_project_review_context()
+            self.assertEqual(rebound["status"], "loaded")
+            self.assertNotEqual(
+                rebound["sessionBindingHash"], first["sessionBindingHash"]
+            )
+
+    def test_post_grill_design_review_does_not_load_project_code_review_skill(self):
+        with patch.object(
+            self.host, "build_project_review_context",
+            side_effect=AssertionError("design review must not load code Skill"),
+        ):
+            evidence = self.host.dispatch_post_grill_review(
+                self.ledger, self.summary["summaryHash"],
+                implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                independent_context_available=True,
+                now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+                grill_completion_ref=self.grill_completion["attestationHash"],
+            )
+        self.assertEqual(evidence.receipt["reviewMode"], "independent-design-review")
+        self.assertIsNone(self.port.calls[-1].get("project_review_context"))
+
+    def test_host_code_review_route_delegates_to_dual_dispatch_with_project_context(self):
+        from selfworkflow.v3.host import Host
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "review.md"
+            skill.write_text("project review", encoding="utf-8")
+            (root / ".selfworkflow").mkdir()
+            digest = "sha256:" + hashlib.sha256(b"project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            route_port = _SpyPort(unique_dispatches=True)
+            route_services_host = self._host_with_port(route_port)
+            host = Host(
+                self.plan, self.request, self.catalog, self.pipeline,
+                review_services=route_services_host._review_services,
+                review_test_mode=True,
+                project_root=str(root), conversation_id="code-review-route",
+            )
+            host._review_strength = lambda: "Full"
+            from tests.unit.v3.test_review_dispatch import _verified
+
+            result = host.dispatch_code_review(
+                _verified(plan_hash=host.plan.plan_hash),
+                implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                attempt_ref="attempt-reviewed",
+            )
+            self.assertEqual(result["reviewMode"], "independent-code-review")
+            self.assertEqual(len(route_port.calls), 2)
+            self.assertEqual(
+                [call["review_mode"] for call in route_port.calls],
+                ["independent-code-review", "independent-code-review"],
+            )
+            self.assertEqual(
+                [call["payload"]["reviewAxis"] for call in route_port.calls],
+                ["standards", "spec"],
+            )
+            self.assertEqual(
+                route_port.calls[0]["project_review_context"],
+                route_port.calls[1]["project_review_context"],
+            )
 
     def test_review_services_are_constructor_bound_and_fake_services_are_test_only(self):
         from selfworkflow.v3.host import Host, HostError

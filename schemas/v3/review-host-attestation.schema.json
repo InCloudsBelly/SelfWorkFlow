@@ -13,7 +13,7 @@
     "attemptRef": {"$ref": "#/$defs/id"},
     "issuedAt": {"type": "string", "format": "utc-date-time"},
     "expiresAt": {"type": "string", "format": "utc-date-time"},
-    "reviewMode": {"const": "independent-design-review"},
+    "reviewMode": {"enum": ["independent-design-review", "independent-code-review"]},
     "forkContext": {"type": "boolean"},
     "payloadHash": {"$ref": "#/$defs/hash"},
     "implementationAgentIdentity": {"$ref": "#/$defs/id"},

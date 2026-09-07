@@ -1,6 +1,9 @@
 import copy
 from datetime import datetime, timezone
+import hashlib
 import json
+from pathlib import Path
+import tempfile
 import unittest
 
 from selfworkflow.v3.hashing import content_hash
@@ -29,7 +32,7 @@ def _summary():
     return value
 
 
-def _verified(summary=None):
+def _verified(summary=None, *, plan_hash=PLAN_HASH):
     from selfworkflow.v3.review_inputs import verify_review_inputs
 
     value = _summary() if summary is None else summary
@@ -37,7 +40,7 @@ def _verified(summary=None):
         "schemaVersion": 3,
         "summaryHash": value["summaryHash"], "designHash": value["designHash"],
         "reviewerPolicyHash": value["reviewerPolicyHash"],
-        "planHash": PLAN_HASH, "attemptRef": "attempt-designed",
+        "planHash": plan_hash, "attemptRef": "attempt-designed",
         "sourceClasses": ["acceptance-criteria", "confirmed-design"],
         "sourceFields": [
             "acceptanceCriteria", "alternatives", "assumptions", "constraints",
@@ -54,7 +57,7 @@ def _verified(summary=None):
         "triggerSource": "explicit-user-request", "grillStatus": "completed",
         "commonUnderstandingConfirmed": True, "confirmationSource": "user-confirmation",
         "designHash": value["designHash"], "summaryHash": value["summaryHash"],
-        "planHash": PLAN_HASH, "attemptRef": "attempt-designed",
+        "planHash": plan_hash, "attemptRef": "attempt-designed",
         "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
         "nonce": "grill-completion-1",
     }
@@ -64,7 +67,7 @@ def _verified(summary=None):
         summary_attestation_resolver=lambda ref: provenance if ref == value["summaryHash"] else None,
         grill_completion_ref=completion["attestationHash"],
         grill_completion_resolver=lambda ref: completion if ref == completion["attestationHash"] else None,
-        reviewer_policy_hash=value["reviewerPolicyHash"], plan_hash=PLAN_HASH,
+        reviewer_policy_hash=value["reviewerPolicyHash"], plan_hash=plan_hash,
         attempt_ref="attempt-designed",
         now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
     )
@@ -77,6 +80,18 @@ def _result(summary, *, verdict="approve", findings=None):
         "reviewLevel": "L2",
         "summaryHash": summary["summaryHash"],
         "designHash": summary["designHash"],
+        "findings": findings or [],
+    }
+    value["resultHash"] = content_hash(value)
+    return value
+
+
+def _code_result(subject, *, verdict="approve", findings=None):
+    value = {
+        "schemaVersion": 3,
+        "verdict": verdict,
+        "reviewLevel": "L2",
+        "reviewSubjectHash": content_hash(subject),
         "findings": findings or [],
     }
     value["resultHash"] = content_hash(value)
@@ -108,29 +123,44 @@ def _attestation(observation, implementation_agent, implementation_context):
 
 
 class _SpyPort:
-    def __init__(self, *, attested=True, same_identity=False, verdict="approve", tamper_attestation=False):
+    def __init__(self, *, attested=True, same_identity=False, verdict="approve", tamper_attestation=False, unique_dispatches=False):
         self.calls = []
         self.attested = attested
         self.same_identity = same_identity
         self.verdict = verdict
         self.tamper_attestation = tamper_attestation
+        self.unique_dispatches = unique_dispatches
         self.last_attestation = None
 
     def dispatch_review(self, **call):
         self.calls.append(call)
         from selfworkflow.v3.review_dispatch import HostDispatchObservation
 
-        summary = call["payload"]["designReviewSummary"]
-        result = _result(
-            summary,
-            verdict=self.verdict,
-            findings=([{"findingId": "important-1", "severity": "important", "summary": "Fix the gate."}] if self.verdict == "changes-required" else []),
-        )
+        if call["review_mode"] == "independent-code-review":
+            summary = call["payload"]["codeReviewSubject"]
+            result = _code_result(
+                summary,
+                verdict=self.verdict,
+                findings=([{"findingId": "important-1", "severity": "important", "summary": "Fix the gate."}] if self.verdict == "changes-required" else []),
+            )
+        else:
+            summary = call["payload"]["designReviewSummary"]
+            result = _result(
+                summary,
+                verdict=self.verdict,
+                findings=([{"findingId": "important-1", "severity": "important", "summary": "Fix the gate."}] if self.verdict == "changes-required" else []),
+            )
         reviewer_agent = call["implementation_agent_identity"] if self.same_identity else "review-agent"
         reviewer_context = call["implementation_context_identity"] if self.same_identity else "review-context"
+        ordinal = len(self.calls)
+        dispatch_id = f"dispatch-{ordinal}" if self.unique_dispatches else "dispatch-1"
+        dispatch_nonce = f"dispatch-nonce-{ordinal}" if self.unique_dispatches else "dispatch-nonce-1"
+        if self.unique_dispatches and not self.same_identity:
+            reviewer_agent = f"review-agent-{ordinal}"
+            reviewer_context = f"review-context-{ordinal}"
         observed = {
-            "dispatchId": "dispatch-1", "reviewMode": call["review_mode"],
-            "dispatchNonce": "dispatch-nonce-1",
+            "dispatchId": dispatch_id, "reviewMode": call["review_mode"],
+            "dispatchNonce": dispatch_nonce,
             "planHash": call["plan_hash"], "attemptRef": call["attempt_ref"],
             "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
             "forkContext": call["fork_context"], "payload": call["payload"],
@@ -146,7 +176,7 @@ class _SpyPort:
             attestation["attestationHash"] = content_hash({key: value for key, value in attestation.items() if key != "attestationHash"})
         self.last_attestation = attestation
         return HostDispatchObservation(
-            dispatch_id="dispatch-1", dispatch_nonce="dispatch-nonce-1",
+            dispatch_id=dispatch_id, dispatch_nonce=dispatch_nonce,
             plan_hash=call["plan_hash"], attempt_ref=call["attempt_ref"],
             issued_at="2026-08-09T11:59:00Z", expires_at="2026-08-09T12:05:00Z",
             review_mode=call["review_mode"],
@@ -155,6 +185,7 @@ class _SpyPort:
             reviewer_agent_identity=reviewer_agent,
             reviewer_context_identity=reviewer_context,
             host_attestation=attestation, returned_value=result,
+            project_review_context=call.get("project_review_context"),
         )
 
 
@@ -176,6 +207,204 @@ class ReviewDispatchTests(unittest.TestCase):
         self.assertEqual(receipt["independence"], "independent")
         self.assertEqual(receipt["reviewVerdict"], "approve")
         self.assertFalse(receipt["parentContextImported"])
+
+    def test_dispatch_passes_the_same_project_review_inputs_to_the_host_port(self):
+        from selfworkflow.project_review import build_code_review_context, load_project_review_profile
+        from selfworkflow.v3.review_dispatch import dispatch_independent_review
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "review.md").write_text("project review", encoding="utf-8")
+            (root / ".selfworkflow").mkdir()
+            digest = "sha256:" + hashlib.sha256(b"project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            profile = load_project_review_profile(root)
+        context = build_code_review_context(
+            profile, strength="Deep", is_code_task=True, conversation_id="review-context"
+        )
+        port = _SpyPort()
+        dispatch_independent_review(
+            _verified(), implementation_agent_identity="implementation-agent",
+            implementation_context_identity="implementation-context", port=port,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+            project_review_context=context,
+        )
+
+        call = port.calls[0]
+        self.assertIn("projectReview", call["payload"])
+        self.assertEqual(call["project_review_context"], context)
+        self.assertEqual(
+            call["project_review_context"]["reviewers"]["standards"],
+            call["project_review_context"]["reviewers"]["spec"],
+        )
+
+    def test_required_unverified_project_review_context_is_fail_closed(self):
+        from selfworkflow.project_review import build_code_review_context, load_project_review_profile
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".selfworkflow").mkdir()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.required", "path": "missing.md",
+                        "contentHash": "sha256:" + "0" * 64, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            context = build_code_review_context(
+                load_project_review_profile(root), strength="Full",
+                is_code_task=True, conversation_id="blocked-review",
+            )
+        with self.assertRaisesRegex(ReviewDispatchError, "project-review-required-unverified"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context", port=_SpyPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+                project_review_context=context,
+            )
+
+    def test_project_review_context_length_mismatch_has_stable_error(self):
+        from selfworkflow.project_review import build_code_review_context, load_project_review_profile
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "review.md"
+            skill.write_text("project review", encoding="utf-8")
+            (root / ".selfworkflow").mkdir()
+            digest = "sha256:" + hashlib.sha256(b"project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            context = build_code_review_context(
+                load_project_review_profile(root), strength="Full",
+                is_code_task=True, conversation_id="length-mismatch",
+            )
+        reviewers = dict(context["reviewers"])
+        standards = dict(reviewers["standards"])
+        standards["skillBytes"] = standards["skillBytes"] + (b"extra",)
+        reviewers["standards"] = standards
+        invalid = dict(context)
+        invalid["reviewers"] = reviewers
+        with self.assertRaisesRegex(ReviewDispatchError, "project-review-context-invalid"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context", port=_SpyPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+                project_review_context=invalid,
+            )
+
+    def test_project_review_context_manifest_metadata_is_strictly_validated(self):
+        from selfworkflow.project_review import build_code_review_context, load_project_review_profile
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "review.md"
+            skill.write_text("project review", encoding="utf-8")
+            (root / ".selfworkflow").mkdir()
+            digest = "sha256:" + hashlib.sha256(b"project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            context = build_code_review_context(
+                load_project_review_profile(root), strength="Full",
+                is_code_task=True, conversation_id="metadata-validation",
+            )
+        reviewers = dict(context["reviewers"])
+        standards = dict(reviewers["standards"])
+        manifest = [dict(item) for item in standards["manifest"]]
+        manifest[0]["path"] = "../escape.md"
+        standards["manifest"] = tuple(manifest)
+        reviewers["standards"] = standards
+        invalid = dict(context)
+        invalid["reviewers"] = reviewers
+        with self.assertRaisesRegex(ReviewDispatchError, "project-review-context-invalid"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context", port=_SpyPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+                project_review_context=invalid,
+            )
+
+    def test_dual_code_review_runs_distinct_standards_and_spec_dispatches(self):
+        from selfworkflow.project_review import build_code_review_context, load_project_review_profile
+        from selfworkflow.v3.review_dispatch import dispatch_dual_code_review
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / "review.md"
+            skill.write_text("project review", encoding="utf-8")
+            (root / ".selfworkflow").mkdir()
+            digest = "sha256:" + hashlib.sha256(b"project review").hexdigest()
+            (root / ".selfworkflow" / "review.yaml").write_text(
+                json.dumps({
+                    "schemaVersion": 1,
+                    "additionalReviewSkills": [{
+                        "id": "project.review", "path": "review.md",
+                        "contentHash": digest, "required": True,
+                    }],
+                }), encoding="utf-8"
+            )
+            context = build_code_review_context(
+                load_project_review_profile(root), strength="Full",
+                is_code_task=True, conversation_id="dual-review",
+            )
+        port = _SpyPort(unique_dispatches=True)
+        result = dispatch_dual_code_review(
+            _verified(), implementation_agent_identity="implementation-agent",
+            implementation_context_identity="implementation-context", port=port,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+            project_review_context=context,
+        )
+        self.assertEqual(len(port.calls), 2)
+        self.assertEqual(
+            [call["review_mode"] for call in port.calls],
+            ["independent-code-review", "independent-code-review"],
+        )
+        self.assertEqual(
+            [call["payload"]["reviewAxis"] for call in port.calls],
+            ["standards", "spec"],
+        )
+        self.assertTrue(all("codeReviewSubject" in call["payload"] for call in port.calls))
+        self.assertEqual(
+            port.calls[0]["project_review_context"],
+            port.calls[1]["project_review_context"],
+        )
+        self.assertEqual(result["projectReviewHash"], content_hash(
+            port.calls[0]["payload"]["projectReview"]
+        ))
+        self.assertNotEqual(
+            result["reviewers"]["standards"]["dispatchId"],
+            result["reviewers"]["spec"]["dispatchId"],
+        )
+        self.assertEqual(
+            result["reviewers"]["standards"]["reviewMode"],
+            "independent-code-review",
+        )
 
     def test_agent_self_report_fields_are_rejected_and_host_identity_wins(self):
         from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review

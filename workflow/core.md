@@ -66,6 +66,10 @@
 ## 按需能力
 
 - 默认工程基底来自固定版本的 `mattpocock/skills`：Design 使用 `grilling` 与代码任务的 `codebase-design`，实现使用 `implement` / `tdd`，调试使用 `diagnosing-bugs`，Full/Deep Review 使用 `code-review`。Plan 与 Verify 继续由 SelfWorkflow 的中性契约和真实命令证据负责。
+- 项目可在根目录提交 `.selfworkflow/review.yaml` 声明额外 Code Review Skill。新项目对话的首个代码任务只检查这一份显式配置，不扫描或下载 `.agents/skills`。配置中的项目相对路径、顺序、`required`、文件 hash 和项目身份共同形成会话绑定；缺失配置为 `absent`，Skill 缺失、路径不安全、不可读或 hash 漂移为 `unverified`；required 项暂停 Review，optional 项记录残余风险并排除出 Reviewer manifest。
+- Full/Deep 代码 Review 的 Standards 与 Spec 两个独立 SubAgent 必须收到完全相同、按序且 hash 校验过的项目 Skill manifest 和对应 Skill 字节；Host 接收项目根与会话身份，在首次匹配的 implement、debug 或显式代码 Review 中通过 `start_project_review_session()` 单次读取并绑定会话，再由 `dispatch_code_review()` 调用双 Review 派发。项目 Skill 只能补充审查能力，不能覆盖保护规则、范围、严重度、独立性、TEA 或完成门禁。required Skill 未验证时暂停 Review；Light、非代码、Grill 设计和仅设计任务不自动加载。宿主不支持双独立上下文时必须标记 `unverified`，不得伪造已加载。漂移会使旧会话失效，下一次代码 Review 重新建立会话。
+- Review dispatch 会再次严格校验并冻结 manifest 元数据与 Skill 字节，再交给两个 Reviewer；调用方不能用自构造的元数据替换已验证输入。
+- 非-Grill 代码 Review 由 Host 的双派发入口分别执行 Standards 和 Spec，并核对两次 dispatch 的身份、nonce 与 Reviewer 身份均不同；Grill 设计 Review 仍使用既有单次设计门禁。
 - Matt 的用户调用型 Skill 只作为对应阶段的编排模板；其中的 commit、工单发布、文档写入或其他副作用不能绕过 SelfWorkflow 授权。特别是 `implement` 的结束提交不是默认许可，只有用户明确要求提交时才执行。
 - 流程深度与能力 Skill 选择相互独立：复杂度、风险和副作用决定流程深度；显式请求以及语言、文件和任务语义决定是否加载通用能力 Skill。明显相关时加载 compact core，中等相关时先看元数据，专项引用只在直接信号命中时读取。
 - 加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。只读任务只应用 reasoning core；实际修改才应用 change rules；真实副作用、高成本或高风险操作继续遵循既有授权护栏。

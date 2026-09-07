@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/code-review-result.schema.json",
+  "title": "SelfWorkFlow V3 structured code review result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "verdict", "reviewLevel", "reviewSubjectHash", "findings", "resultHash"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "verdict": {"enum": ["approve", "changes-required"]},
+    "reviewLevel": {"enum": ["L2", "L3"]},
+    "reviewSubjectHash": {"$ref": "#/$defs/hash"},
+    "findings": {
+      "type": "array", "maxItems": 256, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["findingId", "severity", "summary"],
+        "properties": {
+          "findingId": {"$ref": "#/$defs/id"},
+          "severity": {"enum": ["critical", "important", "minor"]},
+          "summary": {"type": "string", "minLength": 1, "maxLength": 4096}
+        }
+      }
+    },
+    "resultHash": {"$ref": "#/$defs/hash"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
