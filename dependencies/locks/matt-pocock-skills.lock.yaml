@@ -2,8 +2,8 @@ schemaVersion: 1
 sourceId: matt-pocock-skills
 canonicalUrl: https://github.com/mattpocock/skills.git
 path: dependencies/upstream/matt-pocock-skills
-gitlinkCommit: 8b78b531ab965735c5dc74f6f7a219e1e37326df
-gitTree: f4effeaa391f196b146046266cca1918f7be6ad4
+gitlinkCommit: 3cca18b368ae95cdbdebbff572ccafa662551015
+gitTree: 6e84c093fda2026396cea9fad6a924a6da0e1452
 license:
   path: LICENSE
   spdx: MIT
@@ -11,31 +11,31 @@ license:
 selectedSkills:
   - id: grill-me
     path: skills/productivity/grill-me
-    hash: sha256:9c71927d4f0fd32d815247b4ca1fc782d4c5f2f3c1d6d023d188d4a7e0299b21
+    hash: sha256:19e660207b447acf6ee0d600471c02e549c7aca8fb3ab38fdc2c7056aa442fc8
   - id: grilling
     path: skills/productivity/grilling
-    hash: sha256:00d2ccb00b7c02e448330f6405077a9cee664b92e5734228323b164abb9b8dbb
+    hash: sha256:d806733216b16e51adad834e724bfec5540a436d06395bfc75b843cda9f7404b
   - id: codebase-design
     path: skills/engineering/codebase-design
-    hash: sha256:22d3815e5629ddea7ed7c9f8e7c330f6a1559466ee904e58371e1e8a10be0c4b
+    hash: sha256:362b0bec828219d9f4b08ca7c466164e67253bdd817359258e60d2e9c5692a8f
   - id: implement
     path: skills/engineering/implement
     hash: sha256:30cd7bc1ebfb3891e85a1eed3b3b81aea0fa4ad4553a784de7f8e421b2d223e0
   - id: tdd
     path: skills/engineering/tdd
-    hash: sha256:4bc06151a5d5c37af1ee5613dc07b67ecf18b2e22e6a26e8538a3a995a8aafca
+    hash: sha256:193b791c489d1640ccfb58d7cbd60fc9e059ef44632b3c92f208784cfe45ab78
   - id: diagnosing-bugs
     path: skills/engineering/diagnosing-bugs
-    hash: sha256:7ff486208dfcad5ec4d27ed0c091eee4183f3812581f55638e9ddf6fcf7aba1a
+    hash: sha256:bca66b7141da7d225b7dfd1abf6f2bee657b8044d3897604055e760749c71724
   - id: code-review
     path: skills/engineering/code-review
-    hash: sha256:e32441ce3f64628daeb6270bf56104f461b1341aa472cc3968424e90ece17bc4
+    hash: sha256:3abbdfe52540f9242e16589fae2cc423b3d98994c37683944462b29bab89495c
   - id: to-spec
     path: skills/engineering/to-spec
-    hash: sha256:7d7fd04f7e47b8ebac52abe1497725570cbc1c15a56c673fe386950f95931cfb
+    hash: sha256:c73a2250beac0479e384f5466e834bb54ce6e30b7f8705e9999ba840d9d59b36
   - id: to-tickets
     path: skills/engineering/to-tickets
-    hash: sha256:b9478faa82b40c653bba2ea110682b5ae22a6736e4600768ae158c17db861ae2
+    hash: sha256:8082bc6ef165027c5df3215763055f4a9668878bf27f25f582db78a14c3ed3c1
   - id: grill-with-docs
     path: skills/engineering/grill-with-docs
-    hash: sha256:269376d5146332f597c4194fa1adef93b879ad62e0183c0d111a447e7af51be9
+    hash: sha256:abc0fa7948db18b5fb0e1cc1c522ac5ff47d874e2da1e5df60619d79be11f38b

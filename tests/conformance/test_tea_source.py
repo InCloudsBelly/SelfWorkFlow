@@ -29,7 +29,7 @@ class TeaSourceConformanceTests(unittest.TestCase):
         identity = verify_tea_source(REPOSITORY)
         self.assertEqual(
             identity["commit"],
-            "2882e9c8972a94f48d5e848039eec435436f2459",
+            "9c6ca208bcfb99dad244e88f8df7cb4f26e5ff21",
         )
         self.assertEqual(identity["status"], "supported")
 

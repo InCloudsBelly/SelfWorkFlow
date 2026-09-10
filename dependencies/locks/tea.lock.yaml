@@ -2,9 +2,9 @@ schemaVersion: 3
 sourceId: tea
 canonicalUrl: https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise.git
 path: dependencies/upstream/tea
-gitlinkCommit: 2882e9c8972a94f48d5e848039eec435436f2459
-gitTree: 75cb110d9d631afee99edfd785d678505d641ee5
-inventoryHash: sha256:10ff4ddbce7595efad9ae377f74a7e15e0ef771462aac3dbbb4975a8dc7373bb
+gitlinkCommit: 9c6ca208bcfb99dad244e88f8df7cb4f26e5ff21
+gitTree: 8e61619b8bde791ebf778c57ecd680e42ed24656
+inventoryHash: sha256:310ace68f647577213468bf07c819bb4c873453f0f4bf0512699824a7bb7b70f
 license:
   path: LICENSE
   spdx: MIT

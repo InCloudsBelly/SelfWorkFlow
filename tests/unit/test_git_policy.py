@@ -94,14 +94,14 @@ class GitPolicyTests(unittest.TestCase):
         self.assertEqual(policy["allowlist"], [
             {
                 "path": "dependencies/upstream/matt-pocock-skills",
-                "objectHash": "8b78b531ab965735c5dc74f6f7a219e1e37326df",
+                "objectHash": "3cca18b368ae95cdbdebbff572ccafa662551015",
                 "reason": "Pinned Matt Pocock engineering skills foundation used by SelfWorkFlow",
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
             },
             {
                 "path": "dependencies/upstream/tea",
-                "objectHash": "2882e9c8972a94f48d5e848039eec435436f2459",
+                "objectHash": "9c6ca208bcfb99dad244e88f8df7cb4f26e5ff21",
                 "reason": "Pinned official TEA source used by the optional V3 test-quality adapter",
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
