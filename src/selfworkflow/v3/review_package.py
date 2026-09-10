@@ -93,10 +93,10 @@ def normalize_review_package(
 
 
 def ordered_skill_manifest(project_context: Mapping[str, object] | None) -> list[dict[str, object]]:
-    """Return project Skills first, then the pinned generic Review Skill."""
+    """Return the primary project Review Skill and supplementary generic Skill."""
 
-    result: list[dict[str, object]] = []
-    if project_context is not None and project_context.get("status") == "loaded":
+    project_entries: list[dict[str, object]] = []
+    if project_context is not None:
         reviewers = project_context.get("reviewers")
         if isinstance(reviewers, Mapping):
             standards = reviewers.get("standards")
@@ -106,8 +106,20 @@ def ordered_skill_manifest(project_context: Mapping[str, object] | None) -> list
                     for item in manifest:
                         if not isinstance(item, Mapping):
                             raise ReviewPackageError("review-skill-manifest-invalid")
-                        result.append({"layer": "project", **dict(item)})
-    result.append(dict(_GENERIC_CODE_REVIEW_SKILL))
+                        project_entries.append(
+                            {"layer": "project", "role": "primary", **dict(item)}
+                        )
+    if project_entries:
+        result = project_entries
+        result.append({
+            "layer": "generic", "role": "supplementary",
+            **dict(_GENERIC_CODE_REVIEW_SKILL),
+        })
+    else:
+        result = [{
+            "layer": "generic", "role": "primary",
+            **dict(_GENERIC_CODE_REVIEW_SKILL),
+        }]
     return result
 
 

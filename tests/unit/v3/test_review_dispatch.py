@@ -390,7 +390,15 @@ class ReviewDispatchTests(unittest.TestCase):
         self.assertIn("projectReview", call["payload"])
         self.assertEqual(
             call["payload"]["projectReview"]["skillPrecedence"],
-            "project-before-generic",
+            "project-override",
+        )
+        self.assertEqual(
+            call["payload"]["projectReview"]["primarySkillIds"],
+            ["project.review"],
+        )
+        self.assertEqual(
+            call["payload"]["projectReview"]["supplementarySkillIds"],
+            ["matt-pocock.code-review"],
         )
         self.assertEqual(call["project_review_context"], context)
         self.assertEqual(

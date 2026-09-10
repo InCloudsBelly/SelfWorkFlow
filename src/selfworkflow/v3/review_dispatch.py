@@ -280,16 +280,26 @@ def _project_review_payload(
         }
     if axis_inputs["standards"] != axis_inputs["spec"]:
         raise ReviewDispatchError("project-review-context-mismatch")
+    manifest = ordered_skill_manifest(context)
+    primary_skill_ids = [
+        item["id"] for item in manifest if item.get("role") == "primary"
+    ]
+    supplementary_skill_ids = [
+        item["id"] for item in manifest if item.get("role") == "supplementary"
+    ]
     payload = {
         "status": context["status"],
         "blocking": context["blocking"],
         "skillPrecedence": (
-            "project-before-generic" if context["status"] == "loaded"
-            else "generic-only"
+            "project-override" if any(
+                item.get("layer") == "project" for item in manifest
+            ) else "generic-default"
         ),
+        "primarySkillIds": primary_skill_ids,
+        "supplementarySkillIds": supplementary_skill_ids,
         "sessionBindingHash": session_hash,
         "issues": list(issues),
-        "skillManifest": ordered_skill_manifest(context),
+        "skillManifest": manifest,
         "reviewers": axis_payloads,
     }
     payload["skillManifestHash"] = skill_manifest_hash(payload["skillManifest"])

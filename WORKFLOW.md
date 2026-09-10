@@ -454,7 +454,7 @@ templates inside these gates: their commit, issue publication, document write,
 or other side-effect steps require the corresponding SelfWorkflow/user
 authorization. In particular, `implement` does not grant automatic commit.
 
-For a project that needs extra Review expertise, the first code task in a new
+For a project that needs a project-owned Review policy, the first code task in a new
 project conversation checks only the explicit `.selfworkflow/review.yaml`
 profile. A valid profile lists project-relative Skill paths, exact UTF-8 file
 hashes, ordered entries, and `required` flags. It never scans, downloads, or
@@ -466,7 +466,12 @@ entries remain residual risk and are excluded from the reviewer manifest).
 
 In Full/Deep code Review, the existing independent Standards and Spec
 subagents both receive the same ordered project Skill manifest and the same
-hash-verified Skill bytes, in addition to the generic Review package. The Host
+hash-verified Skill bytes. When at least one project Skill is verified, those
+project Skills are the primary Review policy and the pinned generic Review
+Skill is loaded only as a supplementary policy. With no verified project Skill,
+the generic Review Skill remains primary. This precedence is explicit and
+hash-bound in the reviewer payload; it does not change the generic safety,
+TEA, independence, severity, or completion gates. The Host
 accepts the project root and conversation identity at construction; for
 Full/Deep code tasks it lazily creates one `start_project_review_session()` and
 automatically obtains these paired inputs from `build_code_review_context()`

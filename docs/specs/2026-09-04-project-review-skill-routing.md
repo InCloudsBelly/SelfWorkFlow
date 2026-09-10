@@ -1,13 +1,14 @@
-# 项目级额外 Code Review Skill 路由
+# 项目级主 Code Review Skill 覆盖路由
 
 状态：已实现，待最终回归与发布审查。
 
 ## 目标
 
-允许每个项目为代码 Review 声明额外的、项目专属的 Skill；在 Full/Deep
+允许每个项目为代码 Review 声明项目专属的主 Skill；在 Full/Deep
 代码修改的双独立 Review 中，Standards 与 Spec 两个 Reviewer 都收到同一份
-经过路径和内容 hash 校验的 Skill 清单。项目 Skill 只补充审查能力，不能替换
-SelfWorkFlow 的通用 Review、TEA、验证、授权和安全规则。
+经过路径和内容 hash 校验的 Skill 清单。项目 Skill 覆盖通用 Review Skill 的主职责，
+通用 Review Skill 仍作为 supplementary 能力保留；两者都不能替换 SelfWorkFlow
+的 TEA、验证、授权和安全规则。
 
 ## 配置边界
 
@@ -15,7 +16,7 @@ SelfWorkFlow 的通用 Review、TEA、验证、授权和安全规则。
 
 ```yaml
 schemaVersion: 1
-additionalReviewSkills:
+additionalReviewSkills: # 兼容旧字段名；语义为 project Review override
   - id: project.ue5
     path: .agents/skills/kg-ue5-code-review/SKILL.md
     contentHash: sha256:<skill-file-sha256>
@@ -25,7 +26,7 @@ additionalReviewSkills:
 `path` 必须是项目根目录下的相对正斜杠路径；不接受绝对路径、路径穿越、反斜杠
 或 reparse/symlink 逃逸。Skill 文件必须是 UTF-8 可读取的普通文件，实际字节
 hash 必须等于 `contentHash`。条目顺序就是加载顺序，`id` 不得重复。配置不存在
-表示本项目没有额外 Review Skill，不触发扫描、下载或询问。
+表示本项目没有 project Review override，不触发扫描、下载或询问。
 
 ## 会话与 Review 行为
 
@@ -35,17 +36,19 @@ hash 必须等于 `contentHash`。条目顺序就是加载顺序，`id` 不得�
 
 Full/Deep 的代码修改仍调用通用 `mattpocock:code-review` 的 Standards 与 Spec
 双轴。代码派发使用独立的 `independent-code-review` 模式和代码 Review subject
-契约；Grill 设计派发继续使用独立的 `independent-design-review` 契约。若配置有效，
+契约；Grill 设计派发继续使用独立的 `independent-design-review` 契约。若配置中至少
+有一个 project Skill 校验通过，project Skill 是 primary，通用 Skill 是 supplementary；
 两个 Reviewer 都收到：
 
 1. 通用 Review 输入；
-2. 同一份按配置顺序排列的 Skill manifest；
-3. 每个 Skill 的原文和 `contentHash`。
+2. 同一份按配置顺序排列、标记 primary/supplementary 的 Skill manifest；
+3. 每个 project Skill 的原文和 `contentHash`；通用 Skill 由固定 lock 提供。
 
 两个轴必须收到完全相同的项目 Skill manifest 和对应字节；当前版本不支持按轴
 拆分项目 Skill 清单，避免两个 Reviewer 的输入不一致。
 
-项目 Skill 不能改变 protected rules、审查范围、严重度、独立性要求或完成门禁。
+项目 Skill 的覆盖只改变 Review 专项判断的主次，不得改变 protected rules、审查范围、
+严重度、独立性要求、TEA 或完成门禁。
 同一项目配置中的重复 `id`、路径漂移或 hash 冲突 fail closed。`required: true` 的 Skill 缺失、漂移
 或无法加载时，双 Review 标记 `unverified` 并暂停完成；可选 Skill 失败只记录为
 `unverified` 和残余风险，并从实际 Reviewer manifest 中排除，不伪称已执行。
@@ -59,7 +62,7 @@ Light、非代码任务和仅设计/问答任务不因本配置自动加载额�
 - 缺失配置返回 `absent`，不扫描目录；
 - 绝对路径、穿越、终端 `..`、反斜杠、重复 ID、hash 漂移和 symlink/reparse
   均 fail closed；
-- Full/Deep 代码 Review 的两个轴收到相同顺序和相同 hash 的项目 Skill；
+- Full/Deep 代码 Review 的两个轴收到相同顺序、角色和相同 hash 的项目 Skill；
 - Light、非代码和项目未配置时不加载；
 - 项目 Skill 不得覆盖 protected rules，配置变化使会话绑定失效。
 

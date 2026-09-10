@@ -191,7 +191,8 @@ confirmation.
   Heavy/Forensic adapters and dependencies, and real CodeGraph query/mutation
   remain outside this release. Review dispatch now has a fail-closed ephemeral
   SubAgent contract: the Host must provide the selected model, a hash-bound
-  complete code/plan package, ordered project-before-generic Skills, structured
+  complete code/plan package, project-primary/generic-supplementary Skill
+  precedence, structured
   result, Markdown summary, and cleanup evidence. Fake-port tests do not prove
   native support; each vendor Host must still provide fresh capability and
   model-execution evidence before being marked supported.

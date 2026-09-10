@@ -79,7 +79,35 @@ class ReviewPackageTests(unittest.TestCase):
         }
         manifest = ordered_skill_manifest(context)
         self.assertEqual([item["layer"] for item in manifest], ["project", "generic"])
+        self.assertEqual(
+            [item["role"] for item in manifest], ["primary", "supplementary"]
+        )
         self.assertEqual(skill_manifest_hash(manifest), skill_manifest_hash(manifest))
+
+    def test_generic_skill_is_primary_without_a_verified_project_skill(self):
+        manifest = ordered_skill_manifest({"status": "absent", "reviewers": {}})
+        self.assertEqual(len(manifest), 1)
+        self.assertEqual(manifest[0]["layer"], "generic")
+        self.assertEqual(manifest[0]["role"], "primary")
+
+    def test_verified_project_skills_stay_primary_with_optional_drift(self):
+        context = {
+            "status": "unverified",
+            "reviewers": {
+                "standards": {"manifest": ({
+                    "id": "project.review", "path": "review.md",
+                    "contentHash": "sha256:" + "a" * 64, "required": True,
+                },)},
+            },
+        }
+        manifest = ordered_skill_manifest(context)
+        self.assertEqual(
+            [(item["id"], item["role"]) for item in manifest],
+            [
+                ("project.review", "primary"),
+                ("matt-pocock.code-review", "supplementary"),
+            ],
+        )
 
 
 if __name__ == "__main__":
