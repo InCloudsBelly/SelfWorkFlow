@@ -6,8 +6,8 @@ entries:
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:07c2b0595e31db434b7b9acb8c1b1c68ea708ff7
-      contentHash: sha256:b0098bf58a6aafd2332929fb90c77106d6cc922a865757d39b0f134fcc0b5178
+      revision: git:945e62b88811c471345752bf1a3cda8a37e70433
+      contentHash: sha256:f999b46971a926095ebbf67eda4cdd5e4a268a20dcd7784ee210c48363e090b4
     aliases:
       - name: core-workflow
         target: workflow-core
