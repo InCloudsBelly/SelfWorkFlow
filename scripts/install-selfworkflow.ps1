@@ -21,7 +21,6 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 
 if ($Help) {
     @"
@@ -85,6 +84,23 @@ function Set-InstallStage {
 function Resolve-FullPath {
     param([string]$Path)
     return [IO.Path]::GetFullPath($Path)
+}
+
+function Get-Sha256Hex {
+    param([string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
 }
 
 function Invoke-NativeLogged {
@@ -311,7 +327,7 @@ try {
     }
     $mattSkillsReport = [ordered]@{
         commit = $Matches[1]
-        lockHash = "sha256:" + (Get-FileHash -LiteralPath $MattSkillsLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        lockHash = "sha256:" + (Get-Sha256Hex $MattSkillsLockPath)
     }
     $gitlinkOutput = (& git.exe -C $RepositoryRoot ls-files --stage -- "dependencies/upstream/matt-pocock-skills" 2>&1 | Out-String).Trim()
     $gitlinkFields = @($gitlinkOutput -split '\s+')
