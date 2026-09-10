@@ -3,7 +3,7 @@
   "$id": "https://selfworkflow.local/schemas/v3/review-independence-receipt.schema.json",
   "title": "SelfWorkFlow V3 review independence receipt",
   "type": "object", "additionalProperties": false,
-  "required": ["schemaVersion", "reviewMode", "dispatchId", "dispatchNonce", "planHash", "attemptRef", "issuedAt", "expiresAt", "forkContext", "implementationAgentIdentity", "implementationContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "hostAgentIdentity", "hostContextIdentity", "hostAttestationRef", "inputMode", "parentContextImported", "grillReasoningReceived", "payloadHash", "inputSummaryHash", "designHash", "reviewerPolicyHash", "resultHash", "reviewVerdict", "reviewLevel", "fallbackAuthorizationRef", "independence", "receiptHash"],
+  "required": ["schemaVersion", "reviewMode", "dispatchId", "dispatchNonce", "planHash", "attemptRef", "issuedAt", "expiresAt", "forkContext", "implementationAgentIdentity", "implementationContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "hostAgentIdentity", "hostContextIdentity", "hostAttestationRef", "inputMode", "parentContextImported", "grillReasoningReceived", "payloadHash", "inputSummaryHash", "designHash", "reviewerPolicyHash", "resultHash", "reviewVerdict", "reviewLevel", "fallbackAuthorizationRef", "independence", "reviewExecutionMode", "subagentLifecycle", "subagentExecutionId", "reviewModel", "skillManifestHash", "reviewPackageHash", "reviewReportMarkdown", "reviewReportHash", "receiptHash"],
   "properties": {
     "schemaVersion": {"const": 3},
     "reviewMode": {"const": "independent-design-review"},
@@ -18,6 +18,7 @@
     "implementationContextIdentity": {"$ref": "#/$defs/id"},
     "reviewerAgentIdentity": {"$ref": "#/$defs/id"},
     "reviewerContextIdentity": {"$ref": "#/$defs/id"},
+    "subagentExecutionId": {"$ref": "#/$defs/id"},
     "hostAgentIdentity": {"$ref": "#/$defs/id"},
     "hostContextIdentity": {"$ref": "#/$defs/id"},
     "hostAttestationRef": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "null"}]},
@@ -33,6 +34,13 @@
     "reviewLevel": {"enum": ["L2", "L3"]},
     "fallbackAuthorizationRef": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
     "independence": {"enum": ["independent", "unverified"]},
+    "reviewModel": {"oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "required": ["agentId", "model", "reasoningEffort", "selectionMode"], "properties": {"agentId": {"$ref": "#/$defs/id"}, "model": {"type": "string", "minLength": 1, "maxLength": 256}, "reasoningEffort": {"enum": ["low", "medium", "high", "xhigh", "max", "ultra"]}, "selectionMode": {"enum": ["default", "one-time"]}}}]},
+    "skillManifestHash": {"$ref": "#/$defs/hash"},
+    "reviewPackageHash": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
+    "reviewExecutionMode": {"const": "ephemeral-subagent"},
+    "subagentLifecycle": {"const": "created-executed-cleaned"},
+    "reviewReportMarkdown": {"type": "string", "minLength": 1, "maxLength": 65536},
+    "reviewReportHash": {"$ref": "#/$defs/hash"},
     "receiptHash": {"$ref": "#/$defs/hash"}
   },
   "allOf": [

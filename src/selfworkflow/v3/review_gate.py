@@ -8,7 +8,7 @@ import json
 from typing import Any, Callable
 
 from selfworkflow.v3.contracts import ContractError, load_contract
-from selfworkflow.v3.hashing import HashingError, content_hash, require_hash
+from selfworkflow.v3.hashing import HashingError, content_hash, hash_bytes, require_hash
 
 
 @dataclass(frozen=True)
@@ -120,6 +120,13 @@ def _resolve_attestation(
             "dispatchNonce": "dispatchNonce",
             "planHash": "planHash",
             "attemptRef": "attemptRef",
+            "reviewModel": "reviewModel",
+            "reviewExecutionMode": "reviewExecutionMode",
+            "subagentLifecycle": "subagentLifecycle",
+            "subagentExecutionId": "subagentExecutionId",
+            "reviewReportHash": "reviewReportHash",
+            "skillManifestHash": "skillManifestHash",
+            "reviewPackageHash": "reviewPackageHash",
             "issuedAt": "issuedAt",
             "expiresAt": "expiresAt",
         }
@@ -155,6 +162,11 @@ def _receipt_semantics_valid(
         return False
     if (
         not _hash_valid(receipt, "receiptHash")
+        or receipt["reviewExecutionMode"] != "ephemeral-subagent"
+        or receipt["subagentLifecycle"] != "created-executed-cleaned"
+        or receipt["reviewReportHash"] != hash_bytes(
+            receipt["reviewReportMarkdown"].encode("utf-8")
+        )
         or receipt["designHash"] != design_hash
         or receipt["reviewerPolicyHash"] != reviewer_policy_hash
         or receipt["inputSummaryHash"] != input_summary_hash

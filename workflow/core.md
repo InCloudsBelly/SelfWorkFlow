@@ -12,7 +12,7 @@
 
 ## 核心流程
 
-1. **判断范围**：只读问答直接处理。修改任务默认使用 Matt Pocock `grilling` 做有界需求收敛，并只加载当前阶段需要的 Skill；复杂度与风险决定 Light / Full / Deep 深度。`grill-me` 仍只由用户明确启用。
+1. **判断范围**：只读问答直接处理。修改任务按 Light / Full / Deep 选择流程深度；Light 不自动启动 Grill，Full 使用 Matt Pocock `grilling`，Deep 使用 `grill-me`（由上游覆盖更完整的 `grilling` frontier），并只加载当前阶段需要的 Skill。用户仍可在任意强度显式选择。
 2. **定位责任层**：读取用户指定内容、项目规则、目标代码和最少必要上下文。区分根因责任层与报错位置，在最早拥有数据和不变量的层修复，避免下游补偿掩盖上游错误。
 3. **最小实现**：保护用户已有修改，只改完成目标所需内容；检查失败路径、持久数据、缓存、恢复点和受影响共享路径。
 4. **完整 Review**：检查验收条件、完整 diff、逻辑闭环、安全、侵入性和无关修改。普通修改可结构化自审；复杂或高风险任务提高 Review 独立性。
@@ -65,16 +65,17 @@
 
 ## 按需能力
 
-- 默认工程基底来自固定版本的 `mattpocock/skills`：Design 使用 `grilling` 与代码任务的 `codebase-design`，实现使用 `implement` / `tdd`，调试使用 `diagnosing-bugs`，Full/Deep Review 使用 `code-review`。Plan 与 Verify 继续由 SelfWorkflow 的中性契约和真实命令证据负责。
+- 默认工程基底来自固定版本的 `mattpocock/skills`：Full Design 使用 `grilling`，Deep Design 使用 `grill-me`，代码任务按需使用 `codebase-design`，实现使用 `implement` / `tdd`，调试使用 `diagnosing-bugs`，Full/Deep Review 使用 `code-review`。Plan 与 Verify 继续由 SelfWorkflow 的中性契约和真实命令证据负责。
 - 项目可在根目录提交 `.selfworkflow/review.yaml` 声明额外 Code Review Skill。新项目对话的首个代码任务只检查这一份显式配置，不扫描或下载 `.agents/skills`。配置中的项目相对路径、顺序、`required`、文件 hash 和项目身份共同形成会话绑定；缺失配置为 `absent`，Skill 缺失、路径不安全、不可读或 hash 漂移为 `unverified`；required 项暂停 Review，optional 项记录残余风险并排除出 Reviewer manifest。
 - Full/Deep 代码 Review 的 Standards 与 Spec 两个独立 SubAgent 必须收到完全相同、按序且 hash 校验过的项目 Skill manifest 和对应 Skill 字节；Host 接收项目根与会话身份，在首次匹配的 implement、debug 或显式代码 Review 中通过 `start_project_review_session()` 单次读取并绑定会话，再由 `dispatch_code_review()` 调用双 Review 派发。项目 Skill 只能补充审查能力，不能覆盖保护规则、范围、严重度、独立性、TEA 或完成门禁。required Skill 未验证时暂停 Review；Light、非代码、Grill 设计和仅设计任务不自动加载。宿主不支持双独立上下文时必须标记 `unverified`，不得伪造已加载。漂移会使旧会话失效，下一次代码 Review 重新建立会话。
 - Review dispatch 会再次严格校验并冻结 manifest 元数据与 Skill 字节，再交给两个 Reviewer；调用方不能用自构造的元数据替换已验证输入。
-- 非-Grill 代码 Review 由 Host 的双派发入口分别执行 Standards 和 Spec，并核对两次 dispatch 的身份、nonce 与 Reviewer 身份均不同；Grill 设计 Review 仍使用既有单次设计门禁。
+- 所有需要独立性的 Review（包括设计/计划门禁和落地后的代码 Review）都必须通过 Host 的 `ephemeral-subagent` dispatch：父对话不切换模型；SubAgent 使用已验证的 Agent 专用模型，接收 hash-bound 的完整 Review package，返回结构化结果和 hash 绑定的 Markdown 摘要，并在返回前完成清理。缺少能力、模型回显不一致、摘要非法或清理失败都 fail-closed，不得回退父对话。
+- 非-Grill 代码 Review 由 Host 的双派发入口分别执行 Standards 和 Spec；两轴必须针对同一 package、同一有序 Skill manifest 返回独立且 Host attested 的 L2/L3 `approve`，否则 Review 门禁失败。Plan Review 复用同一 SubAgent seam。项目级 Review Skill 在匹配时位于固定 generic Review Skill 之前，但仍受保护规则约束。
 - Matt 的用户调用型 Skill 只作为对应阶段的编排模板；其中的 commit、工单发布、文档写入或其他副作用不能绕过 SelfWorkflow 授权。特别是 `implement` 的结束提交不是默认许可，只有用户明确要求提交时才执行。
 - 流程深度与能力 Skill 选择相互独立：复杂度、风险和副作用决定流程深度；显式请求以及语言、文件和任务语义决定是否加载通用能力 Skill。明显相关时加载 compact core，中等相关时先看元数据，专项引用只在直接信号命中时读取。
 - 加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。只读任务只应用 reasoning core；实际修改才应用 change rules；真实副作用、高成本或高风险操作继续遵循既有授权护栏。
 - 设计、计划、实现、调试、Review 和验证阶段只读取当前阶段命中的 Matt Skill 与必要专项模块，不预加载整个上游仓库。
-- Grill-me 使用 Matt 上游 `grill-me` / `grilling`，只在用户明确要求时启用。Full/Deep 在共同理解确认后仍必须通过独立整体 Review；Light 做有界交叉检查。
+- Light 不自动启动 Grill；Full 自动使用 Matt 上游 `grilling`，Deep 自动使用 `grill-me`（由上游覆盖更完整的 `grilling` frontier）。用户仍可在任意强度显式选择。Full/Deep 在共同理解确认后仍必须通过独立整体 Review；Light 做有界交叉检查。
 - Superpowers 不属于 SelfWorkflow 默认依赖、路由或安装内容。只有用户明确点名时，外部 Agent 才可把它作为本次指定能力使用；不得自动 fallback，也不得因此降低 SelfWorkflow 安全门禁。
 - C/C++/UE 任务默认加载 `cpp-core`，再按 ownership、并发、ABI、性能、安全、构建、调试或 Unreal 信号读取必要专项引用；非 C/C++ 任务不加载。
 - 代码任务默认尝试使用已配置 CodeGraph。只有项目绑定和索引新鲜度匹配时可作为结构证据；版本、commit 或索引过期时只作参考并明确标记“过期”，提示用户是否手动执行 sync/rebuild。缺失或过期不阻塞基础代码分析，也不得伪装成新鲜事实。

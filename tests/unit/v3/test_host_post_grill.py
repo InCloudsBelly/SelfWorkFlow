@@ -12,6 +12,26 @@ from tests.unit.v3.test_post_grill_review_gate import _Consumer, _fallback
 from selfworkflow.v3.hashing import content_hash
 
 
+def _review_package(*, kind, plan_hash, stage_id, attempt_ref):
+    value = {
+        "schemaVersion": 1,
+        "reviewKind": kind,
+        "planHash": plan_hash,
+        "stageId": stage_id,
+        "attemptRef": attempt_ref,
+        "content": {
+            "acceptanceCriteria": ["review package is complete"],
+            "changes": [{"path": "src/example.cpp", "status": "modified"}],
+            "baseline": {"baseHead": "HEAD"},
+            "specification": {"objective": "review"},
+            "verificationPlans": [{"command": "unit-tests"}],
+            "plan": {"objective": "review"},
+            "testDesign": {"cases": ["direct", "failure"]},
+        },
+    }
+    return {**value, "packageHash": content_hash(value)}
+
+
 class HostPostGrillGateTests(unittest.TestCase):
     def setUp(self):
         from selfworkflow.v3.host import Host
@@ -119,6 +139,7 @@ class HostPostGrillGateTests(unittest.TestCase):
             "dispatchPortBound": True, "artifactResolversBound": True,
             "replayConsumersBound": True,
             "independentContextAvailable": independent_context_available,
+            "reviewExecutionMode": "ephemeral-subagent",
             "reviewPolicyHash": self.review_policy.policy_hash,
         }
         service_attestation["attestationHash"] = content_hash(service_attestation)
@@ -184,6 +205,69 @@ class HostPostGrillGateTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             PostGrillReviewEvidence()
         self.assertFalse(hasattr(PostGrillReviewEvidence, "_issue"))
+
+    def test_review_model_selection_uses_agent_default_or_explicit_override(self):
+        from selfworkflow.v3.host import Host, HostError
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "review-models.yaml"
+            config.write_text(
+                "schemaVersion: 1\nagents:\n  codex:\n    review:\n"
+                "      model: gpt-5.6-sol\n      reasoningEffort: max\n",
+                encoding="utf-8",
+            )
+            host = Host(
+                self.plan, self.request, self.catalog, self.pipeline,
+                review_agent_id="codex", review_model_config_path=str(config),
+            )
+            self.assertEqual(
+                host._select_review_model("implementation-agent", None),
+                {
+                    "agentId": "codex", "model": "gpt-5.6-sol",
+                    "reasoningEffort": "max", "selectionMode": "default",
+                },
+            )
+            self.assertEqual(
+                host._select_review_model(
+                    "implementation-agent", {
+                        "agentId": "codex", "model": "gpt-5.6-sol",
+                        "reasoningEffort": "xhigh", "selectionMode": "one-time",
+                    },
+                )["selectionMode"],
+                "one-time",
+            )
+
+            missing = Host(
+                self.plan, self.request, self.catalog, self.pipeline,
+                review_agent_id="claude",
+                review_model_config_path=str(config),
+            )
+            with self.assertRaisesRegex(HostError, "needs_user_configuration"):
+                missing._select_review_model("implementation-agent", None)
+
+    def test_review_model_override_must_be_one_time_and_bound_to_effective_agent(self):
+        from selfworkflow.v3.host import Host, HostError
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "review-models.yaml"
+            host = Host(
+                self.plan, self.request, self.catalog, self.pipeline,
+                review_agent_id="codex", review_model_config_path=str(config),
+            )
+            base = {
+                "agentId": "codex", "model": "gpt-5.6-sol",
+                "reasoningEffort": "max",
+            }
+            with self.assertRaisesRegex(HostError, "review-model-override-invalid"):
+                host._select_review_model(
+                    "implementation-agent", {**base, "selectionMode": "default"}
+                )
+            with self.assertRaisesRegex(HostError, "review-model-override-invalid"):
+                host._select_review_model(
+                    "implementation-agent", {
+                        **base, "agentId": "claude", "selectionMode": "one-time",
+                    }
+                )
 
     def test_host_dispatch_receipt_is_required_and_bound_to_design_attempt(self):
         from selfworkflow.v3.host import HostError
@@ -328,6 +412,10 @@ class HostPostGrillGateTests(unittest.TestCase):
                 implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context",
                 attempt_ref="attempt-reviewed",
+                review_package=_review_package(
+                    kind="code", plan_hash=host.plan.plan_hash,
+                    stage_id="implemented", attempt_ref="attempt-reviewed",
+                ),
             )
             self.assertEqual(result["reviewMode"], "independent-code-review")
             self.assertEqual(len(route_port.calls), 2)
@@ -343,6 +431,32 @@ class HostPostGrillGateTests(unittest.TestCase):
                 route_port.calls[0]["project_review_context"],
                 route_port.calls[1]["project_review_context"],
             )
+
+    def test_host_plan_review_route_requires_and_binds_planned_package(self):
+        from selfworkflow.v3.host import Host
+        from tests.unit.v3.test_review_dispatch import _verified
+
+        port = _SpyPort()
+        services_host = self._host_with_port(port)
+        host = Host(
+            self.plan, self.request, self.catalog, self.pipeline,
+            review_services=services_host._review_services,
+            review_test_mode=True,
+        )
+        result = host.dispatch_plan_review(
+            _verified(plan_hash=host.plan.plan_hash),
+            implementation_agent_identity="implementation-agent",
+            implementation_context_identity="implementation-context",
+            attempt_ref="attempt-planned",
+            review_package=_review_package(
+                kind="plan", plan_hash=host.plan.plan_hash,
+                stage_id="planned", attempt_ref="attempt-planned",
+            ),
+        )
+        self.assertEqual(result["reviewMode"], "independent-design-review")
+        self.assertEqual(
+            port.calls[0]["payload"]["reviewPackage"]["reviewKind"], "plan"
+        )
 
     def test_review_services_are_constructor_bound_and_fake_services_are_test_only(self):
         from selfworkflow.v3.host import Host, HostError

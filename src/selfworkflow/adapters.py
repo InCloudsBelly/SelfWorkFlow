@@ -43,6 +43,7 @@ _CORE_PATHS = (
     "schemas/resolve-result.schema.json",
     "schemas/git-policy.schema.json",
     "schemas/project-review-profile.schema.json",
+    "schemas/review-model-config.schema.json",
     "skills/code-quality",
     "skills/workflow-quality",
     "skills/testing-review-quality",

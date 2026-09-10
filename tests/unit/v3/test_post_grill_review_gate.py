@@ -2,7 +2,7 @@ import copy
 from datetime import datetime, timezone
 import unittest
 
-from selfworkflow.v3.hashing import content_hash
+from selfworkflow.v3.hashing import content_hash, hash_bytes
 
 
 DESIGN_HASH = "sha256:" + "a" * 64
@@ -11,6 +11,8 @@ SUMMARY_HASH = "sha256:" + "c" * 64
 PAYLOAD_HASH = "sha256:" + "d" * 64
 RESULT_HASH = "sha256:" + "e" * 64
 PLAN_HASH = "sha256:" + "f" * 64
+REVIEW_REPORT = "# Review\n\nNo findings."
+SKILL_MANIFEST_HASH = "sha256:" + "1" * 64
 NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
 
 
@@ -52,6 +54,14 @@ def _receipt(*, attested=True, same_agent=False, fallback_ref=None, verdict="app
         "resultHash": RESULT_HASH, "reviewVerdict": verdict, "reviewLevel": "L2",
         "fallbackAuthorizationRef": fallback_ref,
         "independence": "unverified",
+        "reviewExecutionMode": "ephemeral-subagent",
+        "subagentLifecycle": "created-executed-cleaned",
+        "subagentExecutionId": "subagent-1",
+        "reviewModel": None,
+        "skillManifestHash": SKILL_MANIFEST_HASH,
+        "reviewPackageHash": None,
+        "reviewReportMarkdown": REVIEW_REPORT,
+        "reviewReportHash": hash_bytes(REVIEW_REPORT.encode("utf-8")),
     }
     attestation = None
     if attested:
@@ -69,6 +79,13 @@ def _receipt(*, attested=True, same_agent=False, fallback_ref=None, verdict="app
             "reviewerAgentIdentity": value["reviewerAgentIdentity"],
             "reviewerContextIdentity": value["reviewerContextIdentity"],
             "resultHash": value["resultHash"],
+            "reviewModel": value["reviewModel"],
+            "reviewExecutionMode": value["reviewExecutionMode"],
+            "subagentLifecycle": value["subagentLifecycle"],
+            "subagentExecutionId": value["subagentExecutionId"],
+            "reviewReportHash": value["reviewReportHash"],
+            "skillManifestHash": value["skillManifestHash"],
+            "reviewPackageHash": value["reviewPackageHash"],
         }
         attestation["attestationHash"] = content_hash(attestation)
         value["hostAttestationRef"] = attestation["attestationHash"]
@@ -199,6 +216,15 @@ class PostGrillReviewGateTests(unittest.TestCase):
         changed, changed_attestation = _receipt(verdict="changes-required")
         blocked = self._evaluate(True, changed, None, attestation=changed_attestation)
         self.assertEqual((blocked.status, blocked.reason_code), ("pause", "post-grill-review-changes-required"))
+
+    def test_review_report_hash_drift_fails_closed_even_when_receipt_hash_is_resealed(self):
+        receipt, attestation = _receipt()
+        receipt["reviewReportMarkdown"] = "# Tampered review"
+        receipt["receiptHash"] = content_hash({
+            key: value for key, value in receipt.items() if key != "receiptHash"
+        })
+        result = self._evaluate(True, receipt, None, attestation=attestation)
+        self.assertEqual((result.status, result.reason_code), ("pause", "post-grill-review-input-invalid"))
 
     def test_review_contract_schemas_are_registered_and_closed(self):
         from selfworkflow.v3.contracts import ContractError, load_contract

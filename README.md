@@ -108,6 +108,18 @@ workflow rules. The schema and read-only validator are in
 `schemas/project-review-profile.schema.json` and `selfworkflow project-review
 validate --project-root <project-root>`.
 
+Review models are configured per Agent in the machine-local
+`%LOCALAPPDATA%\SelfWorkFlow\config\review-models.local.yaml` file. Missing
+Agent entries pause Review for user configuration; no model alias or reasoning
+level is inferred. Use `selfworkflow review-model status --agent <id>` to
+inspect a selection and `selfworkflow review-model set --agent <id> --model
+<model> --reasoning-effort <effort> --confirm` to save a confirmed default.
+One-time overrides remain in the current dispatch only. The selected value is
+payload-bound, and the Host must return the same value in its dispatch
+observation; a mismatch fails closed. Model execution is still host-attested
+and must not be claimed from configuration alone. The file is machine-local
+and must not be committed.
+
 Runtime profiles are closed and deterministic:
 
 - `core` (default): compact workflow, code-quality sources, stage routing, and thin
@@ -176,9 +188,13 @@ confirmation.
   and automated-tested. The checked-in V3 request intentionally remains `paused`
   until a conforming Host supplies fresh supported evidence.
 - OpenSpec routing, a generic specialist Review selector/aggregate execution path,
-  Heavy/Forensic adapters and dependencies, real CodeGraph query/mutation, and
-  native post-Grill SubAgent dispatch are not implemented by this release. Their
-  design contracts or Fake-port tests are not support evidence.
+  Heavy/Forensic adapters and dependencies, and real CodeGraph query/mutation
+  remain outside this release. Review dispatch now has a fail-closed ephemeral
+  SubAgent contract: the Host must provide the selected model, a hash-bound
+  complete code/plan package, ordered project-before-generic Skills, structured
+  result, Markdown summary, and cleanup evidence. Fake-port tests do not prove
+  native support; each vendor Host must still provide fresh capability and
+  model-execution evidence before being marked supported.
 - Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
   `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
   `adapters/unknown/BOOTSTRAP.md`.

@@ -111,6 +111,58 @@ plan hash before implementation continues. A document that is itself the final
 deliverable still lands through `document`, post-landing Review, and Verify.
 Writing a plan never completes an implementation request.
 
+### Per-Agent Review model
+
+Review model selection is machine-local and keyed by Agent identity. The
+default file is
+`%LOCALAPPDATA%\SelfWorkFlow\config\review-models.local.yaml`; it is not
+part of the repository, runtime snapshot, Wiki, or credentials. Its schema is
+`schemas/review-model-config.schema.json`, for example:
+
+```yaml
+schemaVersion: 1
+agents:
+  codex:
+    review:
+      model: gpt-5.6-sol
+      reasoningEffort: max
+  claude:
+    review: null
+```
+
+When an Agent has no configured Review selection, the Host returns
+`needs_user_configuration`; the Agent must ask the user for the exact model
+and supported reasoning effort before saving a default. Model aliases are not
+inferred (`Xmax` is not silently mapped to `max`). A user-requested switch
+must be explicitly classified as either a new default or a one-time override;
+the latter is carried only in the current Review dispatch and is not persisted.
+The selected `reviewModel` is bound into the Review payload, and the Host must
+return the same validated selection in its dispatch observation; a missing or
+mismatched observation fails closed. Actual model execution and host capability
+remain host-attested; configuration alone is not model-execution evidence. The
+repository CLI can inspect or save the machine-local selection with
+`selfworkflow review-model status` and
+`selfworkflow review-model set --confirm`.
+
+Review model selection never changes the parent conversation's model. Every
+Host-owned independent Review dispatch must create a fresh ephemeral SubAgent
+with the selected model and reasoning effort, pass only the bounded Review
+package, collect the structured result and a bounded Markdown summary, then
+clean up the SubAgent. The required lifecycle is
+`created-executed-cleaned`; missing capability or cleanup failure is
+fail-closed and cannot fall back to the parent conversation. The receipt binds
+`reviewExecutionMode: ephemeral-subagent`, the lifecycle marker, and the
+summary hash. Private reviewer reasoning is never returned or persisted.
+Full/Deep code Review keeps two independent ephemeral SubAgents for Standards
+and Spec. A matching project `.selfworkflow/review.yaml` Skill manifest is
+ordered before the generic Review Skill within the ordinary Skill layer; it
+cannot override protected workflow rules or completion gates. Code Review must
+receive a hash-bound complete package containing the approved diff/materials,
+acceptance specification, and verification plan, bound to the current plan,
+stage, and attempt. Plan Review uses the same package and dispatch seam. The
+dual code gate requires both axes to return independent, attested L2/L3
+`approve` results with the same package and Skill-manifest hashes.
+
 ### 代码实施契约
 
 Any task that adds, changes, or deletes behavior code forms a 代码实施契约 before
@@ -157,7 +209,9 @@ revised. Progress never replaces Review or verification evidence.
 `Full/Deep` tasks, and tasks that produce 至少两份正式文档 among the design,
 test design, and implementation plan, require a new 独立 SubAgent before
 implementation. The latter is upgraded to Full; a Light inline task remains
-lightweight. The reviewer receives the accepted scope, acceptance criteria,
+lightweight. Whenever this gate or a post-landing independent Review is
+required, it uses the same ephemeral SubAgent contract and never changes the
+parent model. The reviewer receives the accepted scope, acceptance criteria,
 project rules, complete final documents, and the 最终文档包 hash, but not the
 main Agent's private reasoning. Chunk Review or 同一 Agent self-review cannot
 replace this 完整文档包 Review.

@@ -23,6 +23,11 @@ from selfworkflow.v3.plan_graph import (
     build_plan_graph,
 )
 from selfworkflow.v3.selector import SelectionResult
+from selfworkflow.review_models import (
+    ReviewModelConfigError,
+    normalize_review_model_payload,
+    resolve_review_model,
+)
 
 
 _MISSING = object()
@@ -179,6 +184,8 @@ class Host:
         review_test_mode: bool = False,
         project_root: str | None = None,
         conversation_id: str | None = None,
+        review_agent_id: str | None = None,
+        review_model_config_path: str | None = None,
     ) -> None:
         if type(plan) is not PlanGraphArtifact:
             raise HostError("v3-host-plan-not-typed")
@@ -220,6 +227,19 @@ class Host:
         self._project_root = project_root
         self._conversation_id = conversation_id
         self._project_review_session = None
+        if review_agent_id is not None and (
+            type(review_agent_id) is not str
+            or not review_agent_id
+        ):
+            raise HostError("review-agent-identity-invalid")
+        if review_model_config_path is not None and (
+            type(review_model_config_path) is not str
+            or not review_model_config_path
+        ):
+            raise HostError("review-model-config-path-invalid")
+        self._review_test_mode = review_test_mode
+        self._review_agent_id = review_agent_id
+        self._review_model_config_path = review_model_config_path
 
     @property
     def plan(self) -> PlanGraphArtifact:
@@ -284,6 +304,7 @@ class Host:
         now: object,
         grill_completion_ref: str,
         fallback_authorization_ref: str | None = None,
+        review_model_override: Mapping[str, object] | None = None,
     ) -> PostGrillReviewEvidence:
         """Dispatch and evaluate the mandatory review through Host-owned ports."""
 
@@ -326,6 +347,9 @@ class Host:
             normalized_summary = verified_input.summary
             if normalized_summary["summaryHash"] != summary_ref:
                 raise HostError("post-grill-review-summary-reference-invalid")
+            selected_review_model = self._select_review_model(
+                implementation_agent_identity, review_model_override,
+            )
             if independent_context_available:
                 receipt = dispatch_independent_review(
                     verified_input,
@@ -335,6 +359,7 @@ class Host:
                     fallback_authorization_ref=fallback_authorization_ref,
                     plan_hash=self._plan.plan_hash,
                     attempt_ref=attempt_ref,
+                    review_model=selected_review_model,
                 )
             else:
                 if fallback_authorization_ref is None:
@@ -365,6 +390,7 @@ class Host:
                     fallback_authorization_ref=fallback_authorization_ref,
                     plan_hash=self._plan.plan_hash,
                     attempt_ref=attempt_ref,
+                    review_model=selected_review_model,
                 )
             decision = evaluate_post_grill_review(
                 independent_context_available=independent_context_available,
@@ -448,16 +474,41 @@ class Host:
         implementation_agent_identity: str,
         implementation_context_identity: str,
         attempt_ref: str,
+        review_package: Mapping[str, object] | None = None,
+        ledger: Mapping[str, Any] | None = None,
+        review_model_override: Mapping[str, object] | None = None,
     ) -> dict[str, Any]:
-        """Dispatch a non-Grill independent code Review with project Skills."""
+        """Dispatch a non-Grill independent code Review with a full package."""
 
         if self._review_services is None:
             raise HostError("code-review-host-services-required")
         if not self._review_services.independent_context_available:
             raise HostError("code-review-independent-context-required")
+        if review_package is None:
+            raise HostError("code-review-package-required")
+        if not self._review_test_mode and ledger is None:
+            raise HostError("code-review-ledger-required")
         try:
             from selfworkflow.v3.review_dispatch import dispatch_dual_code_review
+            if ledger is not None:
+                from selfworkflow.v3.ledger import assert_valid_ledger
+                from selfworkflow.v3.review_package import normalize_review_package
 
+                assert_valid_ledger(ledger, self._plan)
+                active = [item for item in ledger["stages"] if item["status"] == "active"]
+                if len(active) != 1 or active[0]["stageId"] not in {"implemented", "reviewed"}:
+                    raise HostError("code-review-stage-not-active")
+                if active[0]["attempts"][-1]["attemptRef"] != attempt_ref:
+                    raise HostError("code-review-attempt-mismatch")
+                normalize_review_package(
+                    review_package, expected_kind="code",
+                    plan_hash=self._plan.plan_hash,
+                    stage_id=("implemented", "reviewed"), attempt_ref=attempt_ref,
+                )
+
+            selected_review_model = self._select_review_model(
+                implementation_agent_identity, review_model_override,
+            )
             return dispatch_dual_code_review(
                 verified_input,
                 implementation_agent_identity=implementation_agent_identity,
@@ -466,6 +517,8 @@ class Host:
                 plan_hash=self._plan.plan_hash,
                 attempt_ref=attempt_ref,
                 project_review_context=self.build_project_review_context(),
+                review_model=selected_review_model,
+                review_package=review_package,
             )
         except HostError:
             raise
@@ -473,6 +526,96 @@ class Host:
             raise HostError(
                 getattr(error, "reason", "code-review-dispatch-failed")
             ) from None
+
+    def dispatch_plan_review(
+        self,
+        verified_input: object,
+        *,
+        implementation_agent_identity: str,
+        implementation_context_identity: str,
+        attempt_ref: str,
+        review_package: Mapping[str, object] | None = None,
+        ledger: Mapping[str, Any] | None = None,
+        review_model_override: Mapping[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """Dispatch the planned-stage package through the same SubAgent seam."""
+
+        if self._review_services is None:
+            raise HostError("plan-review-host-services-required")
+        if not self._review_services.independent_context_available:
+            raise HostError("plan-review-independent-context-required")
+        if review_package is None:
+            raise HostError("plan-review-package-required")
+        if not self._review_test_mode and ledger is None:
+            raise HostError("plan-review-ledger-required")
+        try:
+            from selfworkflow.v3.review_dispatch import dispatch_independent_review
+            if ledger is not None:
+                from selfworkflow.v3.ledger import assert_valid_ledger
+                from selfworkflow.v3.review_package import normalize_review_package
+
+                assert_valid_ledger(ledger, self._plan)
+                active = [item for item in ledger["stages"] if item["status"] == "active"]
+                if len(active) != 1 or active[0]["stageId"] != "planned":
+                    raise HostError("plan-review-stage-not-active")
+                if active[0]["attempts"][-1]["attemptRef"] != attempt_ref:
+                    raise HostError("plan-review-attempt-mismatch")
+                normalize_review_package(
+                    review_package, expected_kind="plan",
+                    plan_hash=self._plan.plan_hash,
+                    stage_id="planned", attempt_ref=attempt_ref,
+                )
+
+            selected_review_model = self._select_review_model(
+                implementation_agent_identity, review_model_override,
+            )
+            return dispatch_independent_review(
+                verified_input,
+                implementation_agent_identity=implementation_agent_identity,
+                implementation_context_identity=implementation_context_identity,
+                port=self._review_services.dispatch_port,
+                plan_hash=self._plan.plan_hash,
+                attempt_ref=attempt_ref,
+                review_model=selected_review_model,
+                review_package=review_package,
+            )
+        except HostError:
+            raise
+        except Exception as error:
+            raise HostError(
+                getattr(error, "reason", "plan-review-dispatch-failed")
+            ) from None
+
+    def _select_review_model(
+        self,
+        implementation_agent_identity: str,
+        override: Mapping[str, object] | None,
+    ) -> Mapping[str, object] | None:
+        """Resolve the machine-local default or a validated one-time override."""
+
+        agent_id = self._review_agent_id or implementation_agent_identity
+        if override is not None:
+            try:
+                selection = normalize_review_model_payload(dict(override))
+            except (ReviewModelConfigError, TypeError, ValueError):
+                raise HostError("review-model-override-invalid") from None
+            if (
+                selection["selectionMode"] != "one-time"
+                or selection["agentId"] != agent_id
+            ):
+                raise HostError("review-model-override-invalid")
+            return selection
+        if self._review_test_mode:
+            return None
+        try:
+            resolution = resolve_review_model(
+                agent_id, self._review_model_config_path,
+            )
+        except (ReviewModelConfigError, TypeError, ValueError):
+            raise HostError("review-model-config-invalid") from None
+        if resolution.status != "configured" or resolution.selection is None:
+            raise HostError("needs_user_configuration")
+        return resolution.selection.as_dict(selection_mode="default")
 
     def _review_strength(self) -> str:
         """Resolve the plan's effective strength from its immutable request."""

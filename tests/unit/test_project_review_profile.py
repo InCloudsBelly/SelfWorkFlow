@@ -453,6 +453,15 @@ class ProjectReviewProfileTests(unittest.TestCase):
             copied = destination / "schemas/project-review-profile.schema.json"
             self.assertEqual(copied.read_bytes(), (ROOT / "schemas/project-review-profile.schema.json").read_bytes())
 
+    def test_core_runtime_copy_includes_review_model_schema(self):
+        from selfworkflow.adapters import _copy_runtime_path
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "runtime"
+            _copy_runtime_path(ROOT, destination, "schemas/review-model-config.schema.json")
+            copied = destination / "schemas/review-model-config.schema.json"
+            self.assertEqual(copied.read_bytes(), (ROOT / "schemas/review-model-config.schema.json").read_bytes())
+
     def test_invalid_profile_redacts_content_and_fails_closed(self):
         from selfworkflow.project_review import ProjectReviewProfileError, load_project_review_profile
 

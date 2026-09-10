@@ -34,6 +34,11 @@ from selfworkflow.project_review import (
     ProjectReviewProfileError,
     load_project_review_profile,
 )
+from selfworkflow.review_models import (
+    ReviewModelConfigError,
+    resolve_review_model,
+    save_review_model,
+)
 from selfworkflow.sources import (
     commit_superpowers_migration,
     recover_superpowers_migration,
@@ -454,6 +459,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     project_review_validate = project_review_commands.add_parser("validate")
     project_review_validate.add_argument("--project-root", required=True)
+    review_model = commands.add_parser("review-model")
+    review_model_commands = review_model.add_subparsers(
+        dest="review_model_command", required=True,
+    )
+    review_model_status = review_model_commands.add_parser("status")
+    review_model_status.add_argument("--agent", required=True)
+    review_model_status.add_argument("--config-file")
+    review_model_set = review_model_commands.add_parser("set")
+    review_model_set.add_argument("--agent", required=True)
+    review_model_set.add_argument("--model", required=True)
+    review_model_set.add_argument("--reasoning-effort", required=True)
+    review_model_set.add_argument("--config-file")
+    review_model_set.add_argument(
+        "--confirm", action="store_true",
+        help="确认把该选择写入机器本地默认配置",
+    )
     arguments = parser.parse_args(argv)
     if arguments.command == "project-review":
         try:
@@ -463,6 +484,30 @@ def main(argv: list[str] | None = None) -> int:
             return 53
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 53 if result["status"] == "unverified" and result["blocking"] else 0
+    if arguments.command == "review-model":
+        try:
+            if arguments.review_model_command == "status":
+                result = resolve_review_model(
+                    arguments.agent, arguments.config_file,
+                ).as_dict()
+            elif arguments.review_model_command == "set":
+                result = save_review_model(
+                    arguments.config_file,
+                    arguments.agent,
+                    arguments.model,
+                    arguments.reasoning_effort,
+                    confirmed=arguments.confirm,
+                ).as_dict()
+            else:
+                raise ReviewModelConfigError("review-model-command-invalid")
+        except ReviewModelConfigError as error:
+            print(
+                f"SelfWorkFlow: review-model-operation-failed:{error.reason}",
+                file=sys.stderr,
+            )
+            return 54
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
     if arguments.command == "quality":
         try:
             if arguments.quality_command == "capture":

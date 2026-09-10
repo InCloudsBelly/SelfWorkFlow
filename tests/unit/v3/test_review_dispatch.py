@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from selfworkflow.v3.hashing import content_hash
+from selfworkflow.v3.hashing import content_hash, hash_bytes
 
 
 HASH_A = "sha256:" + "a" * 64
@@ -117,19 +117,29 @@ def _attestation(observation, implementation_agent, implementation_context):
         "reviewerAgentIdentity": observation["reviewerAgent"],
         "reviewerContextIdentity": observation["reviewerContext"],
         "resultHash": observation["result"]["resultHash"],
+        "reviewModel": observation["reviewModel"],
+        "reviewExecutionMode": observation["reviewExecutionMode"],
+        "subagentLifecycle": observation["subagentLifecycle"],
+        "subagentExecutionId": observation["subagentExecutionId"],
+        "reviewReportHash": observation["reviewReportHash"],
+        "skillManifestHash": observation["skillManifestHash"],
+        "reviewPackageHash": observation["reviewPackageHash"],
     }
     value["attestationHash"] = content_hash(value)
     return value
 
 
 class _SpyPort:
-    def __init__(self, *, attested=True, same_identity=False, verdict="approve", tamper_attestation=False, unique_dispatches=False):
+    def __init__(self, *, attested=True, same_identity=False, verdict="approve", tamper_attestation=False, unique_dispatches=False, lifecycle="created-executed-cleaned", execution_mode="ephemeral-subagent", report="# Review\n\nNo findings."):
         self.calls = []
         self.attested = attested
         self.same_identity = same_identity
         self.verdict = verdict
         self.tamper_attestation = tamper_attestation
         self.unique_dispatches = unique_dispatches
+        self.lifecycle = lifecycle
+        self.execution_mode = execution_mode
+        self.report = report
         self.last_attestation = None
 
     def dispatch_review(self, **call):
@@ -137,7 +147,9 @@ class _SpyPort:
         from selfworkflow.v3.review_dispatch import HostDispatchObservation
 
         if call["review_mode"] == "independent-code-review":
-            summary = call["payload"]["codeReviewSubject"]
+            summary = call["payload"].get(
+                "reviewPackage", call["payload"]["codeReviewSubject"]
+            )
             result = _code_result(
                 summary,
                 verdict=self.verdict,
@@ -166,6 +178,26 @@ class _SpyPort:
             "forkContext": call["fork_context"], "payload": call["payload"],
             "reviewerAgent": reviewer_agent, "reviewerContext": reviewer_context,
             "result": result,
+            "reviewModel": call.get("review_model"),
+            "reviewExecutionMode": self.execution_mode,
+            "subagentLifecycle": self.lifecycle,
+            "subagentExecutionId": f"subagent-{ordinal}",
+            "reviewReportHash": hash_bytes(self.report.encode("utf-8")),
+            "skillManifestHash": content_hash({
+                "schemaVersion": 1,
+                "skills": (
+                    call.get("payload", {}).get("projectReview", {}).get("skillManifest", [])
+                    if isinstance(call.get("payload", {}).get("projectReview"), dict)
+                    else [{
+                        "layer": "generic",
+                        "id": "matt-pocock.code-review",
+                        "path": "skills/engineering/code-review",
+                        "contentHash": "sha256:e32441ce3f64628daeb6270bf56104f461b1341aa472cc3968424e90ece17bc4",
+                        "required": True,
+                    }]
+                ),
+            }),
+            "reviewPackageHash": call.get("payload", {}).get("reviewPackageHash"),
         }
         attestation = _attestation(
             observed, call["implementation_agent_identity"],
@@ -186,10 +218,68 @@ class _SpyPort:
             reviewer_context_identity=reviewer_context,
             host_attestation=attestation, returned_value=result,
             project_review_context=call.get("project_review_context"),
+            review_model=call.get("review_model"),
+            review_execution_mode=self.execution_mode,
+            subagent_lifecycle=self.lifecycle,
+            subagent_execution_id=f"subagent-{ordinal}",
+            review_report_markdown=self.report,
         )
 
 
+class _IgnoringReviewModelPort(_SpyPort):
+    def dispatch_review(self, **call):
+        observation = super().dispatch_review(**call)
+        object.__setattr__(observation, "review_model", None)
+        return observation
+
+
 class ReviewDispatchTests(unittest.TestCase):
+    def test_dispatch_returns_bounded_report_and_ephemeral_lifecycle(self):
+        from selfworkflow.v3.review_dispatch import dispatch_independent_review
+
+        receipt = dispatch_independent_review(
+            _verified(), implementation_agent_identity="implementation-agent",
+            implementation_context_identity="implementation-context", port=_SpyPort(),
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+        )
+        self.assertEqual(receipt["reviewExecutionMode"], "ephemeral-subagent")
+        self.assertEqual(receipt["subagentLifecycle"], "created-executed-cleaned")
+        self.assertEqual(receipt["reviewReportMarkdown"], "# Review\n\nNo findings.")
+        self.assertRegex(receipt["reviewReportHash"], r"^sha256:[0-9a-f]{64}$")
+
+    def test_dispatch_rejects_non_ephemeral_review_execution(self):
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+
+        with self.assertRaisesRegex(ReviewDispatchError, "review-subagent-required"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                port=_SpyPort(execution_mode="current-dialog"),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+            )
+
+    def test_dispatch_rejects_cleanup_failure(self):
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+
+        with self.assertRaisesRegex(ReviewDispatchError, "review-subagent-cleanup-invalid"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                port=_SpyPort(lifecycle="created-executed-cleanup-failed"),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+            )
+
+    def test_dispatch_rejects_missing_review_report(self):
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
+
+        with self.assertRaisesRegex(ReviewDispatchError, "review-report-invalid"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                port=_SpyPort(report=""), plan_hash=PLAN_HASH,
+                attempt_ref="attempt-designed",
+            )
+
     def test_dispatch_forces_fresh_context_and_summary_only_payload(self):
         from selfworkflow.v3.review_dispatch import dispatch_independent_review
 
@@ -203,10 +293,68 @@ class ReviewDispatchTests(unittest.TestCase):
         call = port.calls[0]
         self.assertEqual(call["review_mode"], "independent-design-review")
         self.assertIs(call["fork_context"], False)
+        self.assertNotIn("review_model", call)
         self.assertEqual(set(call["payload"]), {"schemaVersion", "reviewMode", "designReviewSummary"})
         self.assertEqual(receipt["independence"], "independent")
         self.assertEqual(receipt["reviewVerdict"], "approve")
         self.assertFalse(receipt["parentContextImported"])
+
+    def test_dispatch_binds_valid_review_model_selection_to_host_payload(self):
+        from selfworkflow.v3.review_dispatch import dispatch_independent_review
+
+        selection = {
+            "agentId": "codex",
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max",
+            "selectionMode": "default",
+        }
+        port = _SpyPort()
+        dispatch_independent_review(
+            _verified(), implementation_agent_identity="implementation-agent",
+            implementation_context_identity="implementation-context", port=port,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+            review_model=selection,
+        )
+
+        self.assertEqual(port.calls[0]["review_model"], selection)
+        self.assertEqual(port.calls[0]["payload"]["reviewModel"], selection)
+
+    def test_dispatch_rejects_unvalidated_review_model_selection(self):
+        from selfworkflow.v3.review_dispatch import (
+            ReviewDispatchError, dispatch_independent_review,
+        )
+
+        with self.assertRaisesRegex(ReviewDispatchError, "review-model-payload-invalid"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context", port=_SpyPort(),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+                review_model={
+                    "agentId": "codex", "model": "gpt-5.6-sol",
+                    "reasoningEffort": "Xmax", "selectionMode": "default",
+                },
+            )
+
+    def test_dispatch_rejects_host_that_does_not_observe_selected_review_model(self):
+        from selfworkflow.v3.review_dispatch import (
+            ReviewDispatchError, dispatch_independent_review,
+        )
+
+        selection = {
+            "agentId": "codex",
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max",
+            "selectionMode": "default",
+        }
+        with self.assertRaisesRegex(
+            ReviewDispatchError, "review-model-observation-mismatch"
+        ):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                port=_IgnoringReviewModelPort(), plan_hash=PLAN_HASH,
+                attempt_ref="attempt-designed", review_model=selection,
+            )
 
     def test_dispatch_passes_the_same_project_review_inputs_to_the_host_port(self):
         from selfworkflow.project_review import build_code_review_context, load_project_review_profile
@@ -240,6 +388,10 @@ class ReviewDispatchTests(unittest.TestCase):
 
         call = port.calls[0]
         self.assertIn("projectReview", call["payload"])
+        self.assertEqual(
+            call["payload"]["projectReview"]["skillPrecedence"],
+            "project-before-generic",
+        )
         self.assertEqual(call["project_review_context"], context)
         self.assertEqual(
             call["project_review_context"]["reviewers"]["standards"],
@@ -405,6 +557,17 @@ class ReviewDispatchTests(unittest.TestCase):
             result["reviewers"]["standards"]["reviewMode"],
             "independent-code-review",
         )
+
+    def test_dual_code_review_rejects_unattested_or_non_approving_axis(self):
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_dual_code_review
+
+        with self.assertRaisesRegex(ReviewDispatchError, "review-code-review-gate-failed"):
+            dispatch_dual_code_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                port=_SpyPort(attested=False, unique_dispatches=True),
+                plan_hash=PLAN_HASH, attempt_ref="attempt-reviewed",
+            )
 
     def test_agent_self_report_fields_are_rejected_and_host_identity_wins(self):
         from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review

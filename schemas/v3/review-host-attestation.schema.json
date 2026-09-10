@@ -4,7 +4,7 @@
   "title": "SelfWorkFlow V3 host-observed review dispatch attestation",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "dispatchId", "dispatchNonce", "planHash", "attemptRef", "issuedAt", "expiresAt", "reviewMode", "forkContext", "payloadHash", "implementationAgentIdentity", "implementationContextIdentity", "hostAgentIdentity", "hostContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "resultHash", "attestationHash"],
+  "required": ["schemaVersion", "dispatchId", "dispatchNonce", "planHash", "attemptRef", "issuedAt", "expiresAt", "reviewMode", "forkContext", "payloadHash", "implementationAgentIdentity", "implementationContextIdentity", "hostAgentIdentity", "hostContextIdentity", "reviewerAgentIdentity", "reviewerContextIdentity", "resultHash", "reviewModel", "reviewExecutionMode", "subagentLifecycle", "subagentExecutionId", "reviewReportHash", "skillManifestHash", "reviewPackageHash", "attestationHash"],
   "properties": {
     "schemaVersion": {"const": 3},
     "dispatchId": {"$ref": "#/$defs/id"},
@@ -23,6 +23,13 @@
     "reviewerAgentIdentity": {"$ref": "#/$defs/id"},
     "reviewerContextIdentity": {"$ref": "#/$defs/id"},
     "resultHash": {"$ref": "#/$defs/hash"},
+    "reviewModel": {"oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "required": ["agentId", "model", "reasoningEffort", "selectionMode"], "properties": {"agentId": {"$ref": "#/$defs/id"}, "model": {"type": "string", "minLength": 1, "maxLength": 256}, "reasoningEffort": {"enum": ["low", "medium", "high", "xhigh", "max", "ultra"]}, "selectionMode": {"enum": ["default", "one-time"]}}}]},
+    "reviewExecutionMode": {"const": "ephemeral-subagent"},
+    "subagentLifecycle": {"const": "created-executed-cleaned"},
+    "subagentExecutionId": {"$ref": "#/$defs/id"},
+    "reviewReportHash": {"$ref": "#/$defs/hash"},
+    "skillManifestHash": {"$ref": "#/$defs/hash"},
+    "reviewPackageHash": {"oneOf": [{"$ref": "#/$defs/hash"}, {"type": "null"}]},
     "attestationHash": {"$ref": "#/$defs/hash"}
   },
   "$defs": {

@@ -26,6 +26,7 @@ class ReviewHostServices:
         "host_attestation_consumer", "fallback_authorization_resolver",
         "fallback_authorization_consumer", "backend_class", "_token",
         "independent_context_available",
+        "review_execution_mode",
     )
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
@@ -61,7 +62,7 @@ def bind_review_host_services(
     required = {
         "schemaVersion", "backendClass", "dispatchPortBound",
         "artifactResolversBound", "replayConsumersBound", "reviewPolicyHash",
-        "independentContextAvailable", "attestationHash",
+        "independentContextAvailable", "reviewExecutionMode", "attestationHash",
     }
     if type(service_attestation) is not dict or set(service_attestation) != required:
         raise ReviewServiceError("review-host-service-attestation-invalid")
@@ -72,6 +73,7 @@ def bind_review_host_services(
         or service_attestation["artifactResolversBound"] is not True
         or service_attestation["replayConsumersBound"] is not True
         or type(service_attestation["independentContextAvailable"]) is not bool
+        or service_attestation["reviewExecutionMode"] != "ephemeral-subagent"
         or type(review_policy) is not ReviewPolicyArtifact
         or not review_policy._is_valid()
         or service_attestation["reviewPolicyHash"] != review_policy.policy_hash
@@ -103,6 +105,9 @@ def bind_review_host_services(
     object.__setattr__(
         services, "independent_context_available",
         service_attestation["independentContextAvailable"],
+    )
+    object.__setattr__(
+        services, "review_execution_mode", service_attestation["reviewExecutionMode"],
     )
     object.__setattr__(services, "_token", _SERVICE_TOKEN)
     return services

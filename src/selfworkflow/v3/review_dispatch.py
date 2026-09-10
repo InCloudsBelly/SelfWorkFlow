@@ -15,6 +15,17 @@ from selfworkflow.v3.hashing import (
     HashingError, clone, content_hash, hash_bytes, require_hash,
 )
 from selfworkflow.v3.review_inputs import VerifiedReviewInput
+from selfworkflow.v3.review_report import ReviewReportError, normalize_review_report
+from selfworkflow.v3.review_package import (
+    ReviewPackageError,
+    normalize_review_package,
+    ordered_skill_manifest,
+    skill_manifest_hash,
+)
+from selfworkflow.review_models import (
+    ReviewModelConfigError,
+    normalize_review_model_payload,
+)
 
 
 class ReviewDispatchError(ValueError):
@@ -43,15 +54,31 @@ class HostDispatchObservation:
     host_attestation: dict[str, Any] | None
     returned_value: dict[str, Any]
     project_review_context: Mapping[str, object] | None = None
+    review_model: Mapping[str, object] | None = None
+    review_execution_mode: str = ""
+    subagent_lifecycle: str = ""
+    subagent_execution_id: str = ""
+    review_report_markdown: str = ""
 
 
 class ReviewDispatchPort(Protocol):
+    """Host seam for one ephemeral SubAgent Review.
+
+    Implementations create a fresh reviewer with the requested model, pass only
+    the bounded payload, return the structured result plus a Markdown summary,
+    and delete the reviewer in a finally-equivalent cleanup path. The Host
+    attestation must bind the observed model and opaque SubAgent execution ID.
+    The parent conversation must not change model and must not be used as a
+    fallback.
+    """
+
     def dispatch_review(
         self, *, review_mode: str, fork_context: bool, payload: dict[str, Any],
         implementation_agent_identity: str,
         implementation_context_identity: str,
         plan_hash: str,
         attempt_ref: str,
+        review_model: Mapping[str, object] | None = None,
         project_review_context: Mapping[str, object] | None = None,
     ) -> HostDispatchObservation: ...
 
@@ -122,6 +149,10 @@ def _load_attestation(
     implementation_context_identity: str,
     plan_hash: str,
     attempt_ref: str,
+    observed_review_model: Mapping[str, object] | None,
+    skill_hash: str,
+    review_package_hash: str | None,
+    review_report_hash: str,
 ) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -153,6 +184,13 @@ def _load_attestation(
             "reviewerAgentIdentity": observation.reviewer_agent_identity,
             "reviewerContextIdentity": observation.reviewer_context_identity,
             "resultHash": result_hash,
+            "reviewModel": None if observed_review_model is None else dict(observed_review_model),
+            "reviewExecutionMode": observation.review_execution_mode,
+            "subagentLifecycle": observation.subagent_lifecycle,
+            "subagentExecutionId": observation.subagent_execution_id,
+            "reviewReportHash": review_report_hash,
+            "skillManifestHash": skill_hash,
+            "reviewPackageHash": review_package_hash,
         }
         if any(attestation[key] != item for key, item in expected.items()):
             raise ReviewDispatchError("review-host-attestation-binding-invalid")
@@ -245,10 +283,16 @@ def _project_review_payload(
     payload = {
         "status": context["status"],
         "blocking": context["blocking"],
+        "skillPrecedence": (
+            "project-before-generic" if context["status"] == "loaded"
+            else "generic-only"
+        ),
         "sessionBindingHash": session_hash,
         "issues": list(issues),
+        "skillManifest": ordered_skill_manifest(context),
         "reviewers": axis_payloads,
     }
+    payload["skillManifestHash"] = skill_manifest_hash(payload["skillManifest"])
     normalized_reviewers = MappingProxyType({
         axis: MappingProxyType({
             "manifest": axis_inputs[axis][0],
@@ -278,6 +322,8 @@ def _dispatch_review(
     attempt_ref: str,
     project_review_context: Mapping[str, object] | None,
     review_axis: str | None = None,
+    review_model: Mapping[str, object] | None = None,
+    review_package: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     if (
         not _valid_identity(implementation_agent_identity)
@@ -301,14 +347,36 @@ def _dispatch_review(
     normalized = verified_input.summary
     if project_review_context is not None and not isinstance(project_review_context, Mapping):
         raise ReviewDispatchError("project-review-context-invalid")
+    normalized_review_model = None
+    if review_model is not None:
+        try:
+            normalized_review_model = normalize_review_model_payload(review_model)
+        except (ReviewModelConfigError, TypeError, ValueError):
+            raise ReviewDispatchError("review-model-payload-invalid") from None
     if review_axis is None:
         review_mode = "independent-design-review"
         subject_field = "designReviewSummary"
+        expected_package_kind = "plan"
+        package_stage = "planned"
     else:
         if review_axis not in {"standards", "spec"}:
             raise ReviewDispatchError("review-dispatch-input-invalid")
         review_mode = "independent-code-review"
         subject_field = "codeReviewSubject"
+        expected_package_kind = "code"
+        package_stage = ("implemented", "reviewed")
+    normalized_package = None
+    if review_package is not None:
+        try:
+            normalized_package = normalize_review_package(
+                review_package,
+                expected_kind=expected_package_kind,
+                plan_hash=plan_hash,
+                stage_id=package_stage,
+                attempt_ref=attempt_ref,
+            )
+        except ReviewPackageError as error:
+            raise ReviewDispatchError(error.reason) from None
     payload = {
         "schemaVersion": 3,
         "reviewMode": review_mode,
@@ -316,6 +384,11 @@ def _dispatch_review(
     }
     if review_axis is not None:
         payload["reviewAxis"] = review_axis
+    if normalized_review_model is not None:
+        payload["reviewModel"] = dict(normalized_review_model)
+    if normalized_package is not None:
+        payload["reviewPackage"] = clone(normalized_package)
+        payload["reviewPackageHash"] = normalized_package["packageHash"]
     project_review_payload = None
     normalized_project_review_context = None
     if project_review_context is not None:
@@ -334,6 +407,8 @@ def _dispatch_review(
             "plan_hash": plan_hash,
             "attempt_ref": attempt_ref,
         }
+        if normalized_review_model is not None:
+            dispatch_arguments["review_model"] = dict(normalized_review_model)
         if normalized_project_review_context is not None:
             dispatch_arguments["project_review_context"] = normalized_project_review_context
         observation = port.dispatch_review(
@@ -345,10 +420,32 @@ def _dispatch_review(
         raise ReviewDispatchError("review-dispatch-failed") from None
     if type(observation) is not HostDispatchObservation:
         raise ReviewDispatchError("review-dispatch-observation-invalid")
+    if observation.review_execution_mode != "ephemeral-subagent":
+        raise ReviewDispatchError("review-subagent-required")
+    if observation.subagent_lifecycle != "created-executed-cleaned":
+        raise ReviewDispatchError("review-subagent-cleanup-invalid")
+    try:
+        review_report, review_report_hash = normalize_review_report(
+            observation.review_report_markdown
+        )
+    except ReviewReportError as error:
+        raise ReviewDispatchError(error.reason) from None
     try:
         observed_payload = clone(observation.sent_payload)
     except (HashingError, TypeError, ValueError, OverflowError):
         raise ReviewDispatchError("review-dispatch-observation-invalid") from None
+    if normalized_review_model is None:
+        if observation.review_model is not None:
+            raise ReviewDispatchError("review-model-observation-mismatch")
+    else:
+        try:
+            observed_review_model = normalize_review_model_payload(
+                observation.review_model
+            )
+        except (ReviewModelConfigError, TypeError, ValueError):
+            raise ReviewDispatchError("review-model-observation-mismatch") from None
+        if dict(observed_review_model) != dict(normalized_review_model):
+            raise ReviewDispatchError("review-model-observation-mismatch")
     if (
         observation.review_mode != review_mode
         or observation.fork_context is not fork_context
@@ -364,6 +461,7 @@ def _dispatch_review(
         observation.reviewer_context_identity,
         observation.dispatch_nonce,
         observation.attempt_ref,
+        observation.subagent_execution_id,
     )
     if (
         any(not _valid_identity(item) for item in identities)
@@ -381,10 +479,28 @@ def _dispatch_review(
     if fork_context is True and independent_identity:
         raise ReviewDispatchError("fallback-review-identity-mismatch")
 
+    result_subject = (
+        normalized_package
+        if review_axis is not None and normalized_package is not None
+        else normalized
+    )
     result = _load_result(
-        observation.returned_value, normalized, review_mode=review_mode,
+        observation.returned_value, result_subject, review_mode=review_mode,
     )
     payload_hash = content_hash(payload)
+    skill_manifest = (
+        payload.get("projectReview", {}).get("skillManifest", [])
+        if isinstance(payload.get("projectReview"), Mapping)
+        else [{
+            "layer": "generic",
+            "id": "matt-pocock.code-review",
+            "path": "skills/engineering/code-review",
+            "contentHash": "sha256:e32441ce3f64628daeb6270bf56104f461b1341aa472cc3968424e90ece17bc4",
+            "required": True,
+        }]
+    )
+    skill_hash = skill_manifest_hash(list(skill_manifest))
+    package_hash = None if normalized_package is None else normalized_package["packageHash"]
     attestation = _load_attestation(
         observation.host_attestation,
         observation=observation,
@@ -394,6 +510,13 @@ def _dispatch_review(
         implementation_context_identity=implementation_context_identity,
         plan_hash=plan_hash,
         attempt_ref=attempt_ref,
+        observed_review_model=(
+            None if normalized_review_model is None
+            else normalize_review_model_payload(observation.review_model)
+        ),
+        skill_hash=skill_hash,
+        review_package_hash=package_hash,
+        review_report_hash=review_report_hash,
     )
     if fork_context is True and attestation is not None:
         raise ReviewDispatchError("fallback-review-attestation-invalid")
@@ -412,6 +535,7 @@ def _dispatch_review(
         "implementationContextIdentity": implementation_context_identity,
         "reviewerAgentIdentity": observation.reviewer_agent_identity,
         "reviewerContextIdentity": observation.reviewer_context_identity,
+        "subagentExecutionId": observation.subagent_execution_id,
         "hostAgentIdentity": observation.host_agent_identity,
         "hostContextIdentity": observation.host_context_identity,
         "hostAttestationRef": None if attestation is None else attestation["attestationHash"],
@@ -429,6 +553,16 @@ def _dispatch_review(
         "reviewLevel": result["reviewLevel"],
         "fallbackAuthorizationRef": fallback_authorization_ref,
         "independence": independence,
+        "reviewExecutionMode": "ephemeral-subagent",
+        "subagentLifecycle": "created-executed-cleaned",
+        "reviewReportMarkdown": review_report,
+        "reviewReportHash": review_report_hash,
+        "reviewModel": (
+            None if normalized_review_model is None
+            else dict(normalized_review_model)
+        ),
+        "skillManifestHash": skill_hash,
+        "reviewPackageHash": package_hash,
     }
     if review_mode == "independent-design-review":
         receipt.update({
@@ -461,6 +595,8 @@ def dispatch_independent_review(
     plan_hash: str,
     attempt_ref: str,
     project_review_context: Mapping[str, object] | None = None,
+    review_model: Mapping[str, object] | None = None,
+    review_package: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Force a fresh-context dispatch and derive a receipt from Host observations."""
 
@@ -474,6 +610,8 @@ def dispatch_independent_review(
         plan_hash=plan_hash,
         attempt_ref=attempt_ref,
         project_review_context=project_review_context,
+        review_model=review_model,
+        review_package=review_package,
     )
 
 
@@ -486,6 +624,8 @@ def dispatch_dual_code_review(
     plan_hash: str,
     attempt_ref: str,
     project_review_context: Mapping[str, object] | None = None,
+    review_model: Mapping[str, object] | None = None,
+    review_package: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Run distinct Standards and Spec reviewer dispatches with one bundle."""
 
@@ -507,6 +647,8 @@ def dispatch_dual_code_review(
             attempt_ref=attempt_ref,
             project_review_context=project_review_context,
             review_axis=axis,
+            review_model=review_model,
+            review_package=review_package,
         )
     standards = receipts["standards"]
     spec = receipts["spec"]
@@ -517,6 +659,18 @@ def dispatch_dual_code_review(
         or standards["reviewerContextIdentity"] == spec["reviewerContextIdentity"]
     ):
         raise ReviewDispatchError("review-code-review-not-independent")
+    for receipt in (standards, spec):
+        if (
+            receipt["reviewVerdict"] != "approve"
+            or receipt["reviewLevel"] not in {"L2", "L3"}
+            or receipt["independence"] != "independent"
+            or receipt["hostAttestationRef"] is None
+        ):
+            raise ReviewDispatchError("review-code-review-gate-failed")
+    if standards["reviewPackageHash"] != spec["reviewPackageHash"]:
+        raise ReviewDispatchError("review-code-review-package-mismatch")
+    if standards["skillManifestHash"] != spec["skillManifestHash"]:
+        raise ReviewDispatchError("review-code-review-skill-manifest-mismatch")
     return {
         "schemaVersion": 1,
         "reviewMode": "independent-code-review",
@@ -535,6 +689,8 @@ def dispatch_same_agent_fallback_review(
     plan_hash: str,
     attempt_ref: str,
     project_review_context: Mapping[str, object] | None = None,
+    review_model: Mapping[str, object] | None = None,
+    review_package: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Record the explicitly authorized same-Agent structured review path."""
 
@@ -548,4 +704,6 @@ def dispatch_same_agent_fallback_review(
         plan_hash=plan_hash,
         attempt_ref=attempt_ref,
         project_review_context=project_review_context,
+        review_model=review_model,
+        review_package=review_package,
     )
