@@ -84,6 +84,34 @@ class SubmoduleProfileTests(unittest.TestCase):
 
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_submodule_rollback_reattaches_the_original_branch(self):
+        root = Path(tempfile.mkdtemp(prefix="selfworkflow-submodule-branch-"))
+        try:
+            existing = root / "existing"
+            existing.mkdir()
+            (existing / ".git").write_text("gitdir\n", encoding="utf-8")
+            states = {"existing": ("b" * 40, "a" * 40, "refs/heads/feature", None)}
+            calls = []
+
+            def successful_runner(command, _cwd):
+                calls.append(tuple(command))
+                if "symbolic-ref" in command:
+                    return subprocess.CompletedProcess(command, 0, "refs/heads/feature\n", "")
+                if command[-2:] == ("--get", "submodule.existing.url"):
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                if "rev-parse" in command:
+                    return subprocess.CompletedProcess(command, 0, "a" * 40 + "\n", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            self.assertTrue(_restore_submodules(states, root, successful_runner))
+            self.assertIn(
+                ("git", "-C", "existing", "checkout", "feature"), calls
+            )
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_normal_profile_commands_are_path_limited_and_never_remote(self):
         commands = commands_for_profile("normal")
         flattened = " ".join(part for command in commands for part in command)

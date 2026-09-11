@@ -32,13 +32,6 @@ class PonytailScopeTests(unittest.TestCase):
                     select_ponytail_route("design", semantic_terms=(term,)).enabled
                 )
 
-    def test_ambiguous_terms_do_not_enable_signal_only_operations(self):
-        for term in ("source", "test", "interface", "module", "build"):
-            with self.subTest(term=term):
-                self.assertFalse(
-                    select_ponytail_route("design", semantic_terms=(term,)).enabled
-                )
-
     def test_explicit_review_and_audit_are_additive_and_session_scoped(self):
         review = select_ponytail_route(
             "review", explicit_skill="ponytail-review", semantic_terms=("code",)

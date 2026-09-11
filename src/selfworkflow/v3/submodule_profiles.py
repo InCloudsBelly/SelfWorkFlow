@@ -117,6 +117,8 @@ def apply_submodule_profile(
             if branch.returncode not in (0, 1):
                 raise SubmoduleProfileError("submodule-state-invalid")
             previous_branch = branch.stdout.strip() if branch.returncode == 0 else None
+            if previous_branch is not None and not previous_branch.startswith("refs/heads/"):
+                raise SubmoduleProfileError("submodule-state-invalid")
         states[submodule_path] = (fields[1], previous_commit, previous_branch, previous_url)
 
     failed = False
@@ -180,7 +182,11 @@ def _restore_submodules(
             )
             if result.returncode == 0 and previous_branch:
                 result = runner(
-                    ("git", "-C", submodule_path, "checkout", previous_branch), root
+                    (
+                        "git", "-C", submodule_path, "checkout",
+                        previous_branch.removeprefix("refs/heads/"),
+                    ),
+                    root,
                 )
         elif (path / ".git").exists():
             result = runner(
