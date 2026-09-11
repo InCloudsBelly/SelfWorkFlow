@@ -44,6 +44,13 @@ def _path_hash(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _is_reparse(path: Path) -> bool:
+    metadata = path.lstat()
+    return path.is_symlink() or bool(
+        getattr(metadata, "st_file_attributes", 0) & _REPARSE
+    )
+
+
 def _safe_root(path: str | Path, *, allow_missing: bool = True) -> Path:
     raw = Path(path)
     if not raw.is_absolute():
@@ -340,11 +347,15 @@ def _retired_skill_files(
     agents: Path,
     desired_skill_files: set[str],
 ) -> tuple[list[str], list[str]]:
-    if manifest is None or manifest.get("agentsRoot") != str(agents):
-        return [], []
     retired: list[str] = []
     issues: list[str] = []
-    for operation in manifest.get("operations", []):
+    managed_skill_hashes: dict[str, str] = {}
+    operations = (
+        manifest.get("operations", [])
+        if manifest is not None and manifest.get("agentsRoot") == str(agents)
+        else []
+    )
+    for operation in operations:
         if not isinstance(operation, dict):
             continue
         target_value = operation.get("target")
@@ -359,10 +370,26 @@ def _retired_skill_files(
             or relative in desired_skill_files
         ):
             continue
+        managed_skill_hashes[str(target)] = after_hash
         if not target.is_file() or _path_hash(target) != after_hash:
             issues.append(f"managed-skill-drift:{relative}")
         else:
             retired.append(relative)
+    legacy_root = agents / "skills" / "caveman"
+    if os.path.lexists(legacy_root):
+        if not legacy_root.is_dir() or _is_reparse(legacy_root):
+            issues.append("legacy-skill-ownership-unknown:skills/caveman")
+        else:
+            for path in sorted(legacy_root.rglob("*")):
+                if _is_reparse(path):
+                    issues.append("legacy-skill-ownership-unknown:skills/caveman")
+                    continue
+                if path.is_file():
+                    expected = managed_skill_hashes.get(str(path.resolve(strict=False)))
+                    if expected is None or _path_hash(path) != expected:
+                        issues.append(
+                            f"legacy-skill-ownership-unknown:{_path_relative_to(path, agents)}"
+                        )
     return sorted(set(retired)), sorted(set(issues))
 
 

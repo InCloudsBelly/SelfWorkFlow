@@ -382,6 +382,9 @@ def build_runtime(
             copied_tea = temporary / "dependencies/upstream/tea"
             if copied_tea.exists():
                 shutil.rmtree(copied_tea)
+            copied_graft = temporary / "dependencies/upstream/graft"
+            if copied_graft.exists():
+                shutil.rmtree(copied_graft)
             copied_ponytail = temporary / "dependencies/upstream/ponytail"
             if copied_ponytail.exists():
                 shutil.rmtree(copied_ponytail)

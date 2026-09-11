@@ -26,6 +26,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertTrue((root / "first/skills/ponytail-review/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/ponytail-audit/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/ponytail-help/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/ponytail/LICENSE").is_file())
             self.assertFalse((root / "first/skills/caveman").exists())
             self.assertTrue((root / "first/skills/matt-pocock/grilling/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/matt-pocock/tdd/SKILL.md").is_file())

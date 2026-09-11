@@ -70,7 +70,8 @@ class PonytailSourceTests(unittest.TestCase):
 
     def test_gitlink_or_source_drift_is_not_accepted(self):
         with mock.patch(
-            "selfworkflow.ponytail_source._git", side_effect=["a" * 40, "b" * 40, ""]
+            "selfworkflow.ponytail_source._git",
+            side_effect=["https://github.com/DietrichGebert/ponytail.git", "a" * 40, "b" * 40, ""],
         ):
             with self.assertRaisesRegex(PonytailSourceError, "ponytail-gitlink-mismatch"):
                 verify_ponytail_source(self.ROOT)

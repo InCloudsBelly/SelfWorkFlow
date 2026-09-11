@@ -84,7 +84,7 @@ entries:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
       revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
-      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases:
       - name: ponytail-code
         target: ponytail
@@ -92,7 +92,7 @@ entries:
     exclusions: [pure content generation, non-code document]
     selectors:
       fileExtensions: [.c, .cc, .cpp, .cppm, .cs, .cu, .cuh, .cxx, .go, .h, .hh, .hpp, .hxx, .inl, .ixx, .java, .js, .py, .rs, .shader, .ts, .ush, .usf, .hlsl]
-      operationTypes: [analyze, design, plan, implement, debug, review, verify]
+      operationTypes: []
       semanticTerms: [minimal code change, avoid overbuilding, reuse existing code, code, bug fix]
     stages: [designed, planned, implemented, reviewed, verified]
     requiredCapabilities: [skill-discovery]
@@ -115,7 +115,7 @@ entries:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
       revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
-      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases: []
     triggers: [over-engineering audit, delete unnecessary code]
     exclusions: [pure content generation, non-code document]
@@ -144,7 +144,7 @@ entries:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
       revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
-      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases: []
     triggers: [ponytail help, ponytail commands, ponytail mode]
     exclusions: []
@@ -173,13 +173,13 @@ entries:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
       revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
-      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases: []
     triggers: [over-engineering review, minimal diff review]
     exclusions: [pure content generation, non-code document]
     selectors:
       fileExtensions: [.c, .cc, .cpp, .cppm, .cs, .cu, .cuh, .cxx, .go, .h, .hh, .hpp, .hxx, .inl, .ixx, .java, .js, .py, .rs, .shader, .ts, .ush, .usf, .hlsl]
-      operationTypes: [review, verify]
+      operationTypes: []
       semanticTerms: [over-engineering review, minimal diff review]
     stages: [designed, reviewed, verified]
     requiredCapabilities: [skill-discovery]

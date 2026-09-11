@@ -280,11 +280,11 @@ function Invoke-SelfWorkflow {
     if ($output) {
         Add-Content -LiteralPath $script:InstallLog -Value $output -Encoding UTF8
     }
-    if ($childExit -ne 0) {
-        throw "selfworkflow-command-failed:$childExit"
-    }
     if ($CapturePath) {
         [IO.File]::WriteAllText($CapturePath, $output + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    }
+    if ($childExit -ne 0) {
+        throw "selfworkflow-command-failed:$childExit"
     }
     if (-not $output) {
         return $null
@@ -587,7 +587,15 @@ try {
         "provider", "list", "--config-file", $ProviderConfigFile
     ) (Join-Path $script:LogDirectory "provider-list.json")
     $existingGraftProvider = @($existingProviders.providers | Where-Object { $_.providerId -eq "graft" })
-    if ($existingGraftProvider.Count -gt 0) {
+    $verifiedGraftProvider = @($existingGraftProvider | Where-Object {
+        $_.managementStatus -eq "managed-metadata-available" -and
+        $_.enabled -eq $true -and
+        $_.bindingHash
+    })
+    if ($existingGraftProvider.Count -gt 0 -and $verifiedGraftProvider.Count -eq 0) {
+        Stop-Install "graft-provider-configure" 74 "graft-provider-binding-unverified"
+    }
+    elseif ($verifiedGraftProvider.Count -gt 0) {
         $graftProviderReport = [ordered]@{
             status = "preserved-existing-binding"
             reason = "existing-graft-binding-not-replaced"

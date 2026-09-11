@@ -37,9 +37,31 @@ def commands_for_profile(profile: str) -> tuple[tuple[str, ...], ...]:
 
 
 def _native(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    for key in tuple(environment):
+        if key.startswith("GIT_CONFIG") or key in {
+            "GIT_ATTR_NOSYSTEM", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS",
+            "GIT_SSH_COMMAND", "GIT_SSH", "GIT_ASKPASS", "GIT_EXEC_PATH",
+            "GIT_PROXY_COMMAND",
+        }:
+            environment.pop(key, None)
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+    )
+    safe_command = (
+        [command[0], "-c", "core.hooksPath=NUL", "-c", "core.fsmonitor=false"]
+        + list(command[1:])
+    )
     return subprocess.run(
-        list(command), cwd=cwd, capture_output=True, text=True, encoding="utf-8",
-        errors="strict", check=False, env=os.environ.copy(),
+        safe_command, cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+        errors="strict", check=False, env=environment, timeout=120,
     )
 
 
@@ -128,6 +150,11 @@ def apply_submodule_profile(
                             "git", "-C", restore_path, "checkout", "--detach",
                             restore_commit,
                         ),
+                        root,
+                    )
+                else:
+                    runner(
+                        ("git", "submodule", "deinit", "-f", "--", restore_path),
                         root,
                     )
             raise SubmoduleProfileError("submodule-postcondition-invalid")

@@ -47,13 +47,36 @@ def _reject_reparse_chain(path: Path) -> None:
 
 
 def _git(repository: Path, *arguments: str) -> str:
+    environment = os.environ.copy()
+    for key in tuple(environment):
+        if key.startswith("GIT_CONFIG") or key in {
+            "GIT_ATTR_NOSYSTEM", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS",
+            "GIT_SSH_COMMAND", "GIT_SSH", "GIT_ASKPASS", "GIT_EXEC_PATH",
+            "GIT_PROXY_COMMAND",
+        }:
+            environment.pop(key, None)
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_OPTIONAL_LOCKS": "0",
+        }
+    )
     result = subprocess.run(
-        ["git", "-C", str(repository), *arguments],
+        [
+            "git", "-c", "core.hooksPath=NUL", "-c", "core.fsmonitor=false",
+            "-C", str(repository), *arguments,
+        ],
         check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="strict",
+        env=environment,
+        timeout=120,
     )
     if result.returncode != 0:
         raise PonytailSourceError("ponytail-source-invalid")
@@ -145,6 +168,7 @@ def validate_ponytail_lock(lock: object) -> dict[str, object]:
 def load_ponytail_lock(repository_root: str | Path) -> dict[str, object]:
     root = Path(repository_root).resolve(strict=True)
     lock_path = root / "dependencies/locks/ponytail.lock.yaml"
+    _reject_reparse_chain(lock_path)
     if not lock_path.is_file() or _is_reparse(lock_path):
         raise PonytailSourceError("ponytail-lock-missing")
     try:
@@ -157,6 +181,12 @@ def load_ponytail_lock(repository_root: str | Path) -> dict[str, object]:
 def verify_ponytail_source(repository_root: str | Path) -> dict[str, object]:
     root = Path(repository_root).resolve(strict=True)
     lock = load_ponytail_lock(root)
+    configured_url = _git(
+        root, "config", "--file", ".gitmodules",
+        "--get", f"submodule.{PONYTAIL_PATH}.url",
+    )
+    if configured_url != PONYTAIL_URL:
+        raise PonytailSourceError("ponytail-submodule-url-mismatch")
     gitlink = _git(root, "ls-files", "--stage", "--", PONYTAIL_PATH).split()
     if len(gitlink) < 2 or gitlink[0] != "160000" or gitlink[1] != lock["gitlinkCommit"]:
         raise PonytailSourceError("ponytail-gitlink-mismatch")
@@ -209,7 +239,7 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
         raise PonytailSourceError("ponytail-source-invalid") from None
     if skill_id == "ponytail-help":
         marker_start = "## Configure Default Mode\n"
-        marker_end = "## Update\n"
+        marker_end = "## More\n"
         if marker_start not in text or marker_end not in text:
             raise PonytailSourceError("ponytail-source-adaptation-invalid")
         start = text.index(marker_start)
@@ -219,6 +249,8 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
             "SelfWorkFlow supplies `lite`, `full`, `ultra`, or `off` for the\n"
             "current task. This local adapter does not read or write environment\n"
             "variables, host config files, plugin state, or global mode files.\n\n"
+            "Full/Deep tasks may route the selected Ponytail specialist; no mode\n"
+            "or skill is persisted outside the current task.\n\n"
         )
         text = text[:start] + local_help + text[end:]
         return text.encode("utf-8")
@@ -249,7 +281,17 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
     )
     if old_persistence not in text or old_boundary not in text:
         raise PonytailSourceError("ponytail-source-adaptation-invalid")
-    return text.replace(old_persistence, new_persistence).replace(old_boundary, new_boundary).encode("utf-8")
+    text = text.replace(old_persistence, new_persistence).replace(old_boundary, new_boundary)
+    old_complex = (
+        "- Complex request? Ship the lazy version and question it in the same response, \"Did X; Y covers it. Need full X? Say so.\" Never stall on an answer you can default."
+    )
+    new_complex = (
+        "- Complex request? Keep the approved SelfWorkFlow scope. Record adjacent improvements instead of implementing them; revise the plan before any out-of-scope change. Do not stall when the approved path is sufficient."
+    )
+    if old_complex not in text:
+        raise PonytailSourceError("ponytail-source-adaptation-invalid")
+    text = text.replace(old_complex, new_complex)
+    return text.encode("utf-8")
 
 
 def copy_ponytail_skills(
@@ -274,7 +316,7 @@ def copy_ponytail_skills(
                 output.mkdir(parents=True, exist_ok=True)
             elif path.is_file():
                 output.parent.mkdir(parents=True, exist_ok=True)
-                if path.name == "SKILL.md" and item["id"] == "ponytail":
+                if path.name == "SKILL.md" and item["id"] in {"ponytail", "ponytail-help"}:
                     output.write_bytes(
                         _adapt_ponytail_skill(path.read_bytes(), item["id"])
                     )
@@ -285,6 +327,14 @@ def copy_ponytail_skills(
         runtime_entry = target / "SKILL.md"
         if _hash_file(runtime_entry) != item["runtimeHash"]:
             raise PonytailSourceError("ponytail-runtime-hash-mismatch")
+    license_path = upstream / str(report["license"]["path"])
+    target_license = destination / "skills" / "ponytail" / "LICENSE"
+    if target_license.exists() or os.path.lexists(target_license):
+        raise PonytailSourceError("ponytail-runtime-target-invalid")
+    target_license.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(license_path, target_license)
+    if _hash_file(target_license) != report["license"]["hash"]:
+        raise PonytailSourceError("ponytail-runtime-hash-mismatch")
     return report
 
 

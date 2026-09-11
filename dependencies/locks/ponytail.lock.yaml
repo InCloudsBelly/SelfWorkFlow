@@ -13,7 +13,7 @@ selectedSkills:
   - id: ponytail
     path: skills/ponytail
     hash: sha256:46a57e26a2632e7fa40eae6a3cf3011ccdc4d8db19d8f8617907d6b5deef055e
-    runtimeHash: sha256:5334669466a948cb770fc9ef4d4fee916d0ffa9ddbdc5b8c6e11757baa8107b7
+    runtimeHash: sha256:1f507afb89387711c2c2d8973581362784681039bf731b4e6705cb3f83be83aa
   - id: ponytail-review
     path: skills/ponytail-review
     hash: sha256:6c8b7e5c897a406b66da6aabda7fa6509e8d1d447e73e602265d7986497445d1
@@ -25,4 +25,4 @@ selectedSkills:
   - id: ponytail-help
     path: skills/ponytail-help
     hash: sha256:07e0fc50c722cee981d47f62a5d32a7def4cb65651f414724e5fd6939f145977
-    runtimeHash: sha256:cde7cd909071ba2b184b70a7567a4dc5af6fe90f2218e0fffcff8250f1928153
+    runtimeHash: sha256:46358c185deaf180ed64a9de24aface5a8b996de98a021520571800d9b47a9a7

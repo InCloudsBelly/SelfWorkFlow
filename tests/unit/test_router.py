@@ -186,6 +186,26 @@ class RouterTests(unittest.TestCase):
         )
         self.assertEqual(help_result.selected, ("workflow-core", "ponytail-help"))
 
+    def test_checked_in_catalog_does_not_route_ponytail_for_non_code_design(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import route_skills
+
+        result = route_skills(
+            compile_catalog(Path(__file__).resolve().parents[2] / "catalog").content,
+            self._request(
+                stage="designed",
+                operation_type="design",
+                file_extensions=(),
+                semantic_terms=(),
+                capability_states={
+                    "filesystem-read": "supported",
+                    "skill-discovery": "supported",
+                },
+            ),
+        )
+        self.assertNotIn("ponytail", result.selected)
+        self.assertNotIn("ponytail-review", result.selected)
+
     def test_safety_and_project_mandatory_cannot_be_removed_by_semantic_score(self):
         from selfworkflow.router import route_skills
 

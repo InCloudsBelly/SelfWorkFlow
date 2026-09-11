@@ -67,6 +67,23 @@ class InstallPlanTests(unittest.TestCase):
             self.assertEqual(plan["status"], "paused")
             self.assertIn("unmanaged-snapshot-conflict:WORKFLOW.md", plan["issues"])
 
+    def test_plan_pauses_before_retiring_unowned_caveman_skill(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            legacy = agents / "skills/caveman/SKILL.md"
+            legacy.parent.mkdir(parents=True)
+            legacy.write_text("user-owned\n", encoding="utf-8")
+
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+
+            self.assertEqual(plan["status"], "paused")
+            self.assertIn(
+                "legacy-skill-ownership-unknown:skills/caveman/SKILL.md",
+                plan["issues"],
+            )
+
     def test_cli_writes_plan_and_requires_explicit_paths(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
