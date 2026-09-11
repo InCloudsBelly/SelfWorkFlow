@@ -83,7 +83,7 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
       contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases:
       - name: ponytail-code
@@ -114,7 +114,7 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
       contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases: []
     triggers: [over-engineering audit, delete unnecessary code]
@@ -143,7 +143,7 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
       contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases: []
     triggers: [ponytail help, ponytail commands, ponytail mode]
@@ -172,7 +172,7 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
       contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
     aliases: []
     triggers: [over-engineering review, minimal diff review]
