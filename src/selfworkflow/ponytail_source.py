@@ -124,12 +124,15 @@ def validate_ponytail_lock(lock: object) -> dict[str, object]:
     for item, expected_id in zip(selected, PONYTAIL_SKILLS, strict=True):
         if (
             not isinstance(item, dict)
-            or set(item) != {"id", "path", "hash"}
+            or set(item) != {"id", "path", "hash", "runtimeHash"}
             or item.get("id") != expected_id
             or item.get("path") != f"skills/{expected_id}"
             or not isinstance(item.get("hash"), str)
             or not item["hash"].startswith(_SHA256)
             or len(item["hash"]) != len(_SHA256) + 64
+            or not isinstance(item.get("runtimeHash"), str)
+            or not item["runtimeHash"].startswith(_SHA256)
+            or len(item["runtimeHash"]) != len(_SHA256) + 64
         ):
             raise PonytailSourceError("ponytail-lock-invalid")
         ids.append(item["id"])
@@ -196,6 +199,41 @@ def verify_ponytail_source(repository_root: str | Path) -> dict[str, object]:
     }
 
 
+def _adapt_ponytail_skill(content: bytes) -> bytes:
+    """Apply only the local scope boundary; upstream source remains untouched."""
+
+    try:
+        text = content.decode("utf-8").replace("\r\n", "\n")
+    except UnicodeDecodeError:
+        raise PonytailSourceError("ponytail-source-invalid") from None
+    old_persistence = (
+        "## Persistence\n\n"
+        "ACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\n"
+        "unsure. Off only: \"stop ponytail\" / \"normal mode\". Default: **full**.\n"
+        "Switch: `/ponytail lite|full|ultra`."
+    )
+    new_persistence = (
+        "## Scope\n\n"
+        "Active only for a SelfWorkFlow-routed code task. The mode is scoped to the\n"
+        "current task and is not persisted in host or global configuration. Outside\n"
+        "code tasks this Skill is inactive. Default: **full**. Switch:\n"
+        "`/ponytail lite|full|ultra`."
+    )
+    old_boundary = (
+        "Ponytail governs what you build, not how you talk (pair with Caveman for\n"
+        "terse prose). \"stop ponytail\" / \"normal mode\": revert. Level persists until\n"
+        "changed or session end."
+    )
+    new_boundary = (
+        "Ponytail governs code decisions, not response style. SelfWorkFlow controls\n"
+        "scope, output language, Review, verification, and authorization.\n"
+        "`stop ponytail` / `normal mode` ends this task-scoped enhancement."
+    )
+    if old_persistence not in text or old_boundary not in text:
+        raise PonytailSourceError("ponytail-source-adaptation-invalid")
+    return text.replace(old_persistence, new_persistence).replace(old_boundary, new_boundary).encode("utf-8")
+
+
 def copy_ponytail_skills(
     repository_root: str | Path, destination_root: str | Path
 ) -> dict[str, object]:
@@ -218,9 +256,15 @@ def copy_ponytail_skills(
                 output.mkdir(parents=True, exist_ok=True)
             elif path.is_file():
                 output.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(path, output)
+                if path.name == "SKILL.md" and item["id"] == "ponytail":
+                    output.write_bytes(_adapt_ponytail_skill(path.read_bytes()))
+                else:
+                    shutil.copyfile(path, output)
             else:
                 raise PonytailSourceError("ponytail-source-invalid")
+        runtime_entry = target / "SKILL.md"
+        if _hash_file(runtime_entry) != item["runtimeHash"]:
+            raise PonytailSourceError("ponytail-runtime-hash-mismatch")
     return report
 
 
