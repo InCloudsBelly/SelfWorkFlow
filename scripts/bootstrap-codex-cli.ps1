@@ -16,6 +16,25 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Bootstrap security checks must use the OS-provided Windows PowerShell
+# security cmdlets.  Codex hosts may inject another PowerShell module tree via
+# PSModulePath; Windows PowerShell 5.1 can then load duplicate ObjectSecurity
+# type data and make Get-Acl/Set-Acl unavailable.  Restricting this process to
+# the system module tree also prevents user/module-path shadowing of the ACL
+# implementation used by this security boundary.
+try {
+    $SystemPowerShellModules = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\Modules"
+    if (-not [IO.Directory]::Exists($SystemPowerShellModules)) {
+        throw "System PowerShell module directory is unavailable."
+    }
+    $env:PSModulePath = $SystemPowerShellModules
+    Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+}
+catch {
+    [Console]::Error.WriteLine("SelfWorkFlow: PowerShell security module unavailable.")
+    exit 58
+}
+
 function ConvertFrom-SelfWorkflowStrictJsonObject {
     param([Parameter(Mandatory = $true)][string]$Text)
 

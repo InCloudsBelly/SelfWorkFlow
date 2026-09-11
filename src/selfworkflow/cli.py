@@ -39,6 +39,7 @@ from selfworkflow.review_models import (
     resolve_review_model,
     save_review_model,
 )
+from selfworkflow.work_artifacts import WorkArtifactError, WorkArtifactManager
 from selfworkflow.sources import (
     commit_superpowers_migration,
     recover_superpowers_migration,
@@ -475,6 +476,29 @@ def main(argv: list[str] | None = None) -> int:
         "--confirm", action="store_true",
         help="确认把该选择写入机器本地默认配置",
     )
+    artifact = commands.add_parser("artifact")
+    artifact_commands = artifact.add_subparsers(dest="artifact_command", required=True)
+    artifact_transition = artifact_commands.add_parser("transition")
+    artifact_transition.add_argument("--project-root", required=True)
+    artifact_transition.add_argument("--task-id", required=True)
+    artifact_transition.add_argument("--event", required=True)
+    artifact_transition.add_argument("--expected-content-generation", type=int, required=True)
+    artifact_transition.add_argument("--expected-state-revision", type=int, required=True)
+    artifact_transition.add_argument("--expected-manifest-hash")
+    artifact_transition.add_argument("--operation-nonce", required=True)
+    artifact_transition.add_argument("--artifacts")
+    artifact_transition.add_argument("--review")
+    artifact_transition.add_argument("--verification")
+    artifact_transition.add_argument("--publication")
+    artifact_transition.add_argument("--confirmed-by-user", action="store_true")
+    artifact_reconcile = artifact_commands.add_parser("reconcile")
+    artifact_reconcile.add_argument("--project-root", required=True)
+    artifact_reconcile.add_argument("--task-id", required=True)
+    artifact_reconcile.add_argument("--mode", choices=("dry-run", "apply"), required=True)
+    artifact_reconcile.add_argument("--expected-content-generation", type=int, required=True)
+    artifact_reconcile.add_argument("--expected-state-revision", type=int, required=True)
+    artifact_reconcile.add_argument("--expected-manifest-hash", required=True)
+    artifact_reconcile.add_argument("--plan-hash")
     arguments = parser.parse_args(argv)
     if arguments.command == "project-review":
         try:
@@ -506,6 +530,49 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 54
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
+    if arguments.command == "artifact":
+        try:
+            manager = WorkArtifactManager(arguments.project_root, arguments.task_id)
+
+            def optional_payload(path):
+                if path is None:
+                    return None
+                return _read_json(path, reject_duplicates=True)
+
+            if arguments.artifact_command == "transition":
+                artifacts_payload = optional_payload(arguments.artifacts)
+                artifacts = None if artifacts_payload is None else artifacts_payload.get("artifacts")
+                result = manager.transition(
+                    arguments.expected_content_generation,
+                    arguments.expected_state_revision,
+                    arguments.expected_manifest_hash,
+                    arguments.event,
+                    artifacts,
+                    operation_nonce=arguments.operation_nonce,
+                    review=optional_payload(arguments.review),
+                    verification=optional_payload(arguments.verification),
+                    publication=optional_payload(arguments.publication),
+                    confirmed_by_user=arguments.confirmed_by_user,
+                )
+            elif arguments.artifact_command == "reconcile":
+                result = manager.reconcile(
+                    arguments.mode,
+                    arguments.expected_content_generation,
+                    arguments.expected_state_revision,
+                    arguments.expected_manifest_hash,
+                    arguments.plan_hash,
+                )
+            else:
+                raise WorkArtifactError("artifact-command-invalid")
+        except WorkArtifactError as error:
+            payload = {"status": "error", "error": {"code": error.reason}}
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            return 70
+        except Exception:
+            print(json.dumps({"status": "error", "error": {"code": "artifact-operation-failed"}}, ensure_ascii=False, separators=(",", ":")))
+            return 70
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     if arguments.command == "quality":

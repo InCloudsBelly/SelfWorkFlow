@@ -32,6 +32,7 @@ _CORE_CATALOG_IDS = {
 }
 _CORE_PATHS = (
     "workflow/core.md",
+    "workflow/work-artifact-lifecycle.md",
     "workflow/pipeline.yaml",
     "workflow/git-policy.yaml",
     "workflow/resolve-request.example.json",
@@ -44,6 +45,9 @@ _CORE_PATHS = (
     "schemas/git-policy.schema.json",
     "schemas/project-review-profile.schema.json",
     "schemas/review-model-config.schema.json",
+    "schemas/work-artifact-manifest.schema.json",
+    "schemas/work-artifact-operation.schema.json",
+    "schemas/work-artifact-publication-receipt.schema.json",
     "skills/code-quality",
     "skills/workflow-quality",
     "skills/testing-review-quality",

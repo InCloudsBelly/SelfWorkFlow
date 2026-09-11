@@ -551,3 +551,34 @@ conformance, installer, and behavioral receipts, independent L2-or-higher Review
 and native evidence for both Codex CLI and Desktop. Static conformance cannot be
 promoted to native support. Skipped checks and residual risks remain visible in
 the release manifest.
+
+## Project-local work-document lifecycle
+
+The lifecycle extension is selected only for `Full`/`Deep` tasks or tasks that
+produce at least two formal work documents. A single-document `Light` task does
+not initialize it. The extension is a standalone `WorkArtifactManager`; it does
+not add a V3 stage and does not modify Pipeline, PlanGraph, RunLedger, Review
+dispatch, Provider, or a knowledge backend.
+
+Its only public operations are `selfworkflow artifact transition` and
+`selfworkflow artifact reconcile`. Records live below project-local
+`./selfworkflow/`, protected by an exact `/selfworkflow/` entry in the common
+Git `info/exclude`; `.gitignore`, the Git index, commits, and pushes are never
+changed. Tracked/staged paths, reparse paths, unsafe source descriptors, and
+known sensitive content fail closed. Documents are bounded inline UTF-8; source
+references contain only bounded `sourceId`, `contentHash`, and
+`verificationStatus` metadata.
+
+The normal sequence is `documents-captured/revised -> review-recorded ->
+post-review-recorded -> verification-recorded -> task-completed`, with optional
+`knowledge-published`. Every write binds content generation, state revision,
+Manifest hash, and an operation nonce. Review Critical/Important findings keep
+the candidate/current generation blocked; revision creates a successor and
+invalidates the prior Review. Only fresh verification creates `local-final`.
+Knowledge failure remains local-final and is not reported as publication.
+
+`reconcile --dry-run` is zero-write and returns a plan hash. `apply` must carry
+the same plan hash and never silently falls back when the platform cannot prove
+the required file-system capability. The current and immediately previous
+generation are retained. Knowledge handoff contains final documents and source
+metadata only, never drafts, credentials, or private reasoning.

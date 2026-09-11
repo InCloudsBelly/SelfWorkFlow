@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "backend", "receiptId", "decision", "subjectManifestHash", "subjectPackageHash", "subjectContentGenerationHash", "publishedContentHash", "publishedAt", "receiptHash"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "backend": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "receiptId": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "decision": {"const": "published"},
+    "subjectManifestHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "subjectPackageHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "subjectContentGenerationHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "publishedContentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "publishedAt": {"type": "string", "minLength": 1},
+    "receiptHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

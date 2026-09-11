@@ -561,3 +561,22 @@ methods). All 35 v2 confirmed-plan tests and all 16 smoke tests were Green. The
 removed `-IcaclsCommand` injection interface. This run is a migration inventory,
 not a product-regression claim; those old tests were intentionally not bulk
 rewritten in this task step.
+
+## Project-local work-document lifecycle
+
+For `Full`/`Deep` tasks, or tasks that produce at least two formal design/test/
+plan/review documents, SelfWorkFlow can record the document lifecycle below the
+project's local `./selfworkflow/` directory. A single-document `Light` task does
+not create it. The directory is protected by an exact common-Git
+`info/exclude` entry and is never added, committed, pushed, or written to the
+project `.gitignore`.
+
+Use the thin CLI operations `selfworkflow artifact transition` and
+`selfworkflow artifact reconcile`. They bind each update to the content
+generation, state revision, Manifest hash, and operation nonce. The normal path
+is capture/revise → Review → post-landing Review → Verify → local-final →
+optional user-confirmed knowledge publication → complete. Critical/Important
+findings block Verify; stale Review evidence cannot satisfy a new generation.
+`reconcile --dry-run` is zero-write and returns a plan hash; apply requires that
+same hash and never silently falls back. The optional knowledge package contains
+only final documents, bounded source metadata, hashes, and residual risks.

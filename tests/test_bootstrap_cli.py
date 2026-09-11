@@ -21,6 +21,18 @@ FAKE_NPM_CLI = (
 MANIFEST_SCHEMA = REPOSITORY_ROOT / "schemas" / "bootstrap-tool-manifest.schema.json"
 
 
+def _system_powershell_environment(environment=None):
+    """Keep test-side ACL helpers on the same OS module tree as production."""
+    result = dict(os.environ if environment is None else environment)
+    system_root = result.get("WINDIR") or result.get("SystemRoot")
+    if not system_root:
+        raise AssertionError("Windows system root is required for PowerShell ACL tests")
+    result["PSModulePath"] = str(
+        Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0" / "Modules"
+    )
+    return result
+
+
 def _run_bootstrap(
     local_app_data, *arguments, environment=None, script=BOOTSTRAP_SCRIPT
 ):
@@ -55,7 +67,7 @@ def _validate_manifest_candidate(
     manifest_path = temporary_root / "validation-manifest.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    environment = os.environ.copy()
+    environment = _system_powershell_environment()
     environment.update(
         {
             "SELFWORKFLOW_MANIFEST_LIBRARY": str(MANIFEST_LIBRARY),
@@ -119,7 +131,7 @@ try {
 
 
 def _read_directory_acl(directory):
-    environment = os.environ.copy()
+    environment = _system_powershell_environment()
     environment["SELFWORKFLOW_ACL_TEST_PATH"] = str(directory)
     command = r"""
 $Acl = Get-Acl -LiteralPath $env:SELFWORKFLOW_ACL_TEST_PATH
@@ -200,7 +212,7 @@ def _snapshot_tree(root):
 
 
 def _set_protected_current_user_acl(root):
-    environment = os.environ.copy()
+    environment = _system_powershell_environment()
     environment["SELFWORKFLOW_ACL_ROOT"] = str(root)
     command = r"""
 $ErrorActionPreference = "Stop"
@@ -251,7 +263,7 @@ foreach ($Item in @($Items | Sort-Object { $_.FullName.Length } -Descending)) {
 
 
 def _enable_acl_inheritance(path):
-    environment = os.environ.copy()
+    environment = _system_powershell_environment()
     environment["SELFWORKFLOW_ACL_PATH"] = str(path)
     result = subprocess.run(
         [
@@ -272,7 +284,7 @@ def _enable_acl_inheritance(path):
 
 
 def _add_allow_acl(path, sid, rights):
-    environment = os.environ.copy()
+    environment = _system_powershell_environment()
     environment.update(
         {
             "SELFWORKFLOW_ACL_PATH": str(path),
@@ -336,7 +348,7 @@ def _run_with_rename_probes(
             stderr=subprocess.PIPE,
             text=True,
         )
-        probe_environment = os.environ.copy()
+        probe_environment = _system_powershell_environment()
         probe_environment.update(
             {
                 "SELFWORKFLOW_TARGET_PID": str(target_process.pid),
@@ -597,7 +609,7 @@ exit $LASTEXITCODE
         marker = self.temporary_root / f"{name}-acl-changed"
         stop = self.temporary_root / f"{name}-stop"
         backup_root = Path(str(bootstrap_root) + "-moved")
-        environment = os.environ.copy()
+        environment = _system_powershell_environment()
         environment.update(
             {
                 "SELFWORKFLOW_ACL_TARGET": str(bootstrap_root),

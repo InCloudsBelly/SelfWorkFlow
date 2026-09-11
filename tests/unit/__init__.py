@@ -23,6 +23,7 @@ UNIT_TEST_MODULES = (
     "tests.unit.test_router",
     "tests.unit.test_sources",
     "tests.unit.test_superpowers_overlay",
+    "tests.unit.test_work_artifacts",
 )
 
 
