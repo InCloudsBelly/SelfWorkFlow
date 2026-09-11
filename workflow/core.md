@@ -2,13 +2,13 @@
 
 默认只执行与当前任务直接相关的流程；不要预加载完整 Skill、安装治理、发布治理或知识后端。
 
-## 常驻表达策略
+## 输出与代码任务增强
 
-- **Caveman lite 常驻**：所有对话默认采用紧凑、完整句式，删除客套、填充和重复信息；压缩表达，不压缩判断，必须保持技术信息完整。
-- SelfWorkFlow 明确覆盖上游 Skill 的 `Default: full`：默认始终为 `lite`；`full`、`ultra` 和 `wenyan` 只能由用户明确指定，不能自动升级。
-- 代码、命令、错误必须精确保留；写入仓库或发给第三方的文档、提交信息、注释和消息使用正常专业表达，不套用口语压缩风格。
-- 安全警告、不可逆操作确认、多步流程或任何可能因压缩产生歧义的内容，临时恢复完整表达；清晰说明后继续 lite。
-- 官方 Caveman Skill 常驻安装供显式切换强度使用，但默认不得读取或展开重型可选能力，也不得弱化本工作流的进度、Review、验证和安全要求。
+- 所有用户沟通和工程文档使用中文；代码、命令、错误、路径和协议字段按事实保留。
+- 代码任务加载 Ponytail；它只约束代码设计、实现和审查，不改变输出风格、不启用全局配置、hooks、watcher 或 daemon。
+- Ponytail 按任务路由使用：`ponytail` 为代码任务基础能力；`ponytail-review` 只补充过度设计审查，不替代 Standards/Spec Review；`ponytail-audit` 仅在用户要求审计时加载。非代码任务不自动加载。
+- Ponytail 的 mode 是当前任务会话值，不写入全局配置；默认 mode 为 `full`，仅代码任务生效。
+- 路由由无状态的 `selfworkflow.ponytail_scope.select_ponytail_route()` 决定：`implement/debug` 直接命中；`design/plan/review/analyze/verify` 需代码扩展名或代码语义信号；其他操作保持关闭。
 
 ## 核心流程
 

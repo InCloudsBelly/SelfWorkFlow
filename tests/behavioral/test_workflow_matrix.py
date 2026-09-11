@@ -186,22 +186,16 @@ class LightweightPolicyTextTests(unittest.TestCase):
         ):
             self.assertIn(phrase, content)
 
-    def test_caveman_lite_is_always_on_without_weakening_clarity_or_artifacts(self):
+    def test_ponytail_is_code_scoped_without_changing_output_or_artifact_rules(self):
         content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
         for phrase in (
-            "Caveman lite",
-            "常驻",
-            "Default: full",
-            "技术信息完整",
-            "代码、命令、错误",
-            "文档、提交信息",
-            "安全警告",
-            "不可逆操作",
-            "多步流程",
-            "完整表达",
-            "只能由用户明确指定",
+            "代码任务加载 Ponytail",
+            "非代码任务不自动加载",
+            "mode 为 `full`",
+            "代码、命令、错误、路径和协议字段按事实保留",
         ):
             self.assertIn(phrase, content)
+        self.assertNotIn("Caveman", content)
 
     def test_formal_document_packages_require_fresh_independent_review(self):
         content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")

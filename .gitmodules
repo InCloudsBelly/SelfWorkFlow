@@ -7,3 +7,6 @@
 [submodule "dependencies/upstream/graft"]
 	path = dependencies/upstream/graft
 	url = https://github.com/trailhq/Graft.git
+[submodule "dependencies/upstream/ponytail"]
+	path = dependencies/upstream/ponytail
+	url = https://github.com/DietrichGebert/ponytail.git

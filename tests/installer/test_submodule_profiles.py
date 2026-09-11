@@ -45,6 +45,7 @@ class SubmoduleProfileTests(unittest.TestCase):
         self.assertIn("dependencies/upstream/tea", flattened)
         self.assertIn("dependencies/upstream/matt-pocock-skills", flattened)
         self.assertIn("dependencies/upstream/graft", flattened)
+        self.assertIn("dependencies/upstream/ponytail", flattened)
         self.assertNotIn("dependencies/heavy", flattened)
         self.assertNotIn("--remote", flattened)
         with self.assertRaisesRegex(SubmoduleProfileError, "submodule-profile-invalid"):
@@ -55,6 +56,9 @@ class SubmoduleProfileTests(unittest.TestCase):
         self.assertIn("selfworkflow.v3.submodule_profiles", script)
         self.assertNotIn("submodule update --remote", script)
         self.assertNotIn("dependencies/heavy", script)
+        self.assertIn("PonytailLockPath", script)
+        self.assertIn('"source", "ponytail-verify"', script)
+        self.assertIn("preserved-existing-binding", script)
         self.assertIn("GIT_TERMINAL_PROMPT=0", batch)
 
     def test_clone_repeat_gitlink_update_offline_rollback_and_heavy_isolation(self):
@@ -81,7 +85,9 @@ class SubmoduleProfileTests(unittest.TestCase):
             _git(parent / "dependencies/upstream/matt-pocock-skills", "checkout", "--detach", first)
             _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), "dependencies/upstream/graft")
             _git(parent / "dependencies/upstream/graft", "checkout", "--detach", first)
-            _git(parent, "add", ".gitmodules", "dependencies/upstream/tea", "dependencies/upstream/matt-pocock-skills", "dependencies/upstream/graft")
+            _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), "dependencies/upstream/ponytail")
+            _git(parent / "dependencies/upstream/ponytail", "checkout", "--detach", first)
+            _git(parent, "add", ".gitmodules", "dependencies/upstream/tea", "dependencies/upstream/matt-pocock-skills", "dependencies/upstream/graft", "dependencies/upstream/ponytail")
             _git(parent, "commit", "-m", "pin first")
             parent_remote = root / "parent.git"
             _git(root, "clone", "--bare", str(parent), str(parent_remote))
@@ -95,6 +101,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertEqual(_git(clone / "dependencies/upstream/graft", "rev-parse", "HEAD").stdout.strip(), first)
+            self.assertEqual(_git(clone / "dependencies/upstream/ponytail", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
             self.assertEqual(
                 apply_submodule_profile(
@@ -114,6 +121,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertEqual(_git(clone / "dependencies/upstream/graft", "rev-parse", "HEAD").stdout.strip(), first)
+            self.assertEqual(_git(clone / "dependencies/upstream/ponytail", "rev-parse", "HEAD").stdout.strip(), first)
 
             third = _commit_file(tea_source, "offline-only")
             _git(parent / "dependencies/upstream/tea", "fetch", str(tea_source), third)
@@ -130,6 +138,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertEqual(_git(clone / "dependencies/upstream/graft", "rev-parse", "HEAD").stdout.strip(), first)
+            self.assertEqual(_git(clone / "dependencies/upstream/ponytail", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
 
 

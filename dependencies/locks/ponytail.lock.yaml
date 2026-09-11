@@ -1,0 +1,21 @@
+schemaVersion: 1
+sourceId: ponytail
+canonicalUrl: https://github.com/DietrichGebert/ponytail.git
+path: dependencies/upstream/ponytail
+gitlinkCommit: 356918eba965ee1eac64bd3a7f0dd02108350de5
+gitTree: 3bb4226d87085db53fbf6a0013f6b5de07fcf815
+upstreamVersion: 4.9.0
+license:
+  path: LICENSE
+  spdx: MIT
+  hash: sha256:f1af4301bd3b85026965f9f1cfa101b9bfd73a75c6b92f7a2a72bab5768abd36
+selectedSkills:
+  - id: ponytail
+    path: skills/ponytail
+    hash: sha256:46a57e26a2632e7fa40eae6a3cf3011ccdc4d8db19d8f8617907d6b5deef055e
+  - id: ponytail-review
+    path: skills/ponytail-review
+    hash: sha256:6c8b7e5c897a406b66da6aabda7fa6509e8d1d447e73e602265d7986497445d1
+  - id: ponytail-audit
+    path: skills/ponytail-audit
+    hash: sha256:49e835c96313009179ec162d80ccc9d91625e387c8af7cd3975c531ba105b2d5

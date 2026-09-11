@@ -40,6 +40,7 @@ from selfworkflow.review_models import (
     save_review_model,
 )
 from selfworkflow.work_artifacts import WorkArtifactError, WorkArtifactManager
+from selfworkflow.ponytail_source import PonytailSourceError, verify_ponytail_source
 from selfworkflow.sources import (
     commit_superpowers_migration,
     recover_superpowers_migration,
@@ -423,6 +424,8 @@ def main(argv: list[str] | None = None) -> int:
     source_remove = source_commands.add_parser("remove-stage")
     source_remove.add_argument("--target", required=True)
     source_remove.add_argument("--expected-inventory-hash", required=True)
+    source_ponytail = source_commands.add_parser("ponytail-verify")
+    source_ponytail.add_argument("--repository", required=True)
     provider_parser = commands.add_parser("provider")
     provider_commands = provider_parser.add_subparsers(
         dest="provider_command", required=True,
@@ -832,6 +835,17 @@ def main(argv: list[str] | None = None) -> int:
                 separators=(",", ":"),
             )
         )
+        return 0
+    if arguments.command == "source" and arguments.source_command == "ponytail-verify":
+        try:
+            result = verify_ponytail_source(arguments.repository)
+        except PonytailSourceError as error:
+            print(
+                f"SelfWorkFlow: ponytail-source-verification-failed:{error}",
+                file=sys.stderr,
+            )
+            return 63
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     if arguments.command == "source" and arguments.source_command == "stage":
         try:

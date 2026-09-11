@@ -22,7 +22,11 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertEqual(first["features"], {"grillMe": True})
             self.assertTrue((root / "first/WORKFLOW.md").is_file())
             self.assertTrue((root / "first/skills/code-quality/SKILL.md").is_file())
-            self.assertTrue((root / "first/skills/caveman/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/ponytail/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/ponytail-review/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/ponytail-audit/SKILL.md").is_file())
+            self.assertFalse((root / "first/skills/caveman").exists())
+            self.assertFalse((root / "first/skills/ponytail-help").exists())
             self.assertTrue((root / "first/skills/matt-pocock/grilling/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/matt-pocock/tdd/SKILL.md").is_file())
             self.assertFalse((root / "first/skills/grill-me").exists())
@@ -45,6 +49,8 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 "明确实施确认",
                 "Review → 用户确认 → TDD",
                 "确认失效",
+                "非代码任务不自动加载",
+                "不启用上游全局配置或 hooks",
             ):
                 self.assertIn(phrase, workflow_text)
             self.assertFalse((root / "first/extensions").exists())
@@ -81,6 +87,10 @@ class RuntimeSnapshotTests(unittest.TestCase):
             content = b"".join(
                 path.read_bytes() for path in (root / "first").rglob("*") if path.is_file()
             ).lower()
+            self.assertNotIn(b"caveman", content)
+            self.assertNotIn(b"dependencies/upstream/ponytail", content)
+            self.assertFalse((root / "first/hooks").exists())
+            self.assertFalse((root / "first/.codex-plugin").exists())
             self.assertNotIn(b"e:\\", content)
             self.assertNotIn(b"d:\\openwikic7", content)
             for forbidden in ("provider-config.json", ".codegraph", "logs", "cache"):

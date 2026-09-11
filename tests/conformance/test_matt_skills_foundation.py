@@ -155,7 +155,9 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertIn("Full 和 Deep 必须加载 TEA", workflow)
         self.assertIn("CodeGraph", workflow)
         self.assertIn("过期", workflow)
-        self.assertIn("Caveman lite 常驻", workflow)
+        self.assertIn("Ponytail", workflow)
+        self.assertIn("非代码任务不自动加载", workflow)
+        self.assertNotIn("Caveman", workflow)
         self.assertNotIn("只读取当前阶段需要的 Superpowers Skill", workflow)
 
         active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")

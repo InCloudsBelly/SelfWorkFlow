@@ -14,6 +14,10 @@ from jsonschema import Draft202012Validator
 import yaml
 
 from selfworkflow.catalog import compile_catalog
+from selfworkflow.ponytail_source import (
+    PonytailSourceError,
+    copy_ponytail_skills,
+)
 from selfworkflow.v3.tea_adapter import verify_tea_source
 
 
@@ -58,7 +62,6 @@ _CORE_PATHS = (
     "skills/code-quality",
     "skills/workflow-quality",
     "skills/testing-review-quality",
-    "skills/caveman",
     "skills/tea-quality",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
@@ -245,6 +248,15 @@ def _copy_tea_quality(source: Path, destination: Path) -> None:
     shutil.copyfile(license_path, target / "LICENSE")
 
 
+def _copy_ponytail(source: Path, destination: Path) -> None:
+    """Copy only the three hash-bound Ponytail Skills, never its host files."""
+
+    try:
+        copy_ponytail_skills(source, destination)
+    except PonytailSourceError:
+        raise AdapterError("ponytail-source-invalid") from None
+
+
 def _exclude_c7_v3_catalog(runtime_root: Path) -> None:
     index_path = runtime_root / "catalog/v3/index.yaml"
     document = yaml.safe_load(index_path.read_text(encoding="utf-8"))
@@ -366,6 +378,9 @@ def build_runtime(
             copied_tea = temporary / "dependencies/upstream/tea"
             if copied_tea.exists():
                 shutil.rmtree(copied_tea)
+            copied_ponytail = temporary / "dependencies/upstream/ponytail"
+            if copied_ponytail.exists():
+                shutil.rmtree(copied_ponytail)
             for legacy in (
                 temporary / "skills/grill-me",
                 temporary / "overlays/superpowers",
@@ -400,6 +415,7 @@ def build_runtime(
             source, temporary, include_grill_me=include_grill_me
         )
         _copy_tea_quality(source, temporary)
+        _copy_ponytail(source, temporary)
         catalog_output = temporary / "catalog.json"
         catalog_output.write_bytes(
             _profile_catalog(

@@ -58,6 +58,7 @@ $Version = "0.1.0.dev0"
 $MattSkillsLockPath = Join-Path $RepositoryRoot "dependencies\locks\matt-pocock-skills.lock.yaml"
 $GraftLockPath = Join-Path $RepositoryRoot "dependencies\locks\graft.lock.yaml"
 $GraftPath = Join-Path $RepositoryRoot "dependencies\upstream\graft"
+$PonytailLockPath = Join-Path $RepositoryRoot "dependencies\locks\ponytail.lock.yaml"
 
 function Write-JsonFile {
     param([string]$Path, [object]$Value)
@@ -385,6 +386,7 @@ $script:PythonExecutable = $null
 $applyResult = $null
 $mattSkillsReport = $null
 $graftReport = $null
+$ponytailReport = $null
 $providerReport = [ordered]@{ status = "skipped" }
 $graftProviderReport = [ordered]@{ status = "skipped" }
 $providerSourceReport = $null
@@ -479,6 +481,13 @@ try {
         "provider", "inspect", "--graft-path", $GraftPath
     ) (Join-Path $script:LogDirectory "graft-source.json")
 
+    if (-not (Test-Path -LiteralPath $PonytailLockPath -PathType Leaf)) {
+        Stop-Install "submodules" 25 "ponytail-lock-missing"
+    }
+    $ponytailReport = Invoke-SelfWorkflow @(
+        "source", "ponytail-verify", "--repository", $RepositoryRoot
+    ) (Join-Path $script:LogDirectory "ponytail-source.json")
+
     Set-InstallStage "provider-selection" 30
     if ($CodeGraphOverrideChoice -eq "Ask") {
         if ($NonInteractive) {
@@ -523,6 +532,7 @@ try {
     Write-InstallLog ("Plan status: {0}; planHash: {1}" -f $plan.status, $plan.planHash)
     Write-InstallLog ("Matt Skills commit: {0}; lock: {1}" -f $mattSkillsReport.commit, $mattSkillsReport.lockHash)
     Write-InstallLog ("Graft commit: {0}; version: {1}; lock: {2}" -f $graftReport.commit, $graftReport.version, $graftReport.lockHash)
+    Write-InstallLog ("Ponytail commit: {0}; lock: {1}" -f $ponytailReport.gitlinkCommit, $ponytailReport.lockHash)
     Write-InstallLog "Superpowers: external-only; not managed by SelfWorkflow."
     Write-InstallLog ("Agents root: " + $AgentsRoot)
     Write-InstallLog ("Codex root: " + $CodexRoot)
@@ -544,6 +554,7 @@ try {
         mattSkills = $mattSkillsReport
         graft = $graftReport
         graftSource = $graftSourceReport
+        ponytail = $ponytailReport
         graftProvider = $graftProviderReport
         superpowers = "external-only"
         codeGraphOverrideChoice = $CodeGraphOverrideChoice
@@ -572,15 +583,28 @@ try {
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
 
     Set-InstallStage "graft-provider-configure" 74
-    $graftRollbackToken = [Guid]::NewGuid().ToString("N")
-    $graftProviderReport = Invoke-SelfWorkflow @(
-        "provider", "configure",
-        "--config-file", $ProviderConfigFile,
-        "--graft-path", $GraftPath,
-        "--expected-source-hash", $graftSourceReport.sourceHash,
-        "--rollback-token", $graftRollbackToken,
-        "--replace-existing"
-    ) (Join-Path $script:LogDirectory "graft-provider-configure.json")
+    $existingProviders = Invoke-SelfWorkflow @(
+        "provider", "list", "--config-file", $ProviderConfigFile
+    ) (Join-Path $script:LogDirectory "provider-list.json")
+    $existingGraftProvider = @($existingProviders.providers | Where-Object { $_.providerId -eq "graft" })
+    if ($existingGraftProvider.Count -gt 0) {
+        $graftProviderReport = [ordered]@{
+            status = "preserved-existing-binding"
+            reason = "existing-graft-binding-not-replaced"
+            existing = $existingGraftProvider[0]
+        }
+        Write-InstallLog "Existing Graft binding preserved; explicit provider configuration is required to rebind it."
+    }
+    else {
+        $graftRollbackToken = [Guid]::NewGuid().ToString("N")
+        $graftProviderReport = Invoke-SelfWorkflow @(
+            "provider", "configure",
+            "--config-file", $ProviderConfigFile,
+            "--graft-path", $GraftPath,
+            "--expected-source-hash", $graftSourceReport.sourceHash,
+            "--rollback-token", $graftRollbackToken
+        ) (Join-Path $script:LogDirectory "graft-provider-configure.json")
+    }
 
     if ($CodeGraphOverrideChoice -eq "Configure") {
         Set-InstallStage "provider-configure" 75
@@ -608,6 +632,7 @@ try {
         mattSkills = $mattSkillsReport
         graft = $graftReport
         graftSource = $graftSourceReport
+        ponytail = $ponytailReport
         graftProvider = $graftProviderReport
         superpowers = "external-only"
         codeGraphOverride = $providerReport.status

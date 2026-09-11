@@ -13,7 +13,8 @@ from typing import Callable, Sequence
 _TEA_PATH = "dependencies/upstream/tea"
 _MATT_SKILLS_PATH = "dependencies/upstream/matt-pocock-skills"
 _GRAFT_PATH = "dependencies/upstream/graft"
-_NORMAL_PATHS = (_TEA_PATH, _MATT_SKILLS_PATH, _GRAFT_PATH)
+_PONYTAIL_PATH = "dependencies/upstream/ponytail"
+_NORMAL_PATHS = (_TEA_PATH, _MATT_SKILLS_PATH, _GRAFT_PATH, _PONYTAIL_PATH)
 
 
 class SubmoduleProfileError(RuntimeError):
