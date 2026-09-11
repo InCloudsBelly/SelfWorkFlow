@@ -116,9 +116,9 @@ class InstallApplyTests(unittest.TestCase):
                 / "0.1.0"
                 / plan["artifactHash"].removeprefix("sha256:")
             ), agents_text)
-            self.assertIn("For ordinary tasks", agents_text)
-            self.assertIn("do not create a PlanGraph or RunLedger", agents_text)
-            self.assertIn("explicitly contract-managed", agents_text)
+            self.assertIn("普通任务", agents_text)
+            self.assertIn("不创建 PlanGraph 或 RunLedger", agents_text)
+            self.assertIn("显式 contract-managed", agents_text)
             self.assertNotIn("Read the vendor-neutral workflow at", agents_text)
             self.assertNotIn("run `selfworkflow resolve", agents_text)
             self.assertTrue(

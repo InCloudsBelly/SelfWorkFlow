@@ -53,11 +53,25 @@ class WorkflowResolutionAcceptanceTests(unittest.TestCase):
             self.assertTrue(
                 (snapshot / "workflow/resolve-request.example.json").is_file()
             )
+            for relative in (
+                "workflow/modes/light.md",
+                "workflow/modes/full.md",
+                "workflow/modes/deep.md",
+                "workflow/modules/code.md",
+                "workflow/modules/review.md",
+                "workflow/modules/knowledge.md",
+                "workflow/modules/artifacts.md",
+            ):
+                with self.subTest(snapshot_file=relative):
+                    installed_file = snapshot / relative
+                    source_file = self.ROOT / relative
+                    self.assertTrue(installed_file.is_file())
+                    self.assertEqual(installed_file.read_bytes(), source_file.read_bytes())
             installed_instruction = (codex / "AGENTS.md").read_text(
                 encoding="utf-8"
             )
-            self.assertIn("For ordinary tasks, follow", installed_instruction)
-            self.assertIn("explicitly contract-managed task", installed_instruction)
+            self.assertIn("普通任务直接遵循该策略", installed_instruction)
+            self.assertIn("显式 contract-managed task", installed_instruction)
             self.assertNotIn("selfworkflow resolve", installed_instruction)
 
             cases = (

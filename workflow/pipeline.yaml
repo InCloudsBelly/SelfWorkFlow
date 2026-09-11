@@ -29,9 +29,12 @@ stages:
       - id: test.quality.plan
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
-        condition: {all: [{eq: [writeTask, true]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
       - {id: plan.specialists, cardinality: zero-or-many, allowedInvocationKinds: [skill, mcp]}
-      - {id: plan.gate, cardinality: gate, allowedInvocationKinds: [agent-native, skill]}
+      - id: plan.gate
+        cardinality: gate
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {any: [{eq: [writeTask, true]}, {eq: [operationType, design]}, {eq: [operationType, plan]}]}
   - id: implemented
     failureOwner: implemented
     slots:
@@ -65,11 +68,11 @@ stages:
       - id: review.independent
         cardinality: zero-or-one
         allowedInvocationKinds: [agent-native, skill]
-        condition: {all: [{eq: [writeTask, true]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
       - id: test.quality.review
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
-        condition: {all: [{eq: [writeTask, true]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
       - id: review.remediation
         cardinality: zero-or-many
         allowedInvocationKinds: [agent-native, skill]

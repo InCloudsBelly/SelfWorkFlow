@@ -160,7 +160,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
 
         active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         self.assertIn("primary code-reading", active_workflow)
-        self.assertIn("`rg` for exact literal searches", active_workflow)
+        self.assertIn("保留 `rg` 做精确文本确认", active_workflow)
         cpp_skill = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(
             encoding="utf-8"
         )

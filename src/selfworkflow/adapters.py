@@ -33,6 +33,13 @@ _CORE_CATALOG_IDS = {
 _CORE_PATHS = (
     "workflow/core.md",
     "workflow/work-artifact-lifecycle.md",
+    "workflow/modes/light.md",
+    "workflow/modes/full.md",
+    "workflow/modes/deep.md",
+    "workflow/modules/code.md",
+    "workflow/modules/review.md",
+    "workflow/modules/knowledge.md",
+    "workflow/modules/artifacts.md",
     "workflow/pipeline.yaml",
     "workflow/git-policy.yaml",
     "workflow/resolve-request.example.json",

@@ -24,6 +24,7 @@ UNIT_TEST_MODULES = (
     "tests.unit.test_sources",
     "tests.unit.test_superpowers_overlay",
     "tests.unit.test_work_artifacts",
+    "tests.unit.test_workflow_compression",
 )
 
 

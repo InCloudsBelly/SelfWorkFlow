@@ -64,7 +64,7 @@ needed for the current stage:
 classify briefly
 -> locate the owning layer
 -> Light: bounded core Design; Full: Matt grilling; Deep: Matt grill-me with a deeper frontier
--> SelfWorkflow Plan; Full/Deep require TEA test design and pre-implementation Review
+-> SelfWorkflow Plan; Full/Deep behavior changes require TEA test design, and modifying Full/Deep tasks require pre-implementation Review
 -> Matt TDD RED/GREEN for behavior changes; diagnosing-bugs may compose with it
 -> implement only the approved smallest safe change
 -> review the complete task package; Full/Deep use independent Standards + Spec axes

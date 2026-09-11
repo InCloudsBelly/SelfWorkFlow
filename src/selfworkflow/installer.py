@@ -283,19 +283,18 @@ def _managed_instruction(
 ) -> str:
     return (
         "## SelfWorkflow bootstrap\n\n"
-        "SelfWorkflow is loaded from the installed, hash-bound artifact.\n\n"
+        "SelfWorkflow 已从安装后的 hash-bound artifact 加载。\n\n"
         f"- profile: `{profile}`\n"
         f"- artifact: `{artifact_hash}`\n"
         f"- snapshot: `{snapshot}`\n\n"
-        "Apply the embedded lightweight policy before any substantive response "
-        "or task action. For ordinary tasks, follow it directly and do not create "
-        "a PlanGraph or RunLedger. Use the snapshot only for an explicitly "
-        "contract-managed task or through a conforming Host; if that capability "
-        "is unavailable, pause only the contract-managed mode and never invent "
-        "resolution evidence.\n\n"
-        "When a task uses tools, changes files, or performs side effects, report "
-        f"`SelfWorkflow active: {profile}` in the first progress update.\n\n"
-        "### Embedded lightweight policy\n\n"
+        "在任何实质回复或任务操作前应用内嵌的轻量策略。普通任务直接遵循该策略，"
+        "不创建 PlanGraph 或 RunLedger。从 snapshot 根目录只读读取选定的 mode 和 task module；"
+        "仅在显式 contract-managed task 或 conforming Host 下使用 "
+        "resolver、PlanGraph 和 RunLedger。能力不可用时只暂停 contract-managed mode，"
+        "不得虚构 resolution evidence。\n\n"
+        "任务使用工具、修改文件或产生副作用时，首条进度更新需报告 "
+        f"`SelfWorkflow active: {profile}`。\n\n"
+        "### 内嵌轻量策略\n\n"
         f"{workflow_text.strip()}"
     )
 

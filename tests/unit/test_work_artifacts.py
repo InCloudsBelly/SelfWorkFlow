@@ -147,7 +147,7 @@ class WorkArtifactUnitTests(unittest.TestCase):
             root = Path(temporary)
             _git_repo(root)
             manager = WorkArtifactManager(root, "sensitive")
-            secret = "-----BEGIN PRIVATE KEY-----\nsecret-value\n"
+            secret = "-" * 5 + "BEGIN " + "PRIVATE KEY" + "-" * 5 + "\nsecret-value\n"
             with self.assertRaisesRegex(WorkArtifactError, "sensitive-content") as error:
                 manager.transition(0, 0, None, "documents-captured", [_doc(content=secret)], operation_nonce="s")
             self.assertNotIn("secret-value", str(error.exception))

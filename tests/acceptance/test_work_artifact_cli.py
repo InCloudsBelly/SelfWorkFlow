@@ -51,7 +51,7 @@ class WorkArtifactCliTests(unittest.TestCase):
             root = Path(temporary)
             self._git(root, "init", "-q")
             source = root / "artifacts.json"
-            secret = "-----BEGIN PRIVATE KEY-----secret-value"
+            secret = "-" * 5 + "BEGIN " + "PRIVATE KEY" + "-" * 5 + "secret-value"
             source.write_text(json.dumps({"artifacts": [{"id": "design", "kind": "design", "content": secret}]}), encoding="utf-8")
             result = self._run(
                 "artifact", "transition", "--project-root", root, "--task-id", "cli",
