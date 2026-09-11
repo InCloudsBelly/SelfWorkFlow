@@ -19,6 +19,7 @@ from selfworkflow.v3.providers.codegraph import (
     CodeGraphAdapterError,
     CommandPort,
 )
+from selfworkflow.v3.providers.graft import GraftAdapter, GraftAdapterError
 from selfworkflow.v3.provider_config import (
     ProviderConfigError,
     load_provider_config,
@@ -142,7 +143,7 @@ class ProviderManager:
         self._source_identity_resolver = source_identity_resolver
         self._logger = logger
         self._replace = replace_operation
-        self._adapter_cache: dict[str, tuple[str, CodeGraphAdapter]] = {}
+        self._adapter_cache: dict[str, tuple[str, object]] = {}
 
     @contextmanager
     def _config_lock(self):
@@ -238,7 +239,15 @@ class ProviderManager:
             if (
                 not isinstance(source, dict)
                 or set(source) != {"kind", "version", "commit", "sourceHash", "dirty"}
-                or source.get("kind") != "local-override"
+                or source.get("kind") not in {"local-override", "managed-submodule"}
+                or (
+                    provider_id == "graft"
+                    and source.get("kind") != "managed-submodule"
+                )
+                or (
+                    provider_id != "graft"
+                    and source.get("kind") != "local-override"
+                )
                 or not isinstance(source.get("version"), str)
                 or not source["version"]
                 or not isinstance(source.get("commit"), str)
@@ -480,9 +489,13 @@ class ProviderManager:
         rollback_token: str | None = None,
     ) -> dict[str, Any]:
         try:
-            if provider_id != "codegraph":
+            if provider_id not in {"codegraph", "graft"}:
                 raise ProviderManagerError("provider-not-supported")
-            if ownership != "user-local":
+            expected_ownership = {
+                "codegraph": "user-local",
+                "graft": "selfworkflow-managed",
+            }[provider_id]
+            if ownership != expected_ownership:
                 raise ProviderManagerError("provider-local-override-ownership-invalid")
             prefix = _validate_command_prefix(command_prefix)
             version = _clean_text(source_version, "provider-source-version-invalid")
@@ -494,7 +507,7 @@ class ProviderManager:
             if type(dirty) is not bool:
                 raise ProviderManagerError("provider-source-dirty-invalid")
             source = {
-                "kind": "local-override",
+                "kind": "managed-submodule" if provider_id == "graft" else "local-override",
                 "version": version,
                 "commit": commit,
                 "sourceHash": source_hash,
@@ -664,8 +677,8 @@ class ProviderManager:
         except Exception:
             raise ProviderManagerError("provider-source-identity-drift") from None
 
-    def _adapter(self, provider_id: str) -> CodeGraphAdapter:
-        if provider_id != "codegraph":
+    def _adapter(self, provider_id: str) -> object:
+        if provider_id not in {"codegraph", "graft"}:
             raise ProviderManagerError("provider-not-supported")
         config = self._read_config()
         provider = next(
@@ -681,7 +694,8 @@ class ProviderManager:
         if cached is not None and cached[0] == provider["bindingHash"]:
             return cached[1]
         try:
-            adapter = CodeGraphAdapter(
+            adapter_type = GraftAdapter if provider_id == "graft" else CodeGraphAdapter
+            adapter = adapter_type(
                 command_port=self._command_port,
                 command_prefix=tuple(provider["commandPrefix"]),
                 ownership=provider["ownership"],
@@ -689,7 +703,7 @@ class ProviderManager:
             )
             self._adapter_cache[provider_id] = (provider["bindingHash"], adapter)
             return adapter
-        except CodeGraphAdapterError:
+        except (CodeGraphAdapterError, GraftAdapterError):
             raise ProviderManagerError("provider-adapter-invalid") from None
 
     def doctor(self, provider_id: str) -> dict[str, Any]:
@@ -701,12 +715,66 @@ class ProviderManager:
         raise ProviderManagerError("provider-operation-unverified")
 
     def status(self, provider_id: str, project_root: str) -> dict[str, Any]:
+        if provider_id == "graft":
+            try:
+                from selfworkflow.v3.graft_lifecycle import (
+                    GraftProjectError, GraftProjectLifecycle,
+                )
+                return GraftProjectLifecycle(self._adapter(provider_id)).query_status(
+                    project_root,
+                )
+            except (
+                GraftAdapterError, GraftProjectError, ProviderManagerError,
+            ) as error:
+                self._log(
+                    "provider.status.failed", providerId=provider_id,
+                    operation="status", status="failed", reasonCode=error.reason,
+                )
+                raise ProviderManagerError(error.reason) from None
         self._log(
             "provider.status.failed", providerId=provider_id,
             operation="status", status="failed",
             reasonCode="provider-operation-unverified",
         )
         raise ProviderManagerError("provider-operation-unverified")
+
+    def query(
+        self, provider_id: str, project_root: str, query: str, *, query_kind: str,
+    ) -> dict[str, Any]:
+        if provider_id != "graft":
+            raise ProviderManagerError("provider-not-supported")
+        try:
+            from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+            return GraftProjectLifecycle(self._adapter(provider_id)).query(
+                project_root, query, query_kind=query_kind,
+            )
+        except (GraftAdapterError, ProviderManagerError) as error:
+            raise ProviderManagerError(error.reason) from None
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-query-failed")
+            raise ProviderManagerError(reason) from None
+
+    def graft_preflight(self, project_root: str) -> dict[str, Any]:
+        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
+            raise ProviderManagerError("provider-not-configured")
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+        return GraftProjectLifecycle(self._adapter("graft")).preflight(project_root)
+
+    def graft_enqueue(
+        self, project_root: str, changed_paths: Sequence[str],
+    ) -> dict[str, Any]:
+        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
+            raise ProviderManagerError("provider-not-configured")
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+        return GraftProjectLifecycle(self._adapter("graft")).enqueue(
+            project_root, changed_paths,
+        )
+
+    def graft_worker(self, project_root: str) -> dict[str, Any]:
+        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
+            raise ProviderManagerError("provider-not-configured")
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+        return GraftProjectLifecycle(self._adapter("graft")).run_once(project_root)
 
     def maintain(
         self,
@@ -717,19 +785,22 @@ class ProviderManager:
         plan_only: bool,
         confirmed_plan_hash: str | None = None,
     ) -> dict[str, Any]:
-        if provider_id != "codegraph":
+        if provider_id not in {"codegraph", "graft"}:
             raise ProviderManagerError("provider-not-supported")
-        if not plan_only:
+        if provider_id == "codegraph" and not plan_only:
             raise ProviderManagerError("provider-maintenance-apply-unverified")
         adapter = self._adapter(provider_id)
-        if action == "upgrade-managed-install" and adapter.ownership == "user-local":
+        if action == "upgrade-managed-install" and adapter.ownership == "user-local":  # type: ignore[union-attr]
             raise ProviderManagerError("provider-user-owned-upgrade-forbidden")
         try:
-            plan = adapter.plan_maintenance(action, project_root)
-        except CodeGraphAdapterError as error:
+            plan = adapter.plan_maintenance(action, project_root)  # type: ignore[union-attr]
+        except (CodeGraphAdapterError, GraftAdapterError) as error:
             reason = (
                 "provider-user-owned-upgrade-forbidden"
-                if error.reason == "codegraph-user-owned-upgrade-forbidden"
+                if error.reason in {
+                    "codegraph-user-owned-upgrade-forbidden",
+                    "graft-user-owned-upgrade-forbidden",
+                }
                 else "provider-maintenance-plan-invalid"
             )
             raise ProviderManagerError(reason) from None
@@ -737,4 +808,12 @@ class ProviderManager:
             "provider.maintain.planned", providerId=provider_id,
             operation="maintain", status="planned", planHash=plan["planHash"],
         )
-        return plan
+        if plan_only:
+            return plan
+        try:
+            return adapter.execute_maintenance(  # type: ignore[union-attr]
+                plan, project_root,
+                confirmed_plan_hash=str(confirmed_plan_hash),
+            )
+        except (CodeGraphAdapterError, GraftAdapterError) as error:
+            raise ProviderManagerError(error.reason) from None

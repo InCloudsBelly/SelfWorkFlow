@@ -36,6 +36,12 @@ The pinned Matt Pocock Skills foundation, including strength-routed grilling and
 grill-me, is installed from the repository Submodule. Superpowers is external-only and is
 never installed or enabled by this script.
 
+The pinned Graft Submodule is verified and built with Node >=20 during installation.
+Graft is the default code-reading Provider; its project graph is local and lazily
+initialized on the first code task. Queries use no-refresh. The installed provider
+binding exposes the SelfWorkFlow Host event/Worker for coalesced structural updates;
+it never enables Graft's competing hooks or Deep semantic build.
+
 CodeGraphOverrideChoice:
   Ask        Prompt once during interactive first installation; blank means Skip.
   Configure  Bind the explicit CodeGraphPath as a user-owned local Provider.
@@ -50,6 +56,8 @@ and requires an explicit APPLY confirmation before publishing files.
 $RepositoryRoot = Split-Path -Parent $PSScriptRoot
 $Version = "0.1.0.dev0"
 $MattSkillsLockPath = Join-Path $RepositoryRoot "dependencies\locks\matt-pocock-skills.lock.yaml"
+$GraftLockPath = Join-Path $RepositoryRoot "dependencies\locks\graft.lock.yaml"
+$GraftPath = Join-Path $RepositoryRoot "dependencies\upstream\graft"
 
 function Write-JsonFile {
     param([string]$Path, [object]$Value)
@@ -104,9 +112,14 @@ function Get-Sha256Hex {
 }
 
 function Invoke-NativeLogged {
-    param([string]$Executable, [string[]]$Arguments)
+    param([string]$Executable, [string[]]$Arguments, [string]$WorkingDirectory)
     $previousPreference = $ErrorActionPreference
+    $locationPushed = $false
     try {
+        if ($WorkingDirectory) {
+            Push-Location -LiteralPath $WorkingDirectory
+            $locationPushed = $true
+        }
         $ErrorActionPreference = "Continue"
         $nativeOutput = (& $Executable @Arguments 2>&1 | Out-String).Trim()
         $nativeExitCode = $LASTEXITCODE
@@ -116,6 +129,9 @@ function Invoke-NativeLogged {
         $nativeExitCode = 9009
     }
     finally {
+        if ($locationPushed) {
+            Pop-Location
+        }
         $ErrorActionPreference = $previousPreference
     }
     if ($nativeOutput) {
@@ -275,6 +291,83 @@ function Invoke-SelfWorkflow {
     return $output | ConvertFrom-Json
 }
 
+function Ensure-GraftBuild {
+    param([string]$ExpectedCommit, [string]$ExpectedTree)
+    if (-not (Test-Path -LiteralPath $GraftPath -PathType Container)) {
+        Stop-Install "graft-build" 27 "graft-source-missing"
+    }
+    $node = Get-Command "node.exe" -ErrorAction SilentlyContinue
+    $npm = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
+    if (-not $npm) {
+        $npm = Get-Command "npm.exe" -ErrorAction SilentlyContinue
+    }
+    if (-not $node -or -not $npm) {
+        Stop-Install "graft-build" 27 "node-npm-required"
+    }
+    $nodeVersion = (& $node.Source "--version" 2>$null | Out-String).Trim()
+    if ($nodeVersion -notmatch '^v(2[0-9]|[3-9][0-9])\.') {
+        Stop-Install "graft-build" 27 "node-20-required"
+    }
+    $graftEntry = Join-Path $GraftPath "dist\cli.js"
+    $graftStampPath = Join-Path $GraftPath "node_modules\.selfworkflow-build.json"
+    $graftPackageJsonPath = Join-Path $GraftPath "package.json"
+    $graftPackageLockPath = Join-Path $GraftPath "package-lock.json"
+    if ((Test-Path -LiteralPath $graftEntry -PathType Leaf) -and
+        (Test-Path -LiteralPath $graftStampPath -PathType Leaf)) {
+        try {
+            $stamp = Get-Content -Raw -LiteralPath $graftStampPath | ConvertFrom-Json
+            $stampMatches =
+                $stamp.commit -eq $ExpectedCommit -and
+                $stamp.tree -eq $ExpectedTree -and
+                $stamp.node -eq $nodeVersion -and
+                $stamp.packageJsonHash -eq ("sha256:" + (Get-Sha256Hex $graftPackageJsonPath)) -and
+                $stamp.packageLockHash -eq ("sha256:" + (Get-Sha256Hex $graftPackageLockPath)) -and
+                $stamp.cliHash -eq ("sha256:" + (Get-Sha256Hex $graftEntry))
+            if ($stampMatches) {
+                $cachedRuntimeExit = Invoke-NativeLogged $node.Source @($graftEntry, "--version") $GraftPath
+                if ($cachedRuntimeExit -eq 0) {
+                    Write-InstallLog "Reusing verified local Graft build."
+                    return
+                }
+                Write-InstallLog "Cached Graft runtime check failed; rebuilding."
+            }
+        }
+        catch {
+            Write-InstallLog "Cached Graft build stamp invalid; rebuilding."
+        }
+    }
+    Write-InstallLog ("Building pinned Graft with Node " + $nodeVersion)
+    $ciExit = Invoke-NativeLogged $npm.Source @("ci", "--ignore-scripts") $GraftPath
+    if ($ciExit -ne 0) {
+        Stop-Install "graft-build" 27 "graft-npm-ci-failed"
+    }
+    # Install dependencies without executing package scripts, then rebuild the
+    # pinned native grammar packages after the full dependency tree exists.
+    # This keeps the install order deterministic while still producing a
+    # runnable Graft CLI on hosts where prebuilt grammars are unavailable.
+    $rebuildExit = Invoke-NativeLogged $npm.Source @("rebuild", "--foreground-scripts") $GraftPath
+    if ($rebuildExit -ne 0) {
+        Stop-Install "graft-build" 27 "graft-native-build-failed"
+    }
+    $buildExit = Invoke-NativeLogged $npm.Source @("run", "build") $GraftPath
+    if ($buildExit -ne 0) {
+        Stop-Install "graft-build" 27 "graft-build-failed"
+    }
+    $runtimeExit = Invoke-NativeLogged $node.Source @($graftEntry, "--version") $GraftPath
+    if ($runtimeExit -ne 0) {
+        Stop-Install "graft-build" 27 "graft-runtime-check-failed"
+    }
+    Write-JsonFile $graftStampPath ([ordered]@{
+        schemaVersion = 1
+        commit = $ExpectedCommit
+        tree = $ExpectedTree
+        node = $nodeVersion
+        packageJsonHash = "sha256:" + (Get-Sha256Hex $graftPackageJsonPath)
+        packageLockHash = "sha256:" + (Get-Sha256Hex $graftPackageLockPath)
+        cliHash = "sha256:" + (Get-Sha256Hex $graftEntry)
+    })
+}
+
 $AgentsRoot = Resolve-FullPath $AgentsRoot
 $CodexRoot = Resolve-FullPath $CodexRoot
 $StateRoot = Resolve-FullPath $StateRoot
@@ -291,9 +384,13 @@ $script:FailureExitCode = 20
 $script:PythonExecutable = $null
 $applyResult = $null
 $mattSkillsReport = $null
+$graftReport = $null
 $providerReport = [ordered]@{ status = "skipped" }
+$graftProviderReport = [ordered]@{ status = "skipped" }
 $providerSourceReport = $null
+$graftSourceReport = $null
 $providerRollbackToken = $null
+$graftRollbackToken = $null
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -340,6 +437,48 @@ try {
         Stop-Install "submodules" 25 "matt-skills-gitlink-lock-mismatch"
     }
 
+    if (-not (Test-Path -LiteralPath $GraftLockPath -PathType Leaf)) {
+        Stop-Install "submodules" 25 "graft-lock-missing"
+    }
+    $graftLockText = Get-Content -Raw -LiteralPath $GraftLockPath
+    if ($graftLockText -notmatch '(?m)^gitlinkCommit:\s*([0-9a-f]{40})\s*$') {
+        Stop-Install "submodules" 25 "graft-lock-invalid"
+    }
+    $graftExpectedCommit = $Matches[1]
+    $graftGitlinkOutput = (& git.exe -C $RepositoryRoot ls-files --stage -- "dependencies/upstream/graft" 2>&1 | Out-String).Trim()
+    $graftGitlinkFields = @($graftGitlinkOutput -split '\s+')
+    if (
+        $LASTEXITCODE -ne 0 -or
+        $graftGitlinkFields.Count -lt 2 -or
+        $graftGitlinkFields[0] -ne "160000" -or
+        $graftGitlinkFields[1] -ne $graftExpectedCommit
+    ) {
+        Stop-Install "submodules" 25 "graft-gitlink-lock-mismatch"
+    }
+    $graftHead = (& git.exe -C $GraftPath rev-parse HEAD 2>$null | Out-String).Trim()
+    $graftTree = (& git.exe -C $GraftPath rev-parse "HEAD^{tree}" 2>$null | Out-String).Trim()
+    $graftDirty = (& git.exe -C $GraftPath status --porcelain=v1 --untracked-files=all 2>$null | Out-String).Trim()
+    if ($graftHead -ne $graftExpectedCommit -or $graftDirty) {
+        Stop-Install "submodules" 25 "graft-source-drift"
+    }
+
+    Set-InstallStage "graft-build" 27
+    Ensure-GraftBuild $graftHead $graftTree
+    $graftPackage = Get-Content -Raw -LiteralPath (Join-Path $GraftPath "package.json") | ConvertFrom-Json
+    if ($graftPackage.name -ne "@nanonets/graft" -or $graftPackage.version -ne "0.18.0" -or -not (Test-Path -LiteralPath (Join-Path $GraftPath "dist\cli.js") -PathType Leaf)) {
+        Stop-Install "graft-build" 27 "graft-build-identity-invalid"
+    }
+    $graftReport = [ordered]@{
+        commit = $graftHead
+        tree = $graftTree
+        version = $graftPackage.version
+        lockHash = "sha256:" + (Get-Sha256Hex $GraftLockPath)
+        runtime = "repository-submodule-built"
+    }
+    $graftSourceReport = Invoke-SelfWorkflow @(
+        "provider", "inspect", "--graft-path", $GraftPath
+    ) (Join-Path $script:LogDirectory "graft-source.json")
+
     Set-InstallStage "provider-selection" 30
     if ($CodeGraphOverrideChoice -eq "Ask") {
         if ($NonInteractive) {
@@ -383,6 +522,7 @@ try {
     }
     Write-InstallLog ("Plan status: {0}; planHash: {1}" -f $plan.status, $plan.planHash)
     Write-InstallLog ("Matt Skills commit: {0}; lock: {1}" -f $mattSkillsReport.commit, $mattSkillsReport.lockHash)
+    Write-InstallLog ("Graft commit: {0}; version: {1}; lock: {2}" -f $graftReport.commit, $graftReport.version, $graftReport.lockHash)
     Write-InstallLog "Superpowers: external-only; not managed by SelfWorkflow."
     Write-InstallLog ("Agents root: " + $AgentsRoot)
     Write-InstallLog ("Codex root: " + $CodexRoot)
@@ -402,6 +542,9 @@ try {
         codexRoot = $CodexRoot
         stateRoot = $StateRoot
         mattSkills = $mattSkillsReport
+        graft = $graftReport
+        graftSource = $graftSourceReport
+        graftProvider = $graftProviderReport
         superpowers = "external-only"
         codeGraphOverrideChoice = $CodeGraphOverrideChoice
         codeGraphSource = $providerSourceReport
@@ -428,6 +571,17 @@ try {
     $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
 
+    Set-InstallStage "graft-provider-configure" 74
+    $graftRollbackToken = [Guid]::NewGuid().ToString("N")
+    $graftProviderReport = Invoke-SelfWorkflow @(
+        "provider", "configure",
+        "--config-file", $ProviderConfigFile,
+        "--graft-path", $GraftPath,
+        "--expected-source-hash", $graftSourceReport.sourceHash,
+        "--rollback-token", $graftRollbackToken,
+        "--replace-existing"
+    ) (Join-Path $script:LogDirectory "graft-provider-configure.json")
+
     if ($CodeGraphOverrideChoice -eq "Configure") {
         Set-InstallStage "provider-configure" 75
         $providerRollbackToken = [Guid]::NewGuid().ToString("N")
@@ -452,6 +606,9 @@ try {
         status = "installed"
         profile = $Profile
         mattSkills = $mattSkillsReport
+        graft = $graftReport
+        graftSource = $graftSourceReport
+        graftProvider = $graftProviderReport
         superpowers = "external-only"
         codeGraphOverride = $providerReport.status
         writeCapability = "enabled"
@@ -477,6 +634,22 @@ try {
             Write-Host "Provider configuration is verified; rollback-record cleanup is pending."
         }
     }
+    if ($graftRollbackToken) {
+        try {
+            if ($env:SELFWORKFLOW_TEST_FAIL_PROVIDER_COMMIT -eq "1") {
+                throw "injected-graft-provider-commit-cleanup-failure"
+            }
+            Invoke-SelfWorkflow @(
+                "provider", "commit-config",
+                "--config-file", $ProviderConfigFile,
+                "--rollback-token", $graftRollbackToken
+            ) (Join-Path $script:LogDirectory "graft-provider-config-commit.json") | Out-Null
+            $graftRollbackToken = $null
+        }
+        catch {
+            Write-Host "Graft provider configuration is verified; rollback-record cleanup is pending."
+        }
+    }
     Write-Host "Installation verified."
     Write-Host "Restart Codex before relying on newly discovered Skills."
     exit 0
@@ -486,6 +659,9 @@ catch {
     Write-InstallLog ("FAILED [{0}]: {1}" -f $script:CurrentStage, $failure)
     $rollbackStatus = "not-required"
     try {
+        # Provider transactions are layered: a CodeGraph override is written
+        # after the managed Graft binding. Roll back in reverse order so each
+        # transaction still sees the exact postimage it recorded.
         if ($providerRollbackToken) {
             $providerRollback = Invoke-SelfWorkflow @(
                 "provider", "rollback-config",
@@ -498,6 +674,20 @@ catch {
             }
             elseif ($providerRollback.status -ne "not-issued") {
                 throw "provider-config-rollback-status-invalid"
+            }
+        }
+        if ($graftRollbackToken) {
+            $graftRollback = Invoke-SelfWorkflow @(
+                "provider", "rollback-config",
+                "--config-file", $ProviderConfigFile,
+                "--rollback-token", $graftRollbackToken,
+                "--if-issued"
+            ) (Join-Path $script:LogDirectory "graft-provider-config-rollback.json")
+            if ($graftRollback.status -eq "rolled-back") {
+                $rollbackStatus = "rolled-back"
+            }
+            elseif ($graftRollback.status -ne "not-issued") {
+                throw "graft-provider-config-rollback-status-invalid"
             }
         }
         if ($applyResult -and $applyResult.status -eq "applied") {

@@ -14,7 +14,7 @@ Install_SelfWorkFlow.bat -Profile knowledge
 ```
 
 The installer checks or prepares the repository Python environment, initializes
-the pinned Git Submodules, and packages only the curated Matt Pocock Skills
+the pinned Git Submodules, builds the pinned Graft CLI with Node >=20, and packages only the curated Matt Pocock Skills
 listed in `dependencies/locks/matt-pocock-skills.lock.yaml`. The upstream
 `grilling` and `grill-me` are installed with that curated set. Full automatically
 routes to `grilling`; Deep routes to `grill-me`, whose upstream workflow runs the
@@ -136,7 +136,30 @@ repository-scoped Provider management entry is deliberately not packaged into
 the static Agent snapshot. These files are loaded only by matching V3 requests; machine
 configuration, logs, indexes and caches are never packaged.
 
-## Optional CodeGraph provider
+## Default Graft code provider
+
+Graft is the default local code-reading Provider and is pinned at
+`dependencies/upstream/graft` with `dependencies/locks/graft.lock.yaml`. The
+installer verifies the gitlink, source tree, package/lockfile/license hashes,
+then runs `npm ci --ignore-scripts`, a controlled native-package rebuild,
+`npm run build`, and a CLI runtime smoke test. Queries use Graft's
+`--no-refresh` mode and never build implicitly.
+The project graph is initialized lazily on the first matching code task. After
+an Agent writes code, the Host sends one `agent_write` event and runs the
+SelfWorkFlow coalescing Worker; queries remain `--no-refresh` and never build
+implicitly. The Worker is structural-only: it does not run Deep or install a
+file watcher/daemon. See `docs/providers/graft.md`.
+
+```powershell
+node dependencies/upstream/graft/dist/cli.js build D:\project --no-gitignore --no-ignore
+node dependencies/upstream/graft/dist/cli.js map D:\project --json --no-refresh
+
+python -m selfworkflow.cli provider graft-preflight --project-root D:\project
+python -m selfworkflow.cli provider graft-event --project-root D:\project --changed-path Source\main.cpp
+python -m selfworkflow.cli provider graft-worker --project-root D:\project
+```
+
+## Optional legacy CodeGraph provider
 
 Run the Provider management entry from the cloned SelfWorkFlow repository. It is
 not copied into the static Agent runtime snapshot because that snapshot does not
@@ -145,7 +168,7 @@ contain a Python executable or the SelfWorkFlow package:
 ```bat
 Manage_SelfWorkFlow_Providers.bat list
 Manage_SelfWorkFlow_Providers.bat configure --codegraph-path <local-codegraph-root>
-Manage_SelfWorkFlow_Providers.bat maintain --action sync --project-root D:\project --plan-only
+Manage_SelfWorkFlow_Providers.bat maintain --provider-id codegraph --action sync --project-root D:\project --plan-only
 ```
 
 `doctor` and `status` are reserved names but fail closed with
@@ -161,16 +184,16 @@ ports required by the V3 contract. User-owned local overrides are never upgraded
 by SelfWorkFlow. Replacing a different existing binding fails with a
 conflict unless the user explicitly repeats configure with `--replace-existing`
 (or the installer is run with `-ReplaceCodeGraphOverride`). CodeGraph query/sync/index behavior remains
-`unverified` until native per-operation validation. For code reading, a fresh
-project-bound CodeGraph is preferred for structural navigation and dependency
-understanding; `rg` remains for exact text and files outside the graph. Query
+`unverified` until native per-operation validation. CodeGraph is no longer the
+default route; use it only when explicitly configured or requested. `rg` remains
+for exact text and files outside the Graft graph. Query
 planning explicitly marks the upstream CLI's unavoidable auto-sync possibility
 as `potential-local-write`. See `docs/providers/codegraph.md`.
 
-For a new conversation's first code task, SelfWorkFlow checks the bound
-CodeGraph index once. If stale, it asks whether to update and use it, use the
+For a new conversation's first code task, SelfWorkFlow checks the bound Graft
+index once. If stale, it asks whether to explicitly build and use it, use the
 stale index read-only, or omit it for that conversation. The choice is reused
-for the conversation; index updates still require explicit side-effect
+for the conversation; graph updates still require explicit side-effect
 confirmation.
 
 ## Current capability status

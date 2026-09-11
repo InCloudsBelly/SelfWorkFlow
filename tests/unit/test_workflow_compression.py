@@ -343,19 +343,18 @@ class WorkflowCompressionTests(unittest.TestCase):
                 if slot["slotId"] in {"design.specialists", "plan.gate"}:
                     self.assertEqual(slot["selectedModules"], [])
 
-    def test_read_only_keeps_write_protection_and_graft_is_unsupported(self):
+    def test_read_only_keeps_write_protection_and_graft_is_explicitly_bounded(self):
         text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         for phrase in (
             "writeTask=false",
             "禁止编辑",
             "禁止副作用",
             "Graft",
-            "unsupported",
-            "不属于当前批次",
+            "失败关闭",
         ):
             self.assertIn(phrase, text)
 
-    def test_runtime_package_contains_split_files_without_graft(self):
+    def test_runtime_package_contains_split_files_and_graft_lock(self):
         output_parent = Path(tempfile.mkdtemp(prefix="selfworkflow-compression-"))
         output = output_parent / "runtime"
         try:
@@ -377,7 +376,11 @@ class WorkflowCompressionTests(unittest.TestCase):
                         hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(),
                         entries[relative],
                     )
-            self.assertFalse(any("graft" in path.casefold() for path in entries))
+            self.assertIn("dependencies/locks/graft.lock.yaml", entries)
+            self.assertEqual(
+                entries["dependencies/locks/graft.lock.yaml"],
+                hashlib.sha256((ROOT / "dependencies/locks/graft.lock.yaml").read_bytes()).hexdigest(),
+            )
         finally:
             shutil.rmtree(output_parent, ignore_errors=True)
 

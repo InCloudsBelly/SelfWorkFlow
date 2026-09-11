@@ -165,7 +165,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("代码阅读优先级", cpp_skill)
-        self.assertIn("CodeGraph 缺失、过期", cpp_skill)
+        self.assertIn("Graft 缺失、过期", cpp_skill)
         self.assertIn("新对话第一次命中代码任务", cpp_skill)
         self.assertIn("本对话偏好", cpp_skill)
         provider_doc = (self.ROOT / "docs/providers/codegraph.md").read_text(

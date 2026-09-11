@@ -97,6 +97,15 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertIn("profile", output)
         self.assertIn("knowledge", output)
 
+    def test_graft_install_rebuilds_native_packages_and_smoke_checks_runtime(self):
+        script = (self.ROOT / "scripts" / "install-selfworkflow.ps1").read_text(
+            encoding="utf-8"
+        ).casefold()
+        self.assertIn('"rebuild", "--foreground-scripts"', script)
+        self.assertIn("graft-native-build-failed", script)
+        self.assertIn("graft-runtime-check-failed", script)
+        self.assertNotIn('"prune", "--omit=dev"', script)
+
     def _run_installer(self, root, *arguments, env=None):
         environment = (env or os.environ).copy()
         local_app_data = root / "localappdata"

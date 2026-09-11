@@ -92,8 +92,23 @@ def _provider_manager(config_file: str | None):
     return ProviderManager(
         paths=MachineLocalPaths(config_file=_provider_config_file(config_file)),
         command_port=_SubprocessCommandPort(),
-        source_identity_resolver=_inspect_codegraph_source_identity,
+        source_identity_resolver=_inspect_provider_source_identity,
     )
+
+
+def _inspect_provider_source_identity(source_value: str):
+    """Inspect only the explicitly configured provider checkout."""
+    source = _absolute_path(source_value).resolve(strict=True)
+    package = source / "package.json"
+    if package.is_file() and not package.is_symlink():
+        try:
+            package_name = json.loads(package.read_text(encoding="utf-8")).get("name")
+        except (OSError, UnicodeError, ValueError, AttributeError):
+            package_name = None
+        if package_name == "@nanonets/graft":
+            from selfworkflow.v3.graft_source import inspect_graft_source_path
+            return inspect_graft_source_path(str(source))
+    return _inspect_codegraph_source_identity(str(source))
 
 
 def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
@@ -191,6 +206,40 @@ def _configure_codegraph(
         source_commit=str(report["commit"]),
         source_hash=str(report["sourceHash"]),
         dirty=bool(report["dirty"]),
+        replace_existing=replace_existing,
+        rollback_token=rollback_token,
+    )
+
+
+def _configure_graft(
+    manager, source_value: str, *, replace_existing: bool = False,
+    expected_source_hash: str | None = None,
+    rollback_token: str | None = None,
+) -> dict[str, object]:
+    from selfworkflow.v3.graft_source import GraftSourceError, inspect_graft_source_path
+
+    try:
+        observation = inspect_graft_source_path(source_value)
+    except GraftSourceError as error:
+        raise ValueError(error.reason) from None
+    report = observation["report"]
+    if (
+        expected_source_hash is not None
+        and expected_source_hash != report["sourceHash"]
+    ):
+        raise ValueError("graft-source-drift")
+    if report["dirty"]:
+        raise ValueError("graft-source-dirty")
+    source = Path(observation["source"])
+    return manager.configure(
+        provider_id="graft",
+        source_path=str(source),
+        command_prefix=("node", str(source / "dist" / "cli.js")),
+        ownership="selfworkflow-managed",
+        source_version=str(report["version"]),
+        source_commit=str(report["commit"]),
+        source_hash=str(report["sourceHash"]),
+        dirty=False,
         replace_existing=replace_existing,
         rollback_token=rollback_token,
     )
@@ -381,10 +430,14 @@ def main(argv: list[str] | None = None) -> int:
     provider_list = provider_commands.add_parser("list")
     provider_list.add_argument("--config-file")
     provider_inspect = provider_commands.add_parser("inspect")
-    provider_inspect.add_argument("--codegraph-path", required=True)
+    inspect_paths = provider_inspect.add_mutually_exclusive_group(required=True)
+    inspect_paths.add_argument("--codegraph-path")
+    inspect_paths.add_argument("--graft-path")
     provider_configure = provider_commands.add_parser("configure")
     provider_configure.add_argument("--config-file")
-    provider_configure.add_argument("--codegraph-path", required=True)
+    configure_paths = provider_configure.add_mutually_exclusive_group(required=True)
+    configure_paths.add_argument("--codegraph-path")
+    configure_paths.add_argument("--graft-path")
     provider_configure.add_argument("--replace-existing", action="store_true")
     provider_configure.add_argument("--expected-source-hash")
     provider_configure.add_argument("--rollback-token")
@@ -400,7 +453,7 @@ def main(argv: list[str] | None = None) -> int:
     provider_doctor.add_argument("--provider-id", default="codegraph")
     provider_status = provider_commands.add_parser("status")
     provider_status.add_argument("--config-file")
-    provider_status.add_argument("--provider-id", default="codegraph")
+    provider_status.add_argument("--provider-id", default="graft")
     provider_status.add_argument("--project-root", required=True)
     provider_maintain = provider_commands.add_parser("maintain")
     provider_maintain.add_argument("--config-file")
@@ -411,6 +464,25 @@ def main(argv: list[str] | None = None) -> int:
     provider_maintain.add_argument("--project-root", required=True)
     provider_maintain.add_argument("--plan-only", action="store_true")
     provider_maintain.add_argument("--confirm-plan-hash")
+    provider_query = provider_commands.add_parser("query")
+    provider_query.add_argument("--config-file")
+    provider_query.add_argument("--provider-id", default="graft")
+    provider_query.add_argument("--project-root", required=True)
+    provider_query.add_argument("--query", required=True)
+    provider_query.add_argument(
+        "--query-kind", choices=("ask", "map", "grep", "callers", "skeleton"),
+        default="ask",
+    )
+    graft_preflight = provider_commands.add_parser("graft-preflight")
+    graft_preflight.add_argument("--config-file")
+    graft_preflight.add_argument("--project-root", required=True)
+    graft_event = provider_commands.add_parser("graft-event")
+    graft_event.add_argument("--config-file")
+    graft_event.add_argument("--project-root", required=True)
+    graft_event.add_argument("--changed-path", action="append", required=True)
+    graft_worker = provider_commands.add_parser("graft-worker")
+    graft_worker.add_argument("--config-file")
+    graft_worker.add_argument("--project-root", required=True)
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -616,18 +688,30 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "provider":
         try:
             if arguments.provider_command == "inspect":
-                result = _inspect_codegraph_source(arguments.codegraph_path)["report"]
+                if arguments.graft_path:
+                    from selfworkflow.v3.graft_source import inspect_graft_source_path
+                    result = inspect_graft_source_path(arguments.graft_path)["report"]
+                else:
+                    result = _inspect_codegraph_source(arguments.codegraph_path)["report"]
             else:
                 manager = _provider_manager(arguments.config_file)
             if arguments.provider_command == "list":
                 result = manager.list_providers()
             elif arguments.provider_command == "configure":
-                result = _configure_codegraph(
-                    manager, arguments.codegraph_path,
-                    replace_existing=arguments.replace_existing,
-                    expected_source_hash=arguments.expected_source_hash,
-                    rollback_token=arguments.rollback_token,
-                )
+                if arguments.graft_path:
+                    result = _configure_graft(
+                        manager, arguments.graft_path,
+                        replace_existing=arguments.replace_existing,
+                        expected_source_hash=arguments.expected_source_hash,
+                        rollback_token=arguments.rollback_token,
+                    )
+                else:
+                    result = _configure_codegraph(
+                        manager, arguments.codegraph_path,
+                        replace_existing=arguments.replace_existing,
+                        expected_source_hash=arguments.expected_source_hash,
+                        rollback_token=arguments.rollback_token,
+                    )
             elif arguments.provider_command == "rollback-config":
                 result = manager.rollback_config(
                     arguments.rollback_token, if_issued=arguments.if_issued,
@@ -653,6 +737,19 @@ def main(argv: list[str] | None = None) -> int:
                         arguments.project_root, plan_only=False,
                         confirmed_plan_hash=arguments.confirm_plan_hash,
                     )
+            elif arguments.provider_command == "query":
+                result = manager.query(
+                    arguments.provider_id, arguments.project_root, arguments.query,
+                    query_kind=arguments.query_kind,
+                )
+            elif arguments.provider_command == "graft-preflight":
+                result = manager.graft_preflight(arguments.project_root)
+            elif arguments.provider_command == "graft-event":
+                result = manager.graft_enqueue(
+                    arguments.project_root, arguments.changed_path,
+                )
+            elif arguments.provider_command == "graft-worker":
+                result = manager.graft_worker(arguments.project_root)
             elif arguments.provider_command == "inspect":
                 pass
             else:

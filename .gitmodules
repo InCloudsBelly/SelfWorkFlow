@@ -4,3 +4,6 @@
 [submodule "dependencies/upstream/matt-pocock-skills"]
 	path = dependencies/upstream/matt-pocock-skills
 	url = https://github.com/mattpocock/skills.git
+[submodule "dependencies/upstream/graft"]
+	path = dependencies/upstream/graft
+	url = https://github.com/trailhq/Graft.git

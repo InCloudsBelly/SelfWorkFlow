@@ -106,6 +106,13 @@ class GitPolicyTests(unittest.TestCase):
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
             },
+            {
+                "path": "dependencies/upstream/graft",
+                "objectHash": "f9e65396e638e517aecae0d731017f53084d70ed",
+                "reason": "Pinned official Graft source used by the default code-reading Provider",
+                "owner": "SelfWorkFlow maintainers",
+                "expires": "2030-12-31",
+            },
         ])
 
 

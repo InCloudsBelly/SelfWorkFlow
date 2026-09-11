@@ -162,7 +162,7 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
 
         self.assertIs(
             manager_type.call_args.kwargs["source_identity_resolver"],
-            cli._inspect_codegraph_source_identity,
+            cli._inspect_provider_source_identity,
         )
 
     def test_identity_inspection_disables_git_helpers_and_provider_execution(self):

@@ -64,6 +64,7 @@ _CORE_PATHS = (
     "capabilities/workflow-quality",
     "dependencies/locks/matt-pocock-skills.lock.yaml",
     "dependencies/locks/tea.lock.yaml",
+    "dependencies/locks/graft.lock.yaml",
     "overlays/tea",
     "adapters",
     # V3 is shipped as an explicit, self-contained extension. The lightweight

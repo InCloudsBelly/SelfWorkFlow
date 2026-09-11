@@ -83,6 +83,21 @@ class ProviderManagerTests(unittest.TestCase):
             rollback_token=uuid.uuid4().hex if issue_rollback_token else None,
         )
 
+    def _configure_graft(self, manager, *, replace_existing=False):
+        source = self.root / "private" / "graft"
+        source.mkdir(parents=True, exist_ok=True)
+        return manager.configure(
+            provider_id="graft",
+            source_path=str(source.resolve()),
+            command_prefix=("node", str(source / "dist" / "cli.js")),
+            ownership="selfworkflow-managed",
+            source_version="0.18.0",
+            source_commit="b" * 40,
+            source_hash="sha256:" + "a" * 64,
+            dirty=False,
+            replace_existing=replace_existing,
+        )
+
     def test_list_is_empty_without_scanning_or_creating_config(self):
         manager = self._manager()
 
@@ -121,6 +136,94 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertEqual(first["configurationHash"], second["configurationHash"])
         self.assertEqual(second["status"], "unchanged")
         self.assertEqual(config.read_bytes(), before)
+
+    def test_graft_is_a_managed_provider_and_not_a_user_override(self):
+        manager = self._manager()
+
+        result = self._configure_graft(manager)
+        listed = manager.list_providers()
+
+        self.assertEqual(result["providerId"], "graft")
+        self.assertEqual(listed["providers"][0]["providerId"], "graft")
+        self.assertEqual(listed["providers"][0]["ownership"], "selfworkflow-managed")
+        from selfworkflow.v3.provider_config import load_provider_config
+        loaded = load_provider_config(
+            path=self.root / "machine" / "providers.local.yaml",
+            root=self.root / "machine",
+        )
+        self.assertEqual(
+            loaded["providers"][0]["source"]["kind"], "managed-submodule",
+        )
+
+    def test_graft_preflight_and_worker_use_the_managed_adapter(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        port = FakeCommandPort(
+            self._result(1, stdout='{"context":{"missing":true},"graph":null}'),
+            self._result(stdout="build complete"),
+            self._result(stdout='{"context":{"ok":false,"missing":true},"graph":{"ok":true,"missing":false}}'),
+        )
+        manager = self._manager(
+            port=port,
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+
+        result = manager.graft_preflight(str(project))
+
+        self.assertEqual(result["status"], "initialized")
+        self.assertEqual(port.calls[0]["argv"][0:2], ("node", str(self.root / "private" / "graft" / "dist" / "cli.js")))
+        self.assertIn("build", port.calls[1]["argv"])
+
+    def test_graft_status_enforces_project_binding_before_provider_dispatch(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        port = FakeCommandPort()
+        manager = self._manager(
+            port=port,
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+
+        with self.assertRaisesRegex(
+            ProviderManagerError, "graft-project-root-invalid",
+        ):
+            manager.status("graft", "C:/not-a-project")
+        self.assertEqual(port.calls, [])
+
+    def test_graft_query_enforces_project_binding_before_provider_dispatch(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
+        port = FakeCommandPort()
+        manager = self._manager(
+            port=port,
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+
+        with self.assertRaisesRegex(
+            ProviderManagerError, "graft-project-root-invalid",
+        ):
+            manager.query("graft", "C:/not-a-project", "x", query_kind="ask")
+        self.assertEqual(port.calls, [])
 
     def test_configure_holds_an_exclusive_machine_config_lock(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError

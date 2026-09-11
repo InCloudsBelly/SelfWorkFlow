@@ -1,0 +1,16 @@
+schemaVersion: 1
+canonicalUrl: https://github.com/trailhq/Graft.git
+path: dependencies/upstream/graft
+gitlinkCommit: f9e65396e638e517aecae0d731017f53084d70ed
+gitTree: 42974e35eb97eba5602fc8e523635bc8efe6271c
+package:
+  name: '@nanonets/graft'
+  version: 0.18.0
+  node: '>=20'
+  packageJsonHash: sha256:512f49bd11b72e95c4956db270f7ec6766bd0ffaa587dc514657939312da5fd8
+  packageLockHash: sha256:2fef9581fc285dd516a3b3cbc524ae6269eb138b9248a04ef2a00279ff006628
+entry: dist/cli.js
+license:
+  path: LICENSE
+  spdx: MIT
+  hash: sha256:2ace9c5f76414d60b6840930fa5f553971183c22854bea7085fdc65d2531e424

@@ -44,6 +44,7 @@ class SubmoduleProfileTests(unittest.TestCase):
         flattened = " ".join(part for command in commands for part in command)
         self.assertIn("dependencies/upstream/tea", flattened)
         self.assertIn("dependencies/upstream/matt-pocock-skills", flattened)
+        self.assertIn("dependencies/upstream/graft", flattened)
         self.assertNotIn("dependencies/heavy", flattened)
         self.assertNotIn("--remote", flattened)
         with self.assertRaisesRegex(SubmoduleProfileError, "submodule-profile-invalid"):
@@ -78,7 +79,9 @@ class SubmoduleProfileTests(unittest.TestCase):
             _git(parent / "dependencies/upstream/tea", "checkout", "--detach", first)
             _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), "dependencies/upstream/matt-pocock-skills")
             _git(parent / "dependencies/upstream/matt-pocock-skills", "checkout", "--detach", first)
-            _git(parent, "add", ".gitmodules", "dependencies/upstream/tea", "dependencies/upstream/matt-pocock-skills")
+            _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), "dependencies/upstream/graft")
+            _git(parent / "dependencies/upstream/graft", "checkout", "--detach", first)
+            _git(parent, "add", ".gitmodules", "dependencies/upstream/tea", "dependencies/upstream/matt-pocock-skills", "dependencies/upstream/graft")
             _git(parent, "commit", "-m", "pin first")
             parent_remote = root / "parent.git"
             _git(root, "clone", "--bare", str(parent), str(parent_remote))
@@ -91,6 +94,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             self.assertEqual(first_result["status"], "ready")
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
+            self.assertEqual(_git(clone / "dependencies/upstream/graft", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
             self.assertEqual(
                 apply_submodule_profile(
@@ -109,6 +113,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             )
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
+            self.assertEqual(_git(clone / "dependencies/upstream/graft", "rev-parse", "HEAD").stdout.strip(), first)
 
             third = _commit_file(tea_source, "offline-only")
             _git(parent / "dependencies/upstream/tea", "fetch", str(tea_source), third)
@@ -124,6 +129,7 @@ class SubmoduleProfileTests(unittest.TestCase):
                 )
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
+            self.assertEqual(_git(clone / "dependencies/upstream/graft", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
 
 

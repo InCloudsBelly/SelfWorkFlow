@@ -15,7 +15,7 @@ domains:
 modules:
   - id: cpp-core
     ref: modules/cpp-core.yaml
-    hash: sha256:4c4d9257f2686734a946dd4449cb357ebaeeb38f03122224ecfbdc3cbc8dc765
+    hash: sha256:a634ac5ff0edf1b8aa9cfa8ce48566c4b3b00cee2151bf2d439ecf8a890c9a5a
   - id: cpp.ownership
     ref: modules/cpp.ownership.yaml
     hash: sha256:808e549e26498e21fd7c2f1cdfe2bdac247b492cb6fda516bd95097e3d12bd53
