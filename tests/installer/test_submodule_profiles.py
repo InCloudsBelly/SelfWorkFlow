@@ -71,7 +71,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             existing = root / "existing"
             existing.mkdir()
             (existing / ".git").write_text("gitdir\n", encoding="utf-8")
-            states = {"existing": ("b" * 40, "a" * 40)}
+            states = {"existing": ("b" * 40, "a" * 40, None, None)}
 
             def failed_runner(command, _cwd):
                 if "checkout" in command:

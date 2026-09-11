@@ -15,9 +15,8 @@ _CODE_EXTENSIONS = {
     ".py", ".rs", ".shader", ".ts", ".tsx", ".ush", ".usf", ".hlsl",
 }
 _CODE_TERMS = {
-    "api", "abi", "bug", "build", "code", "compiler", "concurrency", "debug",
-    "implementation", "interface", "module", "refactor", "repository", "source",
-    "test", "unreal", "ue5",
+    "api", "abi", "bug", "code", "compiler", "concurrency", "debug",
+    "implementation", "refactor", "unreal", "ue5",
 }
 _MODES = {"lite", "full", "ultra", "off"}
 _EXPLICIT_SKILLS = {

@@ -80,7 +80,7 @@ def apply_submodule_profile(
     root = Path(repository).resolve()
     if not root.is_dir() or not (root / ".git").exists():
         raise SubmoduleProfileError("submodule-repository-invalid")
-    states: dict[str, tuple[str, str | None]] = {}
+    states: dict[str, tuple[str, str | None, str | None, str | None]] = {}
     for submodule_path in _NORMAL_PATHS:
         listing = runner(
             ("git", "ls-files", "--stage", "--", submodule_path), root
@@ -88,7 +88,15 @@ def apply_submodule_profile(
         fields = listing.stdout.strip().split() if listing.returncode == 0 else []
         if len(fields) < 2 or fields[0] != "160000":
             raise SubmoduleProfileError("submodule-gitlink-invalid")
+        config_key = f"submodule.{submodule_path}.url"
+        configured_url = runner(
+            ("git", "config", "--local", "--get", config_key), root
+        )
+        if configured_url.returncode not in (0, 1):
+            raise SubmoduleProfileError("submodule-config-invalid")
+        previous_url = configured_url.stdout.strip() if configured_url.returncode == 0 else None
         previous_commit: str | None = None
+        previous_branch: str | None = None
         if (root / submodule_path / ".git").exists():
             head = runner(
                 ("git", "-C", submodule_path, "rev-parse", "HEAD"), root
@@ -103,7 +111,13 @@ def apply_submodule_profile(
             if head.returncode != 0 or dirty.returncode != 0 or dirty.stdout:
                 raise SubmoduleProfileError("submodule-dirty")
             previous_commit = head.stdout.strip()
-        states[submodule_path] = (fields[1], previous_commit)
+            branch = runner(
+                ("git", "-C", submodule_path, "symbolic-ref", "-q", "HEAD"), root
+            )
+            if branch.returncode not in (0, 1):
+                raise SubmoduleProfileError("submodule-state-invalid")
+            previous_branch = branch.stdout.strip() if branch.returncode == 0 else None
+        states[submodule_path] = (fields[1], previous_commit, previous_branch, previous_url)
 
     failed = False
     for command in commands:
@@ -117,7 +131,7 @@ def apply_submodule_profile(
         raise SubmoduleProfileError("submodule-update-failed")
 
     commits: dict[str, str] = {}
-    for submodule_path, (target_commit, previous_commit) in states.items():
+    for submodule_path, (target_commit, _, _, _) in states.items():
         head = runner(
             ("git", "-C", submodule_path, "rev-parse", "HEAD"), root
         )
@@ -148,13 +162,14 @@ def apply_submodule_profile(
 
 
 def _restore_submodules(
-    states: dict[str, tuple[str, str | None]],
+    states: dict[str, tuple[str, str | None, str | None, str | None]],
     root: Path,
     runner: Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]],
 ) -> bool:
     rollback_ok = True
-    for submodule_path, (_, previous_commit) in states.items():
+    for submodule_path, (_, previous_commit, previous_branch, previous_url) in states.items():
         path = root / submodule_path
+        result: subprocess.CompletedProcess[str] | None = None
         if previous_commit:
             result = runner(
                 (
@@ -163,17 +178,31 @@ def _restore_submodules(
                 ),
                 root,
             )
+            if result.returncode == 0 and previous_branch:
+                result = runner(
+                    ("git", "-C", submodule_path, "checkout", previous_branch), root
+                )
         elif (path / ".git").exists():
             result = runner(
                 ("git", "submodule", "deinit", "-f", "--", submodule_path),
                 root,
             )
-        else:
-            continue
-        if result.returncode != 0:
+        if result is not None and result.returncode != 0:
             rollback_ok = False
+        config_key = f"submodule.{submodule_path}.url"
+        if previous_url:
+            config_result = runner(
+                ("git", "config", "--local", "--replace-all", config_key, previous_url),
+                root,
+            )
+            if config_result.returncode != 0:
+                rollback_ok = False
+        else:
+            runner(
+                ("git", "config", "--local", "--unset-all", config_key), root
+            )
 
-    for submodule_path, (_, previous_commit) in states.items():
+    for submodule_path, (_, previous_commit, previous_branch, previous_url) in states.items():
         path = root / submodule_path
         if previous_commit:
             head = runner(
@@ -193,7 +222,28 @@ def _restore_submodules(
                 or dirty.stdout
             ):
                 rollback_ok = False
+            branch = runner(
+                ("git", "-C", submodule_path, "symbolic-ref", "-q", "HEAD"), root
+            )
+            if (
+                previous_branch is None and branch.returncode == 0
+                or previous_branch is not None
+                and (branch.returncode != 0 or branch.stdout.strip() != previous_branch)
+            ):
+                rollback_ok = False
         elif (path / ".git").exists():
+            rollback_ok = False
+        config_key = f"submodule.{submodule_path}.url"
+        configured_url = runner(
+            ("git", "config", "--local", "--get", config_key), root
+        )
+        if previous_url is None:
+            if configured_url.returncode == 0 and configured_url.stdout.strip():
+                rollback_ok = False
+        elif (
+            configured_url.returncode != 0
+            or configured_url.stdout.strip() != previous_url
+        ):
             rollback_ok = False
     return rollback_ok
 
