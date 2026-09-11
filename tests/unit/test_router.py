@@ -125,6 +125,67 @@ class RouterTests(unittest.TestCase):
         candidate = next(item for item in result.candidates if item.skill_id == "explicit")
         self.assertIn("explicit", candidate.reasons)
 
+    def test_checked_in_catalog_routes_ponytail_for_code_tasks(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import route_skills
+
+        result = route_skills(
+            compile_catalog(Path(__file__).resolve().parents[2] / "catalog").content,
+            self._request(
+                stage="implemented",
+                operation_type="implement",
+                file_extensions=(".cpp",),
+                capability_states={
+                    "filesystem-read": "supported",
+                    "skill-discovery": "supported",
+                    "test-execution": "supported",
+                },
+            ),
+        )
+        self.assertIn("ponytail", result.selected)
+        self.assertEqual(result.status, "routed")
+
+    def test_checked_in_catalog_routes_ponytail_specialists_only_in_scope(self):
+        from selfworkflow.catalog import compile_catalog
+        from selfworkflow.router import route_skills
+
+        content = compile_catalog(Path(__file__).resolve().parents[2] / "catalog").content
+        review = route_skills(
+            content,
+            self._request(
+                stage="reviewed",
+                operation_type="review",
+                file_extensions=(".cpp",),
+                capability_states={"filesystem-read": "supported", "skill-discovery": "supported"},
+            ),
+        )
+        self.assertIn("ponytail-review", review.selected)
+        self.assertNotIn("ponytail-audit", review.selected)
+
+        audit = route_skills(
+            content,
+            self._request(
+                stage="reviewed",
+                operation_type="review",
+                file_extensions=(".cpp",),
+                explicit_skills=("ponytail-audit",),
+                capability_states={"filesystem-read": "supported", "skill-discovery": "supported"},
+            ),
+        )
+        self.assertIn("ponytail-audit", audit.selected)
+
+        help_result = route_skills(
+            content,
+            self._request(
+                stage="discovered",
+                operation_type="analyze",
+                file_extensions=(),
+                explicit_skills=("ponytail-help",),
+                capability_states={"filesystem-read": "supported", "skill-discovery": "supported"},
+            ),
+        )
+        self.assertEqual(help_result.selected, ("workflow-core", "ponytail-help"))
+
     def test_safety_and_project_mandatory_cannot_be_removed_by_semantic_score(self):
         from selfworkflow.router import route_skills
 
@@ -274,6 +335,7 @@ class RouterTests(unittest.TestCase):
                 "testing-review-quality",
                 "tea-quality-foundation",
                 "matt-skills-foundation",
+                "ponytail",
             ),
         )
         self.assertEqual(result.catalog_hash, compiled.catalog_hash)

@@ -6,7 +6,7 @@
 
 - 所有用户沟通和工程文档使用中文；代码、命令、错误、路径和协议字段按事实保留。
 - 代码任务加载 Ponytail；它只约束代码设计、实现和审查，不改变输出风格、不启用全局配置、hooks、watcher 或 daemon。
-- Ponytail 按任务路由使用：`ponytail` 为代码任务基础能力；`ponytail-review` 只补充过度设计审查，不替代 Standards/Spec Review；`ponytail-audit` 仅在用户要求审计时加载。非代码任务不自动加载。
+- Ponytail 按任务路由使用：`ponytail` 为代码任务基础能力；`ponytail-review` 只补充过度设计审查，不替代 Standards/Spec Review；`ponytail-audit` 仅在用户要求审计时加载；`ponytail-help` 仅响应帮助请求。非代码任务不自动加载。
 - Ponytail 的 mode 是当前任务会话值，不写入全局配置；默认 mode 为 `full`，仅代码任务生效。
 - 路由由无状态的 `selfworkflow.ponytail_scope.select_ponytail_route()` 决定：`implement/debug` 直接命中；`design/plan/review/analyze/verify` 需代码扩展名或代码语义信号；其他操作保持关闭。
 

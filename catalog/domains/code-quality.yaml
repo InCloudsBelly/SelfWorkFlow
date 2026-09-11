@@ -78,3 +78,121 @@ entries:
           target: code-quality-tests
           mode: equals
           value: passed
+  - id: ponytail
+    displayName: Ponytail code-task minimization
+    source:
+      kind: workflow
+      path: dependencies/locks/ponytail.lock.yaml
+      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+    aliases:
+      - name: ponytail-code
+        target: ponytail
+    triggers: [minimal code change, avoid overbuilding, reuse existing code]
+    exclusions: [pure content generation, non-code document]
+    selectors:
+      fileExtensions: [.c, .cc, .cpp, .cppm, .cs, .cu, .cuh, .cxx, .go, .h, .hh, .hpp, .hxx, .inl, .ixx, .java, .js, .py, .rs, .shader, .ts, .ush, .usf, .hlsl]
+      operationTypes: [analyze, design, plan, implement, debug, review, verify]
+      semanticTerms: [minimal code change, avoid overbuilding, reuse existing code, code, bug fix]
+    stages: [designed, planned, implemented, reviewed, verified]
+    requiredCapabilities: [skill-discovery]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 790
+    contextCost: 320
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: ponytail-audit
+    displayName: Ponytail code over-engineering audit
+    source:
+      kind: workflow
+      path: dependencies/locks/ponytail.lock.yaml
+      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+    aliases: []
+    triggers: [over-engineering audit, delete unnecessary code]
+    exclusions: [pure content generation, non-code document]
+    selectors:
+      fileExtensions: []
+      operationTypes: []
+      semanticTerms: []
+    stages: [designed, reviewed, verified]
+    requiredCapabilities: [skill-discovery]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 770
+    contextCost: 256
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: ponytail-help
+    displayName: Ponytail usage help
+    source:
+      kind: workflow
+      path: dependencies/locks/ponytail.lock.yaml
+      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+    aliases: []
+    triggers: [ponytail help, ponytail commands, ponytail mode]
+    exclusions: []
+    selectors:
+      fileExtensions: []
+      operationTypes: []
+      semanticTerms: []
+    stages: [discovered, designed]
+    requiredCapabilities: [skill-discovery]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 760
+    contextCost: 128
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: ponytail-review
+    displayName: Ponytail over-engineering review
+    source:
+      kind: workflow
+      path: dependencies/locks/ponytail.lock.yaml
+      revision: git:0b490701dc1e520a9fe3875f28cdea4ab1d29a40
+      contentHash: sha256:006071bccdb79bb9743fc8457936555f1d0b141d96121959df0697bef273e740
+    aliases: []
+    triggers: [over-engineering review, minimal diff review]
+    exclusions: [pure content generation, non-code document]
+    selectors:
+      fileExtensions: [.c, .cc, .cpp, .cppm, .cs, .cu, .cuh, .cxx, .go, .h, .hh, .hpp, .hxx, .inl, .ixx, .java, .js, .py, .rs, .shader, .ts, .ush, .usf, .hlsl]
+      operationTypes: [review, verify]
+      semanticTerms: [over-engineering review, minimal diff review]
+    stages: [designed, reviewed, verified]
+    requiredCapabilities: [skill-discovery]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen:
+      match: any
+      scopes: []
+      fileExtensions: []
+      operationTypes: []
+    priority: 780
+    contextCost: 256
+    supportStatus: supported
+    protectedRuleOperations: []

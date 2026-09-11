@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: ponytail-coding
+sourceHash: sha256:46a57e26a2632e7fa40eae6a3cf3011ccdc4d8db19d8f8617907d6b5deef055e
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/ponytail/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 320, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

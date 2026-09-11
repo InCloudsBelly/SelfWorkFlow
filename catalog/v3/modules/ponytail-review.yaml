@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: ponytail-review
+sourceHash: sha256:6c8b7e5c897a406b66da6aabda7fa6509e8d1d447e73e602265d7986497445d1
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/ponytail-review/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 256, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

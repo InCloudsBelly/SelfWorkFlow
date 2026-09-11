@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: ponytail-audit
+sourceHash: sha256:49e835c96313009179ec162d80ccc9d91625e387c8af7cd3975c531ba105b2d5
+stage: designed
+slot: code.reasoning
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/ponytail-audit/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 256, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

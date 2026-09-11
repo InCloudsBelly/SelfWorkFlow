@@ -73,6 +73,16 @@ classify briefly
 
 The conceptual sequence is `Discover -> Capability Check -> Classify -> Design ->
 Plan -> Implement/Debug -> Review -> Verify -> optional Knowledge -> Complete`.
+
+Ponytail replaces the former Caveman code-minimization layer. It is loaded only
+for routed coding/engineering work: `ponytail` is the default code lens,
+`ponytail-review` supplements over-engineering review, `ponytail-audit` is
+explicit-only, and `ponytail-help` is a one-shot help card. The selected Skills
+come from the pinned `dependencies/upstream/ponytail` submodule; upstream hooks,
+daemons, plugin files, environment variables, and global config are not copied
+or activated. The route accepts task-scoped `lite`, `full`, `ultra`, or `off`,
+with `full` as the code-task default. Non-code work does not load Ponytail.
+
 For ordinary work, thin Agent adapters follow `WORKFLOW.md` directly and do not
 manufacture a PlanGraph or RunLedger. `selfworkflow resolve` is an opt-in
 contract-management interface for an explicit V3 request or a conforming Host
