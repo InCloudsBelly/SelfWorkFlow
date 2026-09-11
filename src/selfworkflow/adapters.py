@@ -33,6 +33,10 @@ _CORE_CATALOG_IDS = {
     "tea-quality-foundation",
     "code-quality",
     "matt-skills-foundation",
+    "ponytail",
+    "ponytail-review",
+    "ponytail-audit",
+    "ponytail-help",
 }
 _CORE_PATHS = (
     "workflow/core.md",
@@ -249,7 +253,7 @@ def _copy_tea_quality(source: Path, destination: Path) -> None:
 
 
 def _copy_ponytail(source: Path, destination: Path) -> None:
-    """Copy only the three hash-bound Ponytail Skills, never its host files."""
+    """Copy only the four hash-bound Ponytail Skills, never host files."""
 
     try:
         copy_ponytail_skills(source, destination)

@@ -7,9 +7,9 @@
 ## 固定边界
 
 - Ponytail 仅用于代码相关的设计、计划、实现、调试、验证和审查；非代码任务不自动加载。
-- 运行时只发布 `ponytail`、`ponytail-review`、`ponytail-audit` 三项 hash 绑定 Skill。
+- 运行时只发布 `ponytail`、`ponytail-review`、`ponytail-audit`、`ponytail-help` 四项 hash 绑定 Skill。
 - `ponytail-review` 只能补充过度设计审查，不能替代 Standards/Spec Review；`ponytail-audit` 只响应显式审计请求。
-- 不发布上游 `ponytail-help`、hooks、watcher、daemon、全局配置或 Node 运行时；不保留 SelfWorkFlow 管理的 Caveman Skill。
+- `ponytail-help` 只保留一次性使用说明；不发布上游 hooks、watcher、daemon、全局配置或 Node 运行时；不保留 SelfWorkFlow 管理的 Caveman Skill。
 - Ponytail mode 只存在于当前任务路由结果，默认 `full`，不写全局配置。
 - Graft 已有 Provider 绑定默认保留；需要重绑时由用户单独执行显式 Provider 操作。
 

@@ -9,6 +9,7 @@ from typing import Any
 
 from selfworkflow.v3.catalog import CompiledCatalog
 from selfworkflow.v3.cpp_router import CppRouteResult
+from selfworkflow.ponytail_scope import PonytailRoute
 from selfworkflow.v3.contracts import (
     ContractError,
     load_contract,
@@ -117,6 +118,7 @@ def build_plan_graph(
     execution_policy_snapshot: Mapping[str, Any] | None = None,
     policy_snapshot: Mapping[str, Any] | None = None,
     capability_route: CppRouteResult | None = None,
+    ponytail_route: PonytailRoute | None = None,
 ) -> PlanGraphArtifact:
     """Build a deterministic plan from strict loader artifacts and snapshots."""
 
@@ -165,10 +167,22 @@ def build_plan_graph(
     )
     if capability_route is not None and type(capability_route) is not CppRouteResult:
         raise PlanGraphError("v3-capability-route-not-typed")
+    if ponytail_route is not None and type(ponytail_route) is not PonytailRoute:
+        raise PlanGraphError("v3-ponytail-route-not-typed")
+    ponytail_module_ids = (
+        set() if ponytail_route is None or not ponytail_route.enabled
+        else set(ponytail_route.module_ids)
+    )
+    explicit_ponytail = explicit & {
+        "ponytail-coding", "ponytail-review", "ponytail-audit", "ponytail-help",
+    }
+    if explicit_ponytail and not ponytail_module_ids:
+        raise PlanGraphError("v3-ponytail-explicit-not-applicable")
     routed = (
         set() if capability_route is None
         else set(capability_route.selected_module_ids)
     )
+    routed |= ponytail_module_ids
     requested = explicit | project_defaults | routed
     modules = _module_map(catalog_document)
     _validate_module_graph(modules)

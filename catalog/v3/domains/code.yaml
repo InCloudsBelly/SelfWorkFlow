@@ -11,3 +11,7 @@ modules:
   - cpp.build
   - cpp.debugging
   - cpp.engine.unreal
+  - ponytail-coding
+  - ponytail-review
+  - ponytail-audit
+  - ponytail-help

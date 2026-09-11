@@ -20,6 +20,7 @@ _SCHEMA_NAMES = (
     "resolve-request.schema.json",
     "resolve-result.schema.json",
     "capability-route.schema.json",
+    "ponytail-route.schema.json",
     "plan-graph.schema.json",
     "selection-receipt.schema.json",
     "run-ledger.schema.json",
@@ -1007,6 +1008,50 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
             item["estimatedContextCost"] for item in route["moduleLoadTrace"]
         ):
             _raise_semantic("capability-route-context-cost-invalid", ("capabilityRoute", "contextCost"))
+    ponytail_route = document.get("ponytailRoute")
+    if ponytail_route is not None:
+        _validate_schema("ponytail-route.schema.json", ponytail_route)
+        if ponytail_route["routeHash"] != _canonical_hash(ponytail_route, "routeHash"):
+            _raise_semantic("ponytail-route-hash-invalid", ("ponytailRoute", "routeHash"))
+        expected_modules = {
+            "ponytail": "ponytail-coding",
+            "ponytail-review": "ponytail-review",
+            "ponytail-audit": "ponytail-audit",
+            "ponytail-help": "ponytail-help",
+        }
+        if (
+            ponytail_route["skillIds"][0] != "ponytail"
+            and ponytail_route["skillIds"][0] != "ponytail-help"
+        ) or [
+            expected_modules[item] for item in ponytail_route["skillIds"]
+        ] != ponytail_route["selectedModuleIds"]:
+            _raise_semantic(
+                "ponytail-route-skill-module-mismatch",
+                ("ponytailRoute", "selectedModuleIds"),
+            )
+        plan = document.get("planGraph")
+        if plan is not None:
+            route_slot_id = (
+                "design.specialists"
+                if ponytail_route["skillIds"][0] == "ponytail-help"
+                else "code.reasoning"
+            )
+            code_slots = [
+                slot
+                for stage in plan["stages"]
+                for slot in stage["slots"]
+                if stage["stageId"] == "designed"
+                and slot["slotId"] == route_slot_id
+            ]
+            if (
+                len(code_slots) != 1
+                or not set(ponytail_route["selectedModuleIds"])
+                <= set(code_slots[0]["eligibleModules"])
+            ):
+                _raise_semantic(
+                    "ponytail-route-plan-mismatch",
+                    ("ponytailRoute", "selectedModuleIds"),
+                )
     if document["status"] == "active":
         plan = document["planGraph"]
         if plan is None:

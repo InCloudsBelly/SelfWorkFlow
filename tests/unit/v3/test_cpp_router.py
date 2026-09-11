@@ -307,6 +307,100 @@ class CppRouterTests(unittest.TestCase):
             <= set(code_slot["eligibleModules"])
         )
 
+    def test_v3_resolve_routes_ponytail_for_code_operation_without_code_signals(self):
+        from selfworkflow.v3.catalog import compile_catalog
+        from selfworkflow.v3.resolver import resolve_request
+
+        request = _v3_request()
+        required = {
+            "discover-context", "capability-check", "classify-task",
+            "design-grilling", "plan-core", "implement-matt", "implement-tdd",
+            "review-self", "verify-execution", "complete-gate",
+        }
+        request["explicitModuleIds"] = sorted(required)
+        result = resolve_request(
+            request,
+            catalog_source=compile_catalog(),
+            execution_policy_snapshot={
+                "allowUnverifiedModuleIds": sorted(required | {"ponytail-coding"}),
+            },
+        )
+        self.assertEqual(result["status"], "active")
+        route = result["ponytailRoute"]
+        self.assertEqual(route["skillIds"], ["ponytail"])
+        self.assertEqual(route["selectedModuleIds"], ["ponytail-coding"])
+        code_slot = next(
+            slot for stage in result["planGraph"]["stages"]
+            if stage["stageId"] == "designed"
+            for slot in stage["slots"]
+            if slot["slotId"] == "code.reasoning"
+        )
+        self.assertIn("ponytail-coding", code_slot["eligibleModules"])
+
+    def test_v3_resolve_does_not_route_ponytail_for_non_code_operation(self):
+        from selfworkflow.v3.resolver import resolve_request
+
+        request = _v3_request()
+        request.update({
+            "operationType": "document",
+            "writeTask": True,
+            "taskArchetype": "spec-document",
+        })
+        result = resolve_request(request)
+        self.assertNotIn("ponytailRoute", result)
+
+    def test_v3_ponytail_mode_is_task_scoped_and_off_disables_route(self):
+        from selfworkflow.v3.resolver import resolve_request
+
+        request = _v3_request()
+        required = {
+            "discover-context", "capability-check", "classify-task",
+            "design-grilling", "plan-core", "implement-matt", "implement-tdd",
+            "review-self", "verify-execution", "complete-gate",
+        }
+        request["explicitModuleIds"] = sorted(required)
+        request["ponytailMode"] = "ultra"
+        result = resolve_request(
+            request,
+            execution_policy_snapshot={
+                "allowUnverifiedModuleIds": sorted(required | {"ponytail-coding"}),
+            },
+        )
+        self.assertEqual(result["ponytailRoute"]["mode"], "ultra")
+
+        request["ponytailMode"] = "off"
+        disabled = resolve_request(request)
+        self.assertNotIn("ponytailRoute", disabled)
+
+    def test_v3_explicit_help_is_non_code_and_uses_specialist_slot(self):
+        from selfworkflow.v3.catalog import compile_catalog
+        from selfworkflow.v3.resolver import resolve_request
+
+        request = _v3_request()
+        request["operationType"] = "analyze"
+        request["writeTask"] = False
+        request["taskArchetype"] = "exploratory-design"
+        required = {
+            "discover-context", "capability-check", "classify-task",
+            "plan-core", "verify-execution", "complete-gate",
+        }
+        request["explicitModuleIds"] = sorted(required | {"ponytail-help"})
+        result = resolve_request(
+            request,
+            execution_policy_snapshot={
+                "allowUnverifiedModuleIds": sorted(required | {"ponytail-help"}),
+            },
+        )
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["ponytailRoute"]["skillIds"], ["ponytail-help"])
+        specialists = next(
+            slot for stage in result["planGraph"]["stages"]
+            if stage["stageId"] == "designed"
+            for slot in stage["slots"]
+            if slot["slotId"] == "design.specialists"
+        )
+        self.assertIn("ponytail-help", specialists["eligibleModules"])
+
     def test_resolved_cpp_plan_constructs_host_with_original_request(self):
         from selfworkflow.v3.catalog import compile_catalog
         from selfworkflow.v3.pipeline import load_pipeline

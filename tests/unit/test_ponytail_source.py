@@ -23,7 +23,7 @@ class PonytailSourceTests(unittest.TestCase):
         self.assertEqual(report["canonicalUrl"], "https://github.com/DietrichGebert/ponytail.git")
         self.assertEqual(
             [item["id"] for item in report["selectedSkills"]],
-            ["ponytail", "ponytail-review", "ponytail-audit"],
+            ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-help"],
         )
 
     def test_missing_or_invalid_lock_fails_closed(self):

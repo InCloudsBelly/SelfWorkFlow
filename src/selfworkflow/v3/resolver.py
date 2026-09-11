@@ -20,6 +20,7 @@ from selfworkflow.v3.cpp_router import (
     request_from_code_signals,
     route_cpp_capabilities,
 )
+from selfworkflow.ponytail_scope import PonytailRoute, select_ponytail_route
 
 
 class ResolveError(ValueError):
@@ -113,7 +114,8 @@ def _resolution_inputs(
     catalog_source: object,
     pipeline_source: object,
 ) -> tuple[
-    dict[str, Any], CppRouteResult | None, CompiledCatalog, LoadedPipeline,
+    dict[str, Any], CppRouteResult | None, PonytailRoute | None,
+    CompiledCatalog, LoadedPipeline,
 ]:
     normalized = _load_request(request)
     capability_route = None
@@ -124,16 +126,43 @@ def _resolution_inputs(
             )
         except CppRouteError as error:
             raise ResolveError(str(error)) from None
+    code_signals = normalized.get("codeSignals", {})
+    explicit_skill = None
+    for skill_id, module_id in (
+        ("ponytail-help", "ponytail-help"),
+        ("ponytail-review", "ponytail-review"),
+        ("ponytail-audit", "ponytail-audit"),
+        ("ponytail", "ponytail-coding"),
+    ):
+        if module_id in normalized["explicitModuleIds"]:
+            explicit_skill = skill_id
+            break
+    try:
+        ponytail_candidate = select_ponytail_route(
+            normalized["operationType"],
+            file_extensions=tuple(code_signals.get("fileExtensions", ())),
+            semantic_terms=tuple(code_signals.get("languages", ())) + tuple(
+                code_signals.get("taskSignals", ())
+            ),
+            explicit_skill=explicit_skill,
+            mode=normalized.get("ponytailMode", "full"),
+        )
+    except ValueError as error:
+        raise ResolveError(str(error)) from None
+    ponytail_route = ponytail_candidate if ponytail_candidate.enabled else None
     return (
         normalized,
         capability_route,
+        ponytail_route,
         _artifact_or_compile_catalog(catalog_source),
         _artifact_or_load_pipeline(pipeline_source),
     )
 
 
 def _active_result(
-    plan: PlanGraphArtifact, capability_route: CppRouteResult | None,
+    plan: PlanGraphArtifact,
+    capability_route: CppRouteResult | None,
+    ponytail_route: PonytailRoute | None,
 ) -> dict[str, Any]:
     result = {
         "schemaVersion": 3,
@@ -144,6 +173,8 @@ def _active_result(
     }
     if capability_route is not None:
         result["capabilityRoute"] = capability_route.as_dict()
+    if ponytail_route is not None:
+        result["ponytailRoute"] = ponytail_route.as_dict()
     try:
         validate_resolve_result(result)
     except ContractError as error:
@@ -164,7 +195,7 @@ def resolve_plan(
 ) -> ResolvedPlan:
     """Resolve an active typed plan and preserve its exact Host inputs."""
 
-    normalized, capability_route, catalog, pipeline = _resolution_inputs(
+    normalized, capability_route, ponytail_route, catalog, pipeline = _resolution_inputs(
         request, catalog_source, pipeline_source,
     )
     try:
@@ -178,6 +209,7 @@ def resolve_plan(
             execution_policy_snapshot=execution_policy_snapshot,
             policy_snapshot=policy_snapshot,
             capability_route=capability_route,
+            ponytail_route=ponytail_route,
         )
     except PlanGraphError as error:
         raise ResolveError(error.reason) from None
@@ -187,7 +219,7 @@ def resolve_plan(
         plan,
         catalog,
         pipeline,
-        _active_result(plan, capability_route),
+        _active_result(plan, capability_route, ponytail_route),
     )
 
 
@@ -204,7 +236,7 @@ def resolve_request(
 ) -> dict[str, Any]:
     """Return a schema-valid V3 ResolveResult containing only its PlanGraph."""
 
-    normalized, capability_route, catalog, pipeline = _resolution_inputs(
+    normalized, capability_route, ponytail_route, catalog, pipeline = _resolution_inputs(
         request, catalog_source, pipeline_source,
     )
     try:
@@ -218,6 +250,7 @@ def resolve_request(
             execution_policy_snapshot=execution_policy_snapshot,
             policy_snapshot=policy_snapshot,
             capability_route=capability_route,
+            ponytail_route=ponytail_route,
         )
     except PlanGraphError as error:
         result = {
@@ -233,12 +266,14 @@ def resolve_request(
         }
         if capability_route is not None:
             result["capabilityRoute"] = capability_route.as_dict()
+        if ponytail_route is not None:
+            result["ponytailRoute"] = ponytail_route.as_dict()
         try:
             validate_resolve_result(result)
         except ContractError as contract_error:
             raise ResolveError(contract_error.reason) from None
         return result
-    return _active_result(plan, capability_route)
+    return _active_result(plan, capability_route, ponytail_route)
 
 
 def resolve_task(

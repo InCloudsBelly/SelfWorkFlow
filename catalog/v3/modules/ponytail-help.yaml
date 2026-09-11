@@ -1,0 +1,11 @@
+schemaVersion: 3
+id: ponytail-help
+sourceHash: sha256:07e0fc50c722cee981d47f62a5d32a7def4cb65651f414724e5fd6939f145977
+stage: designed
+slot: design.specialists
+selectionMode: bounded-runtime
+invocation: {kind: skill, ref: skills/ponytail-help/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 128, estimatedExecutionCost: 0}
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

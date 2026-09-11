@@ -19,6 +19,7 @@ PONYTAIL_SKILLS = (
     "ponytail",
     "ponytail-review",
     "ponytail-audit",
+    "ponytail-help",
 )
 _SHA256 = "sha256:"
 _REPARSE_POINT = 0x400
@@ -199,13 +200,30 @@ def verify_ponytail_source(repository_root: str | Path) -> dict[str, object]:
     }
 
 
-def _adapt_ponytail_skill(content: bytes) -> bytes:
-    """Apply only the local scope boundary; upstream source remains untouched."""
+def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
+    """Apply only local scope boundaries; upstream source remains untouched."""
 
     try:
         text = content.decode("utf-8").replace("\r\n", "\n")
     except UnicodeDecodeError:
         raise PonytailSourceError("ponytail-source-invalid") from None
+    if skill_id == "ponytail-help":
+        marker_start = "## Configure Default Mode\n"
+        marker_end = "## Update\n"
+        if marker_start not in text or marker_end not in text:
+            raise PonytailSourceError("ponytail-source-adaptation-invalid")
+        start = text.index(marker_start)
+        end = text.index(marker_end, start)
+        local_help = (
+            "## Task-scoped mode\n\n"
+            "SelfWorkFlow supplies `lite`, `full`, `ultra`, or `off` for the\n"
+            "current task. This local adapter does not read or write environment\n"
+            "variables, host config files, plugin state, or global mode files.\n\n"
+        )
+        text = text[:start] + local_help + text[end:]
+        return text.encode("utf-8")
+    if skill_id != "ponytail":
+        return content
     old_persistence = (
         "## Persistence\n\n"
         "ACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\n"
@@ -257,7 +275,9 @@ def copy_ponytail_skills(
             elif path.is_file():
                 output.parent.mkdir(parents=True, exist_ok=True)
                 if path.name == "SKILL.md" and item["id"] == "ponytail":
-                    output.write_bytes(_adapt_ponytail_skill(path.read_bytes()))
+                    output.write_bytes(
+                        _adapt_ponytail_skill(path.read_bytes(), item["id"])
+                    )
                 else:
                     shutil.copyfile(path, output)
             else:

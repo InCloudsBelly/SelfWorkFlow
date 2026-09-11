@@ -2,7 +2,7 @@ schemaVersion: 3
 domains:
   - id: code
     ref: domains/code.yaml
-    hash: sha256:53aa8c0af43e386fff2facec0dee006759f8e785424b928c7121cf28b50bc275
+    hash: sha256:e5234e8c36ae9487fb7acc42714291c1bab3e478b26465101dc312bd7dca66b2
   - id: workflow
     ref: domains/workflow.yaml
     hash: sha256:11b893c8a7d33787b3eda915781928ffa29ebcfb0da44a278f86540554e5f3bc
@@ -43,6 +43,18 @@ modules:
   - id: cpp.engine.unreal
     ref: modules/cpp.engine.unreal.yaml
     hash: sha256:19071b0275c1454f9a07ce5fd50f179d7310fe782145d6b7f9dd637fbeccac2c
+  - id: ponytail-coding
+    ref: modules/ponytail-coding.yaml
+    hash: sha256:5d12c0318c0516ce870728f1c15f58f3426c45e97b900a44a574b2a0d95c47f8
+  - id: ponytail-review
+    ref: modules/ponytail-review.yaml
+    hash: sha256:9181083cd37f91e3147db471cb9c37dab8b9cfe0bc9ec4d6b3d92121a8c30ac8
+  - id: ponytail-audit
+    ref: modules/ponytail-audit.yaml
+    hash: sha256:00bf10a97127dfb2681721289b7f088631f0bd65d4a9ca8c569f373f5ffeb1ed
+  - id: ponytail-help
+    ref: modules/ponytail-help.yaml
+    hash: sha256:fe4985df54bb57c026b30dc14bfe89825a8e1f3e4e7ea20c9faff90baef6b1b1
   - id: discover-context
     ref: modules/discover-context.yaml
     hash: sha256:16bb4f817b3dbf5a9f4bea24c1efeab475e5dddf325e1c706e9e7148c3ce00f0

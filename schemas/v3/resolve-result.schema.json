@@ -27,6 +27,9 @@
     },
     "capabilityRoute": {
       "$ref": "https://selfworkflow.local/schemas/v3/capability-route.schema.json"
+    },
+    "ponytailRoute": {
+      "$ref": "https://selfworkflow.local/schemas/v3/ponytail-route.schema.json"
     }
   },
   "allOf": [

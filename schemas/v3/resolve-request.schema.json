@@ -66,6 +66,7 @@
       "items": {"$ref": "#/$defs/classificationEvidence"}
     },
     "testLevelFloor": {"enum": ["T0", "T1", "T2", "T3"]},
+    "ponytailMode": {"enum": ["lite", "full", "ultra", "off"]},
     "codeSignals": {"$ref": "#/$defs/codeSignals"}
   },
   "allOf": [

@@ -25,8 +25,8 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertTrue((root / "first/skills/ponytail/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/ponytail-review/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/ponytail-audit/SKILL.md").is_file())
+            self.assertTrue((root / "first/skills/ponytail-help/SKILL.md").is_file())
             self.assertFalse((root / "first/skills/caveman").exists())
-            self.assertFalse((root / "first/skills/ponytail-help").exists())
             self.assertTrue((root / "first/skills/matt-pocock/grilling/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/matt-pocock/tdd/SKILL.md").is_file())
             self.assertFalse((root / "first/skills/grill-me").exists())
@@ -75,6 +75,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 {entry["id"] for entry in core_catalog["catalog"]["entries"]},
                 {
                     "workflow-core", "workflow-quality", "code-quality",
+                    "ponytail", "ponytail-review", "ponytail-audit", "ponytail-help",
                     "matt-skills-foundation", "testing-review-quality",
                     "tea-quality-foundation",
                 },
