@@ -84,11 +84,21 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 set(entry["dependencies"]) <= core_ids
                 for entry in core_catalog["catalog"]["entries"]
             ))
+            runtime_root = root / "first"
+            policy_path = runtime_root / "workflow/git-policy.yaml"
             content = b"".join(
-                path.read_bytes() for path in (root / "first").rglob("*") if path.is_file()
+                path.read_bytes() for path in runtime_root.rglob("*") if path.is_file()
             ).lower()
             self.assertNotIn(b"caveman", content)
-            self.assertNotIn(b"dependencies/upstream/ponytail", content)
+            # The runtime policy may name the pinned gitlink for its allowlist;
+            # no upstream tree or source package is copied into the runtime.
+            self.assertIn(b"dependencies/upstream/ponytail", policy_path.read_bytes())
+            content_without_policy = b"".join(
+                path.read_bytes()
+                for path in runtime_root.rglob("*")
+                if path.is_file() and path != policy_path
+            ).lower()
+            self.assertNotIn(b"dependencies/upstream/ponytail", content_without_policy)
             self.assertFalse((root / "first/hooks").exists())
             self.assertFalse((root / "first/.codex-plugin").exists())
             self.assertNotIn(b"e:\\", content)

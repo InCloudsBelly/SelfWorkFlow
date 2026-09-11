@@ -113,6 +113,13 @@ class GitPolicyTests(unittest.TestCase):
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
             },
+            {
+                "path": "dependencies/upstream/ponytail",
+                "objectHash": "356918eba965ee1eac64bd3a7f0dd02108350de5",
+                "reason": "Pinned official Ponytail source used by the code-task workflow adapter",
+                "owner": "SelfWorkFlow maintainers",
+                "expires": "2030-12-31",
+            },
         ])
 
 

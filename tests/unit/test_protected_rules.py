@@ -971,7 +971,7 @@ class ProtectedRulesTests(unittest.TestCase):
         self.assertEqual(
             headings,
             (
-                "## 常驻表达策略",
+                "## 输出与代码任务增强",
                 "## 核心流程",
                 "## 发散与收敛",
                 "## 代码实施契约",

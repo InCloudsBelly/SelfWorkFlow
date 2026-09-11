@@ -15,6 +15,8 @@ UNIT_TEST_MODULES = (
     "tests.unit.test_knowledge_contract",
     "tests.unit.test_ledger",
     "tests.unit.test_pipeline",
+    "tests.unit.test_ponytail_scope",
+    "tests.unit.test_ponytail_source",
     "tests.unit.test_project_review_profile",
     "tests.unit.test_protected_rules",
     "tests.unit.test_quality_gate",
