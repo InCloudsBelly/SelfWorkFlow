@@ -42,7 +42,10 @@ def _native(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[st
         if key.startswith("GIT_CONFIG") or key in {
             "GIT_ATTR_NOSYSTEM", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS",
             "GIT_SSH_COMMAND", "GIT_SSH", "GIT_ASKPASS", "GIT_EXEC_PATH",
-            "GIT_PROXY_COMMAND",
+            "GIT_PROXY_COMMAND", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_PREFIX",
         }:
             environment.pop(key, None)
     environment.update(
@@ -109,20 +112,8 @@ def apply_submodule_profile(
             failed = True
             break
     if failed:
-        for submodule_path, (_, previous_commit) in states.items():
-            if previous_commit:
-                runner(
-                    (
-                        "git", "-C", submodule_path, "checkout", "--detach",
-                        previous_commit,
-                    ),
-                    root,
-                )
-            else:
-                runner(
-                    ("git", "submodule", "deinit", "-f", "--", submodule_path),
-                    root,
-                )
+        if not _restore_submodules(states, root, runner):
+            raise SubmoduleProfileError("submodule-rollback-failed")
         raise SubmoduleProfileError("submodule-update-failed")
 
     commits: dict[str, str] = {}
@@ -143,20 +134,8 @@ def apply_submodule_profile(
             or dirty.returncode != 0
             or dirty.stdout
         ):
-            for restore_path, (_, restore_commit) in states.items():
-                if restore_commit:
-                    runner(
-                        (
-                            "git", "-C", restore_path, "checkout", "--detach",
-                            restore_commit,
-                        ),
-                        root,
-                    )
-                else:
-                    runner(
-                        ("git", "submodule", "deinit", "-f", "--", restore_path),
-                        root,
-                    )
+            if not _restore_submodules(states, root, runner):
+                raise SubmoduleProfileError("submodule-rollback-failed")
             raise SubmoduleProfileError("submodule-postcondition-invalid")
         commits[submodule_path] = target_commit
     return {
@@ -166,6 +145,57 @@ def apply_submodule_profile(
         "commit": commits[_TEA_PATH],
         "commits": commits,
     }
+
+
+def _restore_submodules(
+    states: dict[str, tuple[str, str | None]],
+    root: Path,
+    runner: Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]],
+) -> bool:
+    rollback_ok = True
+    for submodule_path, (_, previous_commit) in states.items():
+        path = root / submodule_path
+        if previous_commit:
+            result = runner(
+                (
+                    "git", "-C", submodule_path, "checkout", "--detach",
+                    previous_commit,
+                ),
+                root,
+            )
+        elif (path / ".git").exists():
+            result = runner(
+                ("git", "submodule", "deinit", "-f", "--", submodule_path),
+                root,
+            )
+        else:
+            continue
+        if result.returncode != 0:
+            rollback_ok = False
+
+    for submodule_path, (_, previous_commit) in states.items():
+        path = root / submodule_path
+        if previous_commit:
+            head = runner(
+                ("git", "-C", submodule_path, "rev-parse", "HEAD"), root
+            )
+            dirty = runner(
+                (
+                    "git", "-C", submodule_path, "status", "--porcelain=v1",
+                    "--untracked-files=all",
+                ),
+                root,
+            )
+            if (
+                head.returncode != 0
+                or head.stdout.strip() != previous_commit
+                or dirty.returncode != 0
+                or dirty.stdout
+            ):
+                rollback_ok = False
+        elif (path / ".git").exists():
+            rollback_ok = False
+    return rollback_ok
 
 
 def main(argv: list[str] | None = None) -> int:

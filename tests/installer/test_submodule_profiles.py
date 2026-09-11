@@ -3,9 +3,12 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from selfworkflow.v3.submodule_profiles import (
     SubmoduleProfileError,
+    _native,
+    _restore_submodules,
     apply_submodule_profile,
     commands_for_profile,
 )
@@ -39,6 +42,48 @@ def _commit_file(repository: Path, value: str) -> str:
 
 
 class SubmoduleProfileTests(unittest.TestCase):
+    def test_native_git_scrubs_repository_locator_environment(self):
+        from subprocess import CompletedProcess
+
+        environment = {
+            "GIT_DIR": "foreign-git",
+            "GIT_WORK_TREE": "foreign-worktree",
+            "GIT_INDEX_FILE": "foreign-index",
+            "GIT_CONFIG_GLOBAL": "foreign-config",
+        }
+        with mock.patch.dict(os.environ, environment, clear=False), mock.patch(
+            "selfworkflow.v3.submodule_profiles.subprocess.run",
+            return_value=CompletedProcess(["git"], 0, "", ""),
+        ) as run:
+            _native(("git", "status"), Path.cwd())
+
+        command = run.call_args.args[0]
+        used_environment = run.call_args.kwargs["env"]
+        self.assertIn("core.hooksPath=NUL", command)
+        self.assertNotIn("GIT_DIR", used_environment)
+        self.assertNotIn("GIT_WORK_TREE", used_environment)
+        self.assertNotIn("GIT_INDEX_FILE", used_environment)
+        self.assertEqual(used_environment["GIT_CONFIG_NOSYSTEM"], "1")
+
+    def test_submodule_rollback_reports_failed_restore_or_postcondition(self):
+        root = Path(tempfile.mkdtemp(prefix="selfworkflow-submodule-rollback-"))
+        try:
+            existing = root / "existing"
+            existing.mkdir()
+            (existing / ".git").write_text("gitdir\n", encoding="utf-8")
+            states = {"existing": ("b" * 40, "a" * 40)}
+
+            def failed_runner(command, _cwd):
+                if "checkout" in command:
+                    return subprocess.CompletedProcess(command, 1, "", "failed")
+                return subprocess.CompletedProcess(command, 1, "", "failed")
+
+            self.assertFalse(_restore_submodules(states, root, failed_runner))
+        finally:
+            import shutil
+
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_normal_profile_commands_are_path_limited_and_never_remote(self):
         commands = commands_for_profile("normal")
         flattened = " ".join(part for command in commands for part in command)

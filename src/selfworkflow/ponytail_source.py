@@ -52,7 +52,10 @@ def _git(repository: Path, *arguments: str) -> str:
         if key.startswith("GIT_CONFIG") or key in {
             "GIT_ATTR_NOSYSTEM", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS",
             "GIT_SSH_COMMAND", "GIT_SSH", "GIT_ASKPASS", "GIT_EXEC_PATH",
-            "GIT_PROXY_COMMAND",
+            "GIT_PROXY_COMMAND", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES",
+            "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_PREFIX",
         }:
             environment.pop(key, None)
     environment.update(
