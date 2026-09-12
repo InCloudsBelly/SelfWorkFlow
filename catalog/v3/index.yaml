@@ -72,7 +72,7 @@ modules:
     hash: sha256:89431368cc08175c79462d294d869c131872aa8d862ceffcda261ac196ce53a5
   - id: design-grill-me
     ref: modules/design-grill-me.yaml
-    hash: sha256:b4bedcb30919019089848fb8731e893ad673b7affb6a22675f2b3cc3c72693a1
+    hash: sha256:e2ce6d6b67cd30e1a8085ef753a390ac1b5551480ae0e04c1eb8edd6df888650
   - id: plan-core
     ref: modules/plan-core.yaml
     hash: sha256:2545c9d445c807f4b182c85b200fdde868b200ce6cef57e37ab9cee0cd44ed18

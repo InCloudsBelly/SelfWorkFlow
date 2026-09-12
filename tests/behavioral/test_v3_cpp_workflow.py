@@ -159,6 +159,10 @@ class V3CppWorkflowTests(unittest.TestCase):
         deep = next(
             item for item in catalog["modules"] if item["id"] == "design-grill-me"
         )
+        self.assertEqual(
+            deep["invocation"],
+            {"kind": "skill", "ref": "matt-pocock:grilling"},
+        )
         self.assertEqual(deep["slot"], "design.deep-grill")
         self.assertEqual(deep_slot["cardinality"], "exactly-one")
         self.assertEqual(deep_slot["selectionMode"], "static")

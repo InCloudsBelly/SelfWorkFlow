@@ -4,7 +4,7 @@ sourceHash: sha256:9c71927d4f0fd32d815247b4ca1fc782d4c5f2f3c1d6d023d188d4a7e0299
 stage: designed
 slot: design.deep-grill
 selectionMode: static
-invocation: {kind: skill, ref: matt-pocock:grill-me}
+invocation: {kind: skill, ref: matt-pocock:grilling}
 dependencies: []
 conflicts: []
 contextCost: {estimatedContextCost: 512, estimatedExecutionCost: 256}

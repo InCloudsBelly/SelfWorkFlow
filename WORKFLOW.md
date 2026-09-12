@@ -38,7 +38,7 @@ Discover → Capability Check → Classify → Design → Plan
 | 任务 | Light | Full | Deep |
 | --- | --- | --- | --- |
 | 只读分析/问答 | 命中能力模块；不自动 Grill/TEA | 同左 | 同左 |
-| 修改的 Design/Plan | 紧凑设计；不自动 Grill | Matt `grilling` 一次 | Matt `grill-me` 一次；其上游负责 frontier，不再另启 `design-grilling` |
+| 修改的 Design/Plan | 紧凑设计；不自动 Grill | Matt `grilling` 一次 | Matt `grilling` 一次，采用更完整 frontier；不再另启 `design-grilling` |
 | 行为变更 Implement/Debug | TDD；命中 `code` | TDD + TEA T2 + Full 设计路由 | TDD + TEA T3 + Deep 设计路由 |
 | 实施前文档 Review | 窄 Review | 独立 `plan-integrated-review` | 独立 `plan-integrated-review` |
 | 落地后代码 Review | 窄完整 diff Review | Standards/Spec 两个独立 SubAgent + `tea-test-review` | 同 Full |

@@ -40,7 +40,7 @@ workflow/modules/artifacts.md
 
 - Light：紧凑设计、窄 Review、最小充分验证；不自动启动 Grill 或 TEA。
 - Full：自动使用 Matt `grilling`，加载 TEA、TDD 和独立 Review。
-- Deep：自动使用 Matt `grill-me` 及其上游 `grilling` frontier，加载 TEA T3 和独立 Review。
+- Deep：自动使用 Matt `grilling` 正文并采用更完整 frontier；显式 `grill-me` 仍仅作用户入口，加载 TEA T3 和独立 Review。
 - Full/Deep 的代码 Review 使用独立、临时、按 Agent 配置模型的 SubAgent；匹配的项目 Review Skill 优先，通用 Review Skill 仅补充。
 - 代码编辑前固定顺序：代码实施契约 → Plan → 独立 Review → 用户明确实施确认 → TDD。
 - 侵入性、收敛、任务外异常、能力门禁、证据、进度、知识生命周期、WorkArtifact、受保护规则和失败关闭语义不得削弱；Light 允许如实的窄结构化自审，Full/Deep 与正式文档门禁才要求独立 Review。
@@ -52,7 +52,7 @@ workflow/modules/artifacts.md
 | 任务/阶段 | Light | Full | Deep |
 | --- | --- | --- | --- |
 | 只读分析/问答 | 启动入口 + 命中能力模块 | 同 Light；不自动 Grill/TEA | 同 Light；不自动 Grill/TEA |
-| 修改任务 Design/Plan | `modes/light.md` + `code.md`（命中时） | `modes/full.md` + `design-grilling` 一次 + Plan | `modes/deep.md` + `design-grill-me` 一次；其上游内部完成更深 frontier，不再独立加载 `design-grilling` |
+| 修改任务 Design/Plan | `modes/light.md` + `code.md`（命中时） | `modes/full.md` + `design-grilling` 一次 + Plan | `modes/deep.md` + `design-grill-me` 一次；直接执行 `grilling` 并采用更深 frontier，不再独立加载 `design-grilling` |
 | `implement`/`debug` 且改变行为 | `code.md` + TDD；无自动 Grill/TEA | `code.md` + TDD + `tea-test-design` + Full 设计路径 | `code.md` + TDD + `tea-test-design` + Deep 设计路径 |
 | 实施前文档 Review | 窄 Review | `review.md` + `plan-integrated-review` | `review.md` + `plan-integrated-review` |
 | Full/Deep 代码落地 Review | 窄 Review | `review.md` + `review-code-review` + `tea-test-review` | `review.md` + `review-code-review` + `tea-test-review` |

@@ -117,6 +117,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
         modules = {item["id"]: item for item in catalog["modules"]}
         expected = {
             "design-grilling": "matt-pocock:grilling",
+            "design-grill-me": "matt-pocock:grilling",
             "design-codebase": "matt-pocock:codebase-design",
             "implement-matt": "matt-pocock:implement",
             "implement-tdd": "matt-pocock:tdd",
