@@ -5,10 +5,6 @@ param(
     [string]$Profile = "core",
     [ValidateSet("Ask", "Existing", "InstallOfficial", "Skip")]
     [string]$SuperpowersChoice = "Skip",
-    [ValidateSet("Ask", "Configure", "Skip")]
-    [string]$CodeGraphOverrideChoice = "Ask",
-    [string]$CodeGraphPath,
-    [switch]$ReplaceCodeGraphOverride,
     [switch]$ConfirmApply,
     [switch]$NonInteractive,
     [string]$AgentsRoot = (Join-Path $env:USERPROFILE ".agents"),
@@ -28,9 +24,6 @@ SelfWorkFlow Windows one-click installer
 
 Usage:
   Install_SelfWorkFlow.bat [-Profile core|knowledge|maintainer]
-    [-CodeGraphOverrideChoice Ask|Configure|Skip]
-    [-CodeGraphPath <explicit-local-path>]
-    [-ReplaceCodeGraphOverride]
 
 The pinned Matt Pocock Skills foundation, including strength-routed grilling and
 grill-me, is installed from the repository Submodule. Superpowers is external-only and is
@@ -41,11 +34,6 @@ Graft is the default code-reading Provider; its project graph is local and lazil
 initialized on the first code task. Queries use no-refresh. The installed provider
 binding exposes the SelfWorkFlow Host event/Worker for coalesced structural updates;
 it never enables Graft's competing hooks or Deep semantic build.
-
-CodeGraphOverrideChoice:
-  Ask        Prompt once during interactive first installation; blank means Skip.
-  Configure  Bind the explicit CodeGraphPath as a user-owned local Provider.
-  Skip       Do not configure a local CodeGraph override.
 
 The installer writes a timestamped diagnostic log, shows the generated plan,
 and requires an explicit APPLY confirmation before publishing files.
@@ -387,11 +375,8 @@ $applyResult = $null
 $mattSkillsReport = $null
 $graftReport = $null
 $ponytailReport = $null
-$providerReport = [ordered]@{ status = "skipped" }
 $graftProviderReport = [ordered]@{ status = "skipped" }
-$providerSourceReport = $null
 $graftSourceReport = $null
-$providerRollbackToken = $null
 $graftRollbackToken = $null
 
 try {
@@ -488,34 +473,6 @@ try {
         "source", "ponytail-verify", "--repository", $RepositoryRoot
     ) (Join-Path $script:LogDirectory "ponytail-source.json")
 
-    Set-InstallStage "provider-selection" 30
-    if ($CodeGraphOverrideChoice -eq "Ask") {
-        if ($NonInteractive) {
-            $CodeGraphOverrideChoice = "Skip"
-        }
-        else {
-            $answer = Read-Host "Configure an explicit local CodeGraph override? [y/N]"
-            if ($answer -match "^(y|yes)$") {
-                $CodeGraphOverrideChoice = "Configure"
-                if (-not $CodeGraphPath) {
-                    $CodeGraphPath = Read-Host "Absolute CodeGraph path"
-                }
-            }
-            else {
-                $CodeGraphOverrideChoice = "Skip"
-            }
-        }
-    }
-    if ($CodeGraphOverrideChoice -eq "Configure") {
-        if (-not $CodeGraphPath) {
-            Stop-Install "provider-selection" 30 "codegraph-path-required"
-        }
-        $CodeGraphPath = (Resolve-Path -LiteralPath $CodeGraphPath -ErrorAction Stop).Path
-        $providerSourceReport = Invoke-SelfWorkflow @(
-            "provider", "inspect", "--codegraph-path", $CodeGraphPath
-        ) (Join-Path $script:LogDirectory "provider-source.json")
-    }
-
     Set-InstallStage "plan" 40
     $doctorBefore = Join-Path $script:LogDirectory "doctor-before.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorBefore | Out-Null
@@ -538,12 +495,6 @@ try {
     Write-InstallLog ("Codex root: " + $CodexRoot)
     Write-InstallLog ("State root: " + $StateRoot)
     Write-InstallLog ("Profile: {0}; Artifact files: {1}" -f $plan.profile, @($plan.artifactFiles).Count)
-    if ($providerSourceReport) {
-        Write-InstallLog ("CodeGraph commit: " + $providerSourceReport.commit)
-        Write-InstallLog ("CodeGraph sourceHash: " + $providerSourceReport.sourceHash)
-        Write-InstallLog ("CodeGraph dirty: " + $providerSourceReport.dirty)
-        Write-InstallLog ("CodeGraph version: " + $providerSourceReport.version)
-    }
     Write-JsonFile (Join-Path $script:LogDirectory "confirmation-summary.json") ([ordered]@{
         planHash = $plan.planHash
         profile = $plan.profile
@@ -557,8 +508,6 @@ try {
         ponytail = $ponytailReport
         graftProvider = $graftProviderReport
         superpowers = "external-only"
-        codeGraphOverrideChoice = $CodeGraphOverrideChoice
-        codeGraphSource = $providerSourceReport
     })
 
     Set-InstallStage "confirmation" 50
@@ -614,25 +563,6 @@ try {
         ) (Join-Path $script:LogDirectory "graft-provider-configure.json")
     }
 
-    if ($CodeGraphOverrideChoice -eq "Configure") {
-        Set-InstallStage "provider-configure" 75
-        $providerRollbackToken = [Guid]::NewGuid().ToString("N")
-        $providerArguments = @(
-            "provider", "configure",
-            "--config-file", $ProviderConfigFile,
-            "--codegraph-path", $CodeGraphPath,
-            "--expected-source-hash", $providerSourceReport.sourceHash,
-            "--rollback-token", $providerRollbackToken
-        )
-        if ($ReplaceCodeGraphOverride) {
-            $providerArguments += "--replace-existing"
-        }
-        $providerReport = Invoke-SelfWorkflow $providerArguments (Join-Path $script:LogDirectory "provider-configure.json")
-        if ($env:SELFWORKFLOW_TEST_FAIL_AFTER_PROVIDER_CONFIG -eq "1") {
-            throw "injected-failure-after-provider-config"
-        }
-    }
-
     $summary = [ordered]@{
         schemaVersion = 1
         status = "installed"
@@ -643,7 +573,6 @@ try {
         ponytail = $ponytailReport
         graftProvider = $graftProviderReport
         superpowers = "external-only"
-        codeGraphOverride = $providerReport.status
         writeCapability = "enabled"
         manifestPath = $applyResult.manifestPath
         logDirectory = $script:LogDirectory
@@ -651,22 +580,6 @@ try {
     }
     Write-JsonFile (Join-Path $script:LogDirectory "summary.json") $summary
     Write-InstallLog ("Installation verification completed; finalizing transaction. Logs: " + $script:LogDirectory)
-    if ($providerRollbackToken) {
-        try {
-            if ($env:SELFWORKFLOW_TEST_FAIL_PROVIDER_COMMIT -eq "1") {
-                throw "injected-provider-commit-cleanup-failure"
-            }
-            Invoke-SelfWorkflow @(
-                "provider", "commit-config",
-                "--config-file", $ProviderConfigFile,
-                "--rollback-token", $providerRollbackToken
-            ) (Join-Path $script:LogDirectory "provider-config-commit.json") | Out-Null
-            $providerRollbackToken = $null
-        }
-        catch {
-            Write-Host "Provider configuration is verified; rollback-record cleanup is pending."
-        }
-    }
     if ($graftRollbackToken) {
         try {
             if ($env:SELFWORKFLOW_TEST_FAIL_PROVIDER_COMMIT -eq "1") {
@@ -692,23 +605,6 @@ catch {
     Write-InstallLog ("FAILED [{0}]: {1}" -f $script:CurrentStage, $failure)
     $rollbackStatus = "not-required"
     try {
-        # Provider transactions are layered: a CodeGraph override is written
-        # after the managed Graft binding. Roll back in reverse order so each
-        # transaction still sees the exact postimage it recorded.
-        if ($providerRollbackToken) {
-            $providerRollback = Invoke-SelfWorkflow @(
-                "provider", "rollback-config",
-                "--config-file", $ProviderConfigFile,
-                "--rollback-token", $providerRollbackToken,
-                "--if-issued"
-            ) (Join-Path $script:LogDirectory "provider-config-rollback.json")
-            if ($providerRollback.status -eq "rolled-back") {
-                $rollbackStatus = "rolled-back"
-            }
-            elseif ($providerRollback.status -ne "not-issued") {
-                throw "provider-config-rollback-status-invalid"
-            }
-        }
         if ($graftRollbackToken) {
             $graftRollback = Invoke-SelfWorkflow @(
                 "provider", "rollback-config",

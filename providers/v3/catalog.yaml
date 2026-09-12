@@ -1,11 +1,5 @@
 schemaVersion: 3
 providers:
-  - providerId: codegraph.public
-    descriptorRef: codegraph-public.yaml
-    lifecycle: unverified
-  - providerId: codegraph.local
-    descriptorRef: codegraph-local-template.yaml
-    lifecycle: unverified
   - providerId: builtin.cpp-core
     descriptorRef: builtin
     lifecycle: supported

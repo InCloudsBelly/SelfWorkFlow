@@ -7,7 +7,7 @@
 
 Graft 将项目源代码构造成可查询的本地结构图，可用于仓库地图、文件 API、符号查找、调用者和调用链等代码上下文。结构路径默认不需要模型 Key；可选 Deep 语义摘要才需要单独的模型 Provider 和敏感数据边界。
 
-SelfWorkFlow 接入后，Graft 是默认代码图 Provider，完全替代 CodeGraph。正式工作流通过受控 CLI Adapter 获取能力检查、代码上下文和关系证据；Graft MCP 仍可用于交互探索，但不会成为唯一的正式证据来源。
+SelfWorkFlow 接入后，Graft 是唯一代码图 Provider。正式工作流通过受控 CLI Adapter 获取能力检查、代码上下文和关系证据；Graft MCP 仍可用于交互探索，但不会绕过正式的项目边界和验证收据。
 
 知识后端是 SelfWorkFlow 的独立可选模块。Graft 只提供结构图和结构证据，不自动触发 Wiki、Deep 或其他知识库写入；是否沉淀知识由通用 `knowledge` 生命周期和已选后端决定。
 
@@ -22,9 +22,7 @@ Graft 的公开使用入口可参考 [官方 README](https://github.com/trailhq/
 - 正常 Submodule profile 会同步 Graft；运行时包携带 Graft lock，安装器在构建阶段验证并构建上游入口。
 - `src/selfworkflow/v3/graft_lifecycle.py` 提供项目级惰性预检、`agent_write` 事件合并、单锁、可重试队列和一次性结构 Worker；Host 只需调用统一 CLI 入口，不启用文件 Watcher 或全局 daemon。
 - Provider Manager 和 CLI 已提供 `graft-preflight`、`graft-event`、`graft-worker`；安装后默认绑定 Graft。
-- CodeGraph 保留为遗留/显式路径，不自动删除已有配置。
-
-因此，当前可依赖的 SelfWorkFlow Graft 能力包括来源校验、受控结构查询、项目惰性初始化和事件驱动结构更新；Deep 语义以及没有统一 Host 事件接口的原生自动接入必须标为 `unverified`。
+因此，当前可依赖的 SelfWorkFlow Graft 能力包括来源校验、受控结构查询、项目惰性初始化和事件驱动结构更新；Graft 不可用时普通任务回退到 `rg`，需要新鲜图证据的任务失败关闭。Deep 语义以及没有统一 Host 事件接口的原生自动接入必须标为 `unverified`。
 
 ## 3. 安装与身份设计
 
@@ -142,9 +140,9 @@ Agent 修改后的 Worker 和普通查询不调用 `build --deep`。当前没有
 
 不通过重新安装、隐式 refresh、网络下载或自动 Deep 来“修复”一次普通查询失败；知识后端的选择和写入由通用知识模块单独负责。
 
-## 9. CodeGraph 迁移说明
+## 9. 回退策略
 
-工作流默认代码阅读路由已改为 Graft；CodeGraph 不作为默认 fallback。已有 CodeGraph 配置会被保留并标记为 `legacy/orphaned`，不会自动删除。Provider Manager 只为 Graft 提供正式查询、预检和事件 Worker 路由；CodeGraph 仍只允许显式 legacy/用户本地配置。
+Graft 是唯一代码图 Provider。Graft 缺失、过期、不可用或未覆盖目标时，普通任务明确标记限制并回退到 `rg`；`rg` 只提供精确文本和未覆盖文件读取，不冒充结构证据。要求新鲜 Graft 图的任务在无法满足时失败关闭。
 
 ## 10. 支持范围与限制
 

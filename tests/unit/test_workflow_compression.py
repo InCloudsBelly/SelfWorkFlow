@@ -225,6 +225,24 @@ class WorkflowCompressionTests(unittest.TestCase):
                 )
                 self.assertEqual(route.selected_modules, ())
 
+    def test_graft_is_the_only_code_graph_provider_with_rg_fallback(self):
+        active_files = (
+            "WORKFLOW.md",
+            "workflow/core.md",
+            "workflow/modules/code.md",
+            "skills/cpp-core/SKILL.md",
+            "docs/providers/graft.md",
+            "README.md",
+            "scripts/install-selfworkflow.ps1",
+        )
+        active_text = "\n".join(
+            (ROOT / relative).read_text(encoding="utf-8")
+            for relative in active_files
+        ).casefold()
+        self.assertNotIn("codegraph", active_text)
+        self.assertIn("graft", active_text)
+        self.assertIn("rg", active_text)
+
     def test_non_code_document_plan_skips_behavior_gates_without_blocking(self):
         catalog = compile_catalog(ROOT / "catalog").content
         evidence = []

@@ -21,12 +21,10 @@ routes to `grilling`; Deep routes to `grill-me`, whose upstream workflow runs th
 deeper `grilling` frontier. Light remains explicit-only.
 SelfWorkflow does not require, install, or default-route to Superpowers.
 
-The same first-install flow asks once whether to bind an explicitly selected
-local CodeGraph checkout. It never scans disks. Blank input skips the optional
-override; unattended installation also skips it unless
-`-CodeGraphOverrideChoice Configure -CodeGraphPath <absolute-path>` is supplied.
-The resulting machine-only configuration is written to
-`%LOCALAPPDATA%\SelfWorkFlow\config\providers.local.yaml` and is excluded from Git.
+The installer verifies and builds only the pinned Graft submodule. It never scans
+disks for another code graph or binds an alternate provider. Project graph
+initialization is lazy and task-scoped; an explicit update is required before
+rebuilding a stale graph.
 
 The Matt Skills source is the repository's fixed
 `dependencies/upstream/matt-pocock-skills` Gitlink. Upgrades are explicit source
@@ -169,36 +167,14 @@ python -m selfworkflow.cli provider graft-event --project-root D:\project --chan
 python -m selfworkflow.cli provider graft-worker --project-root D:\project
 ```
 
-## Optional legacy CodeGraph provider
+## Code reading
 
-Run the Provider management entry from the cloned SelfWorkFlow repository. It is
-not copied into the static Agent runtime snapshot because that snapshot does not
-contain a Python executable or the SelfWorkFlow package:
-
-```bat
-Manage_SelfWorkFlow_Providers.bat list
-Manage_SelfWorkFlow_Providers.bat configure --codegraph-path <local-codegraph-root>
-Manage_SelfWorkFlow_Providers.bat maintain --provider-id codegraph --action sync --project-root D:\project --plan-only
-```
-
-`doctor` and `status` are reserved names but fail closed with
-`provider-operation-unverified`. No configured Provider source is executed until
-the production Host has an immutable, identity-bound launch port; configuration
-records the version as `unverified`.
-
-Maintenance execution is deliberately disabled in this release: omitting
-`--plan-only`, even with `--confirm-plan-hash`, fails closed with
-`provider-maintenance-apply-unverified`. The production Host does not yet bind
-the authorization, persistent lease/replay, mutation-evidence, and rollback
-ports required by the V3 contract. User-owned local overrides are never upgraded
-by SelfWorkFlow. Replacing a different existing binding fails with a
-conflict unless the user explicitly repeats configure with `--replace-existing`
-(or the installer is run with `-ReplaceCodeGraphOverride`). CodeGraph query/sync/index behavior remains
-`unverified` until native per-operation validation. CodeGraph is no longer the
-default route; use it only when explicitly configured or requested. `rg` remains
-for exact text and files outside the Graft graph. Query
-planning explicitly marks the upstream CLI's unavoidable auto-sync possibility
-as `potential-local-write`. See `docs/providers/codegraph.md`.
+Graft is the only code-graph Provider. It is used for fresh structural queries
+with `--no-refresh`; it never rebuilds implicitly. If Graft is missing, stale,
+unavailable, or does not cover a target, the workflow marks that limitation and
+falls back to `rg` for exact text and uncovered files. `rg` is not structural
+evidence and does not replace a required fresh Graft result. See
+`docs/providers/graft.md`.
 
 For a new conversation's first code task, SelfWorkFlow checks the bound Graft
 index once. If stale, it asks whether to explicitly build and use it, use the
@@ -216,13 +192,13 @@ confirmation.
 - V3 schemas, versioned Catalog/Pipeline loaders, immutable PlanGraph/RunLedger
   validation, bounded selector kernel, TEA candidate routing, C++ content-addressed
   routing, the Matt Skills foundation, the fail-closed post-Grill contract gate,
-  machine-local CodeGraph binding, non-executing source inspection, write-ahead
-  CAS-protected installer and one-click Provider rollback, and content-addressed maintenance planning are implemented
+  Graft source binding, non-executing source inspection, write-ahead
+  CAS-protected installer and content-addressed maintenance planning are implemented
   and automated-tested. The checked-in V3 request intentionally remains `paused`
   until a conforming Host supplies fresh supported evidence.
 - OpenSpec routing, a generic specialist Review selector/aggregate execution path,
-  Heavy/Forensic adapters and dependencies, and real CodeGraph query/mutation
-  remain outside this release. Review dispatch now has a fail-closed ephemeral
+  and Heavy/Forensic adapters and dependencies remain outside this release.
+  Review dispatch now has a fail-closed ephemeral
   SubAgent contract: the Host must provide the selected model, a hash-bound
   complete code/plan package, project-primary/generic-supplementary Skill
   precedence, structured

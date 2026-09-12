@@ -154,7 +154,8 @@ class MattSkillsFoundationTests(unittest.TestCase):
 
         workflow = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
         self.assertIn("Full 和 Deep 必须加载 TEA", workflow)
-        self.assertIn("CodeGraph", workflow)
+        self.assertIn("Graft", workflow)
+        self.assertNotIn("CodeGraph", workflow)
         self.assertIn("过期", workflow)
         self.assertIn("Ponytail", workflow)
         self.assertIn("非代码任务不自动加载", workflow)
@@ -171,10 +172,12 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertIn("Graft 缺失、过期", cpp_skill)
         self.assertIn("新对话第一次命中代码任务", cpp_skill)
         self.assertIn("本对话偏好", cpp_skill)
-        provider_doc = (self.ROOT / "docs/providers/codegraph.md").read_text(
+        provider_doc = (self.ROOT / "docs/providers/graft.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Conversation preflight", provider_doc)
+        self.assertIn("唯一代码图 Provider", provider_doc)
+        self.assertIn("回退到 `rg`", provider_doc)
+        self.assertNotIn("CodeGraph", provider_doc)
 
     def test_installer_defaults_to_matt_without_superpowers_or_duplicate_grill(self):
         installer = (self.ROOT / "scripts/install-selfworkflow.ps1").read_text(

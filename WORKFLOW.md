@@ -65,7 +65,7 @@ Review 包绑定批准请求、Plan、阶段/尝试、完整文档、最终文�
 
 每项验收条件都要有真实证据：直接路径、失败路径、状态不变量和最窄回归；配置还要查解析与实际消费者；文档还要查格式、链接、引用和最终 diff。验证收据绑定命令、工作目录、输入摘要、时间、退出码、失败数和消费者结果；包或工作区漂移使旧 Review/验证失效。无法完成的检查列为 `unverified`，写明风险和人工验证法。
 
-代码阅读优先使用已配置且新鲜的 Graft；它是 `primary code-reading`，查询固定 no-refresh；保留 `rg` 做精确文本确认。Graft 缺失或过期时，普通任务可明确标注后使用旧图或 `rg`，需要新鲜图证据的任务失败关闭；CodeGraph 仅作遗留/用户显式指定 Provider。代码任务按路由加载 Ponytail；非代码任务不自动加载。Ponytail 只约束代码任务的设计、实现和审查，不改变表达风格、不启用上游全局配置或 hooks。高侵入信号包括影响半径、公共枚举、全局编译宏和共享热路径；若测试覆盖不能反向驱动生产架构，选择更窄边界。代码实施契约要求在第一次编辑测试或生产代码前完成，并经用户明确确认；确认失效时回到设计。Full/Deep 及正式文档门禁使用独立 SubAgent；Light 可做窄结构化自审，但不得冒充独立 Review。
+代码阅读优先使用已配置且新鲜的 Graft；它是 `primary code-reading`，查询固定 no-refresh；保留 `rg` 做精确文本确认。Graft 缺失、过期或边界无效时，普通任务明确标记并回退 `rg`；需要新鲜图证据的任务失败关闭。代码任务按路由加载 Ponytail；非代码任务不自动加载。Ponytail 只约束代码任务的设计、实现和审查，不改变表达风格、不启用上游全局配置或 hooks。高侵入信号包括影响半径、公共枚举、全局编译宏和共享热路径；若测试覆盖不能反向驱动生产架构，选择更窄边界。代码实施契约要求在第一次编辑测试或生产代码前完成，并经用户明确确认；确认失效时回到设计。Full/Deep 及正式文档门禁使用独立 SubAgent；Light 可做窄结构化自审，但不得冒充独立 Review。
 
 ## 可选知识与留痕
 
@@ -73,4 +73,4 @@ Review 包绑定批准请求、Plan、阶段/尝试、完整文档、最终文�
 
 ## 当前批次边界
 
-当前工作流将锁定的 Graft submodule 作为默认代码图 Provider：新代码任务先做项目级只读预检；首次缺图时惰性初始化；Agent 写入完成后由 Host 发出一次 `agent_write` 事件，SelfWorkFlow 合并路径并运行一次仅结构更新的 Worker。查询固定 no-refresh，不会隐式 build；Worker 不执行 Deep、不启用 Graft 自带 Hook/Watcher/daemon。Graft 缺失、过期或边界无效时按模式标记 `unverified`，需要新鲜图证据的任务失败关闭，普通任务才可降级到 `rg`。CodeGraph 保留为遗留/显式路径，不自动删除用户配置。任何超出当前 Plan 的改动先停止并报告。
+当前工作流将锁定的 Graft submodule 作为唯一代码图 Provider：新代码任务先做项目级只读预检；首次缺图时惰性初始化；Agent 写入完成后由 Host 发出一次 `agent_write` 事件，SelfWorkFlow 合并路径并运行一次仅结构更新的 Worker。查询固定 no-refresh，不会隐式 build；Worker 不执行 Deep、不启用 Graft 自带 Hook/Watcher/daemon。Graft 缺失、过期或边界无效时按模式标记 `unverified`，普通任务回退到 `rg`；需要新鲜图证据的任务失败关闭。任何超出当前 Plan 的改动先停止并报告。
