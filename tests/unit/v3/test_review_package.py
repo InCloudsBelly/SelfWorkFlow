@@ -1,4 +1,8 @@
+import hashlib
+from pathlib import Path
 import unittest
+
+import yaml
 
 from selfworkflow.v3.hashing import content_hash
 from selfworkflow.v3.review_package import (
@@ -33,6 +37,27 @@ def _package(kind="code", stage="implemented", attempt="attempt-1"):
 
 
 class ReviewPackageTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[3]
+
+    def test_generic_manifest_matches_pinned_skill_bytes(self):
+        lock = yaml.safe_load(
+            (self.ROOT / "dependencies/locks/matt-pocock-skills.lock.yaml")
+            .read_text(encoding="utf-8")
+        )
+        locked = next(
+            item for item in lock["selectedSkills"]
+            if item["id"] == "code-review"
+        )
+        skill = self.ROOT / "dependencies/upstream/matt-pocock-skills/skills/engineering/code-review/SKILL.md"
+        actual = "sha256:" + hashlib.sha256(skill.read_bytes()).hexdigest()
+        self.assertEqual(locked["hash"], actual)
+        self.assertEqual(ordered_skill_manifest(None)[0]["contentHash"], actual)
+        catalog = yaml.safe_load(
+            (self.ROOT / "catalog/v3/modules/review-code-review.yaml")
+            .read_text(encoding="utf-8")
+        )
+        self.assertEqual(catalog["sourceHash"], actual)
+
     def test_package_is_bound_to_kind_plan_stage_and_attempt(self):
         result = normalize_review_package(
             _package(), expected_kind="code", plan_hash=PLAN_HASH,

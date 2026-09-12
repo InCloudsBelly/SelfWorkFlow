@@ -162,7 +162,9 @@ class V3CppWorkflowTests(unittest.TestCase):
         self.assertEqual(deep["slot"], "design.deep-grill")
         self.assertEqual(deep_slot["cardinality"], "exactly-one")
         self.assertEqual(deep_slot["selectionMode"], "static")
-        self.assertIn("any", deep_slot["condition"])
+        self.assertIn("all", deep_slot["condition"])
+        self.assertIn("any", deep_slot["condition"]["all"][0])
+        self.assertIn("any", deep_slot["condition"]["all"][1])
 
         def condition(slot_id, **values):
             slot = next(
@@ -177,7 +179,8 @@ class V3CppWorkflowTests(unittest.TestCase):
             projectMinimums={"strength": "Full"}, explicitModuleIds=[],
         ))
         self.assertFalse(condition(
-            "design.deep-grill", writeTask=True, complexity="C2", risk="R2",
+            "design.deep-grill", operationType="design", writeTask=True,
+            complexity="C2", risk="R2",
             projectMinimums={"strength": "Full"}, explicitModuleIds=[],
         ))
         self.assertFalse(condition(
@@ -185,7 +188,8 @@ class V3CppWorkflowTests(unittest.TestCase):
             projectMinimums={"strength": "Deep"}, explicitModuleIds=[],
         ))
         self.assertTrue(condition(
-            "design.deep-grill", writeTask=True, complexity="C3", risk="R3",
+            "design.deep-grill", operationType="design", writeTask=False,
+            complexity="C3", risk="R3",
             projectMinimums={"strength": "Deep"}, explicitModuleIds=[],
         ))
         self.assertFalse(condition(
@@ -193,7 +197,8 @@ class V3CppWorkflowTests(unittest.TestCase):
             projectMinimums={"strength": "Light"}, explicitModuleIds=[],
         ))
         self.assertFalse(condition(
-            "design.deep-grill", writeTask=True, complexity="C1", risk="R1",
+            "design.deep-grill", operationType="analyze", writeTask=False,
+            complexity="C1", risk="R1",
             projectMinimums={"strength": "Light"}, explicitModuleIds=[],
         ))
 

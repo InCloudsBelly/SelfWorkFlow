@@ -238,18 +238,94 @@ class V3PipelineLoaderTests(unittest.TestCase):
         self.assertEqual(slots["knowledge.propose"]["cardinality"], "zero-or-one")
         self.assertEqual(slots["knowledge.update"]["cardinality"], "zero-or-one")
         self.assertIn("mcp", slots["knowledge.update"]["allowedInvocationKinds"])
+        test_quality = slots["test.quality.plan"]
+        self.assertEqual(
+            test_quality["condition"],
+            {"all": [
+                {"any": [
+                    {"eq": ["operationType", "design"]},
+                    {"eq": ["operationType", "plan"]},
+                    {"eq": ["operationType", "implement"]},
+                    {"eq": ["operationType", "debug"]},
+                ]},
+                {"gte": ["testLevelFloor", "T2"]},
+            ]},
+        )
         readiness = slots["plan.integrated-review"]
         self.assertEqual(readiness["cardinality"], "exactly-one")
         self.assertEqual(readiness["selectionMode"], "static")
         self.assertEqual(readiness["allowedInvocationKinds"], ["skill"])
         self.assertEqual(
             readiness["condition"],
-            {"any": [
-                {"gte": ["complexity", "C2"]},
-                {"gte": ["risk", "R2"]},
-                {"gte": ["projectMinimums", "Full"]},
+            {"all": [
+                {"any": [
+                    {"eq": ["operationType", "design"]},
+                    {"eq": ["operationType", "plan"]},
+                    {"eq": ["operationType", "implement"]},
+                    {"eq": ["operationType", "debug"]},
+                ]},
+                {"any": [
+                    {"gte": ["complexity", "C2"]},
+                    {"gte": ["risk", "R2"]},
+                    {"gte": ["projectMinimums", "Full"]},
+                ]},
             ]},
         )
+        deep_grill = slots["design.deep-grill"]
+        self.assertEqual(
+            deep_grill["condition"],
+            {"all": [
+                {"any": [
+                    {"eq": ["operationType", "design"]},
+                    {"eq": ["operationType", "plan"]},
+                    {"eq": ["operationType", "implement"]},
+                    {"eq": ["operationType", "debug"]},
+                ]},
+                {"any": [
+                    {"gte": ["complexity", "C3"]},
+                    {"gte": ["risk", "R3"]},
+                    {"gte": ["projectMinimums", "Deep"]},
+                    {"contains": ["explicitModuleIds", "design-grill-me"]},
+                ]},
+            ]},
+        )
+        from selfworkflow.v3.plan_graph import _condition_matches
+        self.assertFalse(_condition_matches(
+            readiness["condition"],
+            {
+                "operationType": "analyze", "complexity": "C3",
+                "risk": "R3", "projectMinimums": {"strength": "Deep"},
+            },
+        ))
+        self.assertTrue(_condition_matches(
+            readiness["condition"],
+            {
+                "operationType": "plan", "complexity": "C1",
+                "risk": "R1", "projectMinimums": {"strength": "Full"},
+            },
+        ))
+        self.assertFalse(_condition_matches(
+            test_quality["condition"],
+            {"operationType": "analyze", "testLevelFloor": "T3"},
+        ))
+        self.assertTrue(_condition_matches(
+            test_quality["condition"],
+            {"operationType": "plan", "testLevelFloor": "T2"},
+        ))
+        self.assertFalse(_condition_matches(
+            deep_grill["condition"],
+            {
+                "operationType": "analyze", "complexity": "C3",
+                "risk": "R3", "projectMinimums": {"strength": "Deep"},
+            },
+        ))
+        self.assertTrue(_condition_matches(
+            deep_grill["condition"],
+            {
+                "operationType": "plan", "complexity": "C1",
+                "risk": "R1", "projectMinimums": {"strength": "Deep"},
+            },
+        ))
         self.assertEqual(
             slots["implement.orchestrator"]["condition"],
             {"all": [

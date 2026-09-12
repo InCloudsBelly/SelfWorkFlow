@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: ponytail-help
-sourceHash: sha256:07e0fc50c722cee981d47f62a5d32a7def4cb65651f414724e5fd6939f145977
+sourceHash: sha256:46358c185deaf180ed64a9de24aface5a8b996de98a021520571800d9b47a9a7
 stage: designed
 slot: design.specialists
 selectionMode: bounded-runtime

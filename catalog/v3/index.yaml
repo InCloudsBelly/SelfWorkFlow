@@ -45,7 +45,7 @@ modules:
     hash: sha256:19071b0275c1454f9a07ce5fd50f179d7310fe782145d6b7f9dd637fbeccac2c
   - id: ponytail-coding
     ref: modules/ponytail-coding.yaml
-    hash: sha256:5d12c0318c0516ce870728f1c15f58f3426c45e97b900a44a574b2a0d95c47f8
+    hash: sha256:468a7166698631c6dc5713a91c78182402ba40064cf40a2df9aa7ba8f590c704
   - id: ponytail-review
     ref: modules/ponytail-review.yaml
     hash: sha256:9181083cd37f91e3147db471cb9c37dab8b9cfe0bc9ec4d6b3d92121a8c30ac8
@@ -54,7 +54,7 @@ modules:
     hash: sha256:00bf10a97127dfb2681721289b7f088631f0bd65d4a9ca8c569f373f5ffeb1ed
   - id: ponytail-help
     ref: modules/ponytail-help.yaml
-    hash: sha256:fe4985df54bb57c026b30dc14bfe89825a8e1f3e4e7ea20c9faff90baef6b1b1
+    hash: sha256:ee528567ed5d9d6d752204f6447a8fe640b79294fa99179980dc738d8d189f6e
   - id: discover-context
     ref: modules/discover-context.yaml
     hash: sha256:16bb4f817b3dbf5a9f4bea24c1efeab475e5dddf325e1c706e9e7148c3ce00f0
@@ -93,7 +93,7 @@ modules:
     hash: sha256:9fc3ebf5b078dd6c6db9d04fc0a7e3045c33ed8cfa07186bcc3e1820df3ea7d8
   - id: review-code-review
     ref: modules/review-code-review.yaml
-    hash: sha256:eab4edb7d7abd00a12b1904336b280c85ba85efab0bdb8784e696350f213409d
+    hash: sha256:eb284a0b46d64f9ae9ec7e7d443eb5ba95f5ed884e1564e0cdfb2abbe0fc6e5f
   - id: verify-execution
     ref: modules/verify-execution.yaml
     hash: sha256:5de03ac8840ca52da40eae1c17a05572dbc8a9065b6880093937abaa74a60a37

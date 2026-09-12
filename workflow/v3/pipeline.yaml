@@ -47,11 +47,17 @@ stages:
         allowedInvocationKinds: [skill]
         selectionMode: static
         condition:
-          any:
-            - {gte: [complexity, C3]}
-            - {gte: [risk, R3]}
-            - {gte: [projectMinimums, Deep]}
-            - {contains: [explicitModuleIds, design-grill-me]}
+          all:
+            - any:
+                - {eq: [operationType, design]}
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+            - any:
+                - {gte: [complexity, C3]}
+                - {gte: [risk, R3]}
+                - {gte: [projectMinimums, Deep]}
+                - {contains: [explicitModuleIds, design-grill-me]}
       - id: code.reasoning
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]
@@ -70,16 +76,29 @@ stages:
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
         selectionMode: static
-        condition: {gte: [testLevelFloor, T2]}
+        condition:
+          all:
+            - any:
+                - {eq: [operationType, design]}
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+            - {gte: [testLevelFloor, T2]}
       - id: plan.integrated-review
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
         selectionMode: static
         condition:
-          any:
-            - {gte: [complexity, C2]}
-            - {gte: [risk, R2]}
-            - {gte: [projectMinimums, Full]}
+          all:
+            - any:
+                - {eq: [operationType, design]}
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+            - any:
+                - {gte: [complexity, C2]}
+                - {gte: [risk, R2]}
+                - {gte: [projectMinimums, Full]}
   - id: implemented
     slots:
       - id: implement.orchestrator

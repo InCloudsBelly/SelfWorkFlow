@@ -5,8 +5,11 @@ from unittest import mock
 from io import StringIO
 from contextlib import redirect_stderr, redirect_stdout
 
+import yaml
+
 from selfworkflow.ponytail_source import (
     PonytailSourceError,
+    _adapt_ponytail_skill,
     load_ponytail_lock,
     validate_ponytail_lock,
     verify_ponytail_source,
@@ -25,6 +28,29 @@ class PonytailSourceTests(unittest.TestCase):
             [item["id"] for item in report["selectedSkills"]],
             ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-help"],
         )
+
+    def test_catalog_hashes_match_adapted_runtime_skill_bytes(self):
+        catalog = yaml.safe_load(
+            (self.ROOT / "catalog/v3/index.yaml").read_text(encoding="utf-8")
+        )
+        modules = {
+            item["id"]: yaml.safe_load(
+                (self.ROOT / "catalog/v3" / item["ref"]).read_text(encoding="utf-8")
+            )
+            for item in catalog["modules"]
+            if item["id"] in {"ponytail-coding", "ponytail-help"}
+        }
+        for module_id, skill_id in {
+            "ponytail-coding": "ponytail",
+            "ponytail-help": "ponytail-help",
+        }.items():
+            source = (
+                self.ROOT / f"dependencies/upstream/ponytail/skills/{skill_id}/SKILL.md"
+            ).read_bytes()
+            expected = "sha256:" + __import__("hashlib").sha256(
+                _adapt_ponytail_skill(source, skill_id)
+            ).hexdigest()
+            self.assertEqual(modules[module_id]["sourceHash"], expected)
 
     def test_missing_or_invalid_lock_fails_closed(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

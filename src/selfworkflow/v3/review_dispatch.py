@@ -505,7 +505,7 @@ def _dispatch_review(
             "layer": "generic",
             "id": "matt-pocock.code-review",
             "path": "skills/engineering/code-review",
-            "contentHash": "sha256:e32441ce3f64628daeb6270bf56104f461b1341aa472cc3968424e90ece17bc4",
+            "contentHash": "sha256:3abbdfe52540f9242e16589fae2cc423b3d98994c37683944462b29bab89495c",
             "required": True,
         }]
     )
