@@ -64,12 +64,13 @@ class HostDispatchObservation:
 class ReviewDispatchPort(Protocol):
     """Host seam for one ephemeral SubAgent Review.
 
-    Implementations create a fresh reviewer with the requested model, pass only
-    the bounded payload, return the structured result plus a Markdown summary,
-    and delete the reviewer in a finally-equivalent cleanup path. The Host
-    attestation must bind the observed model and opaque SubAgent execution ID.
-    The parent conversation must not change model and must not be used as a
-    fallback.
+    Implementations create a fresh reviewer with the requested model, scoped to
+    this Review dispatch only, enforce
+    the payload's reviewExecutionBoundary, pass only the bounded package,
+    return the structured result plus a Markdown summary, and delete the
+    reviewer in a finally-equivalent cleanup path. The Host attestation must
+    bind the observed model and opaque SubAgent execution ID. The parent
+    conversation must not change model and must not be used as a fallback.
     """
 
     def dispatch_review(
@@ -390,6 +391,29 @@ def _dispatch_review(
     payload = {
         "schemaVersion": 3,
         "reviewMode": review_mode,
+        # This fence is part of the hash-bound Review payload.  The Host may
+        # apply the selected model only to this ephemeral Reviewer and must
+        # reject the dispatch if it cannot enforce the fence.
+        "reviewExecutionBoundary": {
+            "role": "reviewer",
+            "modelScope": "review-only",
+            "graftPolicy": "deny",
+            "allowedOperations": [
+                "read-review-package",
+                "write-review-report",
+            ],
+            "deniedOperations": [
+                "graft.query",
+                "graft.deep",
+                "graft.event",
+                "graft.worker",
+                "provider.maintain",
+                "workspace.write",
+                "verification.run",
+                "knowledge.update",
+                "subagent.spawn",
+            ],
+        },
         subject_field: clone(normalized),
     }
     if review_axis is not None:
@@ -444,6 +468,8 @@ def _dispatch_review(
         observed_payload = clone(observation.sent_payload)
     except (HashingError, TypeError, ValueError, OverflowError):
         raise ReviewDispatchError("review-dispatch-observation-invalid") from None
+    if observed_payload.get("reviewExecutionBoundary") != payload["reviewExecutionBoundary"]:
+        raise ReviewDispatchError("review-execution-boundary-mismatch")
     if normalized_review_model is None:
         if observation.review_model is not None:
             raise ReviewDispatchError("review-model-observation-mismatch")

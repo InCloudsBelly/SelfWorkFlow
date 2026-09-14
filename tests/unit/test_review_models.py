@@ -115,6 +115,27 @@ agents:
             with self.assertRaises(ReviewModelConfigError):
                 one_time_review_model("codex", "gpt-5.6-sol", "Xmax")
 
+    def test_generic_subagent_model_fields_are_rejected(self):
+        from selfworkflow.review_models import ReviewModelConfigError, resolve_review_model
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "review.yaml"
+            path.write_text(
+                """
+schemaVersion: 1
+agents:
+  codex:
+    review:
+      model: gpt-5.6-sol
+      reasoningEffort: xhigh
+    subagents:
+      model: gpt-5.6-sol
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaises(ReviewModelConfigError):
+                resolve_review_model("codex", path)
+
     def test_payload_accepts_mapping_and_requires_exact_selection_mode(self):
         from selfworkflow.review_models import (
             ReviewModelConfigError,

@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 
 
 class FakeCommandPort:
@@ -159,6 +160,16 @@ class ProviderManagerTests(unittest.TestCase):
         project = self.root / "project"
         (project / ".git").mkdir(parents=True)
         port = FakeCommandPort(
+            self._result(stdout="0.18.0"),
+            self._result(stdout="""Commands:
+  build
+  check
+  ask
+  map
+  grep
+  callers
+  skeleton
+"""),
             self._result(1, stdout='{"context":{"missing":true},"graph":null}'),
             self._result(stdout="build complete"),
             self._result(stdout='{"context":{"ok":false,"missing":true},"graph":{"ok":true,"missing":false}}'),
@@ -179,7 +190,61 @@ class ProviderManagerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "initialized")
         self.assertEqual(port.calls[0]["argv"][0:2], ("node", str(self.root / "private" / "graft" / "dist" / "cli.js")))
-        self.assertIn("build", port.calls[1]["argv"])
+        self.assertEqual(result["providerStatus"], "verified")
+        self.assertEqual(result["graphStatus"], "fresh")
+        self.assertIn("build", port.calls[3]["argv"])
+
+    def test_graft_preflight_reports_provider_failure_without_building(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        port = FakeCommandPort(self._result(1, stderr="runtime path"))
+        manager = self._manager(
+            port=port,
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+
+        result = manager.graft_preflight(str(project))
+
+        self.assertEqual(result["status"], "unverified")
+        self.assertEqual(result["providerStatus"], "unavailable")
+        self.assertEqual(result["graphStatus"], "unknown")
+        self.assertNotIn("build", port.calls[0]["argv"])
+        self.assertFalse((project / "graft").exists())
+        self.assertFalse((project / ".gitignore").exists())
+
+    def test_graft_deep_routes_the_explicit_model_to_the_codex_bridge(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        manager = self._manager(
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+
+        with patch(
+            "selfworkflow.v3.graft_codex_bridge.run_codex_graft_deep",
+            return_value={"status": "succeeded"},
+        ) as run:
+            result = manager.graft_deep(
+                str(project), "gpt-5.6-luna", "xhigh",
+            )
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(run.call_args.kwargs["model"], "gpt-5.6-luna")
+        self.assertEqual(run.call_args.kwargs["reasoning_effort"], "xhigh")
+        self.assertEqual(run.call_args.kwargs["graft_command"][0], "node")
 
     def test_graft_status_enforces_project_binding_before_provider_dispatch(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError

@@ -233,6 +233,15 @@ class _IgnoringReviewModelPort(_SpyPort):
         return observation
 
 
+class _DroppingReviewBoundaryPort(_SpyPort):
+    def dispatch_review(self, **call):
+        observation = super().dispatch_review(**call)
+        payload = dict(observation.sent_payload)
+        payload.pop("reviewExecutionBoundary", None)
+        object.__setattr__(observation, "sent_payload", payload)
+        return observation
+
+
 class ReviewDispatchTests(unittest.TestCase):
     def test_dispatch_returns_bounded_report_and_ephemeral_lifecycle(self):
         from selfworkflow.v3.review_dispatch import dispatch_independent_review
@@ -294,10 +303,50 @@ class ReviewDispatchTests(unittest.TestCase):
         self.assertEqual(call["review_mode"], "independent-design-review")
         self.assertIs(call["fork_context"], False)
         self.assertNotIn("review_model", call)
-        self.assertEqual(set(call["payload"]), {"schemaVersion", "reviewMode", "designReviewSummary"})
+        self.assertEqual(
+            set(call["payload"]),
+            {"schemaVersion", "reviewMode", "reviewExecutionBoundary", "designReviewSummary"},
+        )
         self.assertEqual(receipt["independence"], "independent")
         self.assertEqual(receipt["reviewVerdict"], "approve")
         self.assertFalse(receipt["parentContextImported"])
+
+    def test_dispatch_binds_reviewer_capability_boundary(self):
+        from selfworkflow.v3.review_dispatch import dispatch_independent_review
+
+        port = _SpyPort()
+        dispatch_independent_review(
+            _verified(), implementation_agent_identity="implementation-agent",
+            implementation_context_identity="implementation-context", port=port,
+            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+        )
+
+        boundary = port.calls[0]["payload"]["reviewExecutionBoundary"]
+        self.assertEqual(boundary["role"], "reviewer")
+        self.assertEqual(boundary["modelScope"], "review-only")
+        self.assertEqual(boundary["graftPolicy"], "deny")
+        self.assertEqual(
+            boundary["allowedOperations"],
+            ["read-review-package", "write-review-report"],
+        )
+        self.assertIn("graft.deep", boundary["deniedOperations"])
+        self.assertIn("graft.query", boundary["deniedOperations"])
+        self.assertIn("workspace.write", boundary["deniedOperations"])
+
+    def test_dispatch_rejects_host_that_drops_reviewer_boundary(self):
+        from selfworkflow.v3.review_dispatch import (
+            ReviewDispatchError, dispatch_independent_review,
+        )
+
+        with self.assertRaisesRegex(
+            ReviewDispatchError, "review-execution-boundary-mismatch"
+        ):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context",
+                port=_DroppingReviewBoundaryPort(), plan_hash=PLAN_HASH,
+                attempt_ref="attempt-designed",
+            )
 
     def test_dispatch_binds_valid_review_model_selection_to_host_payload(self):
         from selfworkflow.v3.review_dispatch import dispatch_independent_review

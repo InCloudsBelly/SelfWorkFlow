@@ -347,10 +347,13 @@ class Host:
             normalized_summary = verified_input.summary
             if normalized_summary["summaryHash"] != summary_ref:
                 raise HostError("post-grill-review-summary-reference-invalid")
-            selected_review_model = self._select_review_model(
-                implementation_agent_identity, review_model_override,
-            )
             if independent_context_available:
+                # A model override is scoped to the fresh Review SubAgent.
+                # The authorized same-agent fallback below must not switch the
+                # parent/current Agent or inherit that override.
+                selected_review_model = self._select_review_model(
+                    implementation_agent_identity, review_model_override,
+                )
                 receipt = dispatch_independent_review(
                     verified_input,
                     implementation_agent_identity=implementation_agent_identity,
@@ -390,7 +393,6 @@ class Host:
                     fallback_authorization_ref=fallback_authorization_ref,
                     plan_hash=self._plan.plan_hash,
                     attempt_ref=attempt_ref,
-                    review_model=selected_review_model,
                 )
             decision = evaluate_post_grill_review(
                 independent_context_available=independent_context_available,

@@ -218,7 +218,7 @@ def save_review_model(
 def one_time_review_model(
     agent_id: str, model: str, reasoning_effort: str,
 ) -> MappingProxyType:
-    """Create a validated, non-persistent per-call override."""
+    """Create a validated, non-persistent override for one Review dispatch."""
 
     return MappingProxyType(
         _selection(agent_id, model, reasoning_effort).as_dict(selection_mode="one-time")

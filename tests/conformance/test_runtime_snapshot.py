@@ -51,7 +51,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 "Review → 用户确认 → TDD",
                 "确认失效",
                 "非代码任务不自动加载",
-                "不启用上游全局配置或 hooks",
+                "官方 Graft MCP",
             ):
                 self.assertIn(phrase, workflow_text)
             self.assertFalse((root / "first/extensions").exists())

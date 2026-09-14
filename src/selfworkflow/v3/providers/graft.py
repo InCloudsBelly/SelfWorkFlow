@@ -17,7 +17,16 @@ from selfworkflow.v3.providers.codegraph import CommandPort, CommandResult
 
 
 _MAX_OUTPUT_BYTES = 1024 * 1024
+# ``graft check --json`` legitimately includes the full drift set.  Large
+# repositories can therefore exceed the normal command-result budget even
+# though the adapter returns only the bounded freshness summary below.
+# Keep this operation-specific and finite; query/help/version remain on the
+# tighter default limit.
+_STATUS_OUTPUT_BYTES = 64 * 1024 * 1024
 _QUERY_KINDS = frozenset({"ask", "map", "grep", "callers", "skeleton"})
+_REQUIRED_COMMANDS = frozenset({
+    "build", "check", "ask", "map", "grep", "callers", "skeleton",
+})
 _MAINTENANCE_ACTIONS = frozenset({"initialize", "sync", "rebuild"})
 
 
@@ -123,11 +132,18 @@ class GraftAdapter:
     def command_hash(self) -> str:
         return _hash({"argv": list(self._prefix)})
 
+    @property
+    def command_prefix(self) -> tuple[str, ...]:
+        """Return the already source-bound official Graft launcher."""
+
+        return self._prefix
+
     def _run(
         self,
         arguments: Sequence[str],
         *,
         allow_exit_codes: frozenset[int] = frozenset({0}),
+        output_limit_bytes: int = _MAX_OUTPUT_BYTES,
     ) -> CommandResult:
         try:
             if self._pre_dispatch_validator is not None:
@@ -145,7 +161,7 @@ class GraftAdapter:
         ):
             raise GraftAdapterError("graft-command-result-invalid")
         if (
-            len(result.stdout.encode("utf-8")) > _MAX_OUTPUT_BYTES
+            len(result.stdout.encode("utf-8")) > output_limit_bytes
             or len(result.stderr.encode("utf-8")) > _MAX_OUTPUT_BYTES
         ):
             raise GraftAdapterError("graft-command-output-too-large")
@@ -168,6 +184,7 @@ class GraftAdapter:
         result = self._run(
             ("check", root, "--json"),
             allow_exit_codes=frozenset({0, 1}),
+            output_limit_bytes=_STATUS_OUTPUT_BYTES,
         )
         value = self._parse_json(result.stdout, "graft-status-invalid")
         context = value.get("context")
@@ -213,6 +230,27 @@ class GraftAdapter:
             "readOnly": True,
             "supportStatus": "unverified",
             "version": value.splitlines()[0][:256],
+        }
+
+    def provider_preflight(self) -> dict[str, Any]:
+        """Verify that the configured runtime exposes the query surface."""
+
+        version = self.version()["version"]
+        help_result = self._run(("--help",))
+        commands = {
+            line.strip().split(maxsplit=1)[0]
+            for line in help_result.stdout.splitlines()
+            if line.strip()
+        }
+        if not _REQUIRED_COMMANDS <= commands:
+            raise GraftAdapterError("graft-provider-capability-missing")
+        return {
+            "providerId": "graft",
+            "operation": "provider-preflight",
+            "readOnly": True,
+            "providerStatus": "verified",
+            "version": version,
+            "queryCapabilities": sorted(_REQUIRED_COMMANDS),
         }
 
     def query(

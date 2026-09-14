@@ -486,6 +486,11 @@ def main(argv: list[str] | None = None) -> int:
     graft_worker = provider_commands.add_parser("graft-worker")
     graft_worker.add_argument("--config-file")
     graft_worker.add_argument("--project-root", required=True)
+    graft_deep = provider_commands.add_parser("graft-deep")
+    graft_deep.add_argument("--config-file")
+    graft_deep.add_argument("--project-root", required=True)
+    graft_deep.add_argument("--model", required=True)
+    graft_deep.add_argument("--reasoning-effort", required=True)
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -753,6 +758,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
             elif arguments.provider_command == "graft-worker":
                 result = manager.graft_worker(arguments.project_root)
+            elif arguments.provider_command == "graft-deep":
+                result = manager.graft_deep(
+                    arguments.project_root, arguments.model,
+                    arguments.reasoning_effort,
+                )
             elif arguments.provider_command == "inspect":
                 pass
             else:
@@ -762,6 +772,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"SelfWorkFlow: provider-operation-failed:{reason}", file=sys.stderr)
             return 70
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        if (
+            arguments.provider_command == "graft-deep"
+            and (not isinstance(result, dict) or result.get("status") != "succeeded")
+        ):
+            return 71
         return 0
     if arguments.command == "catalog" and arguments.catalog_command == "compile":
         try:

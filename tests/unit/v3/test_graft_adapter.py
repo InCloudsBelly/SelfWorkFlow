@@ -39,6 +39,47 @@ class GraftAdapterTests(unittest.TestCase):
             "graph": {"ok": True, "missing": False},
         })
 
+    def _help(self):
+        return """Commands:
+  build
+  check
+  ask
+  map
+  skeleton
+  callers
+  grep
+"""
+
+    def test_provider_preflight_verifies_runtime_and_query_commands(self):
+        port = FakeCommandPort(
+            self._result(stdout="0.18.0\n"),
+            self._result(stdout=self._help()),
+        )
+
+        result = self._adapter(port).provider_preflight()
+
+        self.assertEqual(result["providerStatus"], "verified")
+        self.assertEqual(result["version"], "0.18.0")
+        self.assertEqual(result["queryCapabilities"], [
+            "ask", "build", "callers", "check", "grep", "map",
+            "skeleton",
+        ])
+        self.assertEqual(port.calls[0]["argv"][-1], "--version")
+        self.assertEqual(port.calls[1]["argv"][-1], "--help")
+
+    def test_provider_preflight_rejects_missing_query_capability(self):
+        from selfworkflow.v3.providers.graft import GraftAdapterError
+
+        port = FakeCommandPort(
+            self._result(stdout="0.18.0\n"),
+            self._result(stdout="Commands:\n  build\n  check\n"),
+        )
+
+        with self.assertRaisesRegex(
+            GraftAdapterError, "graft-provider-capability-missing",
+        ):
+            self._adapter(port).provider_preflight()
+
     def test_status_accepts_fresh_and_stale_exit_without_leaking_output(self):
         port = FakeCommandPort(
             self._result(stdout=self._fresh_status()),
@@ -86,6 +127,18 @@ class GraftAdapterTests(unittest.TestCase):
 
         self.assertEqual(result["freshness"], "fresh")
         self.assertTrue(result["initialized"])
+
+    def test_status_allows_large_bounded_drift_report_but_returns_only_summary(self):
+        payload = {
+            "context": {"ok": False, "missing": False},
+            "graph": {"ok": False, "missing": False, "padding": "x" * (1024 * 1024 + 1)},
+        }
+        port = FakeCommandPort(self._result(exit_code=1, stdout=json.dumps(payload)))
+
+        result = self._adapter(port).status("C:/work/project")
+
+        self.assertEqual(result["freshness"], "stale")
+        self.assertNotIn("padding", result)
 
     def test_query_is_readonly_no_refresh_and_returns_json_payload(self):
         payload = {"hits": [{"path": "Source/main.cpp", "pointer": "fn"}]}

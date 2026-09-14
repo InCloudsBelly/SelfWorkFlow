@@ -81,6 +81,36 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
                 )
         self.assertEqual(manager.calls[-1][-1], "sha256:" + "a" * 64)
 
+    def test_graft_deep_failure_has_nonzero_process_exit(self):
+        manager = _Manager()
+        manager.graft_deep = mock.Mock(return_value={
+            "status": "failed",
+            "reason": "graft-deep-not-fresh",
+        })
+        arguments = [
+            "provider", "graft-deep", "--project-root", "C:/work/project",
+            "--model", "gpt-5.6-luna", "--reasoning-effort", "xhigh",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main(arguments), 71)
+
+    def test_graft_deep_success_keeps_zero_process_exit(self):
+        manager = _Manager()
+        manager.graft_deep = mock.Mock(return_value={
+            "status": "succeeded",
+            "freshness": "fresh",
+        })
+        arguments = [
+            "provider", "graft-deep", "--project-root", "C:/work/project",
+            "--model", "gpt-5.6-luna", "--reasoning-effort", "xhigh",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main(arguments), 0)
+
     def test_configure_uses_explicit_path_helper_only(self):
         manager = _Manager()
         configured = {"providerId": "codegraph", "status": "configured"}

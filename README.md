@@ -122,7 +122,8 @@ Agent entries pause Review for user configuration; no model alias or reasoning
 level is inferred. Use `selfworkflow review-model status --agent <id>` to
 inspect a selection and `selfworkflow review-model set --agent <id> --model
 <model> --reasoning-effort <effort> --confirm` to save a confirmed default.
-One-time overrides remain in the current dispatch only. The selected value is
+One-time overrides remain in the current Review dispatch only; they are never a
+generic SubAgent default and are not propagated to other SubAgents. The selected value is
 payload-bound, and the Host must return the same value in its dispatch
 observation; a mismatch fails closed. Model execution is still host-attested
 and must not be claimed from configuration alone. The file is machine-local
@@ -150,37 +151,56 @@ Graft is the default local code-reading Provider and is pinned at
 `dependencies/upstream/graft` with `dependencies/locks/graft.lock.yaml`. The
 installer verifies the gitlink, source tree, package/lockfile/license hashes,
 then runs `npm ci --ignore-scripts`, a controlled native-package rebuild,
-`npm run build`, and a CLI runtime smoke test. Queries use Graft's
-`--no-refresh` mode and never build implicitly.
-The project graph is initialized lazily on the first matching code task. After
-an Agent writes code, the Host sends one `agent_write` event and runs the
-SelfWorkFlow coalescing Worker; queries remain `--no-refresh` and never build
-implicitly. The Worker is structural-only: it does not run Deep or install a
-file watcher/daemon. See `docs/providers/graft.md`.
+`npm run build`, and a CLI runtime smoke test. The installed Agent query path is
+the official Graft MCP; SelfWorkFlow does not reimplement Graft's graph or query
+protocol.
+The project graph is initialized lazily on the first matching code task. The
+installer publishes the official MCP launcher at
+`%LOCALAPPDATA%\SelfWorkFlow\bin\graft-mcp.cmd`, which starts
+`graft mcp <current-working-directory>` so each project keeps its own `graft/`.
+The SelfWorkFlow Host CLI at
+`%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd` is retained for lifecycle
+checks, explicit maintenance, and recovery. After an Agent writes code,
+SelfWorkFlow triggers the official Graft structural update; ordinary tasks do
+not run Deep, and it does not run a second graph implementation, watcher, or
+daemon. An explicitly requested Deep build uses the current Agent model through
+a one-shot loopback Codex bridge. Before any graph decision,
+`graft-preflight` first verifies
+the real Provider runtime (`--version` and the required commands); an
+existing `graft/` directory alone is not evidence that Graft is usable. See
+`docs/providers/graft.md`.
+
+Official `graft init` can register Graft's native MCP and hooks. SelfWorkFlow
+uses the official MCP as the primary query path and keeps only a thin lifecycle
+gate around it; the launcher is bound to the current working directory rather
+than a fixed project path.
 
 ```powershell
 node dependencies/upstream/graft/dist/cli.js build D:\project --no-gitignore --no-ignore
 node dependencies/upstream/graft/dist/cli.js map D:\project --json --no-refresh
 
-python -m selfworkflow.cli provider graft-preflight --project-root D:\project
-python -m selfworkflow.cli provider graft-event --project-root D:\project --changed-path Source\main.cpp
-python -m selfworkflow.cli provider graft-worker --project-root D:\project
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-preflight --project-root D:\project
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-event --project-root D:\project --changed-path Source\main.cpp
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-worker --project-root D:\project
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-deep --project-root D:\project --model <current-agent-model> --reasoning-effort <current-effort>
 ```
 
 ## Code reading
 
-Graft is the only code-graph Provider. It is used for fresh structural queries
-with `--no-refresh`; it never rebuilds implicitly. If Graft is missing, stale,
-unavailable, or does not cover a target, the workflow marks that limitation and
-falls back to `rg` for exact text and uncovered files. `rg` is not structural
-evidence and does not replace a required fresh Graft result. See
+Graft is the only code-graph Provider. The official MCP supplies structural
+queries and freshness; the workflow verifies its project binding before use.
+If Graft is missing, stale, unavailable, or does not cover a target, the
+workflow marks that limitation and falls back to `rg` for exact text and
+uncovered files. `rg` is not structural evidence and does not replace a
+required fresh Graft result. See
 `docs/providers/graft.md`.
 
-For a new conversation's first code task, SelfWorkFlow checks the bound Graft
-index once. If stale, it asks whether to explicitly build and use it, use the
-stale index read-only, or omit it for that conversation. The choice is reused
-for the conversation; graph updates still require explicit side-effect
-confirmation.
+For a new conversation's first code task, SelfWorkFlow verifies the bound Graft
+runtime and then checks the project index once. If the runtime is unavailable,
+it does not build a graph and falls back to `rg`; if the graph is stale, it asks
+whether to explicitly build and use it, use the stale index read-only, or omit
+it for that conversation. The choice is reused for the conversation; graph
+updates still require explicit side-effect confirmation.
 
 ## Current capability status
 

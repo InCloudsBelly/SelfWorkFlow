@@ -776,6 +776,32 @@ class ProviderManager:
         from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
         return GraftProjectLifecycle(self._adapter("graft")).run_once(project_root)
 
+    def graft_deep(
+        self, project_root: str, model: str, reasoning_effort: str,
+    ) -> dict[str, Any]:
+        """Run one official Graft Deep build through the current Codex model."""
+
+        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
+            raise ProviderManagerError("provider-not-configured")
+        try:
+            from selfworkflow.v3.graft_codex_bridge import run_codex_graft_deep
+
+            adapter = self._adapter("graft")
+            command = getattr(adapter, "command_prefix", None)
+            if not isinstance(command, tuple):
+                raise ProviderManagerError("provider-adapter-unavailable")
+            return run_codex_graft_deep(
+                graft_command=command,
+                project_root=project_root,
+                model=model,
+                reasoning_effort=reasoning_effort,
+            )
+        except ProviderManagerError:
+            raise
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-deep-failed")
+            raise ProviderManagerError(reason) from None
+
     def maintain(
         self,
         provider_id: str,

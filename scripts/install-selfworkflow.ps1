@@ -31,12 +31,15 @@ never installed or enabled by this script.
 
 The pinned Graft Submodule is verified and built with Node >=20 during installation.
 Graft is the default code-reading Provider; its project graph is local and lazily
-initialized on the first code task. Queries use no-refresh. The installed provider
-binding exposes the SelfWorkFlow Host event/Worker for coalesced structural updates;
-it never enables Graft's competing hooks or Deep semantic build.
+initialized on the first code task. The installer registers the official Graft MCP
+for Codex through a managed launcher bound to the current working directory. The
+SelfWorkFlow Host remains responsible only for lifecycle checks, explicit maintenance,
+and recovery; it does not reimplement Graft's graph or query protocol.
 
 The installer writes a timestamped diagnostic log, shows the generated plan,
-and requires an explicit APPLY confirmation before publishing files.
+and requires an explicit APPLY confirmation before publishing files. It also
+installs a machine-local Host CLI at %LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd
+so project conversations can invoke the verified Provider from any working directory.
 "@
     exit 0
 }
@@ -357,6 +360,201 @@ function Ensure-GraftBuild {
     })
 }
 
+function Ensure-HostLauncher {
+    param([string]$RepositoryRoot, [string]$TargetPath)
+    if ($RepositoryRoot -match '[%"\r\n]') {
+        Stop-Install "host-cli" 28 "host-cli-repository-path-invalid"
+    }
+    $parent = Split-Path -Parent $TargetPath
+    [IO.Directory]::CreateDirectory($parent) | Out-Null
+    $marker = "SelfWorkFlow managed Host CLI"
+    if (Test-Path -LiteralPath $TargetPath) {
+        $item = Get-Item -LiteralPath $TargetPath -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Stop-Install "host-cli" 28 "host-cli-target-invalid"
+        }
+        $existing = [IO.File]::ReadAllText($TargetPath)
+        if ($existing -notmatch [regex]::Escape($marker)) {
+            Stop-Install "host-cli" 28 "host-cli-conflict"
+        }
+    }
+    $content = @"
+@echo off
+setlocal
+rem $marker
+set "SELFWORKFLOW_REPOSITORY_ROOT=$RepositoryRoot"
+set "SELFWORKFLOW_PYTHON=%SELFWORKFLOW_REPOSITORY_ROOT%\.venv\Scripts\python.exe"
+if not exist "%SELFWORKFLOW_PYTHON%" (
+  >&2 echo SelfWorkFlow: repository environment missing; rerun the installer.
+  exit /b 20
+)
+set "PYTHONPATH=%SELFWORKFLOW_REPOSITORY_ROOT%\src;%PYTHONPATH%"
+"%SELFWORKFLOW_PYTHON%" -m selfworkflow.cli %*
+exit /b %ERRORLEVEL%
+"@.TrimStart("`r", "`n") + "`r`n"
+    $temporary = Join-Path $parent ("." + [IO.Path]::GetFileName($TargetPath) + ".tmp-" + [Guid]::NewGuid().ToString("N"))
+    $backup = Join-Path $parent ("." + [IO.Path]::GetFileName($TargetPath) + ".bak-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        [IO.File]::WriteAllText($temporary, $content, [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $TargetPath) {
+            [IO.File]::Replace($temporary, $TargetPath, $backup, $true)
+            [IO.File]::Delete($backup)
+        }
+        else {
+            [IO.File]::Move($temporary, $TargetPath)
+        }
+    }
+    catch {
+        Stop-Install "host-cli" 28 "host-cli-write-failed"
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) {
+            [IO.File]::Delete($temporary)
+        }
+        if (Test-Path -LiteralPath $backup) {
+            [IO.File]::Delete($backup)
+        }
+    }
+    return [ordered]@{
+        status = "installed"
+        path = $TargetPath
+        repositoryRoot = $RepositoryRoot
+    }
+}
+
+function Ensure-GraftMcpLauncher {
+    param([string]$RepositoryRoot, [string]$GraftPath, [string]$TargetPath)
+    if ($RepositoryRoot -match '[%"\r\n]' -or $GraftPath -match '[%"\r\n]') {
+        Stop-Install "graft-mcp" 28 "graft-mcp-path-invalid"
+    }
+    $node = Get-Command "node.exe" -ErrorAction SilentlyContinue
+    if (-not $node) {
+        Stop-Install "graft-mcp" 28 "graft-mcp-node-missing"
+    }
+    $nodePath = [IO.Path]::GetFullPath($node.Source)
+    if ($nodePath -match '[%"\r\n]') {
+        Stop-Install "graft-mcp" 28 "graft-mcp-node-path-invalid"
+    }
+    $entry = Join-Path $GraftPath "dist\cli.js"
+    if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) {
+        Stop-Install "graft-mcp" 28 "graft-mcp-entry-missing"
+    }
+    $parent = Split-Path -Parent $TargetPath
+    [IO.Directory]::CreateDirectory($parent) | Out-Null
+    $marker = "SelfWorkFlow managed official Graft MCP launcher"
+    if (Test-Path -LiteralPath $TargetPath) {
+        $item = Get-Item -LiteralPath $TargetPath -Force
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Stop-Install "graft-mcp" 28 "graft-mcp-target-invalid"
+        }
+        $existing = [IO.File]::ReadAllText($TargetPath)
+        if ($existing -notmatch [regex]::Escape($marker)) {
+            Stop-Install "graft-mcp" 28 "graft-mcp-conflict"
+        }
+    }
+    $content = @"
+@echo off
+setlocal
+rem $marker
+set "SELFWORKFLOW_GRAFT_NODE=$nodePath"
+set "SELFWORKFLOW_GRAFT_CLI=$GraftPath\dist\cli.js"
+set "SELFWORKFLOW_GRAFT_PROJECT_ROOT=%CD%"
+if not exist "%SELFWORKFLOW_GRAFT_NODE%" (
+  >&2 echo SelfWorkFlow: Node runtime missing; rerun the installer.
+  exit /b 20
+)
+if not exist "%SELFWORKFLOW_GRAFT_CLI%" (
+  >&2 echo SelfWorkFlow: pinned Graft CLI missing; rerun the installer.
+  exit /b 20
+)
+"%SELFWORKFLOW_GRAFT_NODE%" "%SELFWORKFLOW_GRAFT_CLI%" mcp "%SELFWORKFLOW_GRAFT_PROJECT_ROOT%"
+exit /b %ERRORLEVEL%
+"@.TrimStart("`r", "`n") + "`r`n"
+    $temporary = Join-Path $parent ("." + [IO.Path]::GetFileName($TargetPath) + ".tmp-" + [Guid]::NewGuid().ToString("N"))
+    $backup = Join-Path $parent ("." + [IO.Path]::GetFileName($TargetPath) + ".bak-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        [IO.File]::WriteAllText($temporary, $content, [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $TargetPath) {
+            [IO.File]::Replace($temporary, $TargetPath, $backup, $true)
+            [IO.File]::Delete($backup)
+        }
+        else {
+            [IO.File]::Move($temporary, $TargetPath)
+        }
+    }
+    catch {
+        Stop-Install "graft-mcp" 28 "graft-mcp-write-failed"
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) { [IO.File]::Delete($temporary) }
+        if (Test-Path -LiteralPath $backup) { [IO.File]::Delete($backup) }
+    }
+    return [ordered]@{
+        status = "installed"
+        path = $TargetPath
+        repositoryRoot = $RepositoryRoot
+        projectRootMode = "current-working-directory"
+    }
+}
+
+function Ensure-CodexGraftMcp {
+    param([string]$CodexConfigPath, [string]$LauncherPath)
+    $parent = Split-Path -Parent $CodexConfigPath
+    [IO.Directory]::CreateDirectory($parent) | Out-Null
+    $begin = "# selfworkflow:graft-mcp:begin"
+    $end = "# selfworkflow:graft-mcp:end"
+    $launcherToml = $LauncherPath.Replace("\", "\\").Replace('"', '\"')
+    $section = @"
+$begin
+[mcp_servers.graft]
+command = "$launcherToml"
+args = []
+$end
+"@.Trim("`r", "`n")
+    $existing = if (Test-Path -LiteralPath $CodexConfigPath) {
+        [IO.File]::ReadAllText($CodexConfigPath)
+    } else { "" }
+    $hasBegin = $existing.Contains($begin)
+    $hasEnd = $existing.Contains($end)
+    $hasForeignSection = [regex]::IsMatch($existing, '(?m)^\[mcp_servers\.graft\]\s*$') -and -not $hasBegin
+    if (($hasBegin -xor $hasEnd) -or $hasForeignSection) {
+        Stop-Install "graft-mcp" 28 "codex-graft-mcp-conflict"
+    }
+    if ($hasBegin -and $hasEnd) {
+        $pattern = '(?ms)^' + [regex]::Escape($begin) + '\r?\n.*?^' + [regex]::Escape($end) + '\r?\n?'
+        $updated = [regex]::Replace($existing, $pattern, $section + "`r`n")
+    }
+    elseif ([string]::IsNullOrWhiteSpace($existing)) {
+        $updated = $section + "`r`n"
+    }
+    else {
+        $updated = $existing.TrimEnd("`r", "`n") + "`r`n`r`n" + $section + "`r`n"
+    }
+    if ($updated -ne $existing) {
+        $temporary = Join-Path $parent ("." + [IO.Path]::GetFileName($CodexConfigPath) + ".tmp-" + [Guid]::NewGuid().ToString("N"))
+        $backup = Join-Path $parent ("." + [IO.Path]::GetFileName($CodexConfigPath) + ".bak-" + [Guid]::NewGuid().ToString("N"))
+        try {
+            [IO.File]::WriteAllText($temporary, $updated, [Text.UTF8Encoding]::new($false))
+            if (Test-Path -LiteralPath $CodexConfigPath) {
+                [IO.File]::Replace($temporary, $CodexConfigPath, $backup, $true)
+                [IO.File]::Delete($backup)
+            }
+            else { [IO.File]::Move($temporary, $CodexConfigPath) }
+        }
+        catch { Stop-Install "graft-mcp" 28 "codex-graft-mcp-write-failed" }
+        finally {
+            if (Test-Path -LiteralPath $temporary) { [IO.File]::Delete($temporary) }
+            if (Test-Path -LiteralPath $backup) { [IO.File]::Delete($backup) }
+        }
+    }
+    return [ordered]@{
+        status = if ($updated -eq $existing) { "unchanged" } else { "installed" }
+        configPath = $CodexConfigPath
+        launcherPath = $LauncherPath
+        toolSource = "official-graft-mcp"
+    }
+}
+
 $AgentsRoot = Resolve-FullPath $AgentsRoot
 $CodexRoot = Resolve-FullPath $CodexRoot
 $StateRoot = Resolve-FullPath $StateRoot
@@ -370,6 +568,9 @@ $script:InstallLog = Join-Path $script:LogDirectory "install.log"
 [IO.File]::WriteAllText($script:InstallLog, "", [Text.UTF8Encoding]::new($false))
 $script:CurrentStage = "preflight"
 $script:FailureExitCode = 20
+$HostLauncherPath = Join-Path $env:LOCALAPPDATA "SelfWorkFlow\bin\selfworkflow.cmd"
+$GraftMcpLauncherPath = Join-Path $env:LOCALAPPDATA "SelfWorkFlow\bin\graft-mcp.cmd"
+$CodexGraftMcpConfigPath = Join-Path $CodexRoot "config.toml"
 $script:PythonExecutable = $null
 $applyResult = $null
 $mattSkillsReport = $null
@@ -378,6 +579,8 @@ $ponytailReport = $null
 $graftProviderReport = [ordered]@{ status = "skipped" }
 $graftSourceReport = $null
 $graftRollbackToken = $null
+$graftMcpLauncherReport = $null
+$codexGraftMcpReport = $null
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -507,6 +710,8 @@ try {
         graftSource = $graftSourceReport
         ponytail = $ponytailReport
         graftProvider = $graftProviderReport
+        graftMcpLauncher = $graftMcpLauncherReport
+        codexGraftMcp = $codexGraftMcpReport
         superpowers = "external-only"
     })
 
@@ -528,10 +733,17 @@ try {
     $verifyPath = Join-Path $script:LogDirectory "verify-result.json"
     Invoke-SelfWorkflow @("install", "verify", "--manifest", $applyResult.manifestPath) $verifyPath | Out-Null
 
+    Set-InstallStage "host-cli" 74
+    $hostLauncherReport = Ensure-HostLauncher $RepositoryRoot $HostLauncherPath
+
+    Set-InstallStage "graft-mcp" 75
+    $graftMcpLauncherReport = Ensure-GraftMcpLauncher $RepositoryRoot $GraftPath $GraftMcpLauncherPath
+    $codexGraftMcpReport = Ensure-CodexGraftMcp $CodexGraftMcpConfigPath $GraftMcpLauncherPath
+
     $doctorAfter = Join-Path $script:LogDirectory "doctor-after.json"
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorAfter | Out-Null
 
-    Set-InstallStage "graft-provider-configure" 74
+    Set-InstallStage "graft-provider-configure" 76
     $existingProviders = Invoke-SelfWorkflow @(
         "provider", "list", "--config-file", $ProviderConfigFile
     ) (Join-Path $script:LogDirectory "provider-list.json")
@@ -572,6 +784,9 @@ try {
         graftSource = $graftSourceReport
         ponytail = $ponytailReport
         graftProvider = $graftProviderReport
+        hostLauncher = $hostLauncherReport
+        graftMcpLauncher = $graftMcpLauncherReport
+        codexGraftMcp = $codexGraftMcpReport
         superpowers = "external-only"
         writeCapability = "enabled"
         manifestPath = $applyResult.manifestPath

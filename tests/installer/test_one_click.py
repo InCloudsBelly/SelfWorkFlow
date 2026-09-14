@@ -72,6 +72,44 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout), {"providers": []})
         self.assertFalse((root / "list").exists())
 
+    def test_install_publishes_machine_local_host_launcher_for_provider_calls(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            result = self._run_installer(
+                root, "-SuperpowersChoice", "Skip", "-ConfirmApply"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            launcher = root / "localappdata/SelfWorkFlow/bin/selfworkflow.cmd"
+            self.assertTrue(launcher.is_file())
+            launcher_text = launcher.read_text(encoding="utf-8").casefold()
+            self.assertIn("selfworkflow.cli", launcher_text)
+            self.assertIn("managed", launcher_text)
+            graft_mcp = root / "localappdata/SelfWorkFlow/bin/graft-mcp.cmd"
+            self.assertTrue(graft_mcp.is_file())
+            graft_mcp_text = graft_mcp.read_text(encoding="utf-8").casefold()
+            self.assertIn("official graft mcp launcher", graft_mcp_text)
+            self.assertIn(" mcp ", graft_mcp_text)
+            self.assertIn("%cd%", graft_mcp_text)
+            codex_config = (root / "codex/config.toml").read_text(encoding="utf-8")
+            self.assertIn("# selfworkflow:graft-mcp:begin", codex_config)
+            self.assertIn("[mcp_servers.graft]", codex_config)
+            self.assertIn("graft-mcp.cmd", codex_config)
+
+            (root / "arbitrary-working-directory").mkdir()
+            environment = os.environ.copy()
+            environment["LOCALAPPDATA"] = str(root / "localappdata")
+            result = subprocess.run(
+                [str(launcher), "provider", "list"],
+                cwd=root / "arbitrary-working-directory",
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            providers = json.loads(result.stdout)["providers"]
+            self.assertEqual([item["providerId"] for item in providers], ["graft"])
+
     def test_powershell_help_documents_pinned_matt_logs_and_explicit_apply(self):
         script = self.ROOT / "scripts" / "install-selfworkflow.ps1"
         result = subprocess.run(
@@ -245,6 +283,8 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 root / "agents", root / "codex", root / "state"
             )["agentsRoot"]["treeHash"]
             self.assertEqual(second_hash, first_hash)
+            codex_config = (root / "codex/config.toml").read_text(encoding="utf-8")
+            self.assertEqual(codex_config.count("[mcp_servers.graft]"), 1)
 
 
 if __name__ == "__main__":

@@ -554,6 +554,10 @@ class HostPostGrillGateTests(unittest.TestCase):
         fallback_host = self._host_with_port(
             port, consumer=consumer, independent_context_available=False,
         )
+        review_override = {
+            "agentId": "implementation-agent", "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh", "selectionMode": "one-time",
+        }
         evidence = fallback_host.dispatch_post_grill_review(
             self.ledger, self.summary["summaryHash"],
             implementation_agent_identity="implementation-agent",
@@ -562,8 +566,11 @@ class HostPostGrillGateTests(unittest.TestCase):
             now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
             fallback_authorization_ref=fallback["authorizationHash"],
             grill_completion_ref=self.grill_completion["attestationHash"],
+            review_model_override=review_override,
         )
         self.assertEqual(evidence.receipt["independence"], "unverified")
+        self.assertNotIn("review_model", port.calls[0])
+        self.assertNotIn("reviewModel", port.calls[0]["payload"])
         with self.assertRaisesRegex(HostError, "post-grill-review-authorization-replayed"):
             fallback_host.dispatch_post_grill_review(
                 self.ledger, self.summary["summaryHash"],

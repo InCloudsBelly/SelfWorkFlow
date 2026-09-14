@@ -233,20 +233,70 @@ class GraftProjectLifecycle:
     """Bind one project and run the one-owner structural update worker."""
 
     def __init__(self, provider: object) -> None:
-        if not callable(getattr(provider, "status", None)) or not callable(
-            getattr(provider, "build_structural", None)
+        if (
+            not callable(getattr(provider, "provider_preflight", None))
+            or not callable(getattr(provider, "status", None))
+            or not callable(getattr(provider, "build_structural", None))
         ):
             raise GraftProjectError("graft-provider-invalid")
         self._provider = provider
+
+    def _provider_preflight(self) -> dict[str, Any]:
+        try:
+            result = self._provider.provider_preflight()
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-provider-unavailable")
+            raise GraftProjectError(reason) from None
+        if (
+            not isinstance(result, Mapping)
+            or result.get("providerStatus") != "verified"
+        ):
+            raise GraftProjectError("graft-provider-unavailable")
+        return dict(result)
+
+    def _status(
+        self, root: Path, provider_report: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            result = self._provider.status(str(root))
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-provider-failed")
+            raise GraftProjectError(reason) from None
+        if not isinstance(result, Mapping):
+            raise GraftProjectError("graft-status-invalid")
+        freshness = result.get("freshness")
+        if freshness not in {"fresh", "stale", "missing"}:
+            raise GraftProjectError("graft-status-invalid")
+        enriched = dict(result)
+        enriched["providerStatus"] = "verified"
+        enriched["graphStatus"] = freshness
+        if isinstance(provider_report.get("version"), str):
+            enriched["providerVersion"] = provider_report["version"]
+        if isinstance(provider_report.get("queryCapabilities"), list):
+            enriched["queryCapabilities"] = list(provider_report["queryCapabilities"])
+        return enriched
 
     def query_status(self, project_root: str) -> dict[str, Any]:
         root = _safe_root(project_root)
         _binding(root)
         try:
-            result = self._provider.status(str(root))
+            provider_report = self._provider_preflight()
         except Exception as error:
             reason = getattr(error, "reason", "graft-provider-failed")
-            return {"providerId": "graft", "status": "unverified", "reason": reason}
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "unavailable",
+                "graphStatus": "unknown", "reason": reason,
+            }
+        try:
+            result = self._status(root, provider_report)
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-provider-failed")
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "verified",
+                "graphStatus": "unknown", "reason": reason,
+            }
         if not isinstance(result, Mapping):
             raise GraftProjectError("graft-status-invalid")
         return dict(result)
@@ -259,6 +309,7 @@ class GraftProjectLifecycle:
         root = _safe_root(project_root)
         _binding(root)
         try:
+            self._provider_preflight()
             result = self._provider.query(
                 str(root), query, query_kind=query_kind,
             )
@@ -273,23 +324,51 @@ class GraftProjectLifecycle:
         root = _safe_root(project_root)
         _binding(root)
         try:
-            status = self.query_status(str(root))
-            if status.get("freshness") != "missing":
-                return {"status": "ready", **status}
-            _ensure_ignore(root)
-            build = self._provider.build_structural(str(root))
-            final = self.query_status(str(root))
-            return {"status": "initialized", "build": dict(build), **final}
-        except GraftProjectError:
-            raise
+            provider_report = self._provider_preflight()
         except Exception as error:
             reason = getattr(error, "reason", "graft-update-failed")
-            return {"providerId": "graft", "status": "unverified", "reason": reason}
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "unavailable",
+                "graphStatus": "unknown", "reason": reason,
+            }
+        try:
+            status = self._status(root, provider_report)
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-update-failed")
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "verified",
+                "graphStatus": "unknown", "reason": reason,
+            }
+        if status["freshness"] != "missing":
+            return {"status": "ready", **status}
+        try:
+            _ensure_ignore(root)
+            build = self._provider.build_structural(str(root))
+            final = self._status(root, provider_report)
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-update-failed")
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "verified",
+                "graphStatus": "unknown", "reason": reason,
+            }
+        return {"status": "initialized", "build": dict(build), **final}
 
     def enqueue(self, project_root: str, changed_paths: Sequence[str]) -> dict[str, Any]:
         root = _safe_root(project_root)
         graph, state = _binding(root)
         paths = _relative_changed_paths(root, changed_paths)
+        try:
+            self._provider_preflight()
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-provider-failed")
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "unavailable", "graphStatus": "unknown",
+                "pending": False, "reason": reason,
+            }
         _ensure_ignore(root)
         with _WorkerLock(state):
             queue_path = state / "queue.json"
@@ -310,6 +389,15 @@ class GraftProjectLifecycle:
     def run_once(self, project_root: str) -> dict[str, Any]:
         root = _safe_root(project_root)
         graph, state = _binding(root)
+        try:
+            self._provider_preflight()
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-provider-failed")
+            return {
+                "providerId": "graft", "status": "unverified",
+                "providerStatus": "unavailable", "graphStatus": "unknown",
+                "pending": True, "retryable": True, "reason": reason,
+            }
         with _WorkerLock(state):
             queue_path = state / "queue.json"
             queue = _read_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
@@ -355,3 +443,11 @@ class GraftProjectLifecycle:
             "build": dict(build) if isinstance(build, Mapping) else build,
             "graphRoot": str(graph),
         }
+
+
+def validate_project_root(project_root: object) -> Path:
+    """Validate the same Git/reparse/cache boundary used by the lifecycle."""
+
+    root = _safe_root(project_root)
+    _binding(root)
+    return root
