@@ -1,78 +1,64 @@
 # SelfWorkFlow 启动入口
 
-这是厂商无关的轻量工作流。所有用户沟通和工程文档使用中文；代码、路径、命令、错误原文、模型名、Skill 名和协议字段按事实保留。表达保持紧凑，但不得删减技术信息、进度、范围、Review、验证、风险或失败证据。
+厂商无关、中文优先的轻量工作流。所有用户沟通和工程文档使用中文；代码、路径、命令、错误、模型名、Skill 名和协议字段按事实保留，Skill 内部可用简洁英文。
 
 ## 启动与按需加载
 
-每个新任务先读取本入口；完成分类后报告：
+每个新任务先读取本入口，再按 `Discover → Capability Check → Classify` 分类并报告：
 
 ```text
 SelfWorkflow active: <profile>；mode: <Light|Full|Deep>
 进度 <已完成主阶段/总主阶段>（约 <粗略区间>%）｜当前：<阶段>｜剩余：<关键阶段>｜预计：<时间区间或重估点>
 ```
 
-按 `Discover → Capability Check → Classify` 顺序工作：先检查本阶段 capability 状态，再按 `复杂度 × 风险 × 副作用` 分类；边界不明向上升级，用户可覆盖。启动入口与 runtime manifest 始终加载；分类后必须只读取选定的一个 `workflow/modes/<mode>.md`，再按任务命中读取 `workflow/modules/*.md`。只读任务也要先读选定模式文件，但不加载无关能力模块。缺失、不可读或哈希漂移的必需模块标为 `unverified`，暂停受影响阶段；不得静默读取旧文件、假定能力存在或自行降级。`workflow/core.md` 是按阶段读取的实现参考，不是每轮启动必读全文。
+启动入口与 runtime manifest 始终加载；分类后必须只读取选定的一个 `workflow/modes/<mode>.md`，再按任务命中 `workflow/modules/*.md`。只读任务也要先读选定模式文件，但不加载无关能力。缺失、不可读或哈希漂移的必需模块标为 `unverified`，不得静默降级。普通任务不创建 PlanGraph 或 RunLedger；`workflow/core.md` 按阶段读取，不是每轮启动必读全文。
 
-## 不可覆盖的硬规则
+## 硬规则
 
-- 禁止虚构 capability、Review、test 或 evidence；完成前必须有新鲜验证证据，没有新鲜证据不得宣称完成。
-- 禁止静默降级；能力缺失、失败或 `unverified` 必须说明原因、风险和可行的人工替代。不可替代的门禁不得绕过。
-- 保护凭据和敏感数据、保护用户已有修改、不可逆操作和外部副作用；授权不足先停。
-- `Scope/Plan` 是实施边界。设计阶段可发散，Plan 确认后实施必须收敛；计划外发现只记录为相邻改进，不自动实现。若阻塞验收，停止受影响编辑，修订 Plan 和侵入预算并重新确认。
-- 任务外异常隔离：当前目标根因或完成验收必需的故障可按本任务诊断；发现无关的工作流、安装或环境异常，立即停止并报告，不在原任务中调查、修复、重构或启动旁路 SubAgent；必须用户明确授权后另行处理。
-- 只读任务固定 `writeTask=false`：禁止编辑、禁止副作用；`implement`、`debug`、`document`、`install`、`publish` 和 `knowledge-write` 才可为 `true`，路由前校验不匹配即拒绝。
-- 代码、测试、配置或文档不得超出批准文件、owner、影响范围和侵入性预算；高侵入改动必须有更窄方案比较和用户确认。
-- 范围/验收变化、公共 API/ABI/Schema、持久化、敏感数据、外部或不可逆副作用、受保护默认值、用户改动和重大不确定性都是关键决策，必须用户明确确认。
+- 禁止虚构 capability、Review、test 或 evidence；完成前必须有新鲜验证证据。
+- 禁止静默降级；失败或 `unverified` 必须说明原因、风险和人工验证方法。
+- 保护凭据和敏感数据，保护用户已有修改、不可逆操作和外部副作用。
+- `Scope/Plan` 是实施边界：设计可发散，确认后必须收敛；计划外发现只记录，不自动实现。
+- 任务外异常隔离：当前目标根因或完成验收必需的故障可诊断；发现无关异常立即停止并报告，不在原任务中修复或启动旁路 SubAgent，必须用户明确授权后另行处理。
+- 只读任务固定 `writeTask=false`，禁止编辑和副作用；写入类任务先校验权限与边界。只读路径禁止副作用。
+- 代码、测试、配置和文档不得超出批准文件、owner、影响范围和侵入性预算。范围、验收、公共接口/Schema、持久化、安全、外部副作用、关键决策或重大不确定性变化，必须用户明确确认。
 
-## 固定主流程
+## 固定流程与模块路由
 
 ```text
 Discover → Capability Check → Classify → Design → Plan
 → Implement/Debug → Review → Verify → optional Knowledge → Complete
 ```
 
-执行与验证状态分开记录。只加载当前阶段所需模块；模块只提供适配规则，不能替换硬规则、授权、Review 独立性、TDD、TEA 或完成证据。
-
-闭合命中映射：代码/C++/UE/跨层行为 → `workflow/modules/code.md`；Review/计划门禁 → `workflow/modules/review.md`；知识读写 → `workflow/modules/knowledge.md`；设计、测试、实施、Review 留痕 → `workflow/modules/artifacts.md`。未命中不加载；显式模块也必须符合当前阶段。
+模块只提供适配规则，不能替换硬规则、授权、Review 独立性、TDD、TEA 或完成证据。
 
 | 任务 | Light | Full | Deep |
 | --- | --- | --- | --- |
-| 只读分析/问答 | 命中能力模块；不自动 Grill/TEA | 同左 | 同左 |
-| 修改的 Design/Plan | 紧凑设计；不自动 Grill | Matt `grilling` 一次 | Matt `grilling` 一次，采用更完整 frontier；不再另启 `design-grilling` |
-| 行为变更 Implement/Debug | TDD；命中 `code` | TDD + TEA T2 + Full 设计路由 | TDD + TEA T3 + Deep 设计路由 |
-| 实施前文档 Review | 窄 Review | 独立 `plan-integrated-review` | 独立 `plan-integrated-review` |
-| 落地后代码 Review | 窄完整 diff Review | Standards/Spec 两个独立 SubAgent + `tea-test-review` | 同 Full |
+| 只读分析/问答 | 命中模块 | 同左 | 同左 |
+| Design/Plan | 紧凑设计 | Matt `grilling` 一次 | `grilling` 一次，完整 frontier |
+| 行为变更 | TDD | TDD + TEA T2 | TDD + TEA T3 |
+| 实施前文档 | 窄 Review | 独立 `plan-integrated-review` | 同 Full |
+| 落地后代码 | 窄完整 diff Review | 两个独立 Review SubAgent + `tea-test-review` | 同 Full |
 
-Full/Deep 的 Grill 只执行一次；用户可在任意强度显式选择。`tea-atdd`、`tea-trace`、`tea-nfr` 只在适用且用户显式选择时加载。至少两份正式文档（设计、测试设计或实施计划）时，实施前自动升级为 Full 并做完整文档包 Review。
+Full/Deep/正式文档：独立 Review；Light：窄 Review。Full/Deep 及正式文档门禁使用独立 SubAgent，Light 可做窄结构化自审。`tea-atdd`、`tea-trace`、`tea-nfr` 仅适用且显式选择时加载。正式文档包至少包含两份时自动按 Full 做文档包 Review。
 
-## 修改门禁
+代码/C++/UE/跨层行为加载 `workflow/modules/code.md`，并按需继续读取 `graft-read.md`、`graft-deep.md`、`graft-update.md`；Review/计划、留痕和知识分别加载对应模块。知识是可选扩展，不阻塞普通代码任务。Graft Deep 只由主 Agent 执行。
 
-涉及行为代码前形成代码实施契约：目标、owner、允许文件、替代方案、影响半径、侵入预算、安全、性能、可维护性、兼容性、回滚、测试接缝和 `unverified` 项。固定顺序为：
+## 实施与完成门禁
+
+行为代码第一次编辑前必须形成并确认代码实施契约：目标、责任层、允许文件、替代方案、影响半径、侵入预算、安全、性能、可维护性、兼容性、回滚、测试接缝和 `unverified` 项。
 
 ```text
-设计/规格 +（Full/Deep：TEA/测试设计）+ 实施计划
-→（Full/Deep/正式文档：独立 Review；Light：窄 Review）
-→ 用户明确实施确认 → TDD Red/Green → 实施
+设计/测试设计/实施计划 → Review → 用户明确确认 → TDD Red/Green → 实施
+→ Review → Verify → optional Knowledge → Complete
 ```
 
-固定门禁摘要：Review → 用户确认 → TDD。
+任何越界、关键测试接缝或侵入成本变化都会使确认失效，回到 Design/Plan；不得用下游补偿掩盖上游错误。每项验收条件必须有真实验证证据，无法完成最低验证标为 `unverified`。
 
-Full/Deep 必须记录真实 RED（证明预期行为尚未满足）和 GREEN（同一路径通过），再跑最窄相关回归。测试覆盖不能反向驱动生产架构；优先测试边界、已有扩展点或黑盒验证。任何公共 API/ABI/Schema、持久化格式、全局宏/Build variant、共享热路径、关键测试接缝、非必要调用者或独立子系统扩展都会使原确认失效，必须停下重新设计、Review、确认。
+Review SubAgent 只读取主 Agent 绑定的 package/evidence，不能调用 Graft、provider、验证、写入、知识更新或创建下级 Agent；`reviewModel`/one-time override 仅对该 Reviewer 生效。主 Agent 不切换模型。
 
-## Review、验证与完成
+## 进度与知识
 
-Review 包绑定批准请求、Plan、阶段/尝试、完整文档、最终文档包 hash、适用规则、项目 Review Skill 清单和完整 task delta（含已提交、暂存、未暂存、未跟踪、删除、二进制和文件模式）。Full/Deep 代码 Review 使用两个独立临时 SubAgent，项目 `.selfworkflow/review.yaml` 中匹配且 hash 校验通过的 Skill 优先，通用 Review Skill 只补充；主对话不切换模型。主 Agent 必须在 Review SubAgent 创建前完成所需 Graft 查询/Deep 并绑定 evidence；Reviewer 只读取该 hash-bound package 和 evidence、输出 Review 报告，禁止调用 Graft、provider、验证、写入、知识更新或创建下级 Agent。模型从机器本地 Agent 配置选择；`reviewModel`/one-time override 仅对该 Review SubAgent 生效，不得改写或传播到其他 SubAgent。SubAgent 生命周期必须是 `created → executed → cleaned`；缺能力、身份不独立、清理失败或 hash 漂移均为 `unverified`。Critical/Important 必须清零，Minor 必须有处置。
+工具、修改或副作用任务必须首条报告 profile、mode、进度、当前、剩余和预计；只在阶段变化、阻塞、完成或重估时更新，无法可靠估算要明说。
 
-每项验收条件都要有真实证据：直接路径、失败路径、状态不变量和最窄回归；配置还要查解析与实际消费者；文档还要查格式、链接、引用和最终 diff。验证收据绑定命令、工作目录、输入摘要、时间、退出码、失败数和消费者结果；包或工作区漂移使旧 Review/验证失效。无法完成的检查列为 `unverified`，写明风险和人工验证法。
-
-代码阅读优先使用已配置且新鲜的官方 Graft MCP；SelfWorkflow 只做项目根目录、工具能力和 freshness 门禁，不复制 Graft 的图或查询逻辑。优先按任务调用 `graft_find_code`、`graft_file_api`、`graft_trace_calls`、`graft_find_all`、`graft_repo_map` 和 `graft_check_freshness`；Graft 的官方 MCP 默认管理项目内 `graft/` 缓存。MCP 缺失、过期或边界无效时，普通任务明确标记并回退 `rg`；需要新鲜图证据的任务失败关闭。代码任务按路由加载 Ponytail；非代码任务不自动加载。Ponytail 只约束代码任务的设计、实现和审查，不改变表达风格。SelfWorkflow Host CLI 仅用于安装、预检、维护和失败恢复，不替代官方 MCP。显式需要 Graft Deep 时，仅主 Agent 可传入本次对话的 model/reasoning effort，经一次性 loopback Codex bridge 调用官方 `graft build --deep`；Reviewer 不得执行 Graft；缺少绑定、桥接失败或 freshness 未通过均为 `unverified`。高侵入信号包括影响半径、公共枚举、全局编译宏和共享热路径；若测试覆盖不能反向驱动生产架构，选择更窄边界。代码实施契约要求在第一次编辑测试或生产代码前完成，并经用户明确确认；确认失效时回到设计。Full/Deep 及正式文档门禁使用独立 SubAgent；Light 可做窄结构化自审，但不得冒充独立 Review。
-
-## 可选知识与留痕
-
-知识是可选的厂商无关扩展：`knowledge.read → knowledge.propose → knowledge.update`。任务完成 Review/验证后，若产生稳定、可复用知识，只提示一次是否沉淀；用户明确要求维护知识库时直接进入知识流程。知识后端由显式 adapter 提供，缺能力不阻塞普通代码任务，也不得猜测数据库、模型或 API。工作文档和临时记录放项目 `./selfworkflow/`，不自动 Git add；凭据、token、运行时状态和私人推理不进入 Git/Wiki。
-
-## 当前批次边界
-
-角色边界补充：仅主 Agent 可执行 Graft 查询、Deep、event、worker 或 provider 维护，并应在创建 Review SubAgent 前完成所需 Graft evidence。Review SubAgent 只读取主 Agent 绑定的 package/evidence 并输出 Review 报告；不得调用 Graft、provider、验证、写入、知识更新或创建下级 Agent。缺少 evidence 时返回 `unverified`，不得自行补做。
-
-当前工作流将锁定的 Graft submodule 作为官方 MCP 的运行来源：安装器注册受管的 `graft mcp <当前工作目录>`，因此图和文档留在项目自己的 `graft/`。新代码任务先检查 MCP 工具和 freshness；Agent 写入完成后由 SelfWorkflow 触发官方 Graft 的结构更新，MCP 查询也可按官方机制自动刷新。SelfWorkflow 不实现第二套 Graft 图、查询、Watcher 或 daemon；CLI 只负责安装、预检、显式维护和失败恢复，显式 Deep 另经一次性 Codex bridge 使用当前 Agent 的 model/reasoning effort。Graft 缺失、过期或边界无效时按模式标记 `unverified`，普通任务回退到 `rg`；需要新鲜图证据的任务失败关闭。任何超出当前 Plan 的改动先停止并报告。
+知识接口为 `knowledge.read → knowledge.propose → knowledge.update`：只有用户明确维护或任务完成后形成稳定复用知识时启用；update 需用户确认、来源校验和可恢复发布。后端由显式 adapter 提供，不猜测数据库、模型、OAuth 或路径。临时文档放项目 `./selfworkflow/`，不自动 Git add；凭据、token、私人推理和运行时状态不进入 Git/Wiki。

@@ -90,6 +90,7 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         arguments = [
             "provider", "graft-deep", "--project-root", "C:/work/project",
             "--model", "gpt-5.6-luna", "--reasoning-effort", "xhigh",
+            "--topic-id", "kgpr-coverage", "--scope-file", "Source/main.cpp",
         ]
         with mock.patch(
             "selfworkflow.cli._provider_manager", return_value=manager
@@ -105,11 +106,16 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         arguments = [
             "provider", "graft-deep", "--project-root", "C:/work/project",
             "--model", "gpt-5.6-luna", "--reasoning-effort", "xhigh",
+            "--topic-id", "kgpr-coverage", "--scope-file", "Source/main.cpp",
         ]
         with mock.patch(
             "selfworkflow.cli._provider_manager", return_value=manager
         ), mock.patch("sys.stdout", StringIO()):
             self.assertEqual(main(arguments), 0)
+        manager.graft_deep.assert_called_once_with(
+            "C:/work/project", "gpt-5.6-luna", "xhigh",
+            topic_id="kgpr-coverage", scope_files=["Source/main.cpp"],
+        )
 
     def test_configure_uses_explicit_path_helper_only(self):
         manager = _Manager()

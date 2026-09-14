@@ -777,9 +777,15 @@ class ProviderManager:
         return GraftProjectLifecycle(self._adapter("graft")).run_once(project_root)
 
     def graft_deep(
-        self, project_root: str, model: str, reasoning_effort: str,
+        self,
+        project_root: str,
+        model: str,
+        reasoning_effort: str,
+        *,
+        topic_id: str,
+        scope_files: Sequence[str],
     ) -> dict[str, Any]:
-        """Run one official Graft Deep build through the current Codex model."""
+        """Run one scoped official Graft Deep build through the current model."""
 
         if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
             raise ProviderManagerError("provider-not-configured")
@@ -795,6 +801,8 @@ class ProviderManager:
                 project_root=project_root,
                 model=model,
                 reasoning_effort=reasoning_effort,
+                topic_id=topic_id,
+                scope_files=scope_files,
             )
         except ProviderManagerError:
             raise

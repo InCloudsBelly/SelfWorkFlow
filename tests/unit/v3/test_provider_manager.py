@@ -239,11 +239,15 @@ class ProviderManagerTests(unittest.TestCase):
         ) as run:
             result = manager.graft_deep(
                 str(project), "gpt-5.6-luna", "xhigh",
+                topic_id="kgpr-coverage",
+                scope_files=("Source/main.cpp",),
             )
 
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(run.call_args.kwargs["model"], "gpt-5.6-luna")
         self.assertEqual(run.call_args.kwargs["reasoning_effort"], "xhigh")
+        self.assertEqual(run.call_args.kwargs["topic_id"], "kgpr-coverage")
+        self.assertEqual(run.call_args.kwargs["scope_files"], ("Source/main.cpp",))
         self.assertEqual(run.call_args.kwargs["graft_command"][0], "node")
 
     def test_graft_status_enforces_project_binding_before_provider_dispatch(self):

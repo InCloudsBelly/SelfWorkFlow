@@ -26,6 +26,9 @@ class WorkflowCompressionTests(unittest.TestCase):
     )
     MODULES = (
         "workflow/modules/code.md",
+        "workflow/modules/graft-read.md",
+        "workflow/modules/graft-deep.md",
+        "workflow/modules/graft-update.md",
         "workflow/modules/review.md",
         "workflow/modules/knowledge.md",
         "workflow/modules/artifacts.md",
@@ -108,7 +111,7 @@ class WorkflowCompressionTests(unittest.TestCase):
         bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         light = (ROOT / "workflow/modes/light.md").read_text(encoding="utf-8")
         for phrase in (
-            "（Full/Deep：TEA/测试设计）",
+            "Full/Deep/正式文档：独立 Review；Light：窄 Review",
             "Full/Deep 及正式文档门禁使用独立 SubAgent",
             "Light 可做窄结构化自审",
         ):
@@ -230,6 +233,9 @@ class WorkflowCompressionTests(unittest.TestCase):
             "WORKFLOW.md",
             "workflow/core.md",
             "workflow/modules/code.md",
+            "workflow/modules/graft-read.md",
+            "workflow/modules/graft-deep.md",
+            "workflow/modules/graft-update.md",
             "skills/cpp-core/SKILL.md",
             "docs/providers/graft.md",
             "README.md",

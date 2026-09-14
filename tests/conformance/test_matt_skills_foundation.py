@@ -163,8 +163,8 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertNotIn("只读取当前阶段需要的 Superpowers Skill", workflow)
 
         active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        self.assertIn("primary code-reading", active_workflow)
-        self.assertIn("保留 `rg` 做精确文本确认", active_workflow)
+        self.assertIn("代码/C++/UE/跨层行为", active_workflow)
+        self.assertIn("graft-read.md", active_workflow)
         cpp_skill = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(
             encoding="utf-8"
         )
@@ -175,7 +175,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
         provider_doc = (self.ROOT / "docs/providers/graft.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("唯一代码图 Provider", provider_doc)
+        self.assertIn("官方 Graft MCP 是代码阅读入口", provider_doc)
         self.assertIn("回退到 `rg`", provider_doc)
         self.assertNotIn("CodeGraph", provider_doc)
 

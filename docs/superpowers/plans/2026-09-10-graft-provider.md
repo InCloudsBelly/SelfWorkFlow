@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 Graft 作为 SelfWorkFlow 的正式代码图 Provider，纳入锁定 Submodule、受控安装、项目内图缓存、no-refresh 查询和 Host-neutral 写入 Worker，并替代默认 CodeGraph 路由；Deep 语义图和厂商专属原生 Hook 另行实施。
+**Goal:** 将 Graft 作为 SelfWorkFlow 的正式代码图 Provider，纳入锁定 Submodule、受控安装、项目内图缓存、no-refresh 查询、专题 Deep 和 Host-neutral 写入 Worker，并替代默认 CodeGraph 路由；不修改官方 Graft 源码。
 
 **Architecture:** Graft 源码固定在 `dependencies/upstream/graft`，由锁文件绑定身份；Installer 校验并构建 Submodule 入口，图缓存仍由 Graft 写入项目目录。正式 Adapter 通过受控 CLI 提供证据，查询固定 no-refresh；显式 Graft 证据任务失败关闭。Host 在 Agent 写入完成后发送 `agent_write`，SelfWorkFlow 合并路径并运行结构 Worker；不启用后台刷新、文件 Watcher 或 Deep。
 
@@ -19,7 +19,7 @@
 - Graft Submodule、Submodule 锁和现有 Submodule profile 扩展点。
 - SelfWorkFlow v3 Provider、Provider binding、support matrix、Catalog 和 Provider 配置 Schema（仅在必要时）。
 - SelfWorkFlow Installer、Provider 管理 CLI 和受控 Host Hook/Worker 扩展点。
-- 已配置知识生命周期中的 `knowledge.propose` 扩展点，用于在用户启动个人 Wiki 沉淀后自动生成一次受限 Deep 增强材料。
+- 已确定知识模块与 Graft 解耦；专题 Deep 结果只能作为可选知识来源。
 - Graft 专属单元测试、Installer 测试、合成项目验收测试和新增文档。
 - CodeGraph 默认路由、安装 UX 和说明的迁移清理；保留用户已有 CodeGraph 配置为 `legacy/orphaned`，不自动删除。
 
@@ -30,7 +30,7 @@
 - 不启用 Graft 自带竞争性 Hook、文件系统 Watcher、全局守护进程或未锁定网络安装。
 - 不扫描所有项目，不把图放入 C 盘或机器级缓存，不扫描任意 Ignore 目录。
 - 不让查询触发刷新，不让自动 Worker 调用 Deep。
-- 不让 Deep Wiki 增强绕过 `knowledge.propose`、人工确认或 `knowledge.update` 的 CAS；不自动发布生成内容。
+- 不让专题 Deep 触发或绕过通用知识生命周期；知识后端自行决定是否引用和发布。
 - 不执行暂存、提交或自动删除用户文件。
 
 ## 2. 文件映射
@@ -56,7 +56,7 @@
 | `src/selfworkflow/cli.py` | 暴露正式 Provider 状态、绑定和维护入口；查询入口必须 no-refresh |
 | `src/selfworkflow/v3/host_hooks.py` 或现有等价扩展点 | 接收 Agent 修改完成事件，不实现文件 Watcher |
 | `src/selfworkflow/v3/graft_update_worker.py` 或现有等价扩展点 | 每项目锁、合并窗口、状态和结构更新执行 |
-| 现有 `knowledge.propose` 扩展点（实现时按当前知识后端解析实际路径） | 用户启动 Wiki 沉淀后触发一次 Deep 增强，并把结果作为提案材料 |
+| 专题 Deep 扩展点 | 由明确 topic 和文件范围触发；同一 topic 持续按源 hash 更新 |
 | `tests/unit/v3/test_graft_adapter.py` | Adapter 命令、退出码、输出上限、脱敏和 no-refresh 单元测试 |
 | `tests/unit/v3/test_provider_manager.py` | Provider 注册、能力状态、绑定和失败降级测试 |
 | `tests/unit/v3/test_graft_binding.py` | 项目内路径、Ignore、Reparse Point 和边界失败测试 |
@@ -173,17 +173,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tes
 - [ ] 由 SelfWorkFlow 生成/维护 MCP 配置，注入受控运行时和 `GRAFT_NO_REFRESH=1`。
 - [ ] 不启用 Graft 自带竞争 Hook；不把凭据写入仓库、命令行、配置快照或收据明文。
 - [ ] 把普通 `build --deep` 保持为显式维护操作，记录模型、Base URL、输入摘要、敏感数据确认和结果状态。
-- [ ] 为个人 Wiki 的 `knowledge.propose` 增加一次性 Deep 增强入口：用户启动知识沉淀后自动执行一次，但只读取提案范围。
+- [ ] 为明确 topic 增加受限 Deep 入口：只传入项目内文件清单，使用官方重复 `--only-dir`，结果写入独立专题上下文。
 - [ ] Deep 结果只写入知识提案材料；`knowledge.update` 仍要求用户确认和后端 compare-and-swap。
 - [ ] GREEN：验证 no-key structural、Deep missing-capability、redaction 和用户拒绝路径。
 
-### Task 9 — Wiki Deep 知识增强
+### Task 9 — 专题 Deep 与知识解耦
 
-- [ ] RED：没有用户启动的 `knowledge.propose` 时不触发 Deep；同一提案版本重复进入时不重复调用。
-- [ ] 实现提案范围、内容哈希、Graft/模型身份和一次性 Deep 结果的绑定。
-- [ ] 默认只处理提案涉及的文件和结构关系；范围参数不可用时报告 `unverified`，不得静默扩大到全仓库。
-- [ ] 将 Deep 输出作为 Wiki 草稿增强材料，保留职责、约束、依赖、关键逻辑和不确定项；不直接发布。
-- [ ] GREEN：验证成功、无 Key、用户拒绝、敏感范围拒绝、远程失败、输出不可信和后端 CAS 失败路径。
+- [ ] RED：无 topic、空范围、越界路径或范围参数不可用时拒绝；同一 topic 的不变文件不重复 Deep。
+- [ ] 实现项目内专题上下文、源文件 hash、模型/版本身份和单一 freshness 状态。
+- [ ] 专题 Deep 与全局 structural Map 分开；失败保留旧状态并标记 `unverified`，不得扩大到全仓库。
+- [ ] GREEN：验证成功、源文件漂移、分支切换、删除/新增文件、官方范围参数和知识模块只读引用路径。
 
 ### Task 10 — 原生验收
 
@@ -214,7 +213,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tes
 | CodeGraph 迁移 | 默认选择 Graft，旧配置遗留 | 旧配置误删、仍被默认路由 | Acceptance tests |
 | Host | Codex 修改后更新，查询不更新 | Hook 不可用、事件缺失 | Native receipt |
 | Deep | 手动批准、受控远程调用、脱敏 | 未批准、无 Key、能力 drift | Manual/acceptance evidence |
-| Wiki Deep | `knowledge.propose` 后一次/提案版本，范围受限且只进入提案 | 无确认、超范围、重复调用、后端 CAS 失败 | Knowledge proposal receipt |
+| 专题 Deep | 明确 topic 后按源 hash 增量，写入项目内独立上下文 | 无 topic、超范围、漂移、参数不可用 | Topic Deep receipt |
 
 建议的当前仓库统一测试入口是：
 
@@ -242,6 +241,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <te
 3. 完整 diff 的 Standards/Spec Review 通过，Critical/Important 为零，Minor 均有 disposition。
 4. Installer、Provider、Worker、Host 和三类合成项目验证均有新鲜收据。
 5. 查询无写入、修改自动更新、项目内图边界、无暂存/提交、CodeGraph 遗留保护均有直接证据。
-6. 代码编辑 Worker 和查询不会触发 Deep；个人 Wiki 只在用户已启动的 `knowledge.propose` 中自动执行一次，且受外部数据确认、范围限制、提案审核和可审计收据约束。
+6. 代码编辑 Worker 和查询不会触发 Deep；专题 Deep 只由明确 topic 请求触发，知识模块仅可选择引用其结果。
 
 当前安装前仍须完成 Task 10 的真实项目验收和 Task 11 的完整 diff Review；未完成项必须保持 `unverified`，不能宣称全部边界已验收。

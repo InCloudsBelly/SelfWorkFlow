@@ -11,7 +11,10 @@ class ReviewRoleBoundaryTests(unittest.TestCase):
         review = (ROOT / "workflow" / "modules" / "review.md").read_text(
             encoding="utf-8"
         )
-        text = f"{workflow}\n{review}".lower()
+        deep = (ROOT / "workflow" / "modules" / "graft-deep.md").read_text(
+            encoding="utf-8"
+        )
+        text = f"{workflow}\n{review}\n{deep}".lower()
 
         self.assertIn("主 agent", text)
         self.assertIn("review subagent", text)

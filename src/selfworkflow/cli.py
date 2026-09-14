@@ -491,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
     graft_deep.add_argument("--project-root", required=True)
     graft_deep.add_argument("--model", required=True)
     graft_deep.add_argument("--reasoning-effort", required=True)
+    graft_deep.add_argument("--topic-id", required=True)
+    graft_deep.add_argument("--scope-file", action="append", required=True)
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -762,6 +764,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = manager.graft_deep(
                     arguments.project_root, arguments.model,
                     arguments.reasoning_effort,
+                    topic_id=arguments.topic_id,
+                    scope_files=arguments.scope_file,
                 )
             elif arguments.provider_command == "inspect":
                 pass

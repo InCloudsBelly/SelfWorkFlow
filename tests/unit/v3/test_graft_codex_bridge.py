@@ -208,8 +208,9 @@ class CodexGraftBridgeTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".git").mkdir()
-            (root / "graft").mkdir()
-            (root / "graft" / "manifest.json").write_text("{}", encoding="utf-8")
+            source = root / "Source" / "main.cpp"
+            source.parent.mkdir()
+            source.write_text("int main() {}", encoding="utf-8")
             calls = []
 
             def process_runner(argv, *, cwd, env, input_text, timeout):
@@ -229,6 +230,9 @@ class CodexGraftBridgeTests(unittest.TestCase):
                     )
                     with urlopen(request, timeout=2) as response:
                         self.assertEqual(json.load(response)["choices"][0]["finish_reason"], "tool_calls")
+                    context = Path(argv[argv.index("--dir") + 1])
+                    (context / "manifest.json").parent.mkdir(parents=True, exist_ok=True)
+                    (context / "manifest.json").write_text("{}", encoding="utf-8")
                     return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
                 return type("Result", (), {
                     "returncode": 0,
@@ -244,6 +248,8 @@ class CodexGraftBridgeTests(unittest.TestCase):
                 project_root=root,
                 model="gpt-5.6-luna",
                 reasoning_effort="xhigh",
+                topic_id="kgpr-coverage",
+                scope_files=("Source/main.cpp",),
                 process_runner=process_runner,
                 codex_runner=lambda *args: {
                     "content": "",
@@ -256,6 +262,14 @@ class CodexGraftBridgeTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         self.assertIn("--deep", calls[0]["argv"])
         self.assertEqual(Path(calls[0]["cwd"]).resolve(), root.resolve())
+        self.assertIn("--dir", calls[0]["argv"])
+        self.assertNotEqual(Path(calls[0]["argv"][calls[0]["argv"].index("--dir") + 1]).resolve(), (root / "graft").resolve())
+        self.assertEqual(
+            calls[0]["argv"][calls[0]["argv"].index("--only-dir") + 1],
+            "Source/main.cpp",
+        )
+        self.assertEqual(result["topicId"], "kgpr-coverage")
+        self.assertEqual(result["scopeFiles"], ["Source/main.cpp"])
         self.assertNotIn("OPENAI_API_KEY", calls[0]["env"])
 
     def test_deep_run_never_reports_success_for_stale_check(self):
@@ -264,8 +278,9 @@ class CodexGraftBridgeTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".git").mkdir()
-            (root / "graft").mkdir()
-            (root / "graft" / "manifest.json").write_text("{}", encoding="utf-8")
+            source = root / "Source" / "main.cpp"
+            source.parent.mkdir()
+            source.write_text("int main() {}", encoding="utf-8")
 
             def process_runner(argv, **_kwargs):
                 if "build" in argv:
@@ -284,6 +299,8 @@ class CodexGraftBridgeTests(unittest.TestCase):
                 project_root=root,
                 model="gpt-5.6-luna",
                 reasoning_effort="xhigh",
+                topic_id="kgpr-coverage",
+                scope_files=("Source/main.cpp",),
                 process_runner=process_runner,
                 codex_runner=lambda *args: {"content": "ok", "tool_calls": []},
             )
@@ -293,6 +310,74 @@ class CodexGraftBridgeTests(unittest.TestCase):
             "reason": "graft-deep-not-fresh",
             "retryable": True,
         })
+
+    def test_deep_run_rejects_unbounded_or_unsafe_topic_scope(self):
+        from selfworkflow.v3.graft_codex_bridge import BridgeError, run_codex_graft_deep
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            source = root / "Source" / "main.cpp"
+            source.parent.mkdir()
+            source.write_text("int main() {}", encoding="utf-8")
+            cases = (
+                {"topic_id": "", "scope_files": ("Source/main.cpp",)},
+                {"topic_id": "../all", "scope_files": ("Source/main.cpp",)},
+                {"topic_id": "topic", "scope_files": ()},
+                {"topic_id": "topic", "scope_files": ("../outside.cpp",)},
+                {"topic_id": "topic", "scope_files": ("missing.cpp",)},
+            )
+            for case in cases:
+                with self.subTest(case=case), self.assertRaises(BridgeError):
+                    run_codex_graft_deep(
+                        graft_command=("node", "C:/graft/dist/cli.js"),
+                        project_root=root,
+                        model="gpt-5.6-luna",
+                        reasoning_effort="xhigh",
+                        process_runner=lambda *args, **kwargs: None,
+                        codex_runner=lambda *args: {},
+                        **case,
+                    )
+
+    def test_deep_run_does_not_publish_topic_manifest_when_scope_drifts(self):
+        from selfworkflow.v3.graft_codex_bridge import run_codex_graft_deep
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            source = root / "Source" / "main.cpp"
+            source.parent.mkdir()
+            source.write_text("int main() {}", encoding="utf-8")
+
+            def process_runner(argv, **_kwargs):
+                if "build" in argv:
+                    source.write_text("int main() { return 1; }", encoding="utf-8")
+                    context = Path(argv[argv.index("--dir") + 1])
+                    context.mkdir(parents=True, exist_ok=True)
+                    (context / "manifest.json").write_text("{}", encoding="utf-8")
+                    return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+                return type("Result", (), {
+                    "returncode": 0,
+                    "stdout": json.dumps({
+                        "context": {"ok": True}, "graph": {"ok": True},
+                    }),
+                    "stderr": "",
+                })()
+
+            result = run_codex_graft_deep(
+                graft_command=("node", "C:/graft/dist/cli.js"),
+                project_root=root,
+                model="gpt-5.6-luna",
+                reasoning_effort="xhigh",
+                topic_id="kgpr-coverage",
+                scope_files=("Source/main.cpp",),
+                process_runner=process_runner,
+                codex_runner=lambda *args: {"content": "ok", "tool_calls": []},
+            )
+            topic_manifest = root / ".selfworkflow/graft-deep/kgpr-coverage/selfworkflow-topic.json"
+            self.assertFalse(topic_manifest.exists())
+
+        self.assertEqual(result["reason"], "graft-deep-source-changed")
 
 
 if __name__ == "__main__":

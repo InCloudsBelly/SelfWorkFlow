@@ -8,7 +8,6 @@ reasoning effort supplied by the current Host invocation.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-import hashlib
 import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import subprocess
 import tempfile
 import threading
@@ -25,6 +25,12 @@ from urllib.parse import urlsplit
 import uuid
 
 from selfworkflow.v3.graft_lifecycle import validate_project_root
+from selfworkflow.v3.hashing import (
+    canonical_relative_path,
+    content_hash,
+    hash_file_content,
+    project_root_hash,
+)
 
 
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
@@ -37,6 +43,10 @@ _MAX_TOOL_CALLS = 16
 _MAX_MODEL_LENGTH = 256
 _MAX_REASONING_LENGTH = 32
 _MAX_DEEP_TIMEOUT_SECONDS = 24 * 60 * 60
+_MAX_TOPIC_ID_LENGTH = 64
+_MAX_SCOPE_FILES = 2048
+_MAX_SCOPE_FILE_BYTES = 256 * 1024 * 1024
+_TOPIC_MANIFEST = "selfworkflow-topic.json"
 _REASONING_EFFORTS = frozenset({
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
 })
@@ -496,6 +506,163 @@ def _safe_command(command: Sequence[str]) -> tuple[str, ...]:
     return tuple(command)
 
 
+def _topic_id(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) > _MAX_TOPIC_ID_LENGTH
+        or value != value.strip()
+        or value in {".", ".."}
+        or not value
+        or not all(
+            character.isascii()
+            and (character.isalnum() or character in {".", "_", "-"})
+            for character in value
+        )
+        or not value[0].isalnum()
+    ):
+        raise BridgeError("graft-topic-id-invalid")
+    return value
+
+
+def _is_reparse(path: Path) -> bool:
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    return path.is_symlink() or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
+def _ensure_directory(path: Path, reason: str) -> None:
+    if path.exists():
+        if _is_reparse(path) or not path.is_dir():
+            raise BridgeError(reason)
+        return
+    try:
+        path.mkdir()
+    except OSError:
+        raise BridgeError(reason) from None
+    if _is_reparse(path) or not path.is_dir():
+        raise BridgeError(reason)
+
+
+def _topic_context(root: Path, topic_id: str) -> tuple[Path, Path]:
+    state_root = root / ".selfworkflow"
+    deep_root = state_root / "graft-deep"
+    topic_root = deep_root / topic_id
+    for directory in (state_root, deep_root, topic_root):
+        _ensure_directory(directory, "graft-topic-context-invalid")
+    context = topic_root / "graft"
+    _ensure_directory(context, "graft-topic-context-invalid")
+    try:
+        context.resolve(strict=True).relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        raise BridgeError("graft-topic-context-invalid") from None
+    return topic_root, context
+
+
+def _scope_files(root: Path, values: Sequence[str]) -> tuple[list[str], list[dict[str, Any]]]:
+    if (
+        not isinstance(values, (list, tuple))
+        or not values
+        or len(values) > _MAX_SCOPE_FILES
+    ):
+        raise BridgeError("graft-scope-invalid")
+    relative_paths: list[str] = []
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        try:
+            relative = canonical_relative_path(value)
+        except Exception:
+            raise BridgeError("graft-scope-invalid") from None
+        if (
+            relative == "graft"
+            or relative.startswith("graft/")
+            or relative == ".selfworkflow"
+            or relative.startswith(".selfworkflow/")
+            or relative in seen
+        ):
+            raise BridgeError("graft-scope-invalid")
+        seen.add(relative)
+        candidate = root.joinpath(*relative.split("/"))
+        current = root
+        try:
+            for part in relative.split("/"):
+                current /= part
+                if _is_reparse(current):
+                    raise BridgeError("graft-scope-boundary-invalid")
+            info = candidate.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                raise BridgeError("graft-scope-file-invalid")
+            resolved = candidate.resolve(strict=True)
+            if resolved != candidate:
+                raise BridgeError("graft-scope-boundary-invalid")
+            resolved.relative_to(root)
+            size, digest = hash_file_content(
+                candidate, max_bytes=_MAX_SCOPE_FILE_BYTES,
+            )
+        except BridgeError:
+            raise
+        except (OSError, RuntimeError, ValueError):
+            raise BridgeError("graft-scope-file-invalid") from None
+        relative_paths.append(relative)
+        entries.append({"path": relative, "size": size, "sha256": digest})
+    return relative_paths, entries
+
+
+def _write_topic_manifest(
+    path: Path,
+    *,
+    topic_id: str,
+    project_hash: str,
+    scope_entries: list[dict[str, Any]],
+    model: str,
+    reasoning_effort: str,
+    command: tuple[str, ...],
+) -> str:
+    scope_hash = content_hash(scope_entries)
+    value = {
+        "kind": "selfworkflow-graft-topic",
+        "version": 1,
+        "topicId": topic_id,
+        "projectRootHash": project_hash,
+        "scopeFiles": scope_entries,
+        "scopeHash": scope_hash,
+        "model": model,
+        "reasoningEffort": reasoning_effort,
+        "graftCommandHash": content_hash(list(command)),
+        "freshness": "fresh",
+    }
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8") + b"\n"
+    temporary: Path | None = None
+    try:
+        if path.exists() and (_is_reparse(path) or not path.is_file()):
+            raise BridgeError("graft-topic-manifest-invalid")
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix=f".{path.name}.", suffix=".tmp",
+            dir=path.parent, delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    except BridgeError:
+        raise
+    except (OSError, TypeError, ValueError):
+        raise BridgeError("graft-topic-manifest-write-failed") from None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return scope_hash
+
+
 def _deep_env(bridge: CodexGraftBridge) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items()
@@ -516,14 +683,20 @@ def run_codex_graft_deep(
     project_root: Path,
     model: str,
     reasoning_effort: str,
+    topic_id: str,
+    scope_files: Sequence[str],
     process_runner: ProcessRunner | None = None,
     codex_runner: CodexRunner | None = None,
     timeout_seconds: int = 60 * 60,
 ) -> dict[str, Any]:
-    """Run one official ``graft build --deep`` with a per-call Codex bridge."""
+    """Run one scoped official ``graft build --deep`` with a Codex bridge."""
 
     command = _safe_command(graft_command)
     root = validate_project_root(project_root)
+    topic = _topic_id(topic_id)
+    normalized_scope, initial_scope = _scope_files(root, scope_files)
+    topic_root, context = _topic_context(root, topic)
+    root_hash = project_root_hash(root)
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= _MAX_DEEP_TIMEOUT_SECONDS:
         raise BridgeError("graft-deep-timeout-invalid")
     process = process_runner or _run_process
@@ -534,15 +707,21 @@ def run_codex_graft_deep(
     bridge.start()
     try:
         environment = _deep_env(bridge)
+        build_argv = [
+            *command, "--dir", str(context), "build", str(root), "--deep",
+            "--no-gitignore", "--no-ignore",
+        ]
+        for relative in normalized_scope:
+            build_argv.extend(("--only-dir", relative))
         build_result = process(
-            [*command, "build", str(root), "--deep", "--no-gitignore", "--no-ignore"],
+            build_argv,
             cwd=str(root), env=environment, input_text="", timeout=timeout_seconds,
         )
         if _process_result_code(build_result) != 0:
             return {"status": "failed", "reason": "graft-deep-failed", "retryable": True}
 
         check_result = process(
-            [*command, "check", str(root), "--json"],
+            [*command, "--dir", str(context), "check", str(root), "--json"],
             cwd=str(root), env=environment, input_text="", timeout=timeout_seconds,
         )
         if _process_result_code(check_result) != 0:
@@ -560,18 +739,36 @@ def run_codex_graft_deep(
             or check["graph"].get("ok") is not True
         ):
             return {"status": "failed", "reason": "graft-deep-not-fresh", "retryable": True}
-        manifest = root / "graft" / "manifest.json"
-        if not manifest.is_file() or manifest.is_symlink():
+        manifest = context / "manifest.json"
+        if not manifest.is_file() or _is_reparse(manifest):
             return {"status": "failed", "reason": "graft-deep-manifest-missing", "retryable": True}
+        _, final_scope = _scope_files(root, scope_files)
+        if final_scope != initial_scope:
+            return {
+                "status": "failed",
+                "reason": "graft-deep-source-changed",
+                "retryable": True,
+            }
+        scope_hash = _write_topic_manifest(
+            topic_root / _TOPIC_MANIFEST,
+            topic_id=topic,
+            project_hash=root_hash,
+            scope_entries=final_scope,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            command=command,
+        )
         return {
             "status": "succeeded",
             "provider": "codex-bridge",
             "model": model,
             "reasoningEffort": reasoning_effort,
+            "topicId": topic,
+            "scopeFiles": normalized_scope,
+            "scopeHash": scope_hash,
+            "contextDir": str(context),
             "freshness": "fresh",
-            "projectRootHash": "sha256:" + hashlib.sha256(
-                str(root).casefold().encode("utf-8")
-            ).hexdigest(),
+            "projectRootHash": root_hash,
         }
     except BridgeError:
         raise

@@ -1,7 +1,7 @@
 # SelfWorkFlow Graft Provider 设计
 
 **日期：** 2026-09-10
-**状态：** 设计已获用户确认；Submodule、来源锁、Adapter、工作流路由、项目预检、事件合并和结构 Worker 已实现。Deep 语义以及各厂商原生 Host Hook 仍是独立的未验证边界。
+**状态：** 设计已获用户确认；Submodule、来源锁、Adapter、工作流路由、项目预检、事件合并和结构 Worker 已实现。专题 Deep 正在按本次修订接入；各厂商原生 Host Hook 仍是独立边界。
 **范围：** 个人工作流中的代码结构索引、关系查询和 Agent 修改后的自动结构更新
 
 ## 1. 背景与目标
@@ -16,7 +16,7 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 - 把图和指纹放在当前项目目录内的稳定忽略目录中，不写入 C 盘缓存，不改变索引状态，不执行暂存操作。
 - 保留结构查询失败时的可用降级路径；显式要求 Graft 证据的任务则严格失败关闭。
 - 保留 Graft 的 MCP 体验，但把 MCP 定义为交互便利层；正式工作流证据通过受控 CLI 入口取得。
-- 当用户明确进入个人 Wiki 知识沉淀流程时，自动调用一次受限 Deep，为 Wiki 草稿补充代码职责、设计约束和跨模块语义；结果不自动发布。
+- 支持一个对话一个专题的持续 Deep 上下文：全局 structural Map 与专题 Deep 分开，专题只对明确文件范围执行。
 
 本实现批次已修改 Submodule、来源锁、Adapter、安装器构建门禁、工作流代码模块、项目生命周期 Worker 和相关测试；不修改公共生命周期/证据 Schema、业务 API/ABI、Wiki 数据或用户现有 CodeGraph 配置。Worker 仅接收统一 `agent_write` 事件并执行结构 build；Deep 和各厂商原生 Host Hook 不在本批次实现。
 
@@ -31,13 +31,13 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 5. CodeGraph 的默认路由移除、旧配置保留为遗留状态以及迁移文档。
 6. Codex 及其他已配置 Agent Host 的统一 Hook 接口；初始原生验证以 Codex 为主。
 7. C++、TypeScript、Python 合成项目的原生验收；不宣称直接覆盖 Unreal 工程语义。
-8. `knowledge.propose` 流程中的一次性 Deep Wiki 增强，以及与最终 `knowledge.update` 的确认边界。
+8. 专题 Deep 的范围、增量复用、状态和与通用知识模块的解耦边界。
 
 ### 非目标
 
 - 本轮不实现 Graft 自带 Hook、文件系统 Watcher、全局 daemon、Deep 语义或厂商专属原生 Hook。
 - 不自动扫描所有项目，不在安装时为未知项目建立图。
-- 不把 Graft Deep 语义分析放入代码编辑后的自动更新热路径；个人 Wiki 知识沉淀是唯一的自动触发场景。
+- 不把 Graft Deep 语义分析放入代码编辑后的自动更新热路径；只有明确的专题 Deep 请求触发。
 - 不启用 Graft 自带的竞争性 Hook；SelfWorkFlow 只维护一个修改事件入口。
 - 不把查询操作伪装成新鲜图证据，也不允许查询隐式构建。
 - 不把 Deep 生成的 Wiki 草稿直接当作已确认知识或自动发布到知识后端。
@@ -57,7 +57,7 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 | 自动更新 | Agent 修改代码完成后触发合并后的结构更新 Worker | 每项目一个锁；可合并重复事件；仅结构更新，不自动 Deep |
 | 查询 | 查询使用当前图且不刷新 | 使用 Graft 的 `--no-refresh` 或 `GRAFT_NO_REFRESH=1`；查询不得写图、侧车或指纹 |
 | Deep | 手动、显式批准 | 需要单独的远程模型能力、敏感数据确认和新鲜度说明；不由普通编辑自动触发 |
-| 个人 Wiki 沉淀 | 用户明确进入 `knowledge.propose` 后自动执行一次受限 Deep | 只增强当前知识提案；按提案版本/内容哈希去重；结果需人工确认后才能 `knowledge.update` |
+| 专题 Deep | 明确 topic 与文件范围后持续维护一个专题上下文 | 以源文件 hash 增量更新；不按 Git hash 建目录；结果可被知识模块引用但不触发知识发布 |
 | 失败 | 普通任务不阻塞，显式图证据任务失败关闭 | 标记 stale/unverified，普通代码阅读降级到 `rg`；不得伪造 Graft 结果 |
 | Host | SelfWorkFlow 提供统一受控 Host Hook | 不启用 Graft 自带竞争性 Hook；先验证 Codex，再覆盖其他配置的 Agent Host |
 | 首次建图 | 当前项目首次代码任务或首次 Agent 修改时惰性初始化 | 安装阶段不扫描项目；首次更新失败仍保留降级语义 |
@@ -118,7 +118,7 @@ Provider ID 为 `graft`。正式能力至少包括：
 
 正式 Adapter 负责固定命令模板、仓库根目录、受控环境、超时、输出上限、敏感信息脱敏、退出码和新鲜度解析。MCP 可以用于交互探索，但正式 Review/Verify 证据必须经过 SelfWorkFlow 的受控 CLI 入口和收据封装。
 
-个人 Wiki 的 Deep 增强不新增一个绕过知识生命周期的发布入口。它挂在已确认的 `knowledge.propose` 阶段：先限定提案涉及的文件和版本，再调用一次 Deep，把语义摘要、职责、约束和不确定项作为提案材料；`knowledge.update` 仍需用户确认和后端的 compare-and-swap。若没有具体知识后端，Deep 结果只能作为本地提案材料，不能声称已沉淀。
+专题 Deep 不新增知识发布入口。知识模块可选择读取专题结果作为来源参考，但 Graft 不触发、依赖或写入 Wiki；`knowledge.update` 仍由知识后端自己的确认和 compare-and-swap 负责。
 
 ### 4.4 查询与更新分离
 
@@ -130,7 +130,7 @@ Provider ID 为 `graft`。正式能力至少包括：
 | 显式 `build` | 是 | 由用户/计划显式请求 | 可记录为独立维护操作 |
 | `build --deep` | 是 | 否 | 手动、批准、远程能力和敏感数据边界单独确认 |
 | MCP 连接 | 否 | 否 | 启动环境固定为 no-refresh；不让 MCP 隐式更新 |
-| 个人 Wiki `knowledge.propose` | 仅写入受控提案/Deep 结果 | 是，一次/提案版本 | 用户已启动知识沉淀后自动执行；范围受限，不直接发布，不重复调用 |
+| 专题 Deep | 写入项目内专题上下文 | 仅由明确 topic 请求触发 | 范围受限、按源 hash 增量，不直接写知识库 |
 
 Worker 采用每项目单锁、事件去重和短时间合并窗口。Worker 的状态至少区分 queued、running、succeeded、stale、failed、boundary-invalid；失败不回滚到旧图之外的假成功状态。旧图可作为 stale reference，但不能满足需要新鲜 Graft 证据的验收条件。
 
@@ -188,25 +188,11 @@ SelfWorkFlow 提供统一的“Agent 修改完成”事件接口。Host 只提�
 
 初始验收覆盖 Codex Native Hook；接口设计保持对其他已配置 Agent Host 的可扩展性。文件系统 Watcher、编辑器 Watcher 和全局后台守护进程不在第一版范围内。
 
-### 7.1 个人 Wiki 知识沉淀
+### 7.1 专题 Deep 与知识模块
 
-知识沉淀流程推荐为：
+一个对话只绑定一个 `topic-id`。全局 `graft/` 保存非 Deep structural Map，专题上下文保存于项目 `./selfworkflow/graft-deep/<topic-id>/graft`。SelfWorkFlow 将明确的项目内文件清单作为官方 Graft 的重复 `--only-dir`，并以源文件 hash 识别增量变化；不按 Git hash 建目录，不创建临时 Git 仓库，不扫描全仓库。
 
-```text
-用户明确提出知识沉淀
-        ↓
-knowledge.propose 确定文件范围和当前版本
-        ↓
-自动执行一次受限 Deep
-        ↓
-形成带语义增强的 Wiki 提案
-        ↓
-用户确认后才 knowledge.update
-```
-
-这一次 Deep 默认只读取提案涉及的文件和结构关系，不扫描整个仓库；若当前锁定 Graft 版本不支持足够窄的范围参数，则必须缩小输入或报告 `unverified`，不得静默扩大到全仓库。按提案内容哈希和 Graft/模型身份去重，同一提案版本不重复付费调用。
-
-“自动”只表示在用户已明确启动知识沉淀之后由 Host 自动完成一次辅助步骤，不表示后台自行决定发布知识。首次或新的外部模型/敏感项目边界仍需完成外部数据确认；Deep 失败时提案可以保留结构材料，但必须标记语义增强未完成。
+知识模块完全独立：它可以把专题结果作为可选来源，但不触发 Deep、不依赖 Graft，也不把 Deep 结果直接发布到 Wiki。若官方 Graft 不支持安全的精确范围参数，必须报告 `unverified`，不得扩大范围。
 
 ## 8. 安全、隐私与可维护性
 
@@ -254,7 +240,7 @@ knowledge.propose 确定文件范围和当前版本
 - **AC-8 CodeGraph 迁移：** 默认路径不再依赖 CodeGraph，已有 CodeGraph 配置被保留并标记遗留，不被自动删除。
 - **AC-9 Deep 边界：** 自动 Worker 不调用 Deep；手动 Deep 有单独批准、模型能力、敏感数据和收据检查。
 - **AC-10 原生验证：** C++、TypeScript、Python 合成项目和 Codex Hook 均有真实失败/成功验收；Unreal 相关能力只按已验证范围声明。
-- **AC-11 Wiki Deep：** 用户启动 `knowledge.propose` 后自动执行一次受限 Deep，输出进入提案而非直接发布；同一提案版本不重复调用，失败有 `unverified` 语义。
+- **AC-11 专题 Deep：** 明确 topic 与非空文件范围后，官方 Deep 只处理该范围并写入项目内专题上下文；全局 Map 不被覆盖，源文件 hash 漂移时状态转为 stale/failed；知识模块只可选择引用，不能触发或承载 Deep。
 
 ## 11. 仍需在实现阶段验证的事项
 
