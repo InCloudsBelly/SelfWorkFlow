@@ -40,7 +40,7 @@ Discover → Capability Check → Classify → Design → Plan
 | 实施前文档 | 窄 Review | 独立 `plan-integrated-review` | 同 Full |
 | 落地后代码 | 窄完整 diff Review | 两个独立 Review SubAgent + `tea-test-review` | 同 Full |
 
-Full/Deep/正式文档：独立 Review；Light：窄 Review。Full/Deep 及正式文档门禁使用独立 SubAgent，Light 可做窄结构化自审。`tea-atdd`、`tea-trace`、`tea-nfr` 仅适用且显式选择时加载。正式文档包至少包含两份时自动按 Full 做文档包 Review。
+Full/Deep/正式文档：独立 Review；Light：窄 Review。Full/Deep 及正式文档门禁使用独立 SubAgent，Light 可做窄结构化自审。`tea-atdd`、`tea-trace`、`tea-nfr` 仅适用且显式选择时加载。至少两份正式文档时自动按 Full 做完整文档包 Review，并绑定最终文档包 hash；测试覆盖不能反向驱动生产架构。
 
 代码/C++/UE/跨层行为加载 `workflow/modules/code.md`，并按需继续读取 `graft-read.md`、`graft-deep.md`、`graft-update.md`；Review/计划、留痕和知识分别加载对应模块。知识是可选扩展，不阻塞普通代码任务。Graft Deep 只由主 Agent 执行。
 
