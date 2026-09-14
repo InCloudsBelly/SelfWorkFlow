@@ -11,7 +11,7 @@ SelfWorkflow active: <profile>；mode: <Light|Full|Deep>
 进度 <已完成主阶段/总主阶段>（约 <粗略区间>%）｜当前：<阶段>｜剩余：<关键阶段>｜预计：<时间区间或重估点>
 ```
 
-启动入口与 runtime manifest 始终加载；分类后必须只读取选定的一个 `workflow/modes/<mode>.md`，再按任务命中 `workflow/modules/*.md`。只读任务也要先读选定模式文件，但不加载无关能力。缺失、不可读或哈希漂移的必需模块标为 `unverified`，不得静默降级。普通任务不创建 PlanGraph 或 RunLedger；`workflow/core.md` 按阶段读取，不是每轮启动必读全文。
+启动入口与 runtime manifest 始终加载；分类后必须只读取选定的一个 `workflow/modes/<mode>.md`，再按任务命中 `workflow/modules/*.md`。只读任务也要先读选定模式文件，但不加载无关能力。缺失、不可读或哈希漂移的必需模块标为 `unverified`，不得静默降级。普通任务不创建 PlanGraph 或 RunLedger；`workflow/core.md` 按阶段读取，不是每轮启动必读全文。至少两份正式文档时按 Full 做完整文档包 Review。
 
 ## 硬规则
 
