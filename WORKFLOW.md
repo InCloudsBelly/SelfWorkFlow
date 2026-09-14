@@ -49,7 +49,7 @@ Full/Deep/正式文档：独立 Review；Light：窄 Review。Full/Deep 及正�
 行为代码第一次编辑前必须形成代码实施契约并取得用户明确实施确认：目标、责任层、允许文件、替代方案、影响半径、侵入预算、安全、性能、可维护性、兼容性、回滚、测试接缝和 `unverified` 项；第一次编辑测试或生产代码前不得跳过该门禁。
 
 ```text
-设计/测试设计/实施计划 → Review → 用户明确确认 → TDD Red/Green → 实施
+设计/测试设计/实施计划 → Review → 用户确认 → TDD Red/Green → 实施（用户确认即为明确实施确认）
 → Review → Verify → optional Knowledge → Complete
 ```
 
