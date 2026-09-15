@@ -71,6 +71,7 @@ def _git(repository: Path, *arguments: str) -> str:
     result = subprocess.run(
         [
             "git", "-c", "core.hooksPath=NUL", "-c", "core.fsmonitor=false",
+            "-c", "core.autocrlf=true",
             "-C", str(repository), *arguments,
         ],
         check=False,

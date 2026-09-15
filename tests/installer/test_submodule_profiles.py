@@ -60,6 +60,7 @@ class SubmoduleProfileTests(unittest.TestCase):
         command = run.call_args.args[0]
         used_environment = run.call_args.kwargs["env"]
         self.assertIn("core.hooksPath=NUL", command)
+        self.assertIn("core.autocrlf=true", command)
         self.assertNotIn("GIT_DIR", used_environment)
         self.assertNotIn("GIT_WORK_TREE", used_environment)
         self.assertNotIn("GIT_INDEX_FILE", used_environment)

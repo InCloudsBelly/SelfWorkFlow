@@ -59,7 +59,12 @@ def _native(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[st
         }
     )
     safe_command = (
-        [command[0], "-c", "core.hooksPath=NUL", "-c", "core.fsmonitor=false"]
+        [
+            command[0],
+            "-c", "core.hooksPath=NUL",
+            "-c", "core.fsmonitor=false",
+            "-c", "core.autocrlf=true",
+        ]
         + list(command[1:])
     )
     return subprocess.run(
