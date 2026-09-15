@@ -119,6 +119,23 @@ class WorkflowCompressionTests(unittest.TestCase):
         self.assertIn("不自动 Grill 或 TEA", light)
         self.assertIn("不冒充独立 SubAgent Review", light)
 
+    def test_review_model_boundary_and_compact_dispatch_policy_are_explicit(self):
+        review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
+        for phrase in (
+            "主 Agent 的 Design、Plan、Implement、Verify、Knowledge 始终使用当前 Host 模型",
+            "只有 `dispatch_post_grill_review`、`dispatch_plan_review`、`dispatch_code_review`",
+            "禁止传播给任何其他 Agent",
+            "实施前文档包调用一次独立 Reviewer",
+            "Full/Deep 落地后仅保留 Standards/Spec 两个必要的独立 Reviewer",
+            "不能因“再确认一次”无限追加昂贵调用",
+            "不接收完整主对话历史、Wiki 或无关文件",
+            "两个轴复用同一 package/evidence",
+            "只有 package、diff、规则、Skill hash 或未关闭发现变化时才重新 Review",
+            "TEA 质量检查复用该证据，不自动增加第三个昂贵 Reviewer",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, review)
+
     def test_catalog_routes_match_the_split_mode_contract(self):
         catalog = compile_catalog(ROOT / "catalog").content
         for strength, expected in (
