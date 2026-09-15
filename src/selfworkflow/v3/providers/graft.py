@@ -83,6 +83,29 @@ def _project_root(value: object) -> str:
     return normalized
 
 
+def _context_dir(root: str, value: object) -> str | None:
+    """Validate an optional topic context without allowing root ``graft/``."""
+
+    if value is None:
+        return None
+    context = _project_root(value)
+    try:
+        relative = ntpath.relpath(context, root).replace("\\", "/")
+    except (OSError, ValueError):
+        raise GraftAdapterError("graft-context-dir-invalid") from None
+    parts = relative.split("/")
+    if (
+        len(parts) != 4
+        or parts[0].casefold() != ".selfworkflow"
+        or parts[1].casefold() != "graft-deep"
+        or parts[3].casefold() != "graft"
+        or not parts[2]
+        or parts[2] in {".", ".."}
+    ):
+        raise GraftAdapterError("graft-context-dir-invalid")
+    return context
+
+
 def _prefix(value: Sequence[str]) -> tuple[str, ...]:
     if (
         not isinstance(value, (tuple, list))
@@ -142,13 +165,17 @@ class GraftAdapter:
         self,
         arguments: Sequence[str],
         *,
+        context_dir: str | None = None,
         allow_exit_codes: frozenset[int] = frozenset({0}),
         output_limit_bytes: int = _MAX_OUTPUT_BYTES,
     ) -> CommandResult:
         try:
             if self._pre_dispatch_validator is not None:
                 self._pre_dispatch_validator()
-            result = self._port.run(self._prefix + tuple(arguments), cwd=None)
+            prefix = self._prefix
+            if context_dir is not None:
+                prefix += ("--dir", context_dir)
+            result = self._port.run(prefix + tuple(arguments), cwd=None)
         except GraftAdapterError:
             raise
         except Exception:
@@ -179,10 +206,14 @@ class GraftAdapter:
             raise GraftAdapterError(reason)
         return value
 
-    def status(self, project_root: str) -> dict[str, Any]:
+    def status(
+        self, project_root: str, *, context_dir: str | None = None,
+    ) -> dict[str, Any]:
         root = _project_root(project_root)
+        context = _context_dir(root, context_dir)
         result = self._run(
             ("check", root, "--json"),
+            context_dir=context,
             allow_exit_codes=frozenset({0, 1}),
             output_limit_bytes=_STATUS_OUTPUT_BYTES,
         )
@@ -259,19 +290,21 @@ class GraftAdapter:
         query: str,
         *,
         query_kind: str = "ask",
+        context_dir: str | None = None,
     ) -> dict[str, Any]:
         root = _project_root(project_root)
+        context = _context_dir(root, context_dir)
         query_text = _text(query, "graft-query-invalid")
         if query_kind not in _QUERY_KINDS:
             raise GraftAdapterError("graft-query-kind-invalid")
-        status = self.status(root)
+        status = self.status(root, context_dir=context)
         if not status["initialized"]:
             raise GraftAdapterError("graft-graph-not-ready")
         if query_kind == "map":
             arguments = (query_kind, root, "--json", "--no-refresh")
         else:
             arguments = (query_kind, query_text, root, "--json", "--no-refresh")
-        result = self._run(arguments)
+        result = self._run(arguments, context_dir=context)
         return {
             "providerId": "graft",
             "operation": "query",

@@ -4,13 +4,13 @@
 
 **Goal:** 将 Graft 作为 SelfWorkFlow 的正式代码图 Provider，纳入锁定 Submodule、受控安装、项目内图缓存、no-refresh 查询、专题 Deep 和 Host-neutral 写入 Worker，并替代默认 CodeGraph 路由；不修改官方 Graft 源码。
 
-**Architecture:** Graft 源码固定在 `dependencies/upstream/graft`，由锁文件绑定身份；Installer 校验并构建 Submodule 入口，图缓存仍由 Graft 写入项目目录。正式 Adapter 通过受控 CLI 提供证据，查询固定 no-refresh；显式 Graft 证据任务失败关闭。Host 在 Agent 写入完成后发送 `agent_write`，SelfWorkFlow 合并路径并运行结构 Worker；不启用后台刷新、文件 Watcher 或 Deep。
+**Architecture:** Graft 源码固定在 `dependencies/upstream/graft`，由锁文件绑定身份；Installer 校验并构建 Submodule 入口，图缓存仍由 Graft 写入项目目录。正式 Adapter 通过受控 CLI 提供证据，查询固定 no-refresh；显式 Graft 证据任务失败关闭。Host 在 Agent 写入完成后发送 `agent_write`，SelfWorkFlow 合并路径并更新全局 structural Map；若当前 `conversation-id` 已绑定 Topic 且过期，主 Agent 自动继续同一 Topic 的原范围 Deep。不启用后台刷新或文件 Watcher。
 
 **Tech Stack:** Python 3.11, unittest, PyYAML/jsonschema, Node >=20, npm lockfile, PowerShell, Graft tree-sitter/CLI/MCP。
 
 ---
 
-> 实施状态：Submodule、锁文件、来源校验、只读 Adapter、项目预检、`agent_write` 事件合并 Worker、Provider Manager、默认路由、Installer 构建门禁及对应测试已落地。Deep 构建、知识扩展和厂商专属原生 Hook 仍是后续边界，不能据此宣称已支持。
+> 实施状态：Submodule、锁文件、来源校验、只读 Adapter、项目预检、`agent_write` 事件合并 Worker、Provider Manager、默认路由、Installer 构建门禁及对应测试已落地。Topic Deep 已接入 `conversation-id → topic` 写后链路；知识扩展和厂商专属原生 Hook 仍是独立边界。
 
 ## 1. 固定范围
 
@@ -29,7 +29,7 @@
 - 实施阶段不修改受保护生命周期、证据模型、通用分类、公共 API/ABI、持久化 Schema、全局宏或共享热路径。
 - 不启用 Graft 自带竞争性 Hook、文件系统 Watcher、全局守护进程或未锁定网络安装。
 - 不扫描所有项目，不把图放入 C 盘或机器级缓存，不扫描任意 Ignore 目录。
-- 不让查询触发刷新，不让自动 Worker 调用 Deep。
+- 不让查询触发刷新，不让 Worker 对全局 Map 调用 Deep；绑定 Topic 的写后流程必须显式返回并消费唯一 Deep 下一动作。
 - 不让专题 Deep 触发或绕过通用知识生命周期；知识后端自行决定是否引用和发布。
 - 不执行暂存、提交或自动删除用户文件。
 
@@ -133,7 +133,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test tes
 - [x] RED：连续修改事件只产生一次最终结构更新；查询、Review 查询和普通读取不产生更新事件。
 - [x] 接入 Host-neutral 的“Agent 修改完成”事件入口，不实现文件系统/编辑器 Watcher。
 - [x] 实现每项目单锁、持久化队列、事件合并、诊断和失败可重试语义；不引入后台 daemon 或取消正在运行的进程。
-- [x] Worker 只调用结构 build，不调用 Deep；边界无效时暂停并降级。
+- [x] Worker 先调用全局结构 build；绑定 Topic 过期时由同一次 Host Worker 调用自动沿原 scope 执行 Topic Deep，并在返回前分别验证全局 Map 与 Topic freshness；边界无效或 Deep 失败时显式返回 `partial/unverified` 与可重试动作，不静默降级。
 - [x] GREEN：验证成功、失败、重复事件、并发锁和 stale 图行为。
 
 未来验证入口：
@@ -241,6 +241,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1 -Test <te
 3. 完整 diff 的 Standards/Spec Review 通过，Critical/Important 为零，Minor 均有 disposition。
 4. Installer、Provider、Worker、Host 和三类合成项目验证均有新鲜收据。
 5. 查询无写入、修改自动更新、项目内图边界、无暂存/提交、CodeGraph 遗留保护均有直接证据。
-6. 代码编辑 Worker 和查询不会触发 Deep；专题 Deep 只由明确 topic 请求触发，知识模块仅可选择引用其结果。
+6. 查询不会触发 Deep；代码编辑 Worker 更新全局 structural Map 后，已绑定且过期的专题由同一 `conversation-id` 自动继续原范围 Deep，知识模块仅可选择引用其结果。
 
 当前安装前仍须完成 Task 10 的真实项目验收和 Task 11 的完整 diff Review；未完成项必须保持 `unverified`，不能宣称全部边界已验收。

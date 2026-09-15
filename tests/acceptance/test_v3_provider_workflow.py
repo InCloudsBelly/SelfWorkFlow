@@ -24,6 +24,30 @@ class _Manager:
         from selfworkflow.v3.provider_manager import ProviderManagerError
         raise ProviderManagerError("provider-operation-unverified")
 
+    def graft_topics(self, project_root, conversation_id):
+        self.calls.append(("graft-topics", project_root, conversation_id))
+        return {"providerId": "graft", "topics": [], "conversationChoice": {
+            "choice": "unbound", "status": "unbound",
+        }}
+
+    def graft_topic_select(
+        self, project_root, conversation_id, *, topic_id=None, disable=False,
+    ):
+        self.calls.append((
+            "graft-topic-select", project_root, conversation_id, topic_id, disable,
+        ))
+        return {"providerId": "graft", "status": "disabled" if disable else "bound"}
+
+    def graft_deep(
+        self, project_root, model, reasoning_effort, *, conversation_id,
+        topic_id, scope_files,
+    ):
+        self.calls.append((
+            "graft-deep", project_root, model, reasoning_effort,
+            conversation_id, topic_id, tuple(scope_files),
+        ))
+        return {"status": "succeeded", "freshness": "fresh"}
+
     def maintain(self, provider_id, action, project_root, *, plan_only, confirmed_plan_hash=None):
         self.calls.append((provider_id, action, project_root, plan_only, confirmed_plan_hash))
         if plan_only:
@@ -46,6 +70,33 @@ class _Manager:
 
 
 class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
+    def test_graft_worker_requires_conversation_identity(self):
+        with mock.patch("sys.stderr", StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                main([
+                    "provider", "graft-worker",
+                    "--project-root", "C:/work/project",
+                ])
+        self.assertEqual(error.exception.code, 2)
+
+    def test_new_conversation_topic_discovery_and_no_topic_choice_are_explicit(self):
+        manager = _Manager()
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main([
+                "provider", "graft-topics", "--project-root", "C:/project",
+                "--conversation-id", "thread-new",
+            ]), 0)
+            self.assertEqual(main([
+                "provider", "graft-topic-select", "--project-root", "C:/project",
+                "--conversation-id", "thread-new", "--disable",
+            ]), 0)
+        self.assertEqual(manager.calls, [
+            ("graft-topics", "C:/project", "thread-new"),
+            ("graft-topic-select", "C:/project", "thread-new", None, True),
+        ])
+
     def test_list_is_available_but_unverified_diagnostics_fail_closed(self):
         manager = _Manager()
         output = StringIO()
@@ -90,6 +141,7 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         arguments = [
             "provider", "graft-deep", "--project-root", "C:/work/project",
             "--model", "gpt-5.6-luna", "--reasoning-effort", "xhigh",
+            "--conversation-id", "thread-acceptance-test",
             "--topic-id", "kgpr-coverage", "--scope-file", "Source/main.cpp",
         ]
         with mock.patch(
@@ -106,6 +158,7 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         arguments = [
             "provider", "graft-deep", "--project-root", "C:/work/project",
             "--model", "gpt-5.6-luna", "--reasoning-effort", "xhigh",
+            "--conversation-id", "thread-acceptance-test",
             "--topic-id", "kgpr-coverage", "--scope-file", "Source/main.cpp",
         ]
         with mock.patch(
@@ -114,8 +167,63 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
             self.assertEqual(main(arguments), 0)
         manager.graft_deep.assert_called_once_with(
             "C:/work/project", "gpt-5.6-luna", "xhigh",
+            conversation_id="thread-acceptance-test",
             topic_id="kgpr-coverage", scope_files=["Source/main.cpp"],
         )
+
+    def test_graft_deep_uses_host_context_without_user_model_arguments(self):
+        manager = _Manager()
+        arguments = [
+            "provider", "graft-deep", "--project-root", "C:/work/project",
+            "--conversation-id", "thread-host-context",
+            "--topic-id", "kgpr-coverage", "--scope-file", "Source/main.cpp",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch.dict(os.environ, {
+            "SELFWORKFLOW_HOST_CURRENT_MODEL": "gpt-5.6-luna",
+            "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT": "xhigh",
+        }, clear=True), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main(arguments), 0)
+
+        self.assertEqual(manager.calls, [(
+            "graft-deep", "C:/work/project", "gpt-5.6-luna", "xhigh",
+            "thread-host-context", "kgpr-coverage", ("Source/main.cpp",),
+        )])
+
+    def test_graft_deep_fails_closed_without_complete_host_context(self):
+        manager = _Manager()
+        arguments = [
+            "provider", "graft-deep", "--project-root", "C:/work/project",
+            "--conversation-id", "thread-missing-context",
+            "--topic-id", "kgpr-coverage",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch.dict(os.environ, {}, clear=True), mock.patch(
+            "sys.stderr", StringIO()
+        ):
+            self.assertEqual(main(arguments), 70)
+
+        self.assertEqual(manager.calls, [])
+
+    def test_graft_deep_rejects_stale_arguments_when_host_context_disagrees(self):
+        manager = _Manager()
+        arguments = [
+            "provider", "graft-deep", "--project-root", "C:/work/project",
+            "--model", "gpt-5.6-sol", "--reasoning-effort", "high",
+            "--conversation-id", "thread-context-mismatch",
+            "--topic-id", "kgpr-coverage",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch.dict(os.environ, {
+            "SELFWORKFLOW_HOST_CURRENT_MODEL": "gpt-5.6-luna",
+            "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT": "xhigh",
+        }, clear=True), mock.patch("sys.stderr", StringIO()):
+            self.assertEqual(main(arguments), 70)
+
+        self.assertEqual(manager.calls, [])
 
     def test_configure_uses_explicit_path_helper_only(self):
         manager = _Manager()

@@ -239,6 +239,7 @@ class ProviderManagerTests(unittest.TestCase):
         ) as run:
             result = manager.graft_deep(
                 str(project), "gpt-5.6-luna", "xhigh",
+                conversation_id="thread-manager-test",
                 topic_id="kgpr-coverage",
                 scope_files=("Source/main.cpp",),
             )
@@ -246,9 +247,176 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(run.call_args.kwargs["model"], "gpt-5.6-luna")
         self.assertEqual(run.call_args.kwargs["reasoning_effort"], "xhigh")
+        self.assertEqual(run.call_args.kwargs["conversation_id"], "thread-manager-test")
         self.assertEqual(run.call_args.kwargs["topic_id"], "kgpr-coverage")
         self.assertEqual(run.call_args.kwargs["scope_files"], ("Source/main.cpp",))
         self.assertEqual(run.call_args.kwargs["graft_command"][0], "node")
+
+    def test_graft_worker_automatically_refreshes_bound_topic_with_host_model(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        manager = self._manager(
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+        lifecycle_result = {
+            "providerId": "graft", "status": "succeeded",
+            "globalMapUpdated": True, "conversationId": "thread-auto",
+            "topicRefresh": {
+                "status": "refresh-required", "action": "run-graft-deep",
+                "topicId": "kgpr", "conversationId": "thread-auto",
+            },
+            "nextAction": "run-graft-deep",
+        }
+        fake_lifecycle = type(
+            "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
+        )()
+        with patch(
+            "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
+            return_value=fake_lifecycle,
+        ), patch.dict(
+            os.environ,
+            {
+                "SELFWORKFLOW_HOST_CURRENT_MODEL": "gpt-5.6-sol",
+                "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT": "xhigh",
+            },
+            clear=False,
+        ), patch.object(
+            manager, "graft_deep", return_value={"status": "succeeded"}
+        ) as deep, patch.object(
+            manager, "status",
+            side_effect=[
+                {"providerId": "graft", "freshness": "fresh", "graphStatus": "fresh"},
+                {
+                    "providerId": "graft", "freshness": "fresh",
+                    "graphStatus": "fresh", "topicFreshness": "fresh",
+                },
+            ],
+        ) as status:
+            result = manager.graft_worker(
+                str(project), conversation_id="thread-auto",
+            )
+
+        self.assertEqual(result["status"], "succeeded")
+        self.assertTrue(result["topicUpdated"])
+        self.assertEqual(result["nextAction"], "none")
+        deep.assert_called_once_with(
+            str(project), "gpt-5.6-sol", "xhigh",
+            conversation_id="thread-auto", topic_id="kgpr", scope_files=(),
+        )
+        self.assertEqual(status.call_count, 2)
+        self.assertEqual(status.call_args_list[0].kwargs, {})
+        self.assertEqual(
+            status.call_args_list[1].kwargs,
+            {"conversation_id": "thread-auto"},
+        )
+
+    def test_graft_worker_reports_missing_host_model_without_interrupting_global_update(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        manager = self._manager(
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+        lifecycle_result = {
+            "providerId": "graft", "status": "succeeded",
+            "globalMapUpdated": True, "conversationId": "thread-no-model",
+            "topicRefresh": {
+                "status": "refresh-required", "action": "run-graft-deep",
+                "topicId": "kgpr", "conversationId": "thread-no-model",
+            },
+            "nextAction": "run-graft-deep",
+        }
+        fake_lifecycle = type(
+            "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
+        )()
+        with patch(
+            "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
+            return_value=fake_lifecycle,
+        ), patch.dict(
+            os.environ,
+            {},
+            clear=True,
+        ), patch.object(manager, "graft_deep") as deep:
+            result = manager.graft_worker(
+                str(project), conversation_id="thread-no-model",
+            )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["globalMapUpdated"])
+        self.assertFalse(result["topicUpdated"])
+        self.assertEqual(result["nextAction"], "retry-topic-deep")
+        self.assertEqual(result["reason"], "graft-deep-current-model-unavailable")
+        deep.assert_not_called()
+
+    def test_graft_worker_does_not_claim_fresh_when_post_deep_verification_fails(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        manager = self._manager(
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+        lifecycle_result = {
+            "providerId": "graft", "status": "succeeded",
+            "globalMapUpdated": True, "conversationId": "thread-stale",
+            "topicRefresh": {
+                "status": "refresh-required", "action": "run-graft-deep",
+                "topicId": "kgpr", "conversationId": "thread-stale",
+            },
+            "nextAction": "run-graft-deep",
+        }
+        fake_lifecycle = type(
+            "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
+        )()
+        with patch(
+            "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
+            return_value=fake_lifecycle,
+        ), patch.dict(
+            os.environ,
+            {
+                "SELFWORKFLOW_HOST_CURRENT_MODEL": "gpt-5.6-sol",
+                "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT": "xhigh",
+            },
+            clear=False,
+        ), patch.object(
+            manager, "graft_deep", return_value={"status": "succeeded"}
+        ), patch.object(
+            manager, "status",
+            side_effect=[
+                {"providerId": "graft", "freshness": "fresh", "graphStatus": "fresh"},
+                {
+                    "providerId": "graft", "freshness": "stale",
+                    "graphStatus": "stale", "topicFreshness": "stale",
+                },
+            ],
+        ):
+            result = manager.graft_worker(
+                str(project), conversation_id="thread-stale",
+            )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["globalMapUpdated"])
+        self.assertFalse(result["topicUpdated"])
+        self.assertEqual(result["nextAction"], "retry-topic-deep")
+        self.assertEqual(result["reason"], "graft-freshness-verification-failed")
 
     def test_graft_status_enforces_project_binding_before_provider_dispatch(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError

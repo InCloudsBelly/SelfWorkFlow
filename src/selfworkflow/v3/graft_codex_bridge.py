@@ -8,11 +8,13 @@ reasoning effort supplied by the current Host invocation.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import re
 import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import posixpath
 from pathlib import Path
 import secrets
 import stat
@@ -24,7 +26,12 @@ from typing import Any
 from urllib.parse import urlsplit
 import uuid
 
-from selfworkflow.v3.graft_lifecycle import validate_project_root
+from selfworkflow.v3.graft_lifecycle import (
+    GraftProjectError,
+    bind_conversation_topic,
+    resolve_conversation_topic,
+    validate_project_root,
+)
 from selfworkflow.v3.hashing import (
     canonical_relative_path,
     content_hash,
@@ -55,6 +62,22 @@ _SENSITIVE_PROVIDER_ENV = frozenset({
     "ORCAROUTER_API_KEY", "GRAFT_OPENROUTER_MODEL", "OPENROUTER_BASE_URL",
     "ORCAROUTER_MODEL", "GRAFT_DIR",
 })
+_CPP_EXTENSIONS = frozenset({
+    ".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
+    ".inl", ".ipp", ".c++", ".h++",
+})
+_GRAFT_DEEP_EXTENSIONS = (
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".py", ".go", ".rs", ".java", ".kt", ".scala",
+    ".rb", ".php", ".c", ".h", ".cpp", ".hpp", ".cc",
+    ".cxx", ".hh", ".cs", ".swift", ".sql", ".sh", ".proto",
+    ".inl", ".ipp",
+)
+_GRAFT_SCOPE_EXTENSIONS = frozenset(_GRAFT_DEEP_EXTENSIONS)
+_TOPIC_CONTEXT_ONLY_EXTENSIONS = frozenset({".inl", ".ipp"})
+_CPP_INCLUDE = re.compile(
+    r'^[ \t]*#[ \t]*include[ \t]*"([^"\r\n]+)"', re.MULTILINE,
+)
 
 
 class BridgeError(ValueError):
@@ -610,6 +633,70 @@ def _scope_files(root: Path, values: Sequence[str]) -> tuple[list[str], list[dic
     return relative_paths, entries
 
 
+def _resolve_local_cpp_include(root: Path, including: str, specifier: str) -> str | None:
+    """Resolve one quoted include without guessing outside the project."""
+
+    spec = specifier.replace("\\", "/")
+    candidates = (
+        Path(posixpath.normpath(posixpath.join(posixpath.dirname(including), spec))),
+        Path(posixpath.normpath(spec)),
+    )
+    for candidate in candidates:
+        relative = candidate.as_posix()
+        if (
+            not relative or relative in {".", ".."}
+            or relative.startswith("../")
+            or candidate.suffix.lower() not in _GRAFT_SCOPE_EXTENSIONS
+        ):
+            continue
+        try:
+            normalized, _ = _scope_files(root, (relative,))
+        except BridgeError:
+            continue
+        return normalized[0]
+    return None
+
+
+def _scope_files_with_cpp_includes(
+    root: Path, values: Sequence[str],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Add quoted local C/C++ includes in source order, including ``.inl``.
+
+    This is a narrow context closure, not a directory expansion.  The official
+    Graft command still owns parsing and graph construction; this adapter only
+    makes the explicitly requested source context complete enough for it.
+    """
+
+    explicit, _ = _scope_files(root, values)
+    if any(
+        Path(relative).suffix.lower() not in _GRAFT_SCOPE_EXTENSIONS
+        for relative in explicit
+    ):
+        raise BridgeError("graft-scope-unsupported-file")
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def visit(relative: str) -> None:
+        if relative in seen:
+            return
+        seen.add(relative)
+        ordered.append(relative)
+        if Path(relative).suffix.lower() not in _CPP_EXTENSIONS:
+            return
+        try:
+            source = root.joinpath(*relative.split("/")).read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return
+        for match in _CPP_INCLUDE.finditer(source):
+            target = _resolve_local_cpp_include(root, relative, match.group(1))
+            if target is not None:
+                visit(target)
+
+    for relative in explicit:
+        visit(relative)
+    return _scope_files(root, ordered)
+
+
 def _write_topic_manifest(
     path: Path,
     *,
@@ -628,8 +715,14 @@ def _write_topic_manifest(
         "projectRootHash": project_hash,
         "scopeFiles": scope_entries,
         "scopeHash": scope_hash,
-        "model": model,
-        "reasoningEffort": reasoning_effort,
+        # These values describe the completed build only.  They are never an
+        # execution default: the next call must receive the current Host
+        # model and effort explicitly.
+        "lastRun": {
+            "model": model,
+            "reasoningEffort": reasoning_effort,
+            "source": "host-supplied-context",
+        },
         "graftCommandHash": content_hash(list(command)),
         "freshness": "fresh",
     }
@@ -663,6 +756,61 @@ def _write_topic_manifest(
     return scope_hash
 
 
+def _load_topic_scope(root: Path, topic_id: str) -> tuple[str, ...]:
+    """Load the last accepted scope so a stale Topic can refresh in place."""
+
+    topic_root, _context = _topic_context(root, topic_id)
+    path = topic_root / _TOPIC_MANIFEST
+    if not path.is_file() or _is_reparse(path):
+        raise BridgeError("graft-topic-scope-unavailable")
+    try:
+        if path.stat().st_size > _MAX_RESPONSE_BYTES:
+            raise BridgeError("graft-topic-manifest-too-large")
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except BridgeError:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError):
+        raise BridgeError("graft-topic-manifest-invalid") from None
+    if (
+        not isinstance(value, Mapping)
+        or value.get("kind") != "selfworkflow-graft-topic"
+        or value.get("version") != 1
+        or value.get("topicId") != topic_id
+        or not isinstance(value.get("scopeFiles"), list)
+        or not value["scopeFiles"]
+        or len(value["scopeFiles"]) > _MAX_SCOPE_FILES
+    ):
+        raise BridgeError("graft-topic-manifest-invalid")
+    paths: list[str] = []
+    for entry in value["scopeFiles"]:
+        if (
+            not isinstance(entry, Mapping)
+            or set(entry) != {"path", "size", "sha256"}
+            or not isinstance(entry.get("path"), str)
+        ):
+            raise BridgeError("graft-topic-manifest-invalid")
+        try:
+            relative = canonical_relative_path(entry["path"])
+        except Exception:
+            raise BridgeError("graft-topic-manifest-invalid") from None
+        if (
+            relative == "graft"
+            or relative.startswith("graft/")
+            or relative == ".selfworkflow"
+            or relative.startswith(".selfworkflow/")
+        ):
+            raise BridgeError("graft-topic-manifest-invalid")
+        candidate = root.joinpath(*relative.split("/"))
+        if _is_reparse(candidate):
+            raise BridgeError("graft-topic-scope-boundary-invalid")
+        if not candidate.is_file():
+            continue
+        paths.append(relative)
+    if not paths:
+        raise BridgeError("graft-topic-scope-unavailable")
+    return tuple(paths)
+
+
 def _deep_env(bridge: CodexGraftBridge) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items()
@@ -683,8 +831,9 @@ def run_codex_graft_deep(
     project_root: Path,
     model: str,
     reasoning_effort: str,
-    topic_id: str,
-    scope_files: Sequence[str],
+    conversation_id: str,
+    topic_id: str | None,
+    scope_files: Sequence[str] = (),
     process_runner: ProcessRunner | None = None,
     codex_runner: CodexRunner | None = None,
     timeout_seconds: int = 60 * 60,
@@ -693,8 +842,25 @@ def run_codex_graft_deep(
 
     command = _safe_command(graft_command)
     root = validate_project_root(project_root)
-    topic = _topic_id(topic_id)
-    normalized_scope, initial_scope = _scope_files(root, scope_files)
+    try:
+        conversation_binding = resolve_conversation_topic(root, conversation_id)
+    except GraftProjectError as error:
+        raise BridgeError(error.reason) from None
+    requested_topic = None if topic_id is None else _topic_id(topic_id)
+    if conversation_binding is None:
+        if requested_topic is None:
+            raise BridgeError("graft-topic-binding-required")
+        topic = requested_topic
+    else:
+        bound_topic = _topic_id(conversation_binding["topicId"])
+        if requested_topic is not None and requested_topic != bound_topic:
+            raise BridgeError("graft-conversation-topic-mismatch")
+        topic = bound_topic
+    scope_mode = "explicit"
+    if not scope_files:
+        scope_files = _load_topic_scope(root, topic)
+        scope_mode = "bound-topic"
+    normalized_scope, initial_scope = _scope_files_with_cpp_includes(root, scope_files)
     topic_root, context = _topic_context(root, topic)
     root_hash = project_root_hash(root)
     if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= _MAX_DEEP_TIMEOUT_SECONDS:
@@ -709,8 +875,9 @@ def run_codex_graft_deep(
         environment = _deep_env(bridge)
         build_argv = [
             *command, "--dir", str(context), "build", str(root), "--deep",
-            "--no-gitignore", "--no-ignore",
+            "--no-gitignore", "--no-ignore", "--concurrency", "1",
         ]
+        build_argv.extend(("--extensions", *_GRAFT_DEEP_EXTENSIONS))
         for relative in normalized_scope:
             build_argv.extend(("--only-dir", relative))
         build_result = process(
@@ -721,7 +888,10 @@ def run_codex_graft_deep(
             return {"status": "failed", "reason": "graft-deep-failed", "retryable": True}
 
         check_result = process(
-            [*command, "--dir", str(context), "check", str(root), "--json"],
+            [
+                *command, "--dir", str(context), "check", str(root), "--json",
+                "--extensions", *_GRAFT_DEEP_EXTENSIONS,
+            ],
             cwd=str(root), env=environment, input_text="", timeout=timeout_seconds,
         )
         if _process_result_code(check_result) != 0:
@@ -742,7 +912,7 @@ def run_codex_graft_deep(
         manifest = context / "manifest.json"
         if not manifest.is_file() or _is_reparse(manifest):
             return {"status": "failed", "reason": "graft-deep-manifest-missing", "retryable": True}
-        _, final_scope = _scope_files(root, scope_files)
+        _, final_scope = _scope_files_with_cpp_includes(root, scope_files)
         if final_scope != initial_scope:
             return {
                 "status": "failed",
@@ -758,13 +928,33 @@ def run_codex_graft_deep(
             reasoning_effort=reasoning_effort,
             command=command,
         )
+        try:
+            conversation_binding = bind_conversation_topic(
+                root, conversation_id, topic,
+            )
+        except GraftProjectError as error:
+            raise BridgeError(error.reason) from None
+        context_only = sorted(
+            relative for relative in normalized_scope
+            if Path(relative).suffix.lower() in _TOPIC_CONTEXT_ONLY_EXTENSIONS
+        )
         return {
             "status": "succeeded",
             "provider": "codex-bridge",
             "model": model,
             "reasoningEffort": reasoning_effort,
+            "modelSource": "host-supplied-context",
             "topicId": topic,
+            "conversationBinding": {
+                "conversationId": conversation_id,
+                "topicId": topic,
+                "bindingHash": conversation_binding["bindingHash"],
+                "status": conversation_binding["status"],
+            },
+            "scopeMode": scope_mode,
             "scopeFiles": normalized_scope,
+            "scopeSupport": "context-only" if context_only else "official",
+            "contextOnlyFiles": context_only,
             "scopeHash": scope_hash,
             "contextDir": str(context),
             "freshness": "fresh",

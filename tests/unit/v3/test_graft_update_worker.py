@@ -99,7 +99,9 @@ class GraftUpdateWorkerTests(unittest.TestCase):
         lifecycle.enqueue(str(self.root), ["src/a.cpp"])
         provider.unavailable = True
 
-        result = lifecycle.run_once(str(self.root))
+        result = lifecycle.run_once(
+            str(self.root), conversation_id="thread-provider-failure",
+        )
 
         self.assertEqual(result["status"], "unverified")
         self.assertTrue(result["pending"])
@@ -143,7 +145,9 @@ class GraftUpdateWorkerTests(unittest.TestCase):
 
         self.assertEqual(first["status"], "queued")
         self.assertEqual(second["status"], "coalesced")
-        result = lifecycle.run_once(str(self.root))
+        result = lifecycle.run_once(
+            str(self.root), conversation_id="thread-coalesced",
+        )
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(len(provider.builds), 1)
         state = json.loads(
@@ -158,7 +162,9 @@ class GraftUpdateWorkerTests(unittest.TestCase):
         lifecycle = GraftProjectLifecycle(provider)
         lifecycle.enqueue(str(self.root), ["src/a.cpp"])
 
-        result = lifecycle.run_once(str(self.root))
+        result = lifecycle.run_once(
+            str(self.root), conversation_id="thread-build-failure",
+        )
 
         self.assertEqual(result["status"], "failed")
         self.assertTrue(result["retryable"])
@@ -177,6 +183,284 @@ class GraftUpdateWorkerTests(unittest.TestCase):
 
         self.assertEqual(result["freshness"], "fresh")
         self.assertFalse((self.root / "graft").exists())
+
+    def test_topic_status_and_query_use_only_the_explicit_topic_context(self):
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        (self.root / "graft").write_text("root cache is not part of this query", encoding="utf-8")
+
+        class TopicGraft(FakeGraft):
+            def __init__(self):
+                super().__init__(missing=False)
+                self.status_contexts = []
+                self.query_contexts = []
+
+            def status(self, project_root, *, context_dir=None):
+                self.status_contexts.append(context_dir)
+                return super().status(project_root)
+
+            def query(self, project_root, query, *, query_kind, context_dir=None):
+                self.query_contexts.append(context_dir)
+                return {"providerId": "graft", "data": {"hits": []}}
+
+        provider = TopicGraft()
+        lifecycle = GraftProjectLifecycle(provider)
+
+        status = lifecycle.query_status(str(self.root), context_dir=str(topic))
+        result = lifecycle.query(
+            str(self.root), "Widget", query_kind="ask", context_dir=str(topic),
+        )
+
+        self.assertEqual(status["freshness"], "fresh")
+        self.assertEqual(result["data"], {"hits": []})
+        self.assertEqual(provider.status_contexts, [str(topic.resolve())])
+        self.assertEqual(provider.query_contexts, [str(topic.resolve())])
+        self.assertEqual(
+            (self.root / "graft").read_text(encoding="utf-8"),
+            "root cache is not part of this query",
+        )
+
+    def test_topic_context_must_be_existing_and_inside_selfworkflow_topic_root(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectError, GraftProjectLifecycle,
+        )
+
+        lifecycle = GraftProjectLifecycle(FakeGraft(missing=False))
+        with self.assertRaisesRegex(GraftProjectError, "graft-topic-context-invalid"):
+            lifecycle.query_status(
+                str(self.root),
+                context_dir=str(self.root / "graft"),
+            )
+
+    def test_conversation_topic_binding_round_trips_without_persisting_raw_id(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            bind_conversation_topic, resolve_conversation_topic,
+        )
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        conversation_id = "thread-019-example"
+
+        created = bind_conversation_topic(self.root, conversation_id, "kgpr")
+
+        self.assertEqual(created["status"], "created")
+        self.assertEqual(created["topicId"], "kgpr")
+        self.assertEqual(
+            resolve_conversation_topic(self.root, conversation_id)["topicId"],
+            "kgpr",
+        )
+        binding_files = list(
+            (self.root / ".selfworkflow" / "graft-deep" / ".conversation-bindings")
+            .glob("*.json")
+        )
+        self.assertEqual(len(binding_files), 1)
+        self.assertNotIn(conversation_id, binding_files[0].read_text(encoding="utf-8"))
+
+    def test_conversation_cannot_switch_topics_and_missing_binding_fails_closed(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectError, bind_conversation_topic, resolve_conversation_topic,
+        )
+
+        conversation_id = "thread-bound"
+        with self.assertRaisesRegex(GraftProjectError, "graft-conversation-topic-mismatch"):
+            bind_conversation_topic(self.root, conversation_id, "topic-a")
+            bind_conversation_topic(self.root, conversation_id, "topic-b")
+        self.assertIsNone(resolve_conversation_topic(self.root, "thread-other"))
+
+    def test_new_conversation_lists_existing_topics_and_selection_binds_it(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            choose_conversation_topic, list_graft_topics,
+            resolve_conversation_topic,
+        )
+        from selfworkflow.v3.hashing import content_hash, hash_file_content, project_root_hash
+
+        source = self.root / "Source" / "main.cpp"
+        source.parent.mkdir()
+        source.write_text("int main() {}", encoding="utf-8")
+        size, digest = hash_file_content(source)
+        for topic_id in ("kgpr", "lighting"):
+            topic_root = self.root / ".selfworkflow" / "graft-deep" / topic_id
+            (topic_root / "graft").mkdir(parents=True)
+            scope = [{"path": "Source/main.cpp", "size": size, "sha256": digest}]
+            (topic_root / "selfworkflow-topic.json").write_text(
+                json.dumps({
+                    "kind": "selfworkflow-graft-topic", "version": 1,
+                    "topicId": topic_id, "projectRootHash": project_root_hash(self.root),
+                    "scopeFiles": scope, "scopeHash": content_hash(scope),
+                    "freshness": "fresh",
+                }),
+                encoding="utf-8",
+            )
+
+        result = list_graft_topics(self.root)
+
+        self.assertEqual([item["topicId"] for item in result["topics"]], ["kgpr", "lighting"])
+        self.assertTrue(all(item["selectable"] for item in result["topics"]))
+        selected = choose_conversation_topic(self.root, "thread-new", "kgpr")
+        self.assertEqual(selected["status"], "created")
+        self.assertEqual(resolve_conversation_topic(self.root, "thread-new")["topicId"], "kgpr")
+
+    def test_conversation_can_be_marked_no_topic_and_never_falls_back_to_root_graft(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectError, GraftProjectLifecycle,
+            disable_conversation_graft, resolve_conversation_choice,
+        )
+
+        choice = disable_conversation_graft(self.root, "thread-no-graft")
+        self.assertEqual(choice["status"], "disabled")
+        self.assertEqual(
+            resolve_conversation_choice(self.root, "thread-no-graft")["decision"],
+            "disabled",
+        )
+        status = GraftProjectLifecycle(FakeGraft(missing=False)).query_status(
+            str(self.root), conversation_id="thread-no-graft",
+        )
+        self.assertEqual(status["status"], "disabled")
+        self.assertEqual(status["conversationChoice"]["choice"], "no-deep-topic")
+        with self.assertRaisesRegex(GraftProjectError, "graft-disabled-for-conversation"):
+            GraftProjectLifecycle(FakeGraft(missing=False)).query(
+                str(self.root), "ignored", query_kind="ask",
+                conversation_id="thread-no-graft",
+            )
+
+    def test_disabled_conversation_cannot_be_rebound_to_topic(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectError, choose_conversation_topic, disable_conversation_graft,
+        )
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        disable_conversation_graft(self.root, "thread-locked")
+        with self.assertRaisesRegex(GraftProjectError, "graft-conversation-choice-locked"):
+            choose_conversation_topic(self.root, "thread-locked", "kgpr")
+
+    def test_status_and_query_can_resolve_topic_from_conversation_binding(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectLifecycle, bind_conversation_topic,
+        )
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        bind_conversation_topic(self.root, "thread-bound", "kgpr")
+
+        class TopicGraft(FakeGraft):
+            def __init__(self):
+                super().__init__(missing=False)
+                self.status_contexts = []
+                self.query_contexts = []
+
+            def status(self, project_root, *, context_dir=None):
+                self.status_contexts.append(context_dir)
+                return super().status(project_root)
+
+            def query(self, project_root, query, *, query_kind, context_dir=None):
+                self.query_contexts.append(context_dir)
+                return {"providerId": "graft", "data": {"hits": []}}
+
+        provider = TopicGraft()
+        lifecycle = GraftProjectLifecycle(provider)
+        status = lifecycle.query_status(
+            str(self.root), conversation_id="thread-bound",
+        )
+        result = lifecycle.query(
+            str(self.root), "Widget", query_kind="ask",
+            conversation_id="thread-bound",
+        )
+
+        expected = str(topic.resolve())
+        self.assertEqual(provider.status_contexts, [expected])
+        self.assertEqual(provider.query_contexts, [expected])
+        self.assertEqual(status["conversationBinding"]["topicId"], "kgpr")
+        self.assertEqual(result["conversationBinding"]["conversationId"], "thread-bound")
+
+    def test_topic_status_exposes_stale_scope_files_for_automatic_deep_refresh(self):
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle, bind_conversation_topic
+        from selfworkflow.v3.hashing import content_hash, project_root_hash
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        source = self.root / "Source" / "main.cpp"
+        source.parent.mkdir()
+        source.write_text("int changed() {}", encoding="utf-8")
+        bind_conversation_topic(self.root, "thread-stale", "kgpr")
+        scope = [{
+            "path": "Source/main.cpp", "size": 1,
+            "sha256": "sha256:" + "0" * 64,
+        }]
+        (topic.parent / "selfworkflow-topic.json").write_text(
+            json.dumps({
+                "kind": "selfworkflow-graft-topic", "version": 1,
+                "topicId": "kgpr", "projectRootHash": project_root_hash(self.root),
+                "scopeFiles": scope, "scopeHash": content_hash(scope),
+                "model": "gpt-5.6-luna", "reasoningEffort": "xhigh",
+                "graftCommandHash": content_hash(["node", "graft"]),
+                "freshness": "fresh",
+            }),
+            encoding="utf-8",
+        )
+
+        class TopicGraft(FakeGraft):
+            def status(self, project_root, *, context_dir=None):
+                return super().status(project_root)
+
+        result = GraftProjectLifecycle(TopicGraft()).query_status(
+            str(self.root), conversation_id="thread-stale",
+        )
+
+        self.assertEqual(result["freshness"], "stale")
+        self.assertEqual(result["topicFreshness"], "stale")
+        self.assertEqual(result["topicStaleFiles"], ["Source/main.cpp"])
+
+    def test_global_worker_reports_bound_topic_refresh_after_code_write(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectLifecycle, bind_conversation_topic,
+        )
+        from selfworkflow.v3.hashing import content_hash, hash_file_content, project_root_hash
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        source = self.root / "Source" / "main.cpp"
+        source.parent.mkdir()
+        source.write_text("int changed() {}", encoding="utf-8")
+        bind_conversation_topic(self.root, "thread-write", "kgpr")
+        scope = [{"path": "Source/main.cpp", "size": 1, "sha256": "sha256:" + "0" * 64}]
+        (topic.parent / "selfworkflow-topic.json").write_text(
+            json.dumps({
+                "kind": "selfworkflow-graft-topic", "version": 1,
+                "topicId": "kgpr", "projectRootHash": project_root_hash(self.root),
+                "scopeFiles": scope, "scopeHash": content_hash(scope),
+                "freshness": "fresh",
+            }),
+            encoding="utf-8",
+        )
+
+        result = GraftProjectLifecycle(FakeGraft(missing=False))
+        result.enqueue(str(self.root), ["Source/main.cpp"])
+        outcome = result.run_once(str(self.root), conversation_id="thread-write")
+
+        self.assertEqual(outcome["status"], "succeeded")
+        self.assertEqual(outcome["topicRefresh"]["status"], "refresh-required")
+        self.assertEqual(outcome["topicRefresh"]["topicId"], "kgpr")
+        self.assertEqual(outcome["topicRefresh"]["staleFiles"], ["Source/main.cpp"])
+        self.assertEqual(outcome["conversationId"], "thread-write")
+        self.assertEqual(outcome["topicRefresh"]["conversationId"], "thread-write")
+        self.assertEqual(outcome["globalMap"]["deep"], False)
+        self.assertEqual(outcome["nextAction"], "run-graft-deep")
+
+    def test_worker_requires_conversation_identity_instead_of_global_only_success(self):
+        from selfworkflow.v3.graft_lifecycle import GraftProjectError, GraftProjectLifecycle
+
+        lifecycle = GraftProjectLifecycle(FakeGraft(missing=False))
+        lifecycle.enqueue(str(self.root), ["src/a.cpp"])
+
+        with self.assertRaisesRegex(
+            GraftProjectError, "graft-conversation-id-invalid",
+        ):
+            lifecycle.run_once(str(self.root), conversation_id=None)
+
+        self.assertEqual(lifecycle._provider.builds, [])
 
     def test_outside_or_graph_paths_are_rejected(self):
         from selfworkflow.v3.graft_lifecycle import GraftProjectError, GraftProjectLifecycle

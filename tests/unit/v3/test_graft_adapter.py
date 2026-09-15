@@ -117,6 +117,31 @@ class GraftAdapterTests(unittest.TestCase):
         self.assertEqual(len(port.calls), 1)
         self.assertNotIn("build", port.calls[0]["argv"])
 
+    def test_status_and_query_can_bind_to_explicit_topic_context(self):
+        port = FakeCommandPort(
+            self._result(stdout=self._fresh_status()),
+            self._result(stdout=self._fresh_status()),
+            self._result(stdout=json.dumps({"hits": []})),
+        )
+        adapter = self._adapter(port)
+
+        status = adapter.status(
+            "C:/work/project",
+            context_dir="C:/work/project/.selfworkflow/graft-deep/topic/graft",
+        )
+        result = adapter.query(
+            "C:/work/project", "find Widget", query_kind="ask",
+            context_dir="C:/work/project/.selfworkflow/graft-deep/topic/graft",
+        )
+
+        self.assertEqual(status["freshness"], "fresh")
+        self.assertEqual(result["data"], {"hits": []})
+        for call in port.calls:
+            self.assertEqual(call["argv"][2:4], (
+                "--dir", "C:/work/project/.selfworkflow/graft-deep/topic/graft",
+            ))
+        self.assertNotIn("C:/work/project/graft", str(port.calls))
+
     def test_status_accepts_structural_graph_when_optional_context_is_missing(self):
         port = FakeCommandPort(self._result(stdout=json.dumps({
             "context": {"ok": False, "missing": True},

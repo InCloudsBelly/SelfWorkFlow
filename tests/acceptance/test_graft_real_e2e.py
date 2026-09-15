@@ -105,7 +105,9 @@ class GraftRealE2ETests(unittest.TestCase):
             coalesced = lifecycle.enqueue(str(project), ["src/main.cpp"])
             self.assertEqual(queued["status"], "queued")
             self.assertEqual(coalesced["status"], "coalesced")
-            updated = lifecycle.run_once(str(project))
+            updated = lifecycle.run_once(
+                str(project), conversation_id="thread-real-e2e",
+            )
             self.assertEqual(updated["status"], "succeeded")
             self.assertFalse(updated["pending"])
             self.assertNotEqual(

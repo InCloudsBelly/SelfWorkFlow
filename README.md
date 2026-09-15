@@ -161,9 +161,10 @@ installer publishes the official MCP launcher at
 The SelfWorkFlow Host CLI at
 `%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd` is retained for lifecycle
 checks, explicit maintenance, and recovery. After an Agent writes code,
-SelfWorkFlow triggers the official Graft structural update; ordinary tasks do
-not run Deep, and it does not run a second graph implementation, watcher, or
-daemon. An explicitly requested Deep build uses the current Agent model through
+SelfWorkFlow triggers the official Graft structural update; ordinary reads do
+not run Deep, while a code write in a conversation bound to a Topic continues
+automatically in the same Worker call into that Topic's scoped Deep. It does not
+run a second graph implementation, watcher, or daemon. A Deep build uses the current Agent model through
 a one-shot loopback Codex bridge. Before any graph decision,
 `graft-preflight` first verifies
 the real Provider runtime (`--version` and the required commands); an
@@ -181,9 +182,20 @@ node dependencies/upstream/graft/dist/cli.js map D:\project --json --no-refresh
 
 %LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-preflight --project-root D:\project
 %LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-event --project-root D:\project --changed-path Source\main.cpp
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-worker --project-root D:\project
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-deep --project-root D:\project --model <current-agent-model> --reasoning-effort <current-effort>
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-worker --project-root D:\project --conversation-id <current-conversation-id>
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-deep --project-root D:\project --conversation-id <current-conversation-id>
 ```
+
+The active Host automatically injects the current conversation model and
+reasoning effort for this internal command; users do not choose them. If the
+Host cannot provide both values, the command fails closed. Topic and official
+Graft manifests record only the last run; they are never defaults.
+These values are historical; they are not defaults.
+
+When automatic Topic refresh cannot complete, the Worker returns a visible
+`partial`/`unverified` result with `retry-topic-deep`. The conversation may
+continue, but the workflow must not silently replace Graft with `rg` or report
+the Topic as fresh.
 
 ## Code reading
 

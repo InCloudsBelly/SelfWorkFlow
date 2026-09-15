@@ -18,7 +18,7 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 - 保留 Graft 的 MCP 体验，但把 MCP 定义为交互便利层；正式工作流证据通过受控 CLI 入口取得。
 - 支持一个对话一个专题的持续 Deep 上下文：全局 structural Map 与专题 Deep 分开，专题只对明确文件范围执行。
 
-本实现批次已修改 Submodule、来源锁、Adapter、安装器构建门禁、工作流代码模块、项目生命周期 Worker 和相关测试；不修改公共生命周期/证据 Schema、业务 API/ABI、Wiki 数据或用户现有 CodeGraph 配置。Worker 仅接收统一 `agent_write` 事件并执行结构 build；Deep 和各厂商原生 Host Hook 不在本批次实现。
+本实现批次已修改 Submodule、来源锁、Adapter、安装器构建门禁、工作流代码模块、项目生命周期 Worker 和相关测试；不修改公共生命周期/证据 Schema、业务 API/ABI、Wiki 数据或用户现有 CodeGraph 配置。Worker 接收统一 `agent_write` 事件并执行全局结构 build；绑定 Topic 过期时返回唯一下一动作，由主 Agent 在同一 `conversation-id` 内继续受范围约束的 Topic Deep。
 
 ## 2. 范围与非目标
 
@@ -35,9 +35,9 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 
 ### 非目标
 
-- 本轮不实现 Graft 自带 Hook、文件系统 Watcher、全局 daemon、Deep 语义或厂商专属原生 Hook。
+- 本轮不实现 Graft 自带 Hook、文件系统 Watcher、全局 daemon 或厂商专属原生 Hook；Topic Deep 只通过 SelfWorkFlow 的绑定链路触发。
 - 不自动扫描所有项目，不在安装时为未知项目建立图。
-- 不把 Graft Deep 语义分析放入代码编辑后的自动更新热路径；只有明确的专题 Deep 请求触发。
+- 不把 Graft Deep 语义分析放入全局结构 Worker；已绑定 Topic 的代码写入在 Worker 成功后自动继续原范围 Deep。
 - 不启用 Graft 自带的竞争性 Hook；SelfWorkFlow 只维护一个修改事件入口。
 - 不把查询操作伪装成新鲜图证据，也不允许查询隐式构建。
 - 不把 Deep 生成的 Wiki 草稿直接当作已确认知识或自动发布到知识后端。
@@ -54,9 +54,9 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 | 安装 | 安装流程从锁定 Submodule 构建并安装 Graft 运行时 | 使用项目管理的 Node/npm 构建；不依赖全局 PATH、临时 `npx` 或未锁定网络包 |
 | 图位置 | 当前项目目录内 | 优先使用已登记且稳定、已忽略的项目内目录；否则使用 `<repo>/graft` |
 | 忽略规则 | 仅在必要时为选定项目目录补充锚定的 `/graft/` Ignore 规则 | 不扫描任意被忽略目录，不猜测业务缓存目录，不执行暂存操作 |
-| 自动更新 | Agent 修改代码完成后触发合并后的结构更新 Worker | 每项目一个锁；可合并重复事件；仅结构更新，不自动 Deep |
+| 自动更新 | Agent 修改代码完成后按当前 `conversation-id` 触发全局 Map，并在绑定 Topic 过期时自动继续该 Topic Deep | 每项目一个锁；可合并重复事件；全局 structural Map 与 Topic Deep 严格分离 |
 | 查询 | 查询使用当前图且不刷新 | 使用 Graft 的 `--no-refresh` 或 `GRAFT_NO_REFRESH=1`；查询不得写图、侧车或指纹 |
-| Deep | 手动、显式批准 | 需要单独的远程模型能力、敏感数据确认和新鲜度说明；不由普通编辑自动触发 |
+| Deep | 已绑定 Topic 的代码写入自动触发原范围 Deep；无绑定时仍需显式选择 | 复用当前 conversation 的 Host 模型、Topic 和 scope；不得对根 `graft/` 执行 Deep |
 | 专题 Deep | 明确 topic 与文件范围后持续维护一个专题上下文 | 以源文件 hash 增量更新；不按 Git hash 建目录；结果可被知识模块引用但不触发知识发布 |
 | 失败 | 普通任务不阻塞，显式图证据任务失败关闭 | 标记 stale/unverified，普通代码阅读降级到 `rg`；不得伪造 Graft 结果 |
 | Host | SelfWorkFlow 提供统一受控 Host Hook | 不启用 Graft 自带竞争性 Hook；先验证 Codex，再覆盖其他配置的 Agent Host |
@@ -112,9 +112,9 @@ Provider ID 为 `graft`。正式能力至少包括：
 | --- | --- | --- |
 | `code.context` | 项目地图、结构节点、文件 API、精确查找 | 本地结构图，带 Provider 身份和图新鲜度 |
 | `code.relationships` | callers、调用链、符号关系和跨文件导航 | 本地结构图，带查询命令、输入摘要和图版本 |
-| `code.semantic` | 可选 Deep 语义摘要 | 独立远程能力；必须显式批准，不属于自动结构更新 |
+| `code.semantic` | 可选 Deep 语义摘要 | 未绑定 Topic 时仍需显式选择；已绑定 Topic 的写后原 scope Deep 由 Worker 自动维护 |
 
-`code.semantic` 不得因为安装了 Graft 或存在 API Key 就自动进入默认计划。若当前实现或宿主无法提供可验证的 Deep 收据，能力必须报告为 `unverified`，不能报告为 supported。
+`code.semantic` 不得因为安装了 Graft 或存在 API Key 就对未绑定 Topic 自动进入默认计划。已绑定 Topic 的写后刷新是该对话既有选择的维护动作；若当前实现或宿主无法提供可验证的 Deep 收据，必须报告为 `unverified`，不能报告为 supported。
 
 正式 Adapter 负责固定命令模板、仓库根目录、受控环境、超时、输出上限、敏感信息脱敏、退出码和新鲜度解析。MCP 可以用于交互探索，但正式 Review/Verify 证据必须经过 SelfWorkFlow 的受控 CLI 入口和收据封装。
 
@@ -128,9 +128,9 @@ Provider ID 为 `graft`。正式能力至少包括：
 | Provider 查询 | 否 | 否 | 强制 `--no-refresh`/`GRAFT_NO_REFRESH=1` |
 | 首次项目惰性初始化 | 是 | 仅由首个代码任务或首次修改触发 | 不在安装阶段执行 |
 | 显式 `build` | 是 | 由用户/计划显式请求 | 可记录为独立维护操作 |
-| `build --deep` | 是 | 否 | 手动、批准、远程能力和敏感数据边界单独确认 |
+| `build --deep` | 是 | 否 | 未绑定 Topic 时手动、批准、远程能力和敏感数据边界单独确认；绑定 Topic 的写后原 scope 由 Worker 自动执行 |
 | MCP 连接 | 否 | 否 | 启动环境固定为 no-refresh；不让 MCP 隐式更新 |
-| 专题 Deep | 写入项目内专题上下文 | 仅由明确 topic 请求触发 | 范围受限、按源 hash 增量，不直接写知识库 |
+| 专题 Deep | 写入项目内专题上下文 | 首次绑定需明确选择；后续代码写入由 Worker 自动维护 | 范围受限、按源 hash 增量，不直接写知识库 |
 
 Worker 采用每项目单锁、事件去重和短时间合并窗口。Worker 的状态至少区分 queued、running、succeeded、stale、failed、boundary-invalid；失败不回滚到旧图之外的假成功状态。旧图可作为 stale reference，但不能满足需要新鲜 Graft 证据的验收条件。
 
@@ -181,7 +181,7 @@ SelfWorkFlow 提供统一的“Agent 修改完成”事件接口。Host 只提�
 
 - 代码编辑动作完成后提交事件；连续编辑在合并窗口内合并。
 - 纯读取、搜索、Provider 查询、Review 查询和 MCP 查询不提交更新事件。
-- Worker 只负责结构更新，不调用 Deep；个人 Wiki 的 Deep 由 `knowledge.propose` 受控触发，不属于编辑 Worker。
+- Worker 只更新全局 structural Map，并返回绑定 Topic 的唯一 `nextAction`；主 Agent 在同一 conversation 内继续 Topic Deep。个人 Wiki 的 Deep 仍由 `knowledge.propose` 独立触发。
 - 更新失败不阻塞普通任务，但必须形成 stale/unverified 状态和可读诊断。
 - 明确要求新鲜图证据的任务必须等待成功收据，否则失败关闭。
 - 不启用 Graft 自有 Hook，避免双重更新、双重锁和难以归因的生命周期竞争。
@@ -238,7 +238,7 @@ SelfWorkFlow 提供统一的“Agent 修改完成”事件接口。Host 只提�
 - **AC-6 修改自动更新：** Agent 修改代码后会提交合并事件，Worker 最终只执行一次结构更新；纯查询不会提交事件。
 - **AC-7 失败降级：** 普通任务在 Graft 不可用时降级到 `rg` 并保留 stale/unverified 原因；要求新鲜 Graft 证据的任务失败关闭。
 - **AC-8 CodeGraph 迁移：** 默认路径不再依赖 CodeGraph，已有 CodeGraph 配置被保留并标记遗留，不被自动删除。
-- **AC-9 Deep 边界：** 自动 Worker 不调用 Deep；手动 Deep 有单独批准、模型能力、敏感数据和收据检查。
+- **AC-9 Deep 边界：** 写后 Worker 绝不对全局图调用 Deep；绑定 Topic stale 时，主 Agent 必须使用同一 `conversation-id`、当前 Host 模型和原 scope 继续 Topic Deep，并复核 freshness。
 - **AC-10 原生验证：** C++、TypeScript、Python 合成项目和 Codex Hook 均有真实失败/成功验收；Unreal 相关能力只按已验证范围声明。
 - **AC-11 专题 Deep：** 明确 topic 与非空文件范围后，官方 Deep 只处理该范围并写入项目内专题上下文；全局 Map 不被覆盖，源文件 hash 漂移时状态转为 stale/failed；知识模块只可选择引用，不能触发或承载 Deep。
 

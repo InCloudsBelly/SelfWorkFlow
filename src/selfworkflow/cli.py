@@ -54,6 +54,34 @@ from selfworkflow.transactions import write_json_atomic
 
 _REPARSE_POINT = 0x400
 
+# These values are injected by the active Host for one provider invocation.
+# They are deliberately process-scoped: SelfWorkFlow must not persist or infer
+# the current conversation model from a Topic/Graft manifest.
+_HOST_MODEL_ENV = "SELFWORKFLOW_HOST_CURRENT_MODEL"
+_HOST_REASONING_ENV = "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT"
+
+
+def _resolve_graft_deep_model_context(
+    model: str | None, reasoning_effort: str | None,
+) -> tuple[str, str]:
+    """Resolve the current Host model without falling back to history."""
+
+    if (model is None) != (reasoning_effort is None):
+        raise ValueError("graft-deep-current-model-context-incomplete")
+    host_model = os.environ.get(_HOST_MODEL_ENV)
+    host_reasoning = os.environ.get(_HOST_REASONING_ENV)
+    if host_model or host_reasoning:
+        if not host_model or not host_reasoning:
+            raise ValueError("graft-deep-current-model-context-incomplete")
+        if model is not None and (
+            model != host_model or reasoning_effort != host_reasoning
+        ):
+            raise ValueError("graft-deep-current-model-context-mismatch")
+        return host_model, host_reasoning
+    if model is not None and reasoning_effort is not None:
+        return model, reasoning_effort
+    raise ValueError("graft-deep-current-model-unavailable")
+
 
 class _SubprocessCommandPort:
     """Shell-free process boundary used only by the explicit Provider CLI."""
@@ -458,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
     provider_status.add_argument("--config-file")
     provider_status.add_argument("--provider-id", default="graft")
     provider_status.add_argument("--project-root", required=True)
+    provider_status.add_argument("--context-dir")
+    provider_status.add_argument("--conversation-id")
     provider_maintain = provider_commands.add_parser("maintain")
     provider_maintain.add_argument("--config-file")
     provider_maintain.add_argument("--provider-id", default="codegraph")
@@ -471,6 +501,8 @@ def main(argv: list[str] | None = None) -> int:
     provider_query.add_argument("--config-file")
     provider_query.add_argument("--provider-id", default="graft")
     provider_query.add_argument("--project-root", required=True)
+    provider_query.add_argument("--context-dir")
+    provider_query.add_argument("--conversation-id")
     provider_query.add_argument("--query", required=True)
     provider_query.add_argument(
         "--query-kind", choices=("ask", "map", "grep", "callers", "skeleton"),
@@ -486,13 +518,29 @@ def main(argv: list[str] | None = None) -> int:
     graft_worker = provider_commands.add_parser("graft-worker")
     graft_worker.add_argument("--config-file")
     graft_worker.add_argument("--project-root", required=True)
+    graft_worker.add_argument("--conversation-id", required=True)
     graft_deep = provider_commands.add_parser("graft-deep")
     graft_deep.add_argument("--config-file")
     graft_deep.add_argument("--project-root", required=True)
-    graft_deep.add_argument("--model", required=True)
-    graft_deep.add_argument("--reasoning-effort", required=True)
-    graft_deep.add_argument("--topic-id", required=True)
-    graft_deep.add_argument("--scope-file", action="append", required=True)
+    # Internal compatibility parameters.  The active Host normally injects
+    # these through the process-scoped context above; users are not asked to
+    # choose a model for a Deep run.
+    graft_deep.add_argument("--model")
+    graft_deep.add_argument("--reasoning-effort")
+    graft_deep.add_argument("--conversation-id", required=True)
+    graft_deep.add_argument("--topic-id")
+    graft_deep.add_argument("--scope-file", action="append", default=[])
+    graft_topics = provider_commands.add_parser("graft-topics")
+    graft_topics.add_argument("--config-file")
+    graft_topics.add_argument("--project-root", required=True)
+    graft_topics.add_argument("--conversation-id", required=True)
+    graft_topic_select = provider_commands.add_parser("graft-topic-select")
+    graft_topic_select.add_argument("--config-file")
+    graft_topic_select.add_argument("--project-root", required=True)
+    graft_topic_select.add_argument("--conversation-id", required=True)
+    topic_choice = graft_topic_select.add_mutually_exclusive_group(required=True)
+    topic_choice.add_argument("--topic-id")
+    topic_choice.add_argument("--disable", action="store_true")
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -731,7 +779,11 @@ def main(argv: list[str] | None = None) -> int:
             elif arguments.provider_command == "doctor":
                 result = manager.doctor(arguments.provider_id)
             elif arguments.provider_command == "status":
-                result = manager.status(arguments.provider_id, arguments.project_root)
+                result = manager.status(
+                    arguments.provider_id, arguments.project_root,
+                    context_dir=arguments.context_dir,
+                    conversation_id=arguments.conversation_id,
+                )
             elif arguments.provider_command == "maintain":
                 plan = manager.maintain(
                     arguments.provider_id, arguments.action,
@@ -751,6 +803,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = manager.query(
                     arguments.provider_id, arguments.project_root, arguments.query,
                     query_kind=arguments.query_kind,
+                    context_dir=arguments.context_dir,
+                    conversation_id=arguments.conversation_id,
                 )
             elif arguments.provider_command == "graft-preflight":
                 result = manager.graft_preflight(arguments.project_root)
@@ -759,13 +813,28 @@ def main(argv: list[str] | None = None) -> int:
                     arguments.project_root, arguments.changed_path,
                 )
             elif arguments.provider_command == "graft-worker":
-                result = manager.graft_worker(arguments.project_root)
+                result = manager.graft_worker(
+                    arguments.project_root,
+                    conversation_id=arguments.conversation_id,
+                )
             elif arguments.provider_command == "graft-deep":
+                current_model, current_reasoning = _resolve_graft_deep_model_context(
+                    arguments.model, arguments.reasoning_effort,
+                )
                 result = manager.graft_deep(
-                    arguments.project_root, arguments.model,
-                    arguments.reasoning_effort,
+                    arguments.project_root, current_model, current_reasoning,
+                    conversation_id=arguments.conversation_id,
                     topic_id=arguments.topic_id,
                     scope_files=arguments.scope_file,
+                )
+            elif arguments.provider_command == "graft-topics":
+                result = manager.graft_topics(
+                    arguments.project_root, arguments.conversation_id,
+                )
+            elif arguments.provider_command == "graft-topic-select":
+                result = manager.graft_topic_select(
+                    arguments.project_root, arguments.conversation_id,
+                    topic_id=arguments.topic_id, disable=arguments.disable,
                 )
             elif arguments.provider_command == "inspect":
                 pass
