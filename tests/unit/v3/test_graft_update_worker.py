@@ -166,7 +166,7 @@ class GraftUpdateWorkerTests(unittest.TestCase):
             str(self.root), conversation_id="thread-build-failure",
         )
 
-        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["status"], "partial")
         self.assertTrue(result["retryable"])
         queue = json.loads(
             (self.root / "graft/.cache/selfworkflow/queue.json").read_text()
@@ -448,6 +448,48 @@ class GraftUpdateWorkerTests(unittest.TestCase):
         self.assertEqual(outcome["topicRefresh"]["conversationId"], "thread-write")
         self.assertEqual(outcome["globalMap"]["deep"], False)
         self.assertEqual(outcome["nextAction"], "run-graft-deep")
+
+    def test_global_map_failure_does_not_block_bound_topic_refresh(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectLifecycle, bind_conversation_topic,
+        )
+        from selfworkflow.v3.hashing import content_hash, project_root_hash
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        source = self.root / "Source" / "main.cpp"
+        source.parent.mkdir()
+        source.write_text("int changed() {}", encoding="utf-8")
+        bind_conversation_topic(self.root, "thread-global-failure", "kgpr")
+        scope = [{
+            "path": "Source/main.cpp", "size": 1,
+            "sha256": "sha256:" + "0" * 64,
+        }]
+        (topic.parent / "selfworkflow-topic.json").write_text(
+            json.dumps({
+                "kind": "selfworkflow-graft-topic", "version": 1,
+                "topicId": "kgpr", "projectRootHash": project_root_hash(self.root),
+                "scopeFiles": scope, "scopeHash": content_hash(scope),
+                "freshness": "fresh",
+            }),
+            encoding="utf-8",
+        )
+
+        lifecycle = GraftProjectLifecycle(
+            FakeGraft(missing=False, fail_build=True),
+        )
+        lifecycle.enqueue(str(self.root), ["Source/main.cpp"])
+
+        outcome = lifecycle.run_once(
+            str(self.root), conversation_id="thread-global-failure",
+        )
+
+        self.assertEqual(outcome["status"], "partial")
+        self.assertEqual(outcome["globalMap"]["status"], "failed")
+        self.assertFalse(outcome["globalMapUpdated"])
+        self.assertEqual(outcome["topicRefresh"]["status"], "refresh-required")
+        self.assertEqual(outcome["nextAction"], "run-graft-deep")
+        self.assertTrue(outcome["pending"])
 
     def test_worker_requires_conversation_identity_instead_of_global_only_success(self):
         from selfworkflow.v3.graft_lifecycle import GraftProjectError, GraftProjectLifecycle

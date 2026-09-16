@@ -176,7 +176,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("官方 Graft MCP 是代码阅读入口", provider_doc)
-        self.assertIn("回退到 `rg`", provider_doc)
+        self.assertIn("`rg` 不是默认阅读入口", provider_doc)
         self.assertNotIn("CodeGraph", provider_doc)
 
     def test_installer_defaults_to_matt_without_superpowers_or_duplicate_grill(self):

@@ -1114,10 +1114,16 @@ class GraftProjectLifecycle:
                 }
             _write_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
             active = list(paths)
+        global_failure: str | None = None
+        build: Mapping[str, Any] | None = None
         try:
+            # The global map is a separate, non-Deep acceleration layer.  Its
+            # failure must not prevent the conversation-bound Topic from
+            # being checked and refreshed below.
             build = self._provider.build_structural(str(root))
         except Exception as error:
             reason = getattr(error, "reason", "graft-update-failed")
+            global_failure = reason
             with _WorkerLock(state):
                 queue_path = state / "queue.json"
                 queue = _read_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
@@ -1130,35 +1136,49 @@ class GraftProjectLifecycle:
                     "schemaVersion": 1, "status": "failed", "retryable": True,
                     "lastChangedPaths": active, "reason": reason,
                 })
-            return {
-                "providerId": "graft", "status": "failed", "retryable": True,
-                "pending": True, "reason": reason,
-                "conversationId": conversation_id,
-                "globalMapUpdated": False, "nextAction": "retry-global-map",
-            }
-        with _WorkerLock(state):
-            queue = _read_json(state / "queue.json", {"schemaVersion": 1, "changedPaths": []})
-            pending = queue.get("changedPaths", [])
-            if not isinstance(pending, list):
-                raise GraftProjectError("graft-worker-state-invalid")
-            _write_json(state / "state.json", {
-                "schemaVersion": 1, "status": "succeeded", "retryable": False,
-                "lastChangedPaths": active,
-            })
+        if global_failure is None:
+            with _WorkerLock(state):
+                queue = _read_json(state / "queue.json", {"schemaVersion": 1, "changedPaths": []})
+                pending = queue.get("changedPaths", [])
+                if not isinstance(pending, list):
+                    raise GraftProjectError("graft-worker-state-invalid")
+                _write_json(state / "state.json", {
+                    "schemaVersion": 1, "status": "succeeded", "retryable": False,
+                    "lastChangedPaths": active,
+                })
+        else:
+            with _WorkerLock(state):
+                queue = _read_json(state / "queue.json", {"schemaVersion": 1, "changedPaths": []})
+                pending = queue.get("changedPaths", [])
+                if not isinstance(pending, list):
+                    raise GraftProjectError("graft-worker-state-invalid")
         result = {
-            "providerId": "graft", "status": "succeeded", "retryable": False,
+            "providerId": "graft",
+            "status": "partial" if global_failure is not None else "succeeded",
+            "retryable": global_failure is not None,
             "pending": bool(pending), "changedPathCount": len(active),
-            "build": dict(build) if isinstance(build, Mapping) else build,
             "graphRoot": str(graph),
-            "globalMapUpdated": True,
-            "globalMap": {"root": str(graph), "deep": False, "status": "succeeded"},
+            "globalMapUpdated": global_failure is None,
+            "globalMap": {
+                "root": str(graph), "deep": False,
+                "status": "failed" if global_failure is not None else "succeeded",
+                **({"reason": global_failure} if global_failure is not None else {}),
+            },
             "conversationId": conversation_id,
         }
+        if build is not None:
+            result["build"] = dict(build) if isinstance(build, Mapping) else build
+        if global_failure is not None:
+            result["reason"] = global_failure
         topic_refresh = _topic_refresh_status(root, conversation_id)
         if topic_refresh is None:
             raise GraftProjectError("graft-topic-refresh-result-missing")
         result["topicRefresh"] = topic_refresh
-        result["nextAction"] = topic_refresh["action"]
+        result["nextAction"] = (
+            topic_refresh["action"]
+            if topic_refresh["action"] != "none"
+            else "retry-global-map" if global_failure is not None else "none"
+        )
         return result
 
 

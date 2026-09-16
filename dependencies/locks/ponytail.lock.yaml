@@ -8,21 +8,21 @@ upstreamVersion: 4.9.0
 license:
   path: LICENSE
   spdx: MIT
-  hash: sha256:f1af4301bd3b85026965f9f1cfa101b9bfd73a75c6b92f7a2a72bab5768abd36
+  hash: sha256:fb1bc6909ac3ef82d5c22106e32ef682b0cff66788fa915fb9b53b15c9d2f3ab
 selectedSkills:
   - id: ponytail
     path: skills/ponytail
-    hash: sha256:46a57e26a2632e7fa40eae6a3cf3011ccdc4d8db19d8f8617907d6b5deef055e
+    hash: sha256:1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2
     runtimeHash: sha256:1f507afb89387711c2c2d8973581362784681039bf731b4e6705cb3f83be83aa
   - id: ponytail-review
     path: skills/ponytail-review
-    hash: sha256:6c8b7e5c897a406b66da6aabda7fa6509e8d1d447e73e602265d7986497445d1
-    runtimeHash: sha256:6c8b7e5c897a406b66da6aabda7fa6509e8d1d447e73e602265d7986497445d1
+    hash: sha256:40df33b58fc6ef889b93585733feb9566b76e9586efa7f376785c1e995197ac0
+    runtimeHash: sha256:40df33b58fc6ef889b93585733feb9566b76e9586efa7f376785c1e995197ac0
   - id: ponytail-audit
     path: skills/ponytail-audit
-    hash: sha256:49e835c96313009179ec162d80ccc9d91625e387c8af7cd3975c531ba105b2d5
-    runtimeHash: sha256:49e835c96313009179ec162d80ccc9d91625e387c8af7cd3975c531ba105b2d5
+    hash: sha256:5560b8e383dbe2ddfddc873a1e2bf2e586e23e0cd7d995537482b2315331f6d1
+    runtimeHash: sha256:5560b8e383dbe2ddfddc873a1e2bf2e586e23e0cd7d995537482b2315331f6d1
   - id: ponytail-help
     path: skills/ponytail-help
-    hash: sha256:07e0fc50c722cee981d47f62a5d32a7def4cb65651f414724e5fd6939f145977
+    hash: sha256:2264d1615117b02b0fd5a69ec84cd2757006471a78e4d6c22eed6d581c1d37a4
     runtimeHash: sha256:46358c185deaf180ed64a9de24aface5a8b996de98a021520571800d9b47a9a7

@@ -266,8 +266,10 @@ class ProviderManagerTests(unittest.TestCase):
         )
         self._configure_graft(manager)
         lifecycle_result = {
-            "providerId": "graft", "status": "succeeded",
-            "globalMapUpdated": True, "conversationId": "thread-auto",
+            "providerId": "graft", "status": "partial",
+            "globalMapUpdated": False,
+            "globalMap": {"deep": False, "status": "failed"},
+            "conversationId": "thread-auto",
             "topicRefresh": {
                 "status": "refresh-required", "action": "run-graft-deep",
                 "topicId": "kgpr", "conversationId": "thread-auto",
@@ -292,7 +294,6 @@ class ProviderManagerTests(unittest.TestCase):
         ) as deep, patch.object(
             manager, "status",
             side_effect=[
-                {"providerId": "graft", "freshness": "fresh", "graphStatus": "fresh"},
                 {
                     "providerId": "graft", "freshness": "fresh",
                     "graphStatus": "fresh", "topicFreshness": "fresh",
@@ -303,17 +304,17 @@ class ProviderManagerTests(unittest.TestCase):
                 str(project), conversation_id="thread-auto",
             )
 
-        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["status"], "partial")
         self.assertTrue(result["topicUpdated"])
-        self.assertEqual(result["nextAction"], "none")
+        self.assertEqual(result["nextAction"], "retry-global-map")
+        self.assertFalse(result["completionEligible"])
         deep.assert_called_once_with(
             str(project), "gpt-5.6-sol", "xhigh",
             conversation_id="thread-auto", topic_id="kgpr", scope_files=(),
         )
-        self.assertEqual(status.call_count, 2)
-        self.assertEqual(status.call_args_list[0].kwargs, {})
+        self.assertEqual(status.call_count, 1)
         self.assertEqual(
-            status.call_args_list[1].kwargs,
+            status.call_args_list[0].kwargs,
             {"conversation_id": "thread-auto"},
         )
 
@@ -359,6 +360,47 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertFalse(result["topicUpdated"])
         self.assertEqual(result["nextAction"], "retry-topic-deep")
         self.assertEqual(result["reason"], "graft-deep-current-model-unavailable")
+        deep.assert_not_called()
+
+    def test_graft_worker_keeps_global_retry_separate_when_topic_is_fresh(self):
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        manager = self._manager(
+            source_identity_resolver=lambda source_path: {
+                "source": Path(source_path),
+                "report": {
+                    "version": "0.18.0", "commit": "b" * 40,
+                    "sourceHash": "sha256:" + "a" * 64, "dirty": False,
+                },
+            },
+        )
+        self._configure_graft(manager)
+        lifecycle_result = {
+            "providerId": "graft", "status": "partial",
+            "globalMapUpdated": False,
+            "globalMap": {"deep": False, "status": "failed"},
+            "conversationId": "thread-global-only-retry",
+            "topicRefresh": {
+                "status": "fresh", "action": "none",
+                "topicId": "kgpr", "conversationId": "thread-global-only-retry",
+            },
+            "nextAction": "retry-global-map",
+        }
+        fake_lifecycle = type(
+            "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
+        )()
+        with patch(
+            "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
+            return_value=fake_lifecycle,
+        ), patch.object(manager, "graft_deep") as deep:
+            result = manager.graft_worker(
+                str(project), conversation_id="thread-global-only-retry",
+            )
+
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(result["topicUpdated"])
+        self.assertFalse(result["completionEligible"])
+        self.assertEqual(result["nextAction"], "retry-global-map")
         deep.assert_not_called()
 
     def test_graft_worker_does_not_claim_fresh_when_post_deep_verification_fails(self):

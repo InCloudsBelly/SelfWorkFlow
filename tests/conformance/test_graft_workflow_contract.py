@@ -11,7 +11,7 @@ class GraftWorkflowContractTests(unittest.TestCase):
         text = f"{text}\n{graft_read}"
 
         self.assertIn("官方 Graft MCP", text)
-        self.assertIn("graft_check_freshness", text)
+        self.assertIn("全局非 Deep Code Map", text)
         self.assertIn("SelfWorkflow 不复制 Graft", text)
         self.assertIn("官方 MCP 是 Agent 查询入口", text)
         self.assertIn("不得运行裸 CLI 查询", text)
@@ -45,17 +45,17 @@ class GraftWorkflowContractTests(unittest.TestCase):
         update = (self.ROOT / "workflow/modules/graft-update.md").read_text(encoding="utf-8")
         text = f"{text}\n{update}"
 
-        self.assertIn("代码任务默认先检查并使用新鲜官方 Graft MCP", text)
+        self.assertIn("代码任务优先使用官方 Graft MCP 的全局非 Deep Code Map", text)
         self.assertIn("修改代码后由 SelfWorkflow 自动发送一次 `agent_write` 事件", text)
         self.assertIn("conversation-id", text)
-        self.assertIn("global structural Map", text)
+        self.assertIn("全局非 Deep Code Map", text)
         self.assertIn("Topic Deep", text)
         self.assertIn("同一次 Host", text)
         self.assertIn("retry-topic-deep", text)
         self.assertIn("不启用额外 Watcher、daemon 或第二套图逻辑", text)
 
         doc = (self.ROOT / "docs/providers/graft.md").read_text(encoding="utf-8")
-        self.assertIn("新代码任务默认检查并使用官方 MCP 和 `graft_check_freshness`", doc)
+        self.assertIn("新代码任务优先按需使用官方 MCP 的全局非 Deep Code Map", doc)
         self.assertIn("Agent 修改代码后自动发送一次 `agent_write`", doc)
         self.assertIn("topicRefresh", doc)
         self.assertIn("--conversation-id", doc)

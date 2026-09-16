@@ -4,9 +4,9 @@
 
 ## 默认代码流程
 
-1. 新代码任务默认检查并使用官方 MCP 和 `graft_check_freshness`；`rg` 不是默认阅读入口。
+1. 新代码任务优先按需使用官方 MCP 的全局非 Deep Code Map；全局 `graft/manifest.json` 不是 Topic 流程的前置条件或门禁，`rg` 不是默认阅读入口。
 2. 通过 MCP 按需使用 `graft_repo_map`、`graft_file_api`、`graft_find_code`、`graft_trace_calls`、`graft_find_all`。
-3. Agent 修改代码后自动发送一次 `agent_write`，由 SelfWorkFlow 在同一次 Worker 调用中先更新官方结构图；如当前 conversation 已绑定 Topic 且需要刷新，Worker 自动用当前模型执行原范围 Topic Deep。
+3. Agent 修改代码后自动发送一次 `agent_write`，由 SelfWorkFlow 独立维护非 Deep 全局 Code Map；如当前 conversation 已绑定 Topic 且需要刷新，Worker 自动用当前模型执行原范围 Topic Deep。全局 Map 失败不阻塞 Topic，但必须单独返回待重试状态。
 4. 更新成功才重新报告 `fresh`；查询、Review 查询和纯读取不触发更新。
 
 MCP 缺失、图过期或项目边界无效时，必须明确标记 `unverified`；仅简单文本定位可在说明后临时使用 `rg`，需要新鲜 Graft 结构证据的任务失败关闭。手工读取 `graft/` 文件不属于正式 Graft 查询证据。
@@ -15,7 +15,7 @@ MCP 缺失、图过期或项目边界无效时，必须明确标记 `unverified`
 
 正式来源是锁定的 `dependencies/upstream/graft` Submodule，身份由 `dependencies/locks/graft.lock.yaml` 绑定。安装器从锁定来源构建官方运行时，不使用未锁定的全局 PATH、`npx` 或临时网络包。
 
-官方 MCP 按当前项目目录绑定，项目结构 Map 默认位于 `<repo>/graft/`。图是项目本地可再生缓存，不自动 Git add、commit 或 push；不使用 C 盘机器缓存，也不把固定项目路径写入全局配置。
+官方 MCP 按当前项目目录绑定，项目结构 Map 默认位于 `<repo>/graft/`。全局 Code Map 是项目本地可再生缓存，不自动 Git add、commit 或 push；它不是 Topic Deep 的 freshness 依据。不使用 C 盘机器缓存，也不把固定项目路径写入全局配置。
 
 SelfWorkFlow Host CLI 仅用于安装、预检、事件、Worker、显式维护和失败恢复；Agent 查询应使用官方 MCP。没有有效 Provider 或图边界时，不自动安装、扩大目录或猜测缓存路径。
 
@@ -30,7 +30,7 @@ SelfWorkFlow Host CLI 仅用于安装、预检、事件、Worker、显式维护�
   --project-root D:\project --conversation-id <current-conversation-id>
 ```
 
-Worker 合并重复事件、校验项目边界并调用官方结构 `build`；根图阶段不调用 `build --deep`。`conversation-id` 是写后 Worker 的必需身份，缺失即失败关闭。成功结果同时返回 `conversationId`、全局 structural Map（`deep:false`）、绑定 Topic 的 `topicRefresh` 和 `nextAction`：`fresh` 无后续动作，`refresh-required` 由同一次 Host Worker 调用自动使用当前模型执行原 scope Deep，`disabled/unbound` 不触发 Deep。Worker 随后必须复核全局 Map/Topic freshness；Topic Deep 暂时失败返回 `partial`、`topicFreshness=unverified`、`nextAction=retry-topic-deep`，普通对话可以继续但不得静默回退 `rg` 或声称 Graft fresh。Worker 不实现后台 Watcher 或 daemon。
+Worker 合并重复事件、校验项目边界并调用官方非 Deep `build`；不调用 `build --deep`。`conversation-id` 是写后 Worker 的必需身份，缺失即失败关闭。结果分别返回全局 Map 状态和绑定 Topic 的 `topicRefresh`：`fresh` 无后续动作，`refresh-required` 由同一次 Host Worker 调用自动使用当前模型执行原 scope Deep，`disabled/unbound` 不触发 Deep。全局 Map 失败返回 `partial`/`retry-global-map`，仍继续 Topic 流程；Topic Deep 暂时失败返回 `partial`、`topicFreshness=unverified`、`nextAction=retry-topic-deep`。Topic freshness 只校验 Topic context、Topic `manifest.json` 和源文件 hash，不检查或要求项目根 `graft/manifest.json`。普通对话可以继续但不得静默回退 `rg` 或声称 Graft fresh。Worker 不实现后台 Watcher 或 daemon。
 
 ## 专题 Deep
 
@@ -79,7 +79,7 @@ Deep bridge 默认传入 `--concurrency 1`，降低大型 C++/WASM 任务的资�
 | 状态 | 普通代码任务 | 明确要求新鲜 Graft 证据 |
 | --- | --- | --- |
 | Provider/MCP 缺失 | 标记 `unverified`，回退 `rg` | 失败关闭 |
-| 全局图 stale | 标记 stale，必要时先更新 | 不满足新鲜证据 |
+| 全局 Code Map 缺失/过期 | 单独标记 `globalMap=unverified`，必要时更新；不阻塞 Topic | 不影响 Topic 门禁 |
 | 专题 Deep 失败或源文件漂移 | 保留旧专题状态并报告 | 等待成功收据 |
 | 范围、Reparse Point 或路径边界无效 | 暂停 Graft，回退 `rg` | 失败关闭 |
 

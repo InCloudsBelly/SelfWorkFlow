@@ -8,7 +8,7 @@ inventoryHash: sha256:310ace68f647577213468bf07c819bb4c873453f0f4bf0512699824a7b
 license:
   path: LICENSE
   spdx: MIT
-  hash: sha256:baf7ec28127b3fd98c7311987f9a6234177acff0921a03f6c205c7f39b28bb01
+  hash: sha256:d63b6198ba078d9494407eb94e2d86adf6350195301bb5ded4ba24e36bce8b55
 adapterFiles:
   - path: overlays/tea/adapter.yaml
     hash: sha256:7eb397a9d17fa990ee37bd2f3bb7891899ee939a0e198c207d8afefefb76a315

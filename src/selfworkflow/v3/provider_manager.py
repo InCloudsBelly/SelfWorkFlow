@@ -869,7 +869,7 @@ class ProviderManager:
         """Continue one write-triggered worker run into its bound Topic Deep."""
 
         output = dict(result)
-        if output.get("status") != "succeeded":
+        if output.get("status") not in {"succeeded", "partial"}:
             return output
         topic_refresh = output.get("topicRefresh")
         if not isinstance(topic_refresh, Mapping):
@@ -884,10 +884,10 @@ class ProviderManager:
                     output,
                     reason if isinstance(reason, str) else "graft-topic-refresh-unverified",
                 )
-            if action in {"none", "topic-selection-required"}:
+            if action in {"none", "topic-selection-required", "retry-global-map"}:
                 output.update({
                     "topicUpdated": topic_refresh.get("status") == "fresh",
-                    "completionEligible": True,
+                    "completionEligible": action != "retry-global-map",
                 })
                 return output
             return self._topic_refresh_failure(
@@ -915,7 +915,6 @@ class ProviderManager:
                 output, "graft-topic-deep-failed", deep=deep,
             )
         try:
-            global_status = self.status("graft", project_root)
             topic_status = self.status(
                 "graft", project_root,
                 conversation_id=str(output["conversationId"]),
@@ -924,28 +923,26 @@ class ProviderManager:
             return self._topic_refresh_failure(
                 output, error.reason, deep=deep,
             )
-        global_fresh = (
-            isinstance(global_status, Mapping)
-            and global_status.get("freshness") == "fresh"
-            and global_status.get("graphStatus") == "fresh"
-        )
         topic_fresh = (
             isinstance(topic_status, Mapping)
             and topic_status.get("freshness") == "fresh"
             and topic_status.get("graphStatus") == "fresh"
             and topic_status.get("topicFreshness") == "fresh"
         )
-        if not global_fresh or not topic_fresh:
+        if not topic_fresh:
             return self._topic_refresh_failure(
                 output, "graft-freshness-verification-failed", deep=deep,
             )
+        global_map_failed = (
+            isinstance(output.get("globalMap"), Mapping)
+            and output["globalMap"].get("status") == "failed"
+        )
         output.update({
             "topicUpdated": True,
             "topicFreshness": "fresh",
-            "globalFreshness": "fresh",
             "topicDeep": dict(deep),
-            "nextAction": "none",
-            "completionEligible": True,
+            "nextAction": "retry-global-map" if global_map_failed else "none",
+            "completionEligible": not global_map_failed,
         })
         return output
 
