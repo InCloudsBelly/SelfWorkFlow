@@ -18,7 +18,7 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
 - 保留 Graft 的 MCP 体验，但把 MCP 定义为交互便利层；正式工作流证据通过受控 CLI 入口取得。
 - 支持一个对话一个专题的持续 Deep 上下文：全局 structural Map 与专题 Deep 分开，专题只对明确文件范围执行。
 
-本实现批次已修改 Submodule、来源锁、Adapter、安装器构建门禁、工作流代码模块、项目生命周期 Worker 和相关测试；不修改公共生命周期/证据 Schema、业务 API/ABI、Wiki 数据或用户现有 CodeGraph 配置。Worker 接收统一 `agent_write` 事件并执行全局结构 build；绑定 Topic 过期时返回唯一下一动作，由主 Agent 在同一 `conversation-id` 内继续受范围约束的 Topic Deep。
+本实现批次已修改 Submodule、来源锁、Adapter、安装器构建门禁、工作流代码模块、项目生命周期 Worker 和相关测试；不修改公共生命周期/证据 Schema、业务 API/ABI、Wiki 数据或用户现有 CodeGraph 配置。Worker 接收统一 `agent_write` 事件并先检查绑定 Topic；Topic 过期时优先由同一次 Host 调用继续受范围约束的 Topic Deep，全局结构 Map 延后且不阻塞主任务；Topic fresh 时才执行独立的全局结构 build。
 
 ## 2. 范围与非目标
 
@@ -74,7 +74,9 @@ Graft 提供本地代码图、结构关系查询、仓库地图、符号调用�
         │
 当前项目目录 ──> Project Binding ──> <repo>/graft 或已验证的 ignored cache
         │                              │
-        ├── Agent 编辑完成 ──> Coalescing Update Worker ──> 结构 build
+        ├── Agent 编辑完成 ──> Coalescing Update Worker ──> Topic freshness
+        │                                      ├── stale ──> 原范围 Deep
+        │                                      └── fresh ──> 全局结构 build
         └── 代码查询 ────────────────> no-refresh CLI ─────> 只读查询结果
 ```
 
@@ -181,7 +183,7 @@ SelfWorkFlow 提供统一的“Agent 修改完成”事件接口。Host 只提�
 
 - 代码编辑动作完成后提交事件；连续编辑在合并窗口内合并。
 - 纯读取、搜索、Provider 查询、Review 查询和 MCP 查询不提交更新事件。
-- Worker 只更新全局 structural Map，并返回绑定 Topic 的唯一 `nextAction`；主 Agent 在同一 conversation 内继续 Topic Deep。个人 Wiki 的 Deep 仍由 `knowledge.propose` 独立触发。
+- Worker 独立维护全局 structural Map，并返回绑定 Topic 的唯一 `nextAction`；Topic stale 时优先在同一 conversation 内继续原范围 Topic Deep，全局 Map 可延后重试且不阻塞主任务。个人 Wiki 的 Deep 仍由 `knowledge.propose` 独立触发。
 - 更新失败不阻塞普通任务，但必须形成 stale/unverified 状态和可读诊断。
 - 明确要求新鲜图证据的任务必须等待成功收据，否则失败关闭。
 - 不启用 Graft 自有 Hook，避免双重更新、双重锁和难以归因的生命周期竞争。

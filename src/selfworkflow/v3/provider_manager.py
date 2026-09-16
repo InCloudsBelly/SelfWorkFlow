@@ -887,7 +887,7 @@ class ProviderManager:
             if action in {"none", "topic-selection-required", "retry-global-map"}:
                 output.update({
                     "topicUpdated": topic_refresh.get("status") == "fresh",
-                    "completionEligible": action != "retry-global-map",
+                    "completionEligible": True,
                 })
                 return output
             return self._topic_refresh_failure(
@@ -933,16 +933,16 @@ class ProviderManager:
             return self._topic_refresh_failure(
                 output, "graft-freshness-verification-failed", deep=deep,
             )
-        global_map_failed = (
+        global_map_pending = (
             isinstance(output.get("globalMap"), Mapping)
-            and output["globalMap"].get("status") == "failed"
+            and output["globalMap"].get("status") in {"failed", "deferred"}
         )
         output.update({
             "topicUpdated": True,
             "topicFreshness": "fresh",
             "topicDeep": dict(deep),
-            "nextAction": "retry-global-map" if global_map_failed else "none",
-            "completionEligible": not global_map_failed,
+            "nextAction": "retry-global-map" if global_map_pending else "none",
+            "completionEligible": True,
         })
         return output
 

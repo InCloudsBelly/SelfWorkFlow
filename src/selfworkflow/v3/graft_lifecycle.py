@@ -1114,6 +1114,68 @@ class GraftProjectLifecycle:
                 }
             _write_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
             active = list(paths)
+        topic_refresh = _topic_refresh_status(root, conversation_id)
+        if topic_refresh is None:
+            raise GraftProjectError("graft-topic-refresh-result-missing")
+        if topic_refresh["action"] == "run-graft-deep":
+            # Topic freshness is the task-critical path. Keep the write event
+            # durable and let ProviderManager refresh the Topic before the
+            # independent global map, which may scan a large repository.
+            with _WorkerLock(state):
+                queue_path = state / "queue.json"
+                queue = _read_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
+                pending = queue.get("changedPaths", [])
+                if not isinstance(pending, list) or any(
+                    not isinstance(item, str) for item in pending
+                ):
+                    raise GraftProjectError("graft-worker-state-invalid")
+                merged = sorted(set(active).union(pending))
+                if len(merged) > _MAX_CHANGED_PATHS:
+                    raise GraftProjectError("graft-event-too-large")
+                _write_json(queue_path, {"schemaVersion": 1, "changedPaths": merged})
+                _write_json(state / "state.json", {
+                    "schemaVersion": 1, "status": "deferred", "retryable": True,
+                    "lastChangedPaths": active, "reason": "topic-refresh-priority",
+                })
+            return {
+                "providerId": "graft", "status": "partial", "retryable": True,
+                "pending": True, "changedPathCount": len(active),
+                "graphRoot": str(graph), "globalMapUpdated": False,
+                "globalMap": {
+                    "root": str(graph), "deep": False, "status": "deferred",
+                    "reason": "topic-refresh-priority",
+                },
+                "conversationId": conversation_id,
+                "topicRefresh": topic_refresh,
+                "nextAction": "run-graft-deep",
+                "reason": "global-map-deferred-for-topic-refresh",
+            }
+        if topic_refresh["action"] == "stop":
+            with _WorkerLock(state):
+                queue_path = state / "queue.json"
+                queue = _read_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
+                pending = queue.get("changedPaths", [])
+                if not isinstance(pending, list) or any(
+                    not isinstance(item, str) for item in pending
+                ):
+                    raise GraftProjectError("graft-worker-state-invalid")
+                merged = sorted(set(active).union(pending))
+                if len(merged) > _MAX_CHANGED_PATHS:
+                    raise GraftProjectError("graft-event-too-large")
+                _write_json(queue_path, {"schemaVersion": 1, "changedPaths": merged})
+                _write_json(state / "state.json", {
+                    "schemaVersion": 1, "status": "blocked", "retryable": False,
+                    "lastChangedPaths": active, "reason": topic_refresh.get("reason"),
+                })
+            return {
+                "providerId": "graft", "status": "unverified", "retryable": False,
+                "pending": True, "changedPathCount": len(active),
+                "graphRoot": str(graph), "globalMapUpdated": False,
+                "globalMap": {"root": str(graph), "deep": False, "status": "deferred"},
+                "conversationId": conversation_id,
+                "topicRefresh": topic_refresh, "nextAction": "stop",
+                "reason": topic_refresh.get("reason", "graft-topic-refresh-unverified"),
+            }
         global_failure: str | None = None
         build: Mapping[str, Any] | None = None
         try:

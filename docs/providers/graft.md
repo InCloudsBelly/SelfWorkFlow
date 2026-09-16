@@ -6,7 +6,7 @@
 
 1. 新代码任务优先按需使用官方 MCP 的全局非 Deep Code Map；全局 `graft/manifest.json` 不是 Topic 流程的前置条件或门禁，`rg` 不是默认阅读入口。
 2. 通过 MCP 按需使用 `graft_repo_map`、`graft_file_api`、`graft_find_code`、`graft_trace_calls`、`graft_find_all`。
-3. Agent 修改代码后自动发送一次 `agent_write`，由 SelfWorkFlow 独立维护非 Deep 全局 Code Map；如当前 conversation 已绑定 Topic 且需要刷新，Worker 自动用当前模型执行原范围 Topic Deep。全局 Map 失败不阻塞 Topic，但必须单独返回待重试状态。
+3. Agent 修改代码后自动发送一次 `agent_write`。Worker 先检查当前 conversation 绑定的 Topic：Topic 需要刷新时优先用当前模型执行原范围 Topic Deep，并把全局非 Deep Code Map 延后；Topic 已 fresh 时再维护全局 Map。全局 Map 失败不阻塞 Topic，但必须单独返回待重试状态。
 4. 更新成功才重新报告 `fresh`；查询、Review 查询和纯读取不触发更新。
 
 MCP 缺失、图过期或项目边界无效时，必须明确标记 `unverified`；仅简单文本定位可在说明后临时使用 `rg`，需要新鲜 Graft 结构证据的任务失败关闭。手工读取 `graft/` 文件不属于正式 Graft 查询证据。
@@ -30,7 +30,7 @@ SelfWorkFlow Host CLI 仅用于安装、预检、事件、Worker、显式维护�
   --project-root D:\project --conversation-id <current-conversation-id>
 ```
 
-Worker 合并重复事件、校验项目边界并调用官方非 Deep `build`；不调用 `build --deep`。`conversation-id` 是写后 Worker 的必需身份，缺失即失败关闭。结果分别返回全局 Map 状态和绑定 Topic 的 `topicRefresh`：`fresh` 无后续动作，`refresh-required` 由同一次 Host Worker 调用自动使用当前模型执行原 scope Deep，`disabled/unbound` 不触发 Deep。全局 Map 失败返回 `partial`/`retry-global-map`，仍继续 Topic 流程；Topic Deep 暂时失败返回 `partial`、`topicFreshness=unverified`、`nextAction=retry-topic-deep`。Topic freshness 只校验 Topic context、Topic `manifest.json` 和源文件 hash，不检查或要求项目根 `graft/manifest.json`。普通对话可以继续但不得静默回退 `rg` 或声称 Graft fresh。Worker 不实现后台 Watcher 或 daemon。
+Worker 合并重复事件、校验项目边界；不调用全局 `build --deep`。`conversation-id` 是写后 Worker 的必需身份，缺失即失败关闭。Worker 先返回绑定 Topic 的 `topicRefresh`：`refresh-required` 时优先由同一次 Host Worker 调用使用当前模型执行原 scope Deep，并将全局 Map 标记 `deferred`；Topic fresh 后才尝试官方非 Deep `build`。`fresh` 无后续动作，`disabled/unbound` 不触发 Deep。全局 Map 失败或延后返回 `partial`/`retry-global-map`，不阻塞 Topic/普通对话；Topic Deep 暂时失败返回 `partial`、`topicFreshness=unverified`、`nextAction=retry-topic-deep`。Topic freshness 只校验 Topic context、Topic `manifest.json` 和源文件 hash，不检查或要求项目根 `graft/manifest.json`。普通对话可以继续但不得静默回退 `rg` 或声称 Graft fresh。Worker 每次调用最多尝试一次全局更新，不实现后台 Watcher、daemon 或重试循环。
 
 ## 专题 Deep
 

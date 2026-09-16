@@ -307,7 +307,7 @@ class ProviderManagerTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertTrue(result["topicUpdated"])
         self.assertEqual(result["nextAction"], "retry-global-map")
-        self.assertFalse(result["completionEligible"])
+        self.assertTrue(result["completionEligible"])
         deep.assert_called_once_with(
             str(project), "gpt-5.6-sol", "xhigh",
             conversation_id="thread-auto", topic_id="kgpr", scope_files=(),
@@ -399,7 +399,7 @@ class ProviderManagerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "partial")
         self.assertTrue(result["topicUpdated"])
-        self.assertFalse(result["completionEligible"])
+        self.assertTrue(result["completionEligible"])
         self.assertEqual(result["nextAction"], "retry-global-map")
         deep.assert_not_called()
 
