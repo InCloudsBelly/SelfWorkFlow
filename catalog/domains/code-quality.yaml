@@ -83,8 +83,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
-      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
+      revision: git:db2bdf9f00010906bedbcebf157765240ae9566f
+      contentHash: sha256:f591443773b7bb50bd3396134a218f9cc33560863ae96226baece70c3fa52e22
     aliases:
       - name: ponytail-code
         target: ponytail
@@ -114,8 +114,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
-      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
+      revision: git:db2bdf9f00010906bedbcebf157765240ae9566f
+      contentHash: sha256:f591443773b7bb50bd3396134a218f9cc33560863ae96226baece70c3fa52e22
     aliases: []
     triggers: [over-engineering audit, delete unnecessary code]
     exclusions: [pure content generation, non-code document]
@@ -143,8 +143,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
-      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
+      revision: git:db2bdf9f00010906bedbcebf157765240ae9566f
+      contentHash: sha256:f591443773b7bb50bd3396134a218f9cc33560863ae96226baece70c3fa52e22
     aliases: []
     triggers: [ponytail help, ponytail commands, ponytail mode]
     exclusions: []
@@ -172,8 +172,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:3c57efbcd8e43565c87136e673e2576abfcce6b4
-      contentHash: sha256:c81cfff5f551668ed7a1a4600e407f302ebb52f24b99c9b45b871f6ba40a919e
+      revision: git:db2bdf9f00010906bedbcebf157765240ae9566f
+      contentHash: sha256:f591443773b7bb50bd3396134a218f9cc33560863ae96226baece70c3fa52e22
     aliases: []
     triggers: [over-engineering review, minimal diff review]
     exclusions: [pure content generation, non-code document]
