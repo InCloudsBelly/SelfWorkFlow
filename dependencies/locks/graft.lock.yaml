@@ -7,10 +7,10 @@ package:
   name: '@nanonets/graft'
   version: 0.18.0
   node: '>=20'
-  packageJsonHash: sha256:512f49bd11b72e95c4956db270f7ec6766bd0ffaa587dc514657939312da5fd8
-  packageLockHash: sha256:2fef9581fc285dd516a3b3cbc524ae6269eb138b9248a04ef2a00279ff006628
+  packageJsonHash: sha256:07e19859b1c9adc6806efe9717101d795c546ff358d4e88005c2d20cf1851259
+  packageLockHash: sha256:6d3785b12a1c7477d98a36908c768410873e19c35c114ff937d3d9e91f62c2fe
 entry: dist/cli.js
 license:
   path: LICENSE
   spdx: MIT
-  hash: sha256:2ace9c5f76414d60b6840930fa5f553971183c22854bea7085fdc65d2531e424
+  hash: sha256:d671f52607b002fad21b4a09cf3a7bd6c507e95abfd90040c775fdd4d83e3d7c
