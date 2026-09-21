@@ -514,11 +514,21 @@ def main(argv: list[str] | None = None) -> int:
     graft_event = provider_commands.add_parser("graft-event")
     graft_event.add_argument("--config-file")
     graft_event.add_argument("--project-root", required=True)
+    graft_event.add_argument("--conversation-id", required=True)
     graft_event.add_argument("--changed-path", action="append", required=True)
     graft_worker = provider_commands.add_parser("graft-worker")
     graft_worker.add_argument("--config-file")
     graft_worker.add_argument("--project-root", required=True)
     graft_worker.add_argument("--conversation-id", required=True)
+    graft_sync = provider_commands.add_parser("graft-sync")
+    graft_sync.add_argument("--config-file")
+    graft_sync.add_argument("--project-root", required=True)
+    graft_sync.add_argument("--conversation-id", required=True)
+    graft_sync.add_argument("--changed-path", action="append", required=True)
+    graft_ensure = provider_commands.add_parser("graft-ensure")
+    graft_ensure.add_argument("--config-file")
+    graft_ensure.add_argument("--project-root", required=True)
+    graft_ensure.add_argument("--conversation-id", required=True)
     graft_deep = provider_commands.add_parser("graft-deep")
     graft_deep.add_argument("--config-file")
     graft_deep.add_argument("--project-root", required=True)
@@ -811,9 +821,21 @@ def main(argv: list[str] | None = None) -> int:
             elif arguments.provider_command == "graft-event":
                 result = manager.graft_enqueue(
                     arguments.project_root, arguments.changed_path,
+                    conversation_id=arguments.conversation_id,
                 )
             elif arguments.provider_command == "graft-worker":
                 result = manager.graft_worker(
+                    arguments.project_root,
+                    conversation_id=arguments.conversation_id,
+                )
+            elif arguments.provider_command == "graft-sync":
+                result = manager.graft_sync(
+                    arguments.project_root,
+                    arguments.changed_path,
+                    conversation_id=arguments.conversation_id,
+                )
+            elif arguments.provider_command == "graft-ensure":
+                result = manager.graft_ensure(
                     arguments.project_root,
                     conversation_id=arguments.conversation_id,
                 )
@@ -847,6 +869,20 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         if (
             arguments.provider_command == "graft-deep"
+            and (not isinstance(result, dict) or result.get("status") != "succeeded")
+        ):
+            return 71
+        if (
+            arguments.provider_command == "graft-sync"
+            and (
+                not isinstance(result, dict)
+                or not isinstance(result.get("worker"), dict)
+                or result["worker"].get("status") != "succeeded"
+            )
+        ):
+            return 71
+        if (
+            arguments.provider_command == "graft-ensure"
             and (not isinstance(result, dict) or result.get("status") != "succeeded")
         ):
             return 71

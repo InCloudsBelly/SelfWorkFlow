@@ -1,4 +1,5 @@
 from io import StringIO
+import json
 from pathlib import Path
 import os
 import subprocess
@@ -29,6 +30,27 @@ class _Manager:
         return {"providerId": "graft", "topics": [], "conversationChoice": {
             "choice": "unbound", "status": "unbound",
         }}
+
+    def graft_enqueue(self, project_root, changed_paths, *, conversation_id):
+        self.calls.append((
+            "graft-event", project_root, tuple(changed_paths), conversation_id,
+        ))
+        return {"providerId": "graft", "status": "queued"}
+
+    def graft_worker(self, project_root, *, conversation_id):
+        self.calls.append(("graft-worker", project_root, conversation_id))
+        return {"providerId": "graft", "status": "succeeded", "freshness": "fresh"}
+
+    def graft_sync(self, project_root, changed_paths, *, conversation_id):
+        event = self.graft_enqueue(
+            project_root, changed_paths, conversation_id=conversation_id,
+        )
+        worker = self.graft_worker(project_root, conversation_id=conversation_id)
+        return {"event": event, "worker": worker}
+
+    def graft_ensure(self, project_root, *, conversation_id):
+        self.calls.append(("graft-ensure", project_root, conversation_id))
+        return {"providerId": "graft", "status": "succeeded", "updated": False}
 
     def graft_topic_select(
         self, project_root, conversation_id, *, topic_id=None, disable=False,
@@ -70,6 +92,108 @@ class _Manager:
 
 
 class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
+    def test_graft_sync_requires_conversation_and_changed_path(self):
+        for missing in ("conversation", "changed-path"):
+            arguments = [
+                "provider", "graft-sync", "--project-root", "C:/work/project",
+            ]
+            if missing != "conversation":
+                arguments += ["--conversation-id", "thread-sync"]
+            if missing != "changed-path":
+                arguments += ["--changed-path", "Source/main.cpp"]
+            with self.subTest(missing=missing), mock.patch("sys.stderr", StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    main(arguments)
+            self.assertEqual(error.exception.code, 2)
+
+    def test_graft_sync_coalesces_event_and_worker_into_one_entrypoint(self):
+        manager = _Manager()
+        output = StringIO()
+        arguments = [
+            "provider", "graft-sync", "--project-root", "C:/work/project",
+            "--conversation-id", "thread-sync",
+            "--changed-path", "Source/main.cpp",
+            "--changed-path", "Source/main.h",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", output):
+            self.assertEqual(main(arguments), 0)
+
+        self.assertEqual(manager.calls, [
+            (
+                "graft-event", "C:/work/project",
+                ("Source/main.cpp", "Source/main.h"), "thread-sync",
+            ),
+            ("graft-worker", "C:/work/project", "thread-sync"),
+        ])
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["event"]["status"], "queued")
+        self.assertEqual(result["worker"]["freshness"], "fresh")
+
+    def test_graft_sync_preserves_worker_failure(self):
+        manager = _Manager()
+        manager.graft_worker = mock.Mock(return_value={
+            "providerId": "graft", "status": "partial",
+            "nextAction": "retry-topic-deep",
+        })
+        output = StringIO()
+        arguments = [
+            "provider", "graft-sync", "--project-root", "C:/work/project",
+            "--conversation-id", "thread-sync",
+            "--changed-path", "Source/main.cpp",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", output):
+            self.assertEqual(main(arguments), 71)
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["worker"]["status"], "partial")
+        self.assertEqual(result["worker"]["nextAction"], "retry-topic-deep")
+
+    def test_graft_ensure_requires_project_and_conversation(self):
+        for missing in ("project", "conversation"):
+            arguments = ["provider", "graft-ensure"]
+            if missing != "project":
+                arguments += ["--project-root", "C:/work/project"]
+            if missing != "conversation":
+                arguments += ["--conversation-id", "thread-ensure"]
+            with self.subTest(missing=missing), mock.patch("sys.stderr", StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    main(arguments)
+            self.assertEqual(error.exception.code, 2)
+
+    def test_graft_ensure_routes_to_single_freshness_entrypoint(self):
+        manager = _Manager()
+        output = StringIO()
+        arguments = [
+            "provider", "graft-ensure", "--project-root", "C:/work/project",
+            "--conversation-id", "thread-ensure",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", output):
+            self.assertEqual(main(arguments), 0)
+
+        self.assertEqual(manager.calls, [("graft-ensure", "C:/work/project", "thread-ensure")])
+        self.assertEqual(json.loads(output.getvalue())["updated"], False)
+
+    def test_graft_ensure_failure_is_not_reported_as_success(self):
+        manager = _Manager()
+        manager.graft_ensure = mock.Mock(return_value={
+            "providerId": "graft", "status": "partial",
+            "nextAction": "retry-topic-deep",
+        })
+        arguments = [
+            "provider", "graft-ensure", "--project-root", "C:/work/project",
+            "--conversation-id", "thread-ensure",
+        ]
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main(arguments), 71)
+
     def test_graft_worker_requires_conversation_identity(self):
         with mock.patch("sys.stderr", StringIO()):
             with self.assertRaises(SystemExit) as error:

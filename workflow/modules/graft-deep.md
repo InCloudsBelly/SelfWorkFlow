@@ -1,6 +1,8 @@
 # Graft 专题 Deep 模块
 
-- 一个稳定 `conversation-id` 只绑定一个 `topic-id`。首次 Deep 必须同时提供二者；成功后绑定写入项目 `./selfworkflow/graft-deep/.conversation-bindings/`，只保存 conversation hash，不保存原始 ID。后续同一对话必须继续传同一 `conversation-id`，可省略 `topic-id`，由 SelfWorkFlow 自动恢复；指定不同 topic 立即失败关闭。
+本模块不是普通代码任务的额外路由。未绑定对话不得直接调用 `graft-deep`；首次只通过 `graft-topics` 发现专题，再由用户选择并绑定。绑定后的检查与写后维护分别由 `graft-ensure`、`graft-sync` 统一编排。
+
+- 一个稳定 `conversation-id` 只绑定一个 `topic-id`。绑定写入项目 `./selfworkflow/graft-deep/.conversation-bindings/`，只保存 conversation hash，不保存原始 ID。后续同一对话必须继续传同一 `conversation-id`，可省略 `topic-id`，由 SelfWorkFlow 自动恢复；指定不同 topic 立即失败关闭。
 - 新对话先发现已有 Topic；用户选定后才绑定。用户选择不使用 Deep 时记录 `no-deep-topic`，该对话不调用 Graft；该选择与 Topic 绑定一样保持不变，不自动互相切换。
 - 全局 `graft/` 保留非 Deep structural Map；专题 Deep 使用项目内 `./selfworkflow/graft-deep/<topic-id>/graft`，不创建临时 Git 仓库，不扫描全仓库。
 - Deep 必须接收非空、项目内、无 Reparse Point 的相对文件清单，并将每个文件作为官方 Graft 的重复 `--only-dir`；当前项目全局 Map 与专题上下文分开。

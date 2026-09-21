@@ -770,6 +770,9 @@ class ProviderManager:
     ) -> dict[str, Any]:
         if provider_id != "graft":
             raise ProviderManagerError("provider-not-supported")
+        if conversation_id is None:
+            raise ProviderManagerError("graft-conversation-topic-unbound")
+        self._require_bound_graft_topic(project_root, conversation_id)
         try:
             from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
             return GraftProjectLifecycle(self._adapter(provider_id)).query(
@@ -781,6 +784,18 @@ class ProviderManager:
             raise ProviderManagerError(error.reason) from None
         except Exception as error:
             reason = getattr(error, "reason", "graft-query-failed")
+            raise ProviderManagerError(reason) from None
+
+    @staticmethod
+    def _require_bound_graft_topic(
+        project_root: str, conversation_id: str,
+    ) -> dict[str, str]:
+        from selfworkflow.v3.graft_lifecycle import require_conversation_topic
+
+        try:
+            return require_conversation_topic(project_root, conversation_id)
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-conversation-topic-unbound")
             raise ProviderManagerError(reason) from None
 
     def graft_preflight(self, project_root: str) -> dict[str, Any]:
@@ -834,10 +849,12 @@ class ProviderManager:
             raise ProviderManagerError(reason) from None
 
     def graft_enqueue(
-        self, project_root: str, changed_paths: Sequence[str],
+        self, project_root: str, changed_paths: Sequence[str], *,
+        conversation_id: str,
     ) -> dict[str, Any]:
         if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
             raise ProviderManagerError("provider-not-configured")
+        self._require_bound_graft_topic(project_root, conversation_id)
         from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
         return GraftProjectLifecycle(self._adapter("graft")).enqueue(
             project_root, changed_paths,
@@ -951,6 +968,7 @@ class ProviderManager:
     ) -> dict[str, Any]:
         if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
             raise ProviderManagerError("provider-not-configured")
+        self._require_bound_graft_topic(project_root, conversation_id)
         from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
         result = GraftProjectLifecycle(self._adapter("graft")).run_once(
             project_root, conversation_id=conversation_id,
@@ -958,6 +976,181 @@ class ProviderManager:
         if not isinstance(result, Mapping):
             raise ProviderManagerError("graft-worker-result-invalid")
         return self._refresh_bound_topic_after_worker(project_root, result)
+
+    def graft_sync(
+        self, project_root: str, changed_paths: Sequence[str], *,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        """Run the single write-event-to-worker lifecycle entry point."""
+
+        self._require_bound_graft_topic(project_root, conversation_id)
+        event = self.graft_enqueue(
+            project_root, changed_paths, conversation_id=conversation_id,
+        )
+        worker = self.graft_worker(project_root, conversation_id=conversation_id)
+        if (
+            isinstance(worker, Mapping)
+            and worker.get("nextAction") == "retry-global-map"
+            and isinstance(worker.get("globalMap"), Mapping)
+            and worker["globalMap"].get("status") == "deferred"
+        ):
+            maintenance = self.graft_ensure(
+                project_root, conversation_id=conversation_id,
+            )
+            worker = dict(worker)
+            worker["automaticMaintenance"] = maintenance
+            if maintenance.get("status") == "succeeded":
+                try:
+                    completed = self.graft_complete_pending(project_root)
+                except Exception as error:
+                    worker.update({
+                        "status": "partial",
+                        "nextAction": "retry-global-map",
+                        "reason": getattr(error, "reason", "graft-worker-state-failed"),
+                    })
+                else:
+                    worker.update({
+                        "status": "succeeded",
+                        "retryable": False,
+                        "pending": completed["pending"],
+                        "globalMapUpdated": True,
+                        "globalMap": maintenance["globalMap"],
+                        "topicUpdated": maintenance["updated"].get("topic", False),
+                        "topicFreshness": "fresh",
+                        "nextAction": "none",
+                        "completionEligible": True,
+                    })
+            else:
+                worker.update({
+                    "status": "partial",
+                    "nextAction": maintenance.get("nextAction", "retry-global-map"),
+                    "reason": maintenance.get("reason", "graft-maintenance-incomplete"),
+                })
+        return {"event": event, "worker": worker}
+
+    def graft_complete_pending(self, project_root: str) -> dict[str, Any]:
+        """Clear a deferred write event only after both maps are verified fresh."""
+
+        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
+            raise ProviderManagerError("provider-not-configured")
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+        try:
+            return GraftProjectLifecycle(self._adapter("graft")).complete_pending(
+                project_root,
+            )
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-worker-state-failed")
+            raise ProviderManagerError(reason) from None
+
+    def graft_ensure(
+        self, project_root: str, *, conversation_id: str,
+    ) -> dict[str, Any]:
+        """Check and minimally refresh the bound Topic and global Code Map."""
+
+        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
+            raise ProviderManagerError("provider-not-configured")
+        self._require_bound_graft_topic(project_root, conversation_id)
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+
+        lifecycle = GraftProjectLifecycle(self._adapter("graft"))
+        try:
+            initial = lifecycle.check_freshness(
+                project_root, conversation_id=conversation_id,
+            )
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-freshness-check-failed")
+            raise ProviderManagerError(reason) from None
+        output = {
+            "providerId": "graft",
+            "status": "partial",
+            "conversationId": conversation_id,
+            "topic": initial["topic"],
+            "globalMap": initial["globalMap"],
+            "updated": {"topic": False, "globalMap": False},
+            "nextAction": initial.get("nextAction", "none"),
+        }
+        topic_action = initial["topic"].get("action")
+        if topic_action == "stop":
+            output["reason"] = initial["topic"].get(
+                "reason", "graft-topic-refresh-unverified",
+            )
+            return output
+        if topic_action == "topic-selection-required":
+            output["reason"] = "graft-topic-selection-required"
+            return output
+        if topic_action == "run-graft-deep":
+            topic_id = initial["topic"].get("topicId")
+            if not isinstance(topic_id, str) or not topic_id:
+                output["reason"] = "graft-topic-refresh-topic-invalid"
+                output["nextAction"] = "retry-topic-deep"
+                return output
+            try:
+                model, reasoning_effort = _current_graft_deep_model_context()
+                deep = self.graft_deep(
+                    project_root, model, reasoning_effort,
+                    conversation_id=conversation_id, topic_id=topic_id,
+                    scope_files=(),
+                )
+            except Exception as error:
+                reason = getattr(error, "reason", "graft-topic-deep-failed")
+                output.update({
+                    "reason": reason, "nextAction": "retry-topic-deep",
+                })
+                return output
+            if not isinstance(deep, Mapping) or deep.get("status") != "succeeded":
+                output.update({
+                    "reason": "graft-topic-deep-failed",
+                    "nextAction": "retry-topic-deep",
+                    "topicDeep": deep,
+                })
+                return output
+            output["topicDeep"] = dict(deep)
+            output["updated"]["topic"] = True
+            try:
+                refreshed = lifecycle.check_freshness(
+                    project_root, conversation_id=conversation_id,
+                )
+            except Exception as error:
+                reason = getattr(error, "reason", "graft-freshness-check-failed")
+                output.update({"reason": reason, "nextAction": "retry-topic-deep"})
+                return output
+            output["topic"] = refreshed["topic"]
+            output["globalMap"] = refreshed["globalMap"]
+            if refreshed["topic"].get("status") != "fresh":
+                output.update({
+                    "reason": "graft-freshness-verification-failed",
+                    "nextAction": "retry-topic-deep",
+                })
+                return output
+        if output["globalMap"].get("freshness") != "fresh":
+            try:
+                output["globalMap"] = lifecycle.refresh_global_map(project_root)
+            except Exception as error:
+                reason = getattr(error, "reason", "graft-global-map-failed")
+                output.update({
+                    "reason": reason, "nextAction": "retry-global-map",
+                })
+                return output
+            output["updated"]["globalMap"] = True
+        try:
+            final = lifecycle.check_freshness(
+                project_root, conversation_id=conversation_id,
+            )
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-freshness-check-failed")
+            output.update({"reason": reason, "nextAction": "retry-global-map"})
+            return output
+        output.update({
+            "status": final["status"],
+            "topic": final["topic"],
+            "globalMap": final["globalMap"],
+            "nextAction": final["nextAction"],
+        })
+        if output["status"] != "fresh":
+            output["reason"] = "graft-freshness-verification-failed"
+        else:
+            output["status"] = "succeeded"
+        return output
 
     def graft_deep(
         self,
@@ -973,6 +1166,10 @@ class ProviderManager:
 
         if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
             raise ProviderManagerError("provider-not-configured")
+        binding = self._require_bound_graft_topic(project_root, conversation_id)
+        if topic_id is not None and topic_id != binding["topicId"]:
+            raise ProviderManagerError("graft-conversation-topic-mismatch")
+        topic_id = binding["topicId"]
         try:
             from selfworkflow.v3.graft_codex_bridge import run_codex_graft_deep
 

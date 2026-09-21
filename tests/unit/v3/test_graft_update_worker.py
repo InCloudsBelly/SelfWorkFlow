@@ -184,6 +184,64 @@ class GraftUpdateWorkerTests(unittest.TestCase):
         self.assertEqual(result["freshness"], "fresh")
         self.assertFalse((self.root / "graft").exists())
 
+    def test_ensure_fresh_checks_topic_and_global_without_rebuilding_fresh_maps(self):
+        from selfworkflow.v3.graft_lifecycle import (
+            GraftProjectLifecycle, bind_conversation_topic,
+        )
+        from selfworkflow.v3.hashing import content_hash, hash_file_content, project_root_hash
+
+        topic = self.root / ".selfworkflow" / "graft-deep" / "kgpr" / "graft"
+        topic.mkdir(parents=True)
+        source = self.root / "Source" / "main.cpp"
+        source.parent.mkdir()
+        source.write_text("int current() {}", encoding="utf-8")
+        bind_conversation_topic(self.root, "thread-ensure-fresh", "kgpr")
+        size, digest = hash_file_content(source)
+        scope = [{"path": "Source/main.cpp", "size": size, "sha256": digest}]
+        (topic.parent / "selfworkflow-topic.json").write_text(
+            json.dumps({
+                "kind": "selfworkflow-graft-topic", "version": 1,
+                "topicId": "kgpr", "projectRootHash": project_root_hash(self.root),
+                "scopeFiles": scope, "scopeHash": content_hash(scope),
+                "freshness": "fresh",
+            }),
+            encoding="utf-8",
+        )
+
+        provider = FakeGraft(missing=False)
+        result = GraftProjectLifecycle(provider).check_freshness(
+            str(self.root), conversation_id="thread-ensure-fresh",
+        )
+
+        self.assertEqual(result["topic"]["status"], "fresh")
+        self.assertEqual(result["globalMap"]["freshness"], "fresh")
+        self.assertFalse(result["updated"])
+        self.assertEqual(provider.builds, [])
+
+    def test_refresh_global_map_verifies_freshness_and_updates_only_the_global_layer(self):
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+
+        provider = FakeGraft(missing=True)
+        result = GraftProjectLifecycle(provider).refresh_global_map(str(self.root))
+
+        self.assertEqual(result["status"], "fresh")
+        self.assertFalse(result["deep"])
+        self.assertEqual(len(provider.builds), 1)
+        self.assertFalse((self.root / ".selfworkflow" / "graft-deep").exists())
+
+    def test_complete_pending_clears_deferred_event_after_successful_refresh(self):
+        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
+
+        lifecycle = GraftProjectLifecycle(FakeGraft(missing=False))
+        lifecycle.enqueue(str(self.root), ["src/a.cpp"])
+        result = lifecycle.complete_pending(str(self.root))
+
+        self.assertEqual(result, {"pending": False, "changedPathCount": 1})
+        queue = json.loads(
+            (self.root / "graft/.cache/selfworkflow/queue.json").read_text()
+        )
+        self.assertEqual(queue["changedPaths"], [])
+
     def test_topic_status_and_query_use_only_the_explicit_topic_context(self):
         from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
 

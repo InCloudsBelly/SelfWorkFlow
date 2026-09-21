@@ -154,7 +154,8 @@ then runs `npm ci --ignore-scripts`, a controlled native-package rebuild,
 `npm run build`, and a CLI runtime smoke test. The installed Agent query path is
 the official Graft MCP; SelfWorkFlow does not reimplement Graft's graph or query
 protocol.
-The project graph is initialized lazily on the first matching code task. The
+The project graph is initialized lazily after the conversation has selected and
+bound a Deep Topic. The
 installer publishes the official MCP launcher at
 `%LOCALAPPDATA%\SelfWorkFlow\bin\graft-mcp.cmd`, which starts
 `graft mcp <current-working-directory>` so each project keeps its own `graft/`.
@@ -181,8 +182,8 @@ node dependencies/upstream/graft/dist/cli.js build D:\project --no-gitignore --n
 node dependencies/upstream/graft/dist/cli.js map D:\project --json --no-refresh
 
 %LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-preflight --project-root D:\project
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-event --project-root D:\project --changed-path Source\main.cpp
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-worker --project-root D:\project --conversation-id <current-conversation-id>
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-sync --project-root D:\project --conversation-id <current-conversation-id> --changed-path Source\main.cpp
+%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-ensure --project-root D:\project --conversation-id <current-conversation-id>
 %LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-deep --project-root D:\project --conversation-id <current-conversation-id>
 ```
 
@@ -207,12 +208,15 @@ uncovered files. `rg` is not structural evidence and does not replace a
 required fresh Graft result. See
 `docs/providers/graft.md`.
 
-For a new conversation's first code task, SelfWorkFlow verifies the bound Graft
-runtime and then checks the project index once. If the runtime is unavailable,
-it does not build a graph and falls back to `rg`; if the graph is stale, it asks
-whether to explicitly build and use it, use the stale index read-only, or omit
-it for that conversation. The choice is reused for the conversation; graph
-updates still require explicit side-effect confirmation.
+For a new conversation's first code task, SelfWorkFlow first discovers the
+available Deep Topics. Until the user selects and binds one, it does not call
+Graft or build the global Code Map. After binding, it verifies the bound Graft
+runtime and calls `graft-ensure` once. If both the bound Topic Deep and the
+global non-Deep Code Map are fresh, it performs no build; otherwise it refreshes
+only the stale layer and verifies both again. After a code write, `graft-sync`
+performs the same two-layer maintenance automatically. A missing or failed
+capability is reported explicitly; it is not silently replaced with `rg` as
+structural evidence.
 
 ## Current capability status
 

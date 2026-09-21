@@ -26,6 +26,12 @@ class GraftWorkflowContractTests(unittest.TestCase):
         self.assertIn("provider graft-topic-select --topic-id", graft_read)
         self.assertIn("--disable", graft_read)
         self.assertIn("no-deep-topic", graft_read)
+        self.assertIn("provider graft-ensure", graft_read)
+        self.assertIn("已绑定 Topic 才能", graft_read)
+        self.assertIn("不读取根图、不构建全局 Map", graft_read)
+        self.assertIn("唯一路由", graft_read)
+        self.assertIn("修改后一次 `graft-sync`", graft_read)
+        self.assertIn("继续原有 Light/Full/Deep 流程", graft_read)
 
     def test_graft_doc_keeps_manual_cli_outside_formal_evidence(self):
         text = (self.ROOT / "docs/providers/graft.md").read_text(encoding="utf-8")
@@ -34,9 +40,9 @@ class GraftWorkflowContractTests(unittest.TestCase):
         self.assertIn("官方 Graft MCP 是代码阅读入口", text)
         self.assertIn("官方 Graft MCP 是代码阅读入口", text)
         self.assertIn("SelfWorkFlow 只负责项目边界、能力检查、任务路由、写后更新和显式 Deep", text)
-        self.assertIn("Host CLI 仅用于安装、预检、事件、Worker、显式维护和失败恢复", text)
-        self.assertIn("provider graft-event", text)
-        self.assertIn("provider graft-worker", text)
+        self.assertIn("Host CLI 仅用于安装、预检、写后同步、显式维护和失败恢复", text)
+        self.assertIn("provider graft-sync", text)
+        self.assertIn("graft-ensure", text)
         self.assertIn("topicRefresh", text)
         self.assertIn("`rg` 不是默认阅读入口", text)
 
@@ -45,22 +51,26 @@ class GraftWorkflowContractTests(unittest.TestCase):
         update = (self.ROOT / "workflow/modules/graft-update.md").read_text(encoding="utf-8")
         text = f"{text}\n{update}"
 
-        self.assertIn("代码任务优先使用官方 Graft MCP 的全局非 Deep Code Map", text)
-        self.assertIn("修改代码后由 SelfWorkflow 自动发送一次 `agent_write` 事件", text)
+        self.assertIn("选择唯一分支", text)
+        self.assertIn("provider graft-sync", text)
+        self.assertIn("由入口内部完成 `agent_write`", text)
         self.assertIn("conversation-id", text)
         self.assertIn("全局非 Deep Code Map", text)
         self.assertIn("Topic Deep", text)
-        self.assertIn("同一次 Host", text)
+        self.assertIn("只有绑定 Topic 的 conversation", text)
+        self.assertIn("缺少身份或变更路径必须失败关闭", text)
         self.assertIn("retry-topic-deep", text)
-        self.assertIn("不启用额外 Watcher、daemon 或第二套图逻辑", text)
+        self.assertIn("不自行拼接 Worker、Watcher 或第二套图逻辑", text)
 
         doc = (self.ROOT / "docs/providers/graft.md").read_text(encoding="utf-8")
-        self.assertIn("新代码任务优先按需使用官方 MCP 的全局非 Deep Code Map", doc)
-        self.assertIn("Agent 修改代码后自动发送一次 `agent_write`", doc)
+        self.assertIn("只有已绑定 Deep Topic 的 conversation", doc)
+        self.assertIn("provider graft-sync", doc)
+        self.assertIn("一次 `agent_write`", doc)
         self.assertIn("topicRefresh", doc)
         self.assertIn("--conversation-id", doc)
         self.assertIn("全局 Map", doc)
         self.assertIn("Topic Deep", doc)
+        self.assertIn("graft-ensure", doc)
         self.assertIn("`rg` 不是默认阅读入口", doc)
 
     def test_explicit_deep_uses_current_agent_binding_without_api_key(self):

@@ -254,6 +254,21 @@ def resolve_conversation_choice(
     return None
 
 
+def require_conversation_topic(
+    project_root: str | Path, conversation_id: str,
+) -> dict[str, str]:
+    """Require an explicit Deep Topic before any conversation Graft use."""
+
+    root = _safe_root(project_root)
+    conversation = _conversation_id(conversation_id)
+    choice = resolve_conversation_choice(root, conversation)
+    if choice is None:
+        raise GraftProjectError("graft-conversation-topic-unbound")
+    if choice["decision"] != "topic":
+        raise GraftProjectError("graft-disabled-for-conversation")
+    return choice
+
+
 def _write_conversation_binding(path: Path, value: Mapping[str, Any]) -> None:
     payload = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -432,9 +447,7 @@ def _topic_context(root: Path, value: object) -> Path | None:
 def _conversation_topic_context(
     root: Path, conversation_id: str, explicit_context: str | None,
 ) -> tuple[Path, dict[str, str]]:
-    binding = resolve_conversation_topic(root, conversation_id)
-    if binding is None:
-        raise GraftProjectError("graft-conversation-topic-unbound")
+    binding = require_conversation_topic(root, conversation_id)
     bound_context = _topic_context(
         root,
         root / ".selfworkflow" / "graft-deep" / binding["topicId"] / "graft",
@@ -963,6 +976,80 @@ class GraftProjectLifecycle:
             }
         return enriched
 
+    def check_freshness(
+        self, project_root: str, *, conversation_id: str,
+    ) -> dict[str, Any]:
+        """Check the bound Topic and the independent global structural map."""
+
+        root = _safe_root(project_root)
+        conversation = _conversation_id(conversation_id)
+        provider_report = self._provider_preflight()
+        global_status = self._status(root, provider_report)
+        topic = _topic_refresh_status(root, conversation)
+        if topic is None:
+            raise GraftProjectError("graft-topic-refresh-result-missing")
+        topic_fresh = topic.get("status") in {"fresh", "disabled"}
+        global_fresh = global_status.get("freshness") == "fresh"
+        next_action = "none"
+        if topic.get("action") not in {"none", None}:
+            next_action = str(topic["action"])
+        elif not global_fresh:
+            next_action = "refresh-global-map"
+        return {
+            "providerId": "graft",
+            "status": "fresh" if topic_fresh and global_fresh else "stale",
+            "conversationId": conversation,
+            "topic": topic,
+            "globalMap": {
+                "root": str(root / _GRAPH_DIR),
+                "deep": False,
+                "status": "fresh" if global_fresh else "stale",
+                "freshness": global_status.get("freshness"),
+            },
+            "updated": False,
+            "nextAction": next_action,
+        }
+
+    def refresh_global_map(self, project_root: str) -> dict[str, Any]:
+        """Build and verify only the global non-Deep structural map."""
+
+        root = _safe_root(project_root)
+        provider_report = self._provider_preflight()
+        _ensure_ignore(root)
+        try:
+            build = self._provider.build_structural(str(root))
+            verified = self._status(root, provider_report)
+        except Exception as error:
+            reason = getattr(error, "reason", "graft-update-failed")
+            raise GraftProjectError(reason) from None
+        if verified.get("freshness") != "fresh":
+            raise GraftProjectError("graft-global-map-not-fresh")
+        return {
+            "root": str(root / _GRAPH_DIR),
+            "deep": False,
+            "status": "fresh",
+            "freshness": "fresh",
+            "build": dict(build) if isinstance(build, Mapping) else build,
+        }
+
+    def complete_pending(self, project_root: str) -> dict[str, Any]:
+        """Acknowledge one successfully completed deferred write event."""
+
+        root = _safe_root(project_root)
+        _graph, state = _binding(root)
+        with _WorkerLock(state):
+            queue_path = state / "queue.json"
+            queue = _read_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
+            paths = queue.get("changedPaths", [])
+            if not isinstance(paths, list) or any(not isinstance(item, str) for item in paths):
+                raise GraftProjectError("graft-worker-state-invalid")
+            _write_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
+            _write_json(state / "state.json", {
+                "schemaVersion": 1, "status": "succeeded", "retryable": False,
+                "lastChangedPaths": sorted(set(paths)),
+            })
+        return {"pending": False, "changedPathCount": len(paths)}
+
     def query(
         self, project_root: str, query: str, *, query_kind: str,
         context_dir: str | None = None,
@@ -1091,7 +1178,7 @@ class GraftProjectLifecycle:
         conversation_id = _conversation_id(conversation_id)
         graph, state = _binding(root)
         try:
-            self._provider_preflight()
+            provider_report = self._provider_preflight()
         except Exception as error:
             reason = getattr(error, "reason", "graft-provider-failed")
             return {
@@ -1178,11 +1265,16 @@ class GraftProjectLifecycle:
             }
         global_failure: str | None = None
         build: Mapping[str, Any] | None = None
+        global_freshness: str | None = None
         try:
             # The global map is a separate, non-Deep acceleration layer.  Its
             # failure must not prevent the conversation-bound Topic from
             # being checked and refreshed below.
             build = self._provider.build_structural(str(root))
+            verified = self._status(root, provider_report)
+            global_freshness = verified.get("freshness")
+            if global_freshness != "fresh":
+                raise GraftProjectError("graft-global-map-not-fresh")
         except Exception as error:
             reason = getattr(error, "reason", "graft-update-failed")
             global_failure = reason
@@ -1224,6 +1316,7 @@ class GraftProjectLifecycle:
             "globalMap": {
                 "root": str(graph), "deep": False,
                 "status": "failed" if global_failure is not None else "succeeded",
+                **({"freshness": global_freshness} if global_freshness is not None else {}),
                 **({"reason": global_failure} if global_failure is not None else {}),
             },
             "conversationId": conversation_id,
