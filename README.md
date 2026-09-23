@@ -154,8 +154,8 @@ then runs `npm ci --ignore-scripts`, a controlled native-package rebuild,
 `npm run build`, and a CLI runtime smoke test. The installed Agent query path is
 the official Graft MCP; SelfWorkFlow does not reimplement Graft's graph or query
 protocol.
-The project graph is initialized lazily after the conversation has selected and
-bound a Deep Topic. The
+The project graph is initialized lazily when a global map is explicitly
+confirmed for creation or update; Deep Topic binding does not initialize it. The
 installer publishes the official MCP launcher at
 `%LOCALAPPDATA%\SelfWorkFlow\bin\graft-mcp.cmd`, which starts
 `graft mcp <current-working-directory>` so each project keeps its own `graft/`.
@@ -208,15 +208,15 @@ uncovered files. `rg` is not structural evidence and does not replace a
 required fresh Graft result. See
 `docs/providers/graft.md`.
 
-For a new conversation's first code task, SelfWorkFlow first discovers the
-available Deep Topics. Until the user selects and binds one, it does not call
-Graft or build the global Code Map. After binding, it verifies the bound Graft
-runtime and calls `graft-ensure` once. If both the bound Topic Deep and the
-global non-Deep Code Map are fresh, it performs no build; otherwise it refreshes
-only the stale layer and verifies both again. After a code write, `graft-sync`
-performs the same two-layer maintenance automatically. A missing or failed
-capability is reported explicitly; it is not silently replaced with `rg` as
-structural evidence.
+For a code task, an existing fresh global non-Deep Code Map is used automatically;
+no explicit opt-in or Topic binding is required. `graft-ensure` checks it before
+reading. A stale map requires user confirmation before update; a missing map is
+not initialized automatically. After an Agent code write, including rollback,
+delete, or rename, `graft-sync` updates the affected global map paths. Deep Topic
+freshness/builds are never checked automatically; they require an explicit user
+request and an existing binding.
+A missing or failed capability is reported explicitly; it is not silently
+replaced with `rg` as structural evidence.
 
 ## Current capability status
 

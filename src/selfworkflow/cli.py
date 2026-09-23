@@ -39,6 +39,12 @@ from selfworkflow.review_models import (
     resolve_review_model,
     save_review_model,
 )
+from selfworkflow.graft_models import (
+    GraftModelConfigError,
+    graft_model_config_path,
+    resolve_graft_model,
+    save_graft_model,
+)
 from selfworkflow.work_artifacts import WorkArtifactError, WorkArtifactManager
 from selfworkflow.ponytail_source import PonytailSourceError, verify_ponytail_source
 from selfworkflow.sources import (
@@ -63,11 +69,19 @@ _HOST_REASONING_ENV = "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT"
 
 def _resolve_graft_deep_model_context(
     model: str | None, reasoning_effort: str | None,
+    config_file: str | None = None,
 ) -> tuple[str, str]:
-    """Resolve the current Host model without falling back to history."""
+    """Resolve explicit compatibility input or the machine Graft default."""
 
     if (model is None) != (reasoning_effort is None):
         raise ValueError("graft-deep-current-model-context-incomplete")
+    configured_path = (
+        Path(config_file).parent / "graft-model.local.yaml"
+        if config_file is not None else graft_model_config_path()
+    )
+    if configured_path.exists():
+        resolution = resolve_graft_model(configured_path)
+        return resolution.selection.model, resolution.selection.reasoning_effort
     host_model = os.environ.get(_HOST_MODEL_ENV)
     host_reasoning = os.environ.get(_HOST_REASONING_ENV)
     if host_model or host_reasoning:
@@ -80,7 +94,8 @@ def _resolve_graft_deep_model_context(
         return host_model, host_reasoning
     if model is not None and reasoning_effort is not None:
         return model, reasoning_effort
-    raise ValueError("graft-deep-current-model-unavailable")
+    resolution = resolve_graft_model(configured_path)
+    return resolution.selection.model, resolution.selection.reasoning_effort
 
 
 class _SubprocessCommandPort:
@@ -529,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     graft_ensure.add_argument("--config-file")
     graft_ensure.add_argument("--project-root", required=True)
     graft_ensure.add_argument("--conversation-id", required=True)
+    graft_ensure.add_argument("--allow-update", action="store_true")
     graft_deep = provider_commands.add_parser("graft-deep")
     graft_deep.add_argument("--config-file")
     graft_deep.add_argument("--project-root", required=True)
@@ -551,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
     topic_choice = graft_topic_select.add_mutually_exclusive_group(required=True)
     topic_choice.add_argument("--topic-id")
     topic_choice.add_argument("--disable", action="store_true")
+    topic_choice.add_argument("--global-only", action="store_true")
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -616,6 +633,17 @@ def main(argv: list[str] | None = None) -> int:
         "--confirm", action="store_true",
         help="确认把该选择写入机器本地默认配置",
     )
+    graft_model = commands.add_parser("graft-model")
+    graft_model_commands = graft_model.add_subparsers(
+        dest="graft_model_command", required=True,
+    )
+    graft_model_status = graft_model_commands.add_parser("status")
+    graft_model_status.add_argument("--config-file")
+    graft_model_set = graft_model_commands.add_parser("set")
+    graft_model_set.add_argument("--model", required=True)
+    graft_model_set.add_argument("--reasoning-effort", required=True)
+    graft_model_set.add_argument("--config-file")
+    graft_model_set.add_argument("--confirm", action="store_true")
     artifact = commands.add_parser("artifact")
     artifact_commands = artifact.add_subparsers(dest="artifact_command", required=True)
     artifact_transition = artifact_commands.add_parser("transition")
@@ -670,6 +698,27 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 54
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
+    if arguments.command == "graft-model":
+        try:
+            if arguments.graft_model_command == "status":
+                result = resolve_graft_model(arguments.config_file).as_dict()
+            elif arguments.graft_model_command == "set":
+                result = save_graft_model(
+                    arguments.config_file,
+                    arguments.model,
+                    arguments.reasoning_effort,
+                    confirmed=arguments.confirm,
+                ).as_dict()
+            else:
+                raise GraftModelConfigError("graft-model-command-invalid")
+        except GraftModelConfigError as error:
+            print(
+                f"SelfWorkFlow: graft-model-operation-failed:{error.reason}",
+                file=sys.stderr,
+            )
+            return 55
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     if arguments.command == "artifact":
@@ -838,10 +887,12 @@ def main(argv: list[str] | None = None) -> int:
                 result = manager.graft_ensure(
                     arguments.project_root,
                     conversation_id=arguments.conversation_id,
+                    **({"allow_update": True} if arguments.allow_update else {}),
                 )
             elif arguments.provider_command == "graft-deep":
                 current_model, current_reasoning = _resolve_graft_deep_model_context(
                     arguments.model, arguments.reasoning_effort,
+                    arguments.config_file,
                 )
                 result = manager.graft_deep(
                     arguments.project_root, current_model, current_reasoning,
@@ -857,6 +908,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = manager.graft_topic_select(
                     arguments.project_root, arguments.conversation_id,
                     topic_id=arguments.topic_id, disable=arguments.disable,
+                    global_only=arguments.global_only,
                 )
             elif arguments.provider_command == "inspect":
                 pass

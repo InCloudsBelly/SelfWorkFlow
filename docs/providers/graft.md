@@ -4,11 +4,11 @@
 
 ## 默认代码流程
 
-1. 只有已绑定 Deep Topic 的 conversation 才使用官方 MCP 的 Topic 查询和全局非 Deep Code Map；未绑定或选择 `no-deep-topic` 时不调用 Graft。全局 `graft/manifest.json` 不是 Topic 流程的前置条件或门禁，`rg` 不是默认阅读入口。
-2. 已绑定 Topic 的新对话或继续对话先调用一次 `provider graft-ensure`。两张图都 fresh 时不构建；只更新 stale/missing 的层并在返回前重新核验。
+1. 已有可用且 fresh 的全局非 Deep Code Map 自动使用，无论是否绑定 Topic；无须启用记录。明确禁用仍尊重，缺失图不自动初始化。
+2. 每个代码读取阶段调用一次 `provider graft-ensure`，默认只读检查全局 Map；stale 时询问更新，同意后传 `--allow-update`。用户主动要求刷新视为本次确认。外部编辑或分支切换后重新检查，不检查任何 Deep freshness，不以根 Deep manifest 判定结构图。
 3. 通过 MCP 按需使用 `graft_repo_map`、`graft_file_api`、`graft_find_code`、`graft_trace_calls`、`graft_find_all`。
-4. Agent 修改代码后通过 SelfWorkFlow 的 `provider graft-sync` 薄入口发送一次 `agent_write` 并调用 Worker。Worker 先检查当前 conversation 绑定的 Topic：Topic 需要刷新时优先用当前模型执行原范围 Topic Deep，并自动收尾一次全局非 Deep Code Map；Topic 已 fresh 时再维护全局 Map。全局 Map 失败不阻塞 Topic，但必须单独返回待重试状态。
-5. 两张图均重新验证成功才报告 `fresh`；查询、Review 查询和纯读取不触发写后更新。
+4. Agent 修改、撤回、删除或重命名代码后，合并实际操作路径（含重命名前后路径）调用一次 `provider graft-sync`；最终 Git diff 为空也不能漏掉撤回。Worker 只维护已有全局非 Deep Map，不自动检查或更新 Topic Deep。
+5. 全局 Map 重新验证成功才报告 `fresh`；查询、Review 查询和纯读取不触发写后更新。Deep 仅由用户明确要求时单独调用 `provider graft-deep`。
 
 MCP 缺失、图过期或项目边界无效时，必须明确标记 `unverified`；仅简单文本定位可在说明后临时使用 `rg`，需要新鲜 Graft 结构证据的任务失败关闭。手工读取 `graft/` 文件不属于正式 Graft 查询证据。
 
@@ -38,12 +38,12 @@ SelfWorkFlow Host CLI 仅用于安装、预检、写后同步、显式维护和�
   --project-root D:\project --conversation-id <current-conversation-id>
 ```
 
-`graft-ensure` 不创建第二套图，也不重复构建 fresh 图；它只按绑定的
-Topic scope 执行必要的 Deep，并对全局 Code Map 执行一次非 Deep structural
-更新。两张图的最终状态必须分别报告；任一层失败都返回 `partial` 和下一步，
-不把旧缓存冒充为 fresh。
+`graft-ensure` 默认只检查；stale 返回 `confirmation_required` 和
+`confirm-global-map-update`，不写图；missing 返回
+`global-map-initialization-required`，不自动创建。用户确认后加
+`--allow-update` 才构建并重新验证。fresh 不重建。Deep 不在该入口中检查或更新。
 
-Worker 合并重复事件、校验项目边界；不调用全局 `build --deep`。只有已绑定 Topic 的 conversation 才能进入 Worker；未绑定或 `no-deep-topic` 在入队前失败关闭，不构建全局 Map。`conversation-id` 是写后 Worker 的必需身份，缺失即失败关闭。Worker 先返回绑定 Topic 的 `topicRefresh`：`refresh-required` 时优先由同一次 Host Worker 调用使用当前模型执行原 scope Deep，并将全局 Map 标记 `deferred`；Topic fresh 后自动收尾一次官方非 Deep `build`。`fresh` 无后续动作。全局 Map 失败或延后返回 `partial`/`retry-global-map`，不阻塞 Topic/普通对话；Topic Deep 暂时失败返回 `partial`、`topicFreshness=unverified`、`nextAction=retry-topic-deep`。Topic freshness 只校验 Topic context、Topic `manifest.json` 和源文件 hash，不检查或要求项目根 `graft/manifest.json`。普通对话可以继续但不得静默回退 `rg` 或声称 Graft fresh。Worker 每次调用最多尝试一次全局更新，不实现后台 Watcher、daemon 或重试循环。
+Worker 合并重复事件、校验项目边界；不调用全局 `build --deep`，也不检查 Topic manifest。已有全局 Map 的代码修改才进入 Worker；`conversation-id` 是写后 Worker 的必需身份，缺失即失败关闭。全局 Map 失败返回 `partial`/`retry-global-map`，不实现后台 Watcher、daemon 或重试循环。
 
 ## 专题 Deep
 
@@ -55,18 +55,18 @@ Deep 不是全仓库默认步骤。一个稳定 `conversation-id` 只绑定一�
 
 绑定后的 Deep 必须使用稳定 `conversation-id`、已绑定的 `topic-id` 和非空的项目内相对文件清单；后续可省略 `topic-id`，SelfWorkFlow 从绑定索引自动恢复，并拒绝切换到另一个 topic。每次调用结果都必须明确回显 `conversationId → topicId`。SelfWorkFlow 将每个文件作为官方 Graft 的重复 `--only-dir`，并沿 quoted local `#include` 做有限的 C/C++ 闭包，`.inl/.ipp` 按 include 出现顺序纳入上下文。它不会创建临时 Git 仓库，也不会因为范围不清而扫描整个项目。`.inl/.ipp` 目前属于 `context-only`：可进入 Deep 的文件语境，但不伪报官方结构符号节点。源文件 hash 用于识别不变、变更、新增和删除文件；专题只在明确使用该 topic 时惰性更新。
 
-新对话首次接触 Graft 时先调用：
+仅用户显式要求 Deep 且需要恢复/选择 Topic 时调用：
 
 ```powershell
 %LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-topics `
   --project-root D:\project --conversation-id <current-conversation-id>
 ```
 
-它只读取项目 `.selfworkflow/graft-deep/<topic-id>/` 下已有专题并返回 freshness，不调用 Provider、不创建图。用户选择已有专题后调用 `provider graft-topic-select --topic-id <id>` 自动绑定；用户明确不使用 Deep/Graft 时调用同一命令的 `--disable`，本对话记为 `no-deep-topic`。两种选择都不能被后续普通消息静默改变；没有已有专题时不猜测新范围。
+它只读取项目 `.selfworkflow/graft-deep/<topic-id>/` 下已有专题并列出选项，不调用 Provider、不创建图。用户选择已有专题后调用 `provider graft-topic-select --topic-id <id>` 自动绑定；用户只使用全局 Map 时调用 `--global-only`；用户明确不使用 Graft 时调用 `--disable`，本对话记为 `no-deep-topic`。两种选择都不能被后续普通消息静默改变；没有已有专题时不猜测新范围。
 
 Topic 读取必须显式绑定当前 `conversation-id` 对应的 `<repo>/.selfworkflow/graft-deep/<topic-id>/graft`；`provider status/query --conversation-id` 自动解析该绑定，显式 `--context-dir` 只能用于一致性核对，不会读取或检查项目根 `<repo>/graft/`。根图和 Topic 图是两个独立上下文。缺少绑定时失败关闭。
 
-Topic status 返回 `topicFreshness=stale` 或 `topicStaleFiles` 时，写后 Worker 会使用同一 `conversation-id`、当前 Host model/reasoning effort 自动调用一次 `provider graft-deep`；省略 `--scope-file` 即复用已绑定 Topic manifest 的原 scope，只更新已绑定范围，不扩大扫描。成功且重新验证 fresh 前，旧 Topic 只能作为 stale reference。
+只有用户明确要求 Deep 时，才使用同一 `conversation-id`、当前 Host model/reasoning effort 调用一次 `provider graft-deep`；省略 `--scope-file` 即复用已绑定 Topic manifest 的原 scope，只更新已绑定范围，不扩大扫描。成功且重新验证 fresh 前，旧 Topic 只能作为 stale reference。
 
 调用入口必须带专题和范围：
 

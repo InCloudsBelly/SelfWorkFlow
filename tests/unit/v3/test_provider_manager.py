@@ -273,7 +273,7 @@ class ProviderManagerTests(unittest.TestCase):
                 scope_files=("Source/main.cpp",),
             )
 
-    def test_graft_worker_automatically_refreshes_bound_topic_with_host_model(self):
+    def test_graft_worker_skips_deep_until_explicitly_requested(self):
         project = self.root / "project"
         (project / ".git").mkdir(parents=True)
         manager = self._manager(
@@ -292,10 +292,11 @@ class ProviderManagerTests(unittest.TestCase):
             "globalMap": {"deep": False, "status": "failed"},
             "conversationId": "thread-auto",
             "topicRefresh": {
-                "status": "refresh-required", "action": "run-graft-deep",
-                "topicId": "kgpr", "conversationId": "thread-auto",
+                "status": "skipped", "action": "none",
+                "reason": "deep-not-requested",
+                "conversationId": "thread-auto",
             },
-            "nextAction": "run-graft-deep",
+            "nextAction": "none",
         }
         fake_lifecycle = type(
             "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
@@ -303,6 +304,9 @@ class ProviderManagerTests(unittest.TestCase):
         with patch.object(
             manager, "_require_bound_graft_topic",
             return_value={"topicId": "kgpr"},
+        ), patch.object(
+            manager, "_require_graft_enabled",
+            return_value={"decision": "topic", "topicId": "kgpr"},
         ), patch(
             "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
             return_value=fake_lifecycle,
@@ -329,24 +333,20 @@ class ProviderManagerTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "partial")
-        self.assertTrue(result["topicUpdated"])
-        self.assertEqual(result["nextAction"], "retry-global-map")
+        self.assertFalse(result["topicUpdated"])
+        self.assertEqual(result["nextAction"], "none")
         self.assertTrue(result["completionEligible"])
-        deep.assert_called_once_with(
-            str(project), "gpt-5.6-sol", "xhigh",
-            conversation_id="thread-auto", topic_id="kgpr", scope_files=(),
-        )
-        self.assertEqual(status.call_count, 1)
-        self.assertEqual(
-            status.call_args_list[0].kwargs,
-            {"conversation_id": "thread-auto"},
-        )
+        deep.assert_not_called()
+        status.assert_not_called()
 
     def test_graft_sync_closes_deferred_global_map_after_topic_refresh(self):
         manager = self._manager()
         with patch.object(
             manager, "_require_bound_graft_topic",
             return_value={"topicId": "kgpr"},
+        ), patch.object(
+            manager, "_require_graft_enabled",
+            return_value={"decision": "topic", "topicId": "kgpr"},
         ), patch.object(
             manager, "graft_enqueue", return_value={"status": "queued"}
         ), patch.object(
@@ -370,7 +370,7 @@ class ProviderManagerTests(unittest.TestCase):
                 "C:/project", ["Source/main.cpp"], conversation_id="thread-sync"
             )
 
-        ensure.assert_called_once_with("C:/project", conversation_id="thread-sync")
+        ensure.assert_called_once_with("C:/project", conversation_id="thread-sync", allow_update=True)
         complete.assert_called_once_with("C:/project")
         self.assertEqual(result["worker"]["status"], "succeeded")
         self.assertEqual(result["worker"]["nextAction"], "none")
@@ -388,23 +388,13 @@ class ProviderManagerTests(unittest.TestCase):
         )
         self._configure_graft(manager)
         initial = {
-            "status": "stale", "conversationId": "thread-ensure",
-            "topic": {
-                "status": "refresh-required", "action": "run-graft-deep",
-                "topicId": "kgpr",
-            },
-            "globalMap": {"deep": False, "status": "fresh", "freshness": "fresh"},
+            "status": "fresh", "globalMap": {
+                "deep": False, "status": "fresh", "freshness": "fresh",
+            }, "nextAction": "none",
         }
-        final = {
-            "status": "fresh", "conversationId": "thread-ensure",
-            "topic": {"status": "fresh", "action": "none", "topicId": "kgpr"},
-            "globalMap": {"deep": False, "status": "fresh", "freshness": "fresh"},
-            "nextAction": "none",
-        }
-        checks = iter((initial, final, final))
         fake_lifecycle = type(
             "FakeLifecycle", (), {
-                "check_freshness": lambda self, *args, **kwargs: next(checks),
+                "check_global_freshness": lambda self, *args, **kwargs: initial,
                 "refresh_global_map": lambda self, *args, **kwargs: self.fail(
                     "fresh global map must not rebuild"
                 ),
@@ -413,6 +403,9 @@ class ProviderManagerTests(unittest.TestCase):
         with patch.object(
             manager, "_require_bound_graft_topic",
             return_value={"topicId": "kgpr"},
+        ), patch.object(
+            manager, "_require_graft_enabled",
+            return_value={"decision": "topic", "topicId": "kgpr"},
         ), patch(
             "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
             return_value=fake_lifecycle,
@@ -431,14 +424,11 @@ class ProviderManagerTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "succeeded")
-        self.assertTrue(result["updated"]["topic"])
+        self.assertFalse(result["updated"]["topic"])
         self.assertFalse(result["updated"]["globalMap"])
-        deep.assert_called_once_with(
-            "C:/project", "gpt-5.6-luna", "xhigh",
-            conversation_id="thread-ensure", topic_id="kgpr", scope_files=(),
-        )
+        deep.assert_not_called()
 
-    def test_graft_worker_reports_missing_host_model_without_interrupting_global_update(self):
+    def test_graft_worker_uses_default_model_without_host_context(self):
         project = self.root / "project"
         (project / ".git").mkdir(parents=True)
         manager = self._manager(
@@ -455,10 +445,11 @@ class ProviderManagerTests(unittest.TestCase):
             "providerId": "graft", "status": "succeeded",
             "globalMapUpdated": True, "conversationId": "thread-no-model",
             "topicRefresh": {
-                "status": "refresh-required", "action": "run-graft-deep",
-                "topicId": "kgpr", "conversationId": "thread-no-model",
+                "status": "skipped", "action": "none",
+                "reason": "deep-not-requested",
+                "conversationId": "thread-no-model",
             },
-            "nextAction": "run-graft-deep",
+            "nextAction": "none",
         }
         fake_lifecycle = type(
             "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
@@ -466,6 +457,9 @@ class ProviderManagerTests(unittest.TestCase):
         with patch.object(
             manager, "_require_bound_graft_topic",
             return_value={"topicId": "kgpr"},
+        ), patch.object(
+            manager, "_require_graft_enabled",
+            return_value={"decision": "topic", "topicId": "kgpr"},
         ), patch(
             "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
             return_value=fake_lifecycle,
@@ -478,11 +472,10 @@ class ProviderManagerTests(unittest.TestCase):
                 str(project), conversation_id="thread-no-model",
             )
 
-        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["status"], "succeeded")
         self.assertTrue(result["globalMapUpdated"])
         self.assertFalse(result["topicUpdated"])
-        self.assertEqual(result["nextAction"], "retry-topic-deep")
-        self.assertEqual(result["reason"], "graft-deep-current-model-unavailable")
+        self.assertEqual(result["nextAction"], "none")
         deep.assert_not_called()
 
     def test_graft_worker_keeps_global_retry_separate_when_topic_is_fresh(self):
@@ -504,8 +497,9 @@ class ProviderManagerTests(unittest.TestCase):
             "globalMap": {"deep": False, "status": "failed"},
             "conversationId": "thread-global-only-retry",
             "topicRefresh": {
-                "status": "fresh", "action": "none",
-                "topicId": "kgpr", "conversationId": "thread-global-only-retry",
+                "status": "skipped", "action": "none",
+                "reason": "deep-not-requested",
+                "conversationId": "thread-global-only-retry",
             },
             "nextAction": "retry-global-map",
         }
@@ -515,6 +509,9 @@ class ProviderManagerTests(unittest.TestCase):
         with patch.object(
             manager, "_require_bound_graft_topic",
             return_value={"topicId": "kgpr"},
+        ), patch.object(
+            manager, "_require_graft_enabled",
+            return_value={"decision": "topic", "topicId": "kgpr"},
         ), patch(
             "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
             return_value=fake_lifecycle,
@@ -524,7 +521,7 @@ class ProviderManagerTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "partial")
-        self.assertTrue(result["topicUpdated"])
+        self.assertFalse(result["topicUpdated"])
         self.assertTrue(result["completionEligible"])
         self.assertEqual(result["nextAction"], "retry-global-map")
         deep.assert_not_called()
@@ -546,10 +543,11 @@ class ProviderManagerTests(unittest.TestCase):
             "providerId": "graft", "status": "succeeded",
             "globalMapUpdated": True, "conversationId": "thread-stale",
             "topicRefresh": {
-                "status": "refresh-required", "action": "run-graft-deep",
-                "topicId": "kgpr", "conversationId": "thread-stale",
+                "status": "skipped", "action": "none",
+                "reason": "deep-not-requested",
+                "conversationId": "thread-stale",
             },
-            "nextAction": "run-graft-deep",
+            "nextAction": "none",
         }
         fake_lifecycle = type(
             "FakeLifecycle", (), {"run_once": lambda self, *args, **kwargs: lifecycle_result}
@@ -557,6 +555,9 @@ class ProviderManagerTests(unittest.TestCase):
         with patch.object(
             manager, "_require_bound_graft_topic",
             return_value={"topicId": "kgpr"},
+        ), patch.object(
+            manager, "_require_graft_enabled",
+            return_value={"decision": "topic", "topicId": "kgpr"},
         ), patch(
             "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle",
             return_value=fake_lifecycle,
@@ -569,7 +570,7 @@ class ProviderManagerTests(unittest.TestCase):
             clear=False,
         ), patch.object(
             manager, "graft_deep", return_value={"status": "succeeded"}
-        ), patch.object(
+        ) as deep, patch.object(
             manager, "status",
             side_effect=[
                 {"providerId": "graft", "freshness": "fresh", "graphStatus": "fresh"},
@@ -583,11 +584,11 @@ class ProviderManagerTests(unittest.TestCase):
                 str(project), conversation_id="thread-stale",
             )
 
-        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["status"], "succeeded")
         self.assertTrue(result["globalMapUpdated"])
         self.assertFalse(result["topicUpdated"])
-        self.assertEqual(result["nextAction"], "retry-topic-deep")
-        self.assertEqual(result["reason"], "graft-freshness-verification-failed")
+        self.assertEqual(result["nextAction"], "none")
+        deep.assert_not_called()
 
     def test_graft_status_enforces_project_binding_before_provider_dispatch(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
@@ -636,7 +637,7 @@ class ProviderManagerTests(unittest.TestCase):
             )
         self.assertEqual(port.calls, [])
 
-    def test_graft_workflow_requires_a_bound_topic_before_any_map_operation(self):
+    def test_graft_workflow_defaults_to_global_without_creating_topic_choice(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
 
         project = self.root / "project"
@@ -645,22 +646,32 @@ class ProviderManagerTests(unittest.TestCase):
         manager = self._manager(port=port)
         self._configure_graft(manager)
 
-        with self.assertRaisesRegex(
-            ProviderManagerError, "graft-conversation-topic-unbound",
-        ):
-            manager.graft_ensure(str(project), conversation_id="thread-unbound")
-        with self.assertRaisesRegex(
-            ProviderManagerError, "graft-conversation-topic-unbound",
-        ):
-            manager.graft_sync(
-                str(project), ["Source/main.cpp"],
-                conversation_id="thread-unbound",
-            )
-        with self.assertRaisesRegex(
-            ProviderManagerError, "graft-conversation-topic-unbound",
-        ):
-            manager.graft_worker(str(project), conversation_id="thread-unbound")
+        self.assertEqual(manager._require_graft_enabled(
+            str(project), "thread-unbound"), {"decision": "global"})
+        self.assertFalse((project / ".selfworkflow").exists())
         self.assertEqual(port.calls, [])
+
+    def test_global_stale_requires_confirmation_and_never_calls_deep(self):
+        from unittest.mock import Mock
+        project = self.root / "project"
+        (project / ".git").mkdir(parents=True)
+        manager = self._manager()
+        self._configure_graft(manager)
+        lifecycle = Mock()
+        stale = {"status": "stale", "globalMap": {"deep": False, "freshness": "stale"}, "nextAction": "refresh-global-map"}
+        fresh = {"status": "fresh", "globalMap": {"deep": False, "freshness": "fresh"}, "nextAction": "none"}
+        lifecycle.check_global_freshness.return_value = stale
+        with patch.object(manager, "_adapter"), patch(
+            "selfworkflow.v3.graft_lifecycle.GraftProjectLifecycle", return_value=lifecycle
+        ), patch.object(manager, "graft_deep") as deep:
+            result = manager.graft_ensure(str(project), conversation_id="new")
+            self.assertEqual(result["status"], "confirmation_required")
+            lifecycle.refresh_global_map.assert_not_called()
+            lifecycle.check_global_freshness.side_effect = [stale, fresh]
+            result = manager.graft_ensure(str(project), conversation_id="new", allow_update=True)
+            self.assertEqual(result["status"], "succeeded")
+            lifecycle.refresh_global_map.assert_called_once_with(str(project))
+            deep.assert_not_called()
 
     def test_configure_holds_an_exclusive_machine_config_lock(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError

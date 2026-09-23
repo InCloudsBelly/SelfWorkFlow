@@ -26,12 +26,12 @@ Discover → Capability Check → Classify → Design → Plan
 - Design/Plan：按 Light/Full/Deep 读取对应设计模块；Full/Deep 自动一次 `grilling`。
 - 行为变更：TDD；Full/Deep 再加载 TEA。`tea-atdd`、`tea-trace`、`tea-nfr` 仅显式需要时加载。
 - Review、知识、文档留痕：只加载各自模块；知识是可选扩展，不阻塞普通交付。
-- Graft：只由代码路由决定。已绑定 Deep Topic 才加载 Graft 模块；未绑定或 `no-deep-topic` 完全不调用 Graft。
+- Graft：已有可用且 fresh 的全局非 Deep Code Map 自动使用，无须显式启用或 Topic 绑定；stale 时询问更新，缺失不自动初始化。
 
 ## 两条 Graft 路径
 
-1. **已绑定 Deep Topic**：首次只检查一次绑定；代码读取前调用一次 `graft-ensure`；代码修改后调用一次 `graft-sync`。两个入口负责 Topic Deep 与全局非 Deep Code Map，不检查全局 Deep manifest。
-2. **未绑定/`no-deep-topic`**：不读取、不构建、不查询 Graft，继续原有 Light/Full/Deep 流程。绑定检查只用于决定分支，不是 Graft 查询。
+1. **默认全局 Map**：读取阶段用 `graft-ensure` 只读检查；fresh 自动使用，stale 询问，同意后加 `--allow-update`。Agent 修改/撤回后合并调用一次 `graft-sync`；外部编辑/分支切换后重新检查，过期先询问。只维护全局非 Deep Code Map，不逐行重复构建。
+2. **显式 Deep**：仅用户明确要求时恢复或选择 Topic，再使用/更新 Deep；绑定本身不触发 Deep 检查。明确禁用 Graft 时尊重禁用，继续原有 Light/Full/Deep 流程。
 
 主 Agent 负责 Graft；Reviewer 不调用 Graft/provider。Graft 失败不得静默伪造 fresh 或无声降级。
 
