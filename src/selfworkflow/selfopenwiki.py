@@ -15,6 +15,44 @@ EXTERNAL_CAPABILITIES = frozenset({
     "update.external-agent.begin",
     "update.external-agent.reviewed-finalize",
 })
+PERSONAL_PROTOCOL = "selfopenwiki:personal-openwiki-v1"
+PERSONAL_TOOL_NAMES = (
+    "openwiki_begin",
+    "openwiki_submit_plan",
+    "openwiki_next_page",
+    "openwiki_inspect_page_claims",
+    "openwiki_submit_page",
+    "openwiki_finish",
+)
+PERSONAL_CAPABILITIES = frozenset({
+    "personal.lifecycle.begin",
+    "personal.wiki-root.explicit",
+    "personal.skill-adaptation.bound",
+    "personal.lifecycle.plan",
+    "personal.page-job.queue",
+    "personal.lifecycle.next-page",
+    "personal.candidate.write-package",
+    "personal.claims.inspect",
+    "personal.claims.binding",
+    "personal.page.validate-assigned",
+    "personal.claims.sparse-decisions",
+    "personal.lifecycle.finish",
+    "personal.c7-review-cas-publish",
+})
+_PERSONAL_STATUSES = {
+    "openwiki_begin": {"planning", "resuming", "noop"},
+    "openwiki_submit_plan": {"plan_accepted"},
+    "openwiki_next_page": {"page_pending", "queue_complete"},
+    "openwiki_inspect_page_claims": {"claims_inspected"},
+    "openwiki_submit_page": {"page_accepted"},
+    "openwiki_finish": {
+        "review_required",
+        "publish_pending",
+        "repair_ready",
+        "needs_clarification",
+        "complete",
+    },
+}
 MCP_ENTRY = Path("self-openwiki") / "mcp-server" / "dist" / "index.js"
 VISUALIZER_ENTRY = Path(".work") / "openwiki" / "dist" / "cli" / "cli.js"
 
@@ -114,11 +152,75 @@ def validate_external_status(value: object) -> dict[str, object]:
             raise SelfOpenWikiError("external-status-invalid")
     if external["ready"] is not True:
         raise SelfOpenWikiError("external-agent-not-ready")
+    paths = value.get("paths")
+    if (
+        not isinstance(paths, dict)
+        or set(paths) != {"openWikiRoot", "runtimeRoot", "wikiRoot"}
+        or not all(isinstance(paths[key], str) and paths[key] for key in paths)
+        or any(not Path(paths[key]).is_absolute() for key in paths)
+    ):
+        raise SelfOpenWikiError("external-status-paths-invalid")
+    return dict(value)
+
+
+def validate_personal_status(value: object) -> dict[str, object]:
+    """Require the verified v2 personal lifecycle in addition to external mode."""
+
+    result = validate_external_status(value)
+    capabilities = result["capabilities"]
+    capability_ids = {
+        item["id"]
+        for item in capabilities
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    if not PERSONAL_CAPABILITIES <= capability_ids:
+        raise SelfOpenWikiError("personal-capability-missing")
+    return result
+
+
+def validate_personal_result(tool_name: object, value: object) -> dict[str, object]:
+    """Validate the stable protocol/status envelope without inventing fields."""
+
+    if tool_name not in PERSONAL_TOOL_NAMES:
+        raise SelfOpenWikiError("personal-tool-invalid")
+    if not isinstance(value, dict):
+        raise SelfOpenWikiError("personal-result-invalid")
+    if value.get("ok") is False:
+        error = value.get("error")
+        recovery = value.get("recovery")
+        if (
+            not isinstance(error, dict)
+            or not {"code", "message", "retryable"} <= set(error)
+            or not set(error) <= {"code", "details", "message", "retryable"}
+            or not isinstance(error.get("code"), str)
+            or not error["code"]
+            or not isinstance(error.get("message"), str)
+            or not error["message"]
+            or not isinstance(error.get("retryable"), bool)
+            or not isinstance(recovery, dict)
+            or not isinstance(recovery.get("action"), str)
+            or not recovery["action"]
+            or (
+                "message" in recovery
+                and (
+                    not isinstance(recovery["message"], str)
+                    or not recovery["message"]
+                )
+            )
+        ):
+            raise SelfOpenWikiError("personal-result-invalid")
+        return dict(value)
+    if (
+        value.get("ok") is not True
+        or value.get("protocol") != PERSONAL_PROTOCOL
+        or value.get("status") not in _PERSONAL_STATUSES[tool_name]
+    ):
+        raise SelfOpenWikiError("personal-result-invalid")
     return dict(value)
 
 
 class SelfOpenWikiAdapter:
-    """Host-side preflight and status adapter; no side-effecting operations."""
+    """Host-side preflight and strict MCP contract adapter."""
 
     def __init__(self, client: SelfOpenWikiClient):
         self._client = client
@@ -131,6 +233,49 @@ class SelfOpenWikiAdapter:
         except Exception:
             raise SelfOpenWikiError("backend-unavailable") from None
         return validate_external_status(value)
+
+    def personal_status(self) -> dict[str, object]:
+        """Call ``openwiki_status`` first and require the v2 personal lifecycle."""
+
+        try:
+            value = self._client.call_tool("openwiki_status", {})
+        except Exception:
+            raise SelfOpenWikiError("backend-unavailable") from None
+        return validate_personal_status(value)
+
+    def override_wiki_root(self) -> str:
+        """Return the module-owned Wiki root from the live MCP status."""
+
+        status = self.personal_status()
+        paths = status["paths"]
+        assert isinstance(paths, dict)
+        wiki_root = paths["wikiRoot"]
+        assert isinstance(wiki_root, str)
+        return wiki_root
+
+    def personal_call(
+        self, tool_name: str, arguments: dict[str, object]
+    ) -> dict[str, object]:
+        """Route one v2 call through the bound Wiki module."""
+
+        if tool_name not in PERSONAL_TOOL_NAMES:
+            raise SelfOpenWikiError("personal-tool-invalid")
+        status = self.personal_status()
+        routed_arguments = dict(arguments)
+        if tool_name == "openwiki_begin":
+            paths = status["paths"]
+            assert isinstance(paths, dict)
+            wiki_root = paths["wikiRoot"]
+            assert isinstance(wiki_root, str)
+            requested = routed_arguments.get("wikiRoot")
+            if requested is not None and requested != wiki_root:
+                raise SelfOpenWikiError("personal-wiki-root-mismatch")
+            routed_arguments["wikiRoot"] = wiki_root
+        try:
+            value = self._client.call_tool(tool_name, routed_arguments)
+        except Exception:
+            raise SelfOpenWikiError("backend-unavailable") from None
+        return validate_personal_result(tool_name, value)
 
     @staticmethod
     def setup_command(repository_root: str | Path, *, with_mcp: bool = False) -> list[str]:

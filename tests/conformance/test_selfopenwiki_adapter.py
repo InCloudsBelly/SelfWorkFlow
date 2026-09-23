@@ -6,6 +6,7 @@ import unittest
 import yaml
 
 from selfworkflow.adapters import build_runtime
+from selfworkflow import selfopenwiki
 from selfworkflow.selfopenwiki import (
     EXTERNAL_CAPABILITIES,
     SelfOpenWikiAdapter,
@@ -16,12 +17,12 @@ from selfworkflow.selfopenwiki import (
 
 class _FakeClient:
     def __init__(self, response):
-        self.response = response
+        self.responses = list(response) if isinstance(response, list) else [response]
         self.calls = []
 
     def call_tool(self, name, arguments):
         self.calls.append((name, arguments))
-        return self.response
+        return self.responses.pop(0)
 
 
 class SelfOpenWikiAdapterTests(unittest.TestCase):
@@ -35,6 +36,11 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             "authRequired": False,
             "version": {"contractSchema": 2},
             "externalAgent": {"ready": True, "activeTransaction": None},
+            "paths": {
+                "openWikiRoot": "D:/SelfOpenWiki/.work/openwiki",
+                "runtimeRoot": "D:/wiki_zxh.selfopenwiki",
+                "wikiRoot": "D:/wiki_zxh",
+            },
             "capabilities": [
                 {"id": capability}
                 for capability in sorted(EXTERNAL_CAPABILITIES)
@@ -64,6 +70,89 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         ):
             with self.assertRaises(SelfOpenWikiError):
                 validate_external_status(response)
+
+    def test_personal_status_requires_v2_capabilities(self):
+        self.assertTrue(hasattr(SelfOpenWikiAdapter, "personal_status"))
+        required = set(selfopenwiki.PERSONAL_CAPABILITIES)
+        ready = self.status(
+            capabilities=[
+                {"id": capability}
+                for capability in sorted(EXTERNAL_CAPABILITIES | required)
+            ]
+        )
+        client = _FakeClient(ready)
+        result = SelfOpenWikiAdapter(client).personal_status()
+        self.assertEqual(result["version"]["contractSchema"], 2)
+        self.assertEqual(client.calls, [("openwiki_status", {})])
+        self.assertEqual(
+            SelfOpenWikiAdapter(_FakeClient(ready)).override_wiki_root(),
+            "D:/wiki_zxh",
+        )
+
+        missing = self.status(
+            capabilities=[
+                {"id": capability}
+                for capability in sorted(EXTERNAL_CAPABILITIES)
+            ]
+        )
+        with self.assertRaisesRegex(SelfOpenWikiError, "personal-capability-missing"):
+            selfopenwiki.validate_personal_status(missing)
+
+    def test_personal_call_accepts_only_v2_protocol_and_tool_status(self):
+        self.assertTrue(hasattr(SelfOpenWikiAdapter, "personal_call"))
+        status = self.status(
+            capabilities=[
+                {"id": capability}
+                for capability in sorted(EXTERNAL_CAPABILITIES | set(selfopenwiki.PERSONAL_CAPABILITIES))
+            ]
+        )
+        result = {
+            "ok": True,
+            "protocol": "selfopenwiki:personal-openwiki-v1",
+            "status": "planning",
+        }
+        client = _FakeClient([status, result])
+        self.assertEqual(
+            SelfOpenWikiAdapter(client).personal_call("openwiki_begin", {"mode": "update"}),
+            result,
+        )
+        self.assertEqual(
+            client.calls,
+            [
+                ("openwiki_status", {}),
+                ("openwiki_begin", {"mode": "update", "wikiRoot": "D:/wiki_zxh"}),
+            ],
+        )
+        mismatch_client = _FakeClient([status])
+        with self.assertRaisesRegex(SelfOpenWikiError, "personal-wiki-root-mismatch"):
+            SelfOpenWikiAdapter(mismatch_client).personal_call(
+                "openwiki_begin", {"wikiRoot": "D:/other-wiki"}
+            )
+        with self.assertRaisesRegex(SelfOpenWikiError, "personal-result-invalid"):
+            selfopenwiki.validate_personal_result(
+                "openwiki_begin", {**result, "protocol": "wrong"}
+            )
+        with self.assertRaisesRegex(SelfOpenWikiError, "personal-result-invalid"):
+            selfopenwiki.validate_personal_result(
+                "openwiki_finish", result
+            )
+        self.assertEqual(
+            selfopenwiki.validate_personal_result(
+                "openwiki_finish",
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "busy",
+                        "message": "Busy.",
+                        "retryable": True,
+                    },
+                    "recovery": {"action": "retry"},
+                },
+            )["ok"],
+            False,
+        )
+        with self.assertRaisesRegex(SelfOpenWikiError, "personal-tool-invalid"):
+            selfopenwiki.validate_personal_result("openwiki_status", result)
 
     def test_external_active_transaction_is_structurally_bound(self):
         active = {
@@ -175,6 +264,43 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         self.assertEqual(adapter["personalWiki"]["requiredExternalRoot"], True)
         self.assertEqual(contract["status"]["required"]["version.contractSchema"], 2)
         self.assertEqual(contract["externalUpdate"]["legacyFallback"], False)
+        self.assertEqual(
+            adapter["mcp"]["personalLifecycle"]["protocol"],
+            "selfopenwiki:personal-openwiki-v1",
+        )
+        self.assertEqual(
+            adapter["mcp"]["personalLifecycle"]["tools"],
+            list(selfopenwiki.PERSONAL_TOOL_NAMES),
+        )
+        self.assertEqual(
+            set(adapter["mcp"]["personalLifecycle"]["requiredCapabilities"]),
+            set(selfopenwiki.PERSONAL_CAPABILITIES),
+        )
+        self.assertEqual(
+            adapter["personalWiki"]["overrideRouting"]["source"],
+            "openwiki_status.paths.wikiRoot",
+        )
+        self.assertEqual(
+            adapter["hostBinding"],
+            {
+                "entrypoint": "selfworkflow.selfopenwiki:SelfOpenWikiAdapter",
+                "callBoundary": "personal_call",
+                "statusBoundary": "personal_status",
+            },
+        )
+        self.assertEqual(
+            contract["personalLifecycle"]["tools"],
+            list(selfopenwiki.PERSONAL_TOOL_NAMES),
+        )
+        self.assertEqual(
+            set(contract["personalLifecycle"]["requiredCapabilities"]),
+            set(selfopenwiki.PERSONAL_CAPABILITIES),
+        )
+        self.assertEqual(
+            contract["personalLifecycle"]["overrideRouting"]["source"],
+            "openwiki_status.paths.wikiRoot",
+        )
+        self.assertIn("openwiki_finish", contract["personalLifecycle"]["sequence"])
         for path in (
             self.ROOT / "extensions/knowledge/selfopenwiki/adapter.yaml",
             self.ROOT / "extensions/knowledge/selfopenwiki/tool-contract.json",

@@ -5,6 +5,10 @@ transport: mcp-stdio
 contractSchema: 2
 executionMode: external_agent
 selection: explicit-knowledge-backend
+hostBinding:
+  entrypoint: selfworkflow.selfopenwiki:SelfOpenWikiAdapter
+  callBoundary: personal_call
+  statusBoundary: personal_status
 repository:
   officialOpenWikiSubmodule: upstream/openwiki
   privateIntegrationOutsideSubmodule: true
@@ -13,6 +17,11 @@ personalWiki:
   runtimeSuffix: .selfopenwiki
   forbidPublicCheckoutWrites: true
   forbidPrivateRuntimeEvidenceInGit: true
+  overrideRouting:
+    source: openwiki_status.paths.wikiRoot
+    injectOn: openwiki_begin
+    mismatch: fail-closed
+    statusRequiredBeforeEveryPersonalCall: true
 installation:
   setup: [Setup.bat]
   setupWithMcp: [Setup.bat, --with-mcp]
@@ -34,6 +43,30 @@ mcp:
     begin: openwiki_begin_external_update
     finalize: openwiki_finalize_external_update
     legacyDefault: disabled
+  personalLifecycle:
+    protocol: selfopenwiki:personal-openwiki-v1
+    default: true
+    tools:
+      - openwiki_begin
+      - openwiki_submit_plan
+      - openwiki_next_page
+      - openwiki_inspect_page_claims
+      - openwiki_submit_page
+      - openwiki_finish
+    requiredCapabilities:
+      - personal.lifecycle.begin
+      - personal.wiki-root.explicit
+      - personal.skill-adaptation.bound
+      - personal.lifecycle.plan
+      - personal.page-job.queue
+      - personal.lifecycle.next-page
+      - personal.candidate.write-package
+      - personal.claims.inspect
+      - personal.claims.binding
+      - personal.page.validate-assigned
+      - personal.claims.sparse-decisions
+      - personal.lifecycle.finish
+      - personal.c7-review-cas-publish
 visualizer:
   command: [node, .work/openwiki/dist/cli/cli.js, visualize, <wiki-root>, --port, "4321", --no-open]
   loopbackOnly: true

@@ -29,6 +29,53 @@
     "automaticCommit": false,
     "automaticPush": false
   },
+  "personalLifecycle": {
+    "protocol": "selfopenwiki:personal-openwiki-v1",
+    "default": true,
+    "overrideRouting": {
+      "source": "openwiki_status.paths.wikiRoot",
+      "injectOn": "openwiki_begin",
+      "mismatch": "fail-closed",
+      "statusRequiredBeforeEveryPersonalCall": true
+    },
+    "tools": [
+      "openwiki_begin",
+      "openwiki_submit_plan",
+      "openwiki_next_page",
+      "openwiki_inspect_page_claims",
+      "openwiki_submit_page",
+      "openwiki_finish"
+    ],
+    "sequence": [
+      "openwiki_status",
+      "openwiki_begin",
+      "openwiki_submit_plan",
+      "openwiki_next_page",
+      "openwiki_inspect_page_claims",
+      "openwiki_submit_page",
+      "openwiki_finish"
+    ],
+    "requiredCapabilities": [
+      "personal.lifecycle.begin",
+      "personal.wiki-root.explicit",
+      "personal.skill-adaptation.bound",
+      "personal.lifecycle.plan",
+      "personal.page-job.queue",
+      "personal.lifecycle.next-page",
+      "personal.candidate.write-package",
+      "personal.claims.inspect",
+      "personal.claims.binding",
+      "personal.page.validate-assigned",
+      "personal.claims.sparse-decisions",
+      "personal.lifecycle.finish",
+      "personal.c7-review-cas-publish"
+    ],
+    "compatibilityManifest": {
+      "schemaVersion": 2,
+      "protocol": "selfopenwiki:personal-openwiki-v1",
+      "source": "SelfOpenWiki/config/personal-openwiki-compatibility.json"
+    }
+  },
   "installation": {
     "setup": ["Setup.bat"],
     "setupWithMcp": ["Setup.bat", "--with-mcp"],
