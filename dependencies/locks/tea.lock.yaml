@@ -2,19 +2,19 @@ schemaVersion: 3
 sourceId: tea
 canonicalUrl: https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise.git
 path: dependencies/upstream/tea
-gitlinkCommit: 9c6ca208bcfb99dad244e88f8df7cb4f26e5ff21
-gitTree: 8e61619b8bde791ebf778c57ecd680e42ed24656
-inventoryHash: sha256:310ace68f647577213468bf07c819bb4c873453f0f4bf0512699824a7bb7b70f
+gitlinkCommit: 913249f24e10a8098e6642bce0e67b8662b91aa8
+gitTree: 5fb8c2b83aff4189d461c4cdf92b355e763a6d73
+inventoryHash: sha256:a9d49290e6b260990e2df00a2e59ed9ab3440e73bc78b96ff0ed404306e354a9
 license:
   path: LICENSE
   spdx: MIT
   hash: sha256:d63b6198ba078d9494407eb94e2d86adf6350195301bb5ded4ba24e36bce8b55
 adapterFiles:
   - path: overlays/tea/adapter.yaml
-    hash: sha256:7eb397a9d17fa990ee37bd2f3bb7891899ee939a0e198c207d8afefefb76a315
+    hash: sha256:a3ce8a1692c1e5e827273ec3b3a554df1d08a219d3c9d58edbbc66c0e58138d6
   - path: overlays/tea/routing.yaml
     hash: sha256:629443609b46d693905cb43422a04578a8d335b991737f01152571b81336260a
-adapterHash: sha256:674adda31d9182dce9be056f318da1111952093d5685281f363cc829a02fa228
+adapterHash: sha256:6a8d3696df883ce672a5c0fb0ec736878b78f5e7c49876011d6fff5b8f403a30
 status:
   sourceIntegrity: supported
   adapterSupport: supported
