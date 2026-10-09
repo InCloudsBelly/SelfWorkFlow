@@ -45,7 +45,7 @@ modules:
     hash: sha256:19071b0275c1454f9a07ce5fd50f179d7310fe782145d6b7f9dd637fbeccac2c
   - id: ponytail-coding
     ref: modules/ponytail-coding.yaml
-    hash: sha256:468a7166698631c6dc5713a91c78182402ba40064cf40a2df9aa7ba8f590c704
+    hash: sha256:5290dd620bf7a3eb87605bddcb4a6ea4a1d559027098688c3e5bbf735cce0d9e
   - id: ponytail-review
     ref: modules/ponytail-review.yaml
     hash: sha256:9181083cd37f91e3147db471cb9c37dab8b9cfe0bc9ec4d6b3d92121a8c30ac8
@@ -54,7 +54,7 @@ modules:
     hash: sha256:00bf10a97127dfb2681721289b7f088631f0bd65d4a9ca8c569f373f5ffeb1ed
   - id: ponytail-help
     ref: modules/ponytail-help.yaml
-    hash: sha256:ee528567ed5d9d6d752204f6447a8fe640b79294fa99179980dc738d8d189f6e
+    hash: sha256:e798a2bdb469d56f8cc52d66597bb2f4142f47f19a38ec69d2fdca1f9d8d3bbf
   - id: discover-context
     ref: modules/discover-context.yaml
     hash: sha256:16bb4f817b3dbf5a9f4bea24c1efeab475e5dddf325e1c706e9e7148c3ce00f0
@@ -117,10 +117,10 @@ modules:
     hash: sha256:c43c40410a02a892675f199f2ca1a5dd91ac1ec84e40fb47fb45ee0e742c4737
   - id: knowledge-read
     ref: modules/knowledge-read.yaml
-    hash: sha256:796ab068d57568c6acc2c279b94c051578c7bcf6cf645ae073e713e8ce7ed757
+    hash: sha256:070bf29616b46946e3ca552cdf3160d0a07eff748c635d5620bbad80ec331c18
   - id: knowledge-propose
     ref: modules/knowledge-propose.yaml
-    hash: sha256:3d7a55aaefaae8391995bc6698c5bebda311429d9aa93cdcc10f3c582bd79b79
+    hash: sha256:152f3b7033e8d0d38fb946c78baa1fd7b1a2af786ace17c0a581d6a7be63a5aa
   - id: knowledge-update
     ref: modules/knowledge-update.yaml
-    hash: sha256:2c0169a87d09a4c20d245f16da96ab4fc772b40e5cea48d355d0f6c577bb1ce7
+    hash: sha256:852f83c7d06dddbc44683946adbc5031282a9315f20dbb574fd3cc4b2d533702

@@ -94,28 +94,28 @@ class GitPolicyTests(unittest.TestCase):
         self.assertEqual(policy["allowlist"], [
             {
                 "path": "dependencies/upstream/matt-pocock-skills",
-                "objectHash": "3cca18b368ae95cdbdebbff572ccafa662551015",
+                "objectHash": "b0618bc436ad893b3c5e84e55fba86586d34a404",
                 "reason": "Pinned Matt Pocock engineering skills foundation used by SelfWorkFlow",
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
             },
             {
                 "path": "dependencies/upstream/tea",
-                "objectHash": "9c6ca208bcfb99dad244e88f8df7cb4f26e5ff21",
+                "objectHash": "913249f24e10a8098e6642bce0e67b8662b91aa8",
                 "reason": "Pinned official TEA source used by the optional V3 test-quality adapter",
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
             },
             {
                 "path": "dependencies/upstream/graft",
-                "objectHash": "f9e65396e638e517aecae0d731017f53084d70ed",
+                "objectHash": "fe30ead39d5e6f0c921018d364da2bdbc9d4b3ad",
                 "reason": "Pinned official Graft source used by the default code-reading Provider",
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",
             },
             {
                 "path": "dependencies/upstream/ponytail",
-                "objectHash": "356918eba965ee1eac64bd3a7f0dd02108350de5",
+                "objectHash": "9cc65d03aa2da1db7121b912d03596409ee340b8",
                 "reason": "Pinned official Ponytail source used by the code-task workflow adapter",
                 "owner": "SelfWorkFlow maintainers",
                 "expires": "2030-12-31",

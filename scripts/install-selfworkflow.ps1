@@ -655,7 +655,7 @@ try {
     Set-InstallStage "graft-build" 27
     Ensure-GraftBuild $graftHead $graftTree
     $graftPackage = Get-Content -Raw -LiteralPath (Join-Path $GraftPath "package.json") | ConvertFrom-Json
-    if ($graftPackage.name -ne "@nanonets/graft" -or $graftPackage.version -ne "0.18.0" -or -not (Test-Path -LiteralPath (Join-Path $GraftPath "dist\cli.js") -PathType Leaf)) {
+    if ($graftPackage.name -ne "@nanonets/graft" -or $graftPackage.version -ne "0.21.1" -or -not (Test-Path -LiteralPath (Join-Path $GraftPath "dist\cli.js") -PathType Leaf)) {
         Stop-Install "graft-build" 27 "graft-build-identity-invalid"
     }
     $graftReport = [ordered]@{

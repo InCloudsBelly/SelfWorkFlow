@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: knowledge-read
-sourceHash: sha256:bef75bc171d7e957e2211005882e5fa2235434b85eeb8873075feecabb4d79fd
+sourceHash: sha256:5310a29bde36c0290288f44f441b040297f5c9b63d2e180e7a58fde400b38f08
 stage: discovered
 slot: knowledge.read
 selectionMode: bounded-runtime

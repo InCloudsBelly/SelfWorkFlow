@@ -75,7 +75,7 @@ class GraftRealE2ETests(unittest.TestCase):
             wiring = project / "graft" / ".graph" / "wiring.json"
             self.assertTrue(wiring.is_file())
             self.assertIn("/graft/", (project / ".gitignore").read_text())
-            self.assertEqual(adapter.version()["version"], "0.18.0")
+            self.assertEqual(adapter.version()["version"], "0.21.1")
             self.assertEqual(adapter.plan_query(str(project), "helper")["queryKind"], "ask")
 
             query_specs = (

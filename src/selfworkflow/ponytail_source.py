@@ -283,18 +283,29 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
         "scope, output language, Review, verification, and authorization.\n"
         "`stop ponytail` / `normal mode` ends this task-scoped enhancement."
     )
-    if old_persistence not in text or old_boundary not in text:
-        raise PonytailSourceError("ponytail-source-adaptation-invalid")
-    text = text.replace(old_persistence, new_persistence).replace(old_boundary, new_boundary)
     old_complex = (
         "- Complex request? Ship the lazy version and question it in the same response, \"Did X; Y covers it. Need full X? Say so.\" Never stall on an answer you can default."
     )
     new_complex = (
         "- Complex request? Keep the approved SelfWorkFlow scope. Record adjacent improvements instead of implementing them; revise the plan before any out-of-scope change. Do not stall when the approved path is sufficient."
     )
-    if old_complex not in text:
+    if old_persistence in text and old_boundary in text and old_complex in text:
+        text = text.replace(old_persistence, new_persistence).replace(old_boundary, new_boundary)
+        text = text.replace(old_complex, new_complex)
+        return text.encode("utf-8")
+
+    current_boundary = (
+        "Active for the whole session until the user says \"stop ponytail\" or "
+        "\"normal mode\". Switch level: `/ponytail lite|full|ultra`."
+    )
+    scoped_boundary = (
+        "Active only for the current SelfWorkFlow-routed code task. The mode is "
+        "task-scoped and is not persisted in host or global configuration. Switch "
+        "level: `/ponytail lite|full|ultra`."
+    )
+    if current_boundary not in text:
         raise PonytailSourceError("ponytail-source-adaptation-invalid")
-    text = text.replace(old_complex, new_complex)
+    text = text.replace(current_boundary, scoped_boundary)
     return text.encode("utf-8")
 
 

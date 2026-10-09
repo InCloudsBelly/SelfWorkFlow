@@ -88,11 +88,11 @@ _CORE_PATHS = (
 
 _MATT_LOCK_PATH = "dependencies/locks/matt-pocock-skills.lock.yaml"
 _TEA_RUNTIME_WORKFLOWS = {
-    "bmad-testarch-test-design": "src/workflows/testarch/bmad-testarch-test-design",
-    "bmad-testarch-atdd": "src/workflows/testarch/bmad-testarch-atdd",
-    "bmad-testarch-test-review": "src/workflows/testarch/bmad-testarch-test-review",
-    "bmad-testarch-trace": "src/workflows/testarch/bmad-testarch-trace",
-    "bmad-testarch-nfr": "src/workflows/testarch/bmad-testarch-nfr",
+    "bmad-testarch-test-design": "skills/bmad-testarch-test-design",
+    "bmad-testarch-atdd": "skills/bmad-testarch-atdd",
+    "bmad-testarch-test-review": "skills/bmad-testarch-test-review",
+    "bmad-testarch-trace": "skills/bmad-testarch-trace",
+    "bmad-testarch-nfr": "skills/bmad-testarch-nfr",
 }
 
 

@@ -6,8 +6,8 @@ entries:
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:f80c6e95f90607d9d88eeb5254c0a1b581cdccb1
-      contentHash: sha256:4fc91d3f276281b3d00e989330cc574ea6b2be492ff1bb874268485f642a23ac
+      revision: git:d708433a60611ec49a7a5567b6cf4ae025a29cf6
+      contentHash: sha256:ac57747edd2d8fd8694bc2e76e3ab1c42b18ed8160f53b96b78999ec0e1ffb88
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -112,8 +112,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/tea.lock.yaml
-      revision: git:db2bdf9f00010906bedbcebf157765240ae9566f
-      contentHash: sha256:3777957a43f06ef8cf24cebe14f225bdad11291a10a2552a71a9a2f26711dd41
+      revision: git:52309a9a6becae620453647d7217334a1d1cbc21
+      contentHash: sha256:9af898d495bbcbfe497fd1169b90b1fd0f238a7d1e6b29cef2dfa51f54084806
     aliases:
       - name: tea-quality
         target: tea-quality-foundation
@@ -143,8 +143,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/matt-pocock-skills.lock.yaml
-      revision: git:db2bdf9f00010906bedbcebf157765240ae9566f
-      contentHash: sha256:ac3ef885a55312c67830f7ea87ee8da57f1a85f3eb5b795d3a13d847a057f729
+      revision: git:4fb84b00022b0242c3dbed4e08a3447d6389d013
+      contentHash: sha256:e7ac2ee8edd9bc962a4b88fd25fa721a49ffa335a560cd57806dcd9715ff553c
     aliases:
       - name: matt-skills
         target: matt-skills-foundation

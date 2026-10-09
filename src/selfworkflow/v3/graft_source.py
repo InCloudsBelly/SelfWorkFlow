@@ -80,7 +80,7 @@ def _load_lock(path: Path) -> dict[str, Any]:
         not isinstance(package, dict)
         or set(package) != {"name", "version", "node", "packageJsonHash", "packageLockHash"}
         or package.get("name") != "@nanonets/graft"
-        or package.get("version") != "0.18.0"
+        or package.get("version") != "0.21.1"
         or package.get("node") != ">=20"
         or not isinstance(package.get("packageJsonHash"), str)
         or not isinstance(package.get("packageLockHash"), str)
@@ -193,7 +193,7 @@ def inspect_graft_source_path(source_value: str | Path) -> dict[str, Any]:
     if (
         not isinstance(package, dict)
         or package.get("name") != "@nanonets/graft"
-        or package.get("version") != "0.18.0"
+        or package.get("version") != "0.21.1"
         or not isinstance(package.get("bin"), dict)
         or package["bin"].get("graft") != "dist/cli.js"
     ):

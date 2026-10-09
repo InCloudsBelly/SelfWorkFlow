@@ -20,7 +20,7 @@ class GraftSourceConformanceTests(unittest.TestCase):
         result = verify_graft_source(ROOT)
         self.assertEqual(result["providerId"], "graft")
         self.assertEqual(result["status"], "ready")
-        self.assertEqual(result["commit"], "f9e65396e638e517aecae0d731017f53084d70ed")
+        self.assertEqual(result["commit"], "fe30ead39d5e6f0c921018d364da2bdbc9d4b3ad")
 
     def test_dirty_or_branch_drift_fails_closed(self):
         original = subprocess.run

@@ -197,7 +197,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertEqual(summary["writeCapability"], "enabled")
             self.assertEqual(
                 summary["mattSkills"]["commit"],
-                "3cca18b368ae95cdbdebbff572ccafa662551015",
+                "b0618bc436ad893b3c5e84e55fba86586d34a404",
             )
             self.assertTrue(
                 (root / "agents/skills/matt-pocock/grill-me/SKILL.md").is_file()

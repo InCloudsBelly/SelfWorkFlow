@@ -5,37 +5,37 @@ artifactRoot: artifacts/test-quality
 workflows:
   - id: teach-me-testing
     upstreamId: bmad-teach-me-testing
-    root: src/workflows/testarch/bmad-teach-me-testing
+    root: skills/bmad-teach-me-testing
     support: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: atdd
     upstreamId: bmad-testarch-atdd
-    root: src/workflows/testarch/bmad-testarch-atdd
+    root: skills/bmad-testarch-atdd
     support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: automate
     upstreamId: bmad-testarch-automate
-    root: src/workflows/testarch/bmad-testarch-automate
+    root: skills/bmad-testarch-automate
     support: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: ci
     upstreamId: bmad-testarch-ci
-    root: src/workflows/testarch/bmad-testarch-ci
+    root: skills/bmad-testarch-ci
     support: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: framework
     upstreamId: bmad-testarch-framework
-    root: src/workflows/testarch/bmad-testarch-framework
+    root: skills/bmad-testarch-framework
     support: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: nfr
     upstreamId: bmad-testarch-nfr
-    root: src/workflows/testarch/bmad-testarch-nfr
+    root: skills/bmad-testarch-nfr
     support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: test-design
     upstreamId: bmad-testarch-test-design
-    root: src/workflows/testarch/bmad-testarch-test-design
+    root: skills/bmad-testarch-test-design
     support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: test-review
     upstreamId: bmad-testarch-test-review
-    root: src/workflows/testarch/bmad-testarch-test-review
+    root: skills/bmad-testarch-test-review
     support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: trace
     upstreamId: bmad-testarch-trace
-    root: src/workflows/testarch/bmad-testarch-trace
+    root: skills/bmad-testarch-trace
     support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}

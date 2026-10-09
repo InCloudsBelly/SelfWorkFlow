@@ -10,7 +10,7 @@
 4. Agent 修改、撤回、删除或重命名代码后，合并实际操作路径（含重命名前后路径）调用一次 `provider graft-sync`；最终 Git diff 为空也不能漏掉撤回。Worker 只维护已有全局非 Deep Map，不自动检查或更新 Topic Deep。
 5. 全局 Map 重新验证成功才报告 `fresh`；查询、Review 查询和纯读取不触发写后更新。Deep 仅由用户明确要求时单独调用 `provider graft-deep`。
 
-MCP 缺失、图过期或项目边界无效时，必须明确标记 `unverified`；仅简单文本定位可在说明后临时使用 `rg`，需要新鲜 Graft 结构证据的任务失败关闭。手工读取 `graft/` 文件不属于正式 Graft 查询证据。
+MCP 缺失、图过期或项目边界无效时，必须明确标记 `unverified`；`rg` 不是默认阅读入口，仅简单文本定位可在说明后临时使用 `rg`，需要新鲜 Graft 结构证据的任务失败关闭。手工读取 `graft/` 文件不属于正式 Graft 查询证据。
 
 ## 来源、安装与图位置
 
