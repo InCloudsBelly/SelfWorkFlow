@@ -21,6 +21,9 @@ selectedSkills:
   - id: implement
     path: skills/engineering/implement
     hash: sha256:83042ad79e3d7ce616124bf59a38a5ebe79417adb36bedfc4e6223aab783be8c
+  - id: implement-spec
+    path: skills/engineering/implement-spec
+    hash: sha256:5bdaaf884b02b24db432241bcc32250bfee6149c45c743a2a1fef6b416837cfa
   - id: tdd
     path: skills/engineering/tdd
     hash: sha256:969583080caf842ae86a53501a0091eced13fd89cad65d3aa75c09112318ff33

@@ -26,3 +26,7 @@ selectedSkills:
     path: skills/ponytail-help
     hash: sha256:d677ee12119d1d7531a93162a97a585e2a33d9ca4b5b70d2f62a2fad4cee2f29
     runtimeHash: sha256:6db4ea2a6d6dcdb00b675fc5eed1ce154dc7b91b0a3aecf5a66317a3a98fdbf6
+  - id: ponytail-debt
+    path: skills/ponytail-debt
+    hash: sha256:1478a4339e4d8c888e75d72ac91befd1fbbcc5bc4dc51c9bd67bf07b43bb49ef
+    runtimeHash: sha256:51b165b32ae68be08063fac0fc0e2ce2c78e98239ad5c833be7645204bdaa093

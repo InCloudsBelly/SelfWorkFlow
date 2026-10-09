@@ -11,10 +11,10 @@ license:
   hash: sha256:d63b6198ba078d9494407eb94e2d86adf6350195301bb5ded4ba24e36bce8b55
 adapterFiles:
   - path: overlays/tea/adapter.yaml
-    hash: sha256:a3ce8a1692c1e5e827273ec3b3a554df1d08a219d3c9d58edbbc66c0e58138d6
+    hash: sha256:b73e3de962a3b83067a6bfac87e2b3cc92ae18952d16084debe007fbd69da5d0
   - path: overlays/tea/routing.yaml
-    hash: sha256:629443609b46d693905cb43422a04578a8d335b991737f01152571b81336260a
-adapterHash: sha256:6a8d3696df883ce672a5c0fb0ec736878b78f5e7c49876011d6fff5b8f403a30
+    hash: sha256:d48041e452a6c0776e1191d92210f1280ba3970d035800b400d2174f2f1d2111
+adapterHash: sha256:9fe6c523610e4e7c0179e0fc8d9c9bec8dafbac0f8c01f482f7c81ccf03f867a
 status:
   sourceIntegrity: supported
   adapterSupport: supported
