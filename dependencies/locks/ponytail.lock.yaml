@@ -2,9 +2,9 @@ schemaVersion: 1
 sourceId: ponytail
 canonicalUrl: https://github.com/DietrichGebert/ponytail.git
 path: dependencies/upstream/ponytail
-gitlinkCommit: 356918eba965ee1eac64bd3a7f0dd02108350de5
-gitTree: 3bb4226d87085db53fbf6a0013f6b5de07fcf815
-upstreamVersion: 4.9.0
+gitlinkCommit: 9cc65d03aa2da1db7121b912d03596409ee340b8
+gitTree: 42320b8382d3bd9eb59521e6b7f2735edcd9b649
+upstreamVersion: 5.1.0
 license:
   path: LICENSE
   spdx: MIT
@@ -12,17 +12,17 @@ license:
 selectedSkills:
   - id: ponytail
     path: skills/ponytail
-    hash: sha256:1316a2f3f95741d2300b116fe0c2d81ce4a9568656ed0a62643f54aaf09957f2
-    runtimeHash: sha256:1f507afb89387711c2c2d8973581362784681039bf731b4e6705cb3f83be83aa
+    hash: sha256:fc12a0b9588a7fa3543d31ddc41541f735a5626105781643873110f2da1bd52a
+    runtimeHash: sha256:6f6923cdb31d13e707936b6a2a985c226918e3f668e2e8ef004829b6819877f0
   - id: ponytail-review
     path: skills/ponytail-review
-    hash: sha256:40df33b58fc6ef889b93585733feb9566b76e9586efa7f376785c1e995197ac0
-    runtimeHash: sha256:40df33b58fc6ef889b93585733feb9566b76e9586efa7f376785c1e995197ac0
+    hash: sha256:affa0eedca467b58699fafbea28f6f85352aa3e7f23785964bf42f029a291504
+    runtimeHash: sha256:affa0eedca467b58699fafbea28f6f85352aa3e7f23785964bf42f029a291504
   - id: ponytail-audit
     path: skills/ponytail-audit
-    hash: sha256:5560b8e383dbe2ddfddc873a1e2bf2e586e23e0cd7d995537482b2315331f6d1
-    runtimeHash: sha256:5560b8e383dbe2ddfddc873a1e2bf2e586e23e0cd7d995537482b2315331f6d1
+    hash: sha256:3ab632ce4695de214dafe4db13d6f939e1c4be328bd0754ea751dc28b70be554
+    runtimeHash: sha256:3ab632ce4695de214dafe4db13d6f939e1c4be328bd0754ea751dc28b70be554
   - id: ponytail-help
     path: skills/ponytail-help
-    hash: sha256:2264d1615117b02b0fd5a69ec84cd2757006471a78e4d6c22eed6d581c1d37a4
-    runtimeHash: sha256:46358c185deaf180ed64a9de24aface5a8b996de98a021520571800d9b47a9a7
+    hash: sha256:d677ee12119d1d7531a93162a97a585e2a33d9ca4b5b70d2f62a2fad4cee2f29
+    runtimeHash: sha256:6db4ea2a6d6dcdb00b675fc5eed1ce154dc7b91b0a3aecf5a66317a3a98fdbf6
