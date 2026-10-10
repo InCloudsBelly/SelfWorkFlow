@@ -19,7 +19,7 @@ from selfworkflow.v3.providers.codegraph import (
     CodeGraphAdapterError,
     CommandPort,
 )
-from selfworkflow.v3.providers.graft import GraftAdapter, GraftAdapterError
+from selfworkflow.v3.providers.graft import GraftAdapter, GraftAdapterError, graft_failure_details
 from selfworkflow.v3.provider_config import (
     ProviderConfigError,
     load_provider_config,
@@ -38,8 +38,9 @@ _HOST_REASONING_ENV = "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT"
 class ProviderManagerError(ValueError):
     """Stable manager error which never embeds paths, command output, or secrets."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, diagnostics: dict[str, Any] | None = None) -> None:
         self.reason = reason
+        self.diagnostics = diagnostics
         super().__init__(reason)
 
 
@@ -764,7 +765,7 @@ class ProviderManager:
                     "provider.status.failed", providerId=provider_id,
                     operation="status", status="failed", reasonCode=error.reason,
                 )
-                raise ProviderManagerError(error.reason) from None
+                raise ProviderManagerError(error.reason, **graft_failure_details(error)) from None
         self._log(
             "provider.status.failed", providerId=provider_id,
             operation="status", status="failed",
@@ -793,10 +794,10 @@ class ProviderManager:
                 conversation_id=lifecycle_conversation,
             )
         except (GraftAdapterError, ProviderManagerError) as error:
-            raise ProviderManagerError(error.reason) from None
+            raise ProviderManagerError(error.reason, **graft_failure_details(error)) from None
         except Exception as error:
             reason = getattr(error, "reason", "graft-query-failed")
-            raise ProviderManagerError(reason) from None
+            raise ProviderManagerError(reason, **graft_failure_details(error)) from None
 
     @staticmethod
     def _require_bound_graft_topic(
@@ -1097,7 +1098,7 @@ class ProviderManager:
             initial = lifecycle.check_global_freshness(project_root)
         except Exception as error:
             reason = getattr(error, "reason", "graft-freshness-check-failed")
-            raise ProviderManagerError(reason) from None
+            raise ProviderManagerError(reason, **graft_failure_details(error)) from None
         output = {
             "providerId": "graft",
             "status": "partial",
@@ -1130,6 +1131,7 @@ class ProviderManager:
                 reason = getattr(error, "reason", "graft-global-map-failed")
                 output.update({
                     "reason": reason, "nextAction": "retry-global-map",
+                    **graft_failure_details(error),
                 })
                 return output
             output["updated"]["globalMap"] = True
@@ -1137,7 +1139,7 @@ class ProviderManager:
             final = lifecycle.check_global_freshness(project_root)
         except Exception as error:
             reason = getattr(error, "reason", "graft-freshness-check-failed")
-            output.update({"reason": reason, "nextAction": "retry-global-map"})
+            output.update({"reason": reason, "nextAction": "retry-global-map", **graft_failure_details(error)})
             return output
         output.update({
             "status": final["status"],
@@ -1231,4 +1233,4 @@ class ProviderManager:
                 confirmed_plan_hash=str(confirmed_plan_hash),
             )
         except (CodeGraphAdapterError, GraftAdapterError) as error:
-            raise ProviderManagerError(error.reason) from None
+            raise ProviderManagerError(error.reason, **graft_failure_details(error)) from None

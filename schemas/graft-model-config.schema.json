@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/graft-model-config.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "graftDeep"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "graftDeep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoningEffort"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1, "maxLength": 256},
+        "reasoningEffort": {"enum": ["low", "medium", "high", "xhigh", "max", "ultra"]}
+      }
+    }
+  }
+}

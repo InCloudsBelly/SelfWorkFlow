@@ -31,6 +31,10 @@ class CommandResult:
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    failure_kind: str | None = None
+    duration_ms: int | None = None
+    timeout_ms: int | None = None
+    exception_type: str | None = None
 
 
 class CommandPort(Protocol):

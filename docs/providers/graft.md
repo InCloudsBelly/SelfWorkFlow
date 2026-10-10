@@ -100,6 +100,35 @@ Deep bridge 默认传入 `--concurrency 1`，降低大型 C++/WASM 任务的资�
 
 ## 官方命令参考
 
+### 命令失败诊断
+
+通过 SelfWorkFlow Provider CLI 执行的 Graft 命令失败时，JSON 结果包含
+`reason` 和 `diagnostics`。异常路径仍保留 stderr 上的稳定错误摘要；成功结果格式不变。
+
+| SelfWorkFlow CLI 退出码 | 类别 | 说明 |
+| --- | --- | --- |
+| 74 | `timeout` | `graft-command-timeout`，子命令超过运行窗口 |
+| 75 | `start-failed` | `graft-command-start-failed`，进程未能启动 |
+| 76 | `nonzero-exit` | `graft-command-failed`，保留子进程原始退出码 |
+| 77 | `response-invalid` / `output-too-large` | JSON 无法解析、结构不符合要求或输出超限；保留原有具体原因码 |
+
+`diagnostics` 包含 `operation`、`failureKind`、`childExitCode`、`durationMs`、
+`timeoutMs`、`exceptionType`、`stdoutTail` 和 `stderrTail`。
+`operation` 是实际失败的 Graft 子命令，例如 `check` 或 `build`，不是外层
+`graft-ensure`。启动失败和超时没有可用的原始退出码，`childExitCode` 为 `null`，
+不把执行器内部的 `9009` 当作子进程退出码。非 CLI 注入端口未提供的计时字段为 `null`。
+
+输出先脱敏再截断，每个尾部最多 4096 UTF-8 字节。脱敏覆盖常见凭据字段所在行、
+私钥块、HTTP URL 中的用户名密码和敏感环境变量值；不输出完整命令行或异常对象。
+诊断仅随本次响应返回，不写入 Provider 配置或图缓存。
+
+`graft-ensure`、`status`、`graft-preflight` 和 `graft-sync` 等入口会保留这些诊断；
+即使结果以 `unverified` 或 `partial` 返回，也使用对应非零退出码。
+其他失败继续使用既有退出码。此改动不增加重试、不调整 120 秒超时，
+也不改变独立 Deep bridge 或官方 MCP 的执行策略。
+
+### 维护者命令
+
 以下命令只用于维护者对锁定 Submodule 的本地 smoke test；正式 Agent 查询仍使用官方 MCP：
 
 ```powershell

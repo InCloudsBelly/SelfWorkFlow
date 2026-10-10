@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 
 from selfworkflow import __version__
@@ -67,6 +68,23 @@ _HOST_MODEL_ENV = "SELFWORKFLOW_HOST_CURRENT_MODEL"
 _HOST_REASONING_ENV = "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT"
 
 
+def _graft_diagnostic_exit(result):
+    """Keep CLI categories separate from the unmodified child exit code."""
+    if not isinstance(result, dict):
+        return None
+    diagnostics = result.get("diagnostics")
+    if isinstance(diagnostics, dict):
+        return {
+            "timeout": 74, "start-failed": 75,
+            "nonzero-exit": 76, "response-invalid": 77, "output-too-large": 77,
+        }.get(diagnostics.get("failureKind"))
+    for key in ("event", "worker"):
+        code = _graft_diagnostic_exit(result.get(key))
+        if code is not None:
+            return code
+    return None
+
+
 def _resolve_graft_deep_model_context(
     model: str | None, reasoning_effort: str | None,
     config_file: str | None = None,
@@ -104,17 +122,35 @@ class _SubprocessCommandPort:
     def run(self, argv, *, cwd=None):
         from selfworkflow.v3.providers.codegraph import CommandResult
 
+        started = time.monotonic()
         try:
             result = subprocess.run(
                 list(argv), cwd=cwd, check=False, capture_output=True,
-                text=True, timeout=120,
+                text=True, encoding="utf-8", errors="replace", timeout=120,
             )
-        except Exception:
-            return CommandResult(exit_code=9009)
+        except subprocess.TimeoutExpired as error:
+            def decoded(value):
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", errors="replace")
+                return value or ""
+
+            return CommandResult(
+                exit_code=9009, stdout=decoded(error.stdout), stderr=decoded(error.stderr),
+                failure_kind="timeout", duration_ms=int((time.monotonic() - started) * 1000),
+                timeout_ms=120000, exception_type=type(error).__name__,
+            )
+        except OSError as error:
+            return CommandResult(
+                exit_code=9009, failure_kind="start-failed",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                timeout_ms=120000, exception_type=type(error).__name__,
+            )
         return CommandResult(
             exit_code=result.returncode,
             stdout=result.stdout,
             stderr=result.stderr,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            timeout_ms=120000,
         )
 
 
@@ -917,8 +953,17 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as error:
             reason = getattr(error, "reason", "provider-operation-failed")
             print(f"SelfWorkFlow: provider-operation-failed:{reason}", file=sys.stderr)
+            from selfworkflow.v3.providers.graft import graft_failure_details
+            details = graft_failure_details(error)
+            if details:
+                payload = {"providerId": "graft", "status": "error", "reason": reason, **details}
+                print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+                return _graft_diagnostic_exit(payload) or 70
             return 70
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        diagnostic_exit = _graft_diagnostic_exit(result)
+        if diagnostic_exit is not None:
+            return diagnostic_exit
         if (
             arguments.provider_command == "graft-deep"
             and (not isinstance(result, dict) or result.get("status") != "succeeded")

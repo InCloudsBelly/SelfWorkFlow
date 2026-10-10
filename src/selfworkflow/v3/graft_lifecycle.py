@@ -17,6 +17,8 @@ import tempfile
 from typing import Any
 import unicodedata
 
+from selfworkflow.v3.providers.graft import graft_failure_details
+
 from selfworkflow.v3.hashing import (
     HashingError, canonical_relative_path, content_hash, hash_file_content,
     project_root_hash,
@@ -41,8 +43,9 @@ _TOPIC_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 class GraftProjectError(ValueError):
     """Stable project binding/worker error without paths or command output."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, diagnostics: dict[str, Any] | None = None) -> None:
         self.reason = reason
+        self.diagnostics = diagnostics
         super().__init__(reason)
 
 
@@ -220,7 +223,7 @@ def resolve_conversation_disabled(
     if (
         material["kind"] != "selfworkflow-graft-conversation-choice"
         or material["version"] != 1
-        or material["choice"] != "no-deep-topic"
+        or material["choice"] not in {"no-deep-topic", "global-only"}
         or not all(isinstance(material[key], str) for key in (
             "conversationIdHash", "projectRootHash",
         ))
@@ -231,7 +234,7 @@ def resolve_conversation_disabled(
     ):
         raise GraftProjectError("graft-conversation-choice-invalid")
     return {
-        "choice": "no-deep-topic",
+        "choice": material["choice"],
         "conversationIdHash": value["conversationIdHash"],
         "projectRootHash": value["projectRootHash"],
         "bindingHash": value["bindingHash"],
@@ -250,7 +253,10 @@ def resolve_conversation_choice(
     if topic is not None:
         return {"decision": "topic", **topic}
     if disabled is not None:
-        return {"decision": "disabled", **disabled}
+        return {
+            "decision": "disabled" if disabled["choice"] == "no-deep-topic" else "global",
+            **disabled,
+        }
     return None
 
 
@@ -338,6 +344,8 @@ def disable_conversation_graft(
         raise GraftProjectError("graft-conversation-choice-locked")
     existing = resolve_conversation_disabled(root, conversation)
     if existing is not None:
+        if existing["choice"] != "no-deep-topic":
+            raise GraftProjectError("graft-conversation-choice-locked")
         return {"status": "loaded", **existing}
     path = _conversation_disabled_path(root, conversation, create=True)
     if path is None:
@@ -352,6 +360,36 @@ def disable_conversation_graft(
     value = {**material, "bindingHash": content_hash(material)}
     _write_conversation_binding(path, value)
     return {"status": "disabled", **value}
+
+
+def enable_conversation_global(
+    project_root: str | Path, conversation_id: str,
+) -> dict[str, str]:
+    """Persist the explicit choice to use only the global non-Deep Map."""
+
+    root = _safe_root(project_root)
+    conversation = _conversation_id(conversation_id)
+    if resolve_conversation_topic(root, conversation) is not None:
+        raise GraftProjectError("graft-conversation-choice-locked")
+    existing = resolve_conversation_disabled(root, conversation)
+    if existing is not None:
+        if existing["choice"] != "global-only":
+            raise GraftProjectError("graft-conversation-choice-locked")
+        return {"status": "loaded", **existing}
+    path = _conversation_disabled_path(root, conversation, create=True)
+    if path is None:
+        raise GraftProjectError("graft-conversation-choice-invalid")
+    material = {
+        "kind": "selfworkflow-graft-conversation-choice",
+        "version": 1,
+        "conversationIdHash": _conversation_id_hash(conversation),
+        "choice": "global-only",
+        "projectRootHash": project_root_hash(root),
+    }
+    value = {**material, "bindingHash": content_hash(material)}
+    _write_conversation_binding(path, value)
+    return {"status": "global-only", **value}
+
 
 
 def _is_reparse(path: Path) -> bool:
@@ -631,7 +669,7 @@ def conversation_topic_options(
             "conversationId": conversation,
             "choice": choice["choice"],
             "bindingHash": choice["bindingHash"],
-            "status": "disabled",
+            "status": "disabled" if choice["decision"] == "disabled" else "global-only",
         }
     return result
 
@@ -655,7 +693,7 @@ def _topic_refresh_status(
             "status": "unbound", "action": "topic-selection-required",
             "conversationId": conversation_id,
         }
-    if choice["decision"] == "disabled":
+    if choice["decision"] in {"disabled", "global"}:
         return {
             "status": "disabled", "action": "none",
             "conversationId": conversation_id,
@@ -865,7 +903,7 @@ class GraftProjectLifecycle:
             result = self._provider.provider_preflight()
         except Exception as error:
             reason = getattr(error, "reason", "graft-provider-unavailable")
-            raise GraftProjectError(reason) from None
+            raise GraftProjectError(reason, **graft_failure_details(error)) from None
         if (
             not isinstance(result, Mapping)
             or result.get("providerStatus") != "verified"
@@ -886,7 +924,7 @@ class GraftProjectLifecycle:
                 )
         except Exception as error:
             reason = getattr(error, "reason", "graft-provider-failed")
-            raise GraftProjectError(reason) from None
+            raise GraftProjectError(reason, **graft_failure_details(error)) from None
         if not isinstance(result, Mapping):
             raise GraftProjectError("graft-status-invalid")
         freshness = result.get("freshness")
@@ -907,6 +945,7 @@ class GraftProjectLifecycle:
     ) -> dict[str, Any]:
         root = _safe_root(project_root)
         binding = None
+        choice = None
         if conversation_id is not None:
             choice = resolve_conversation_choice(root, conversation_id)
             if choice is not None and choice["decision"] == "disabled":
@@ -921,9 +960,12 @@ class GraftProjectLifecycle:
                         "status": "disabled",
                     },
                 }
-            context, binding = _conversation_topic_context(
-                root, conversation_id, context_dir,
-            )
+            if choice is not None and choice["decision"] == "global":
+                context = None
+            else:
+                context, binding = _conversation_topic_context(
+                    root, conversation_id, context_dir,
+                )
         else:
             context = _topic_context(root, context_dir)
         if context_dir is None and conversation_id is None:
@@ -949,6 +991,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "unavailable",
                 "graphStatus": "unknown", "reason": reason,
+                **graft_failure_details(error),
             }
         try:
             result = self._status(root, provider_report, context_dir=context)
@@ -958,6 +1001,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "verified",
                 "graphStatus": "unknown", "reason": reason,
+                **graft_failure_details(error),
             }
         if not isinstance(result, Mapping):
             raise GraftProjectError("graft-status-invalid")
@@ -973,6 +1017,13 @@ class GraftProjectLifecycle:
                 "bindingHash": binding["bindingHash"],
                 "contextDir": str(context),
                 "status": "loaded",
+            }
+        if choice is not None and choice["decision"] == "global":
+            enriched["conversationChoice"] = {
+                "conversationId": conversation_id,
+                "choice": choice["choice"],
+                "bindingHash": choice["bindingHash"],
+                "status": "global-only",
             }
         return enriched
 
@@ -1010,6 +1061,32 @@ class GraftProjectLifecycle:
             "nextAction": next_action,
         }
 
+    def check_global_freshness(self, project_root: str) -> dict[str, Any]:
+        """Check only the global non-Deep Code Map.
+
+        Normal Graft routing must not inspect a Deep Topic.  Topic freshness
+        is an explicit, user-requested operation and is intentionally kept out
+        of this automatic maintenance path.
+        """
+
+        root = _safe_root(project_root)
+        provider_report = self._provider_preflight()
+        global_status = self._status(root, provider_report)
+        fresh = global_status.get("freshness") == "fresh"
+        return {
+            "providerId": "graft",
+            "status": "fresh" if fresh else "stale",
+            "globalMap": {
+                "root": str(root / _GRAPH_DIR),
+                "deep": False,
+                "status": "fresh" if fresh else "stale",
+                "freshness": global_status.get("freshness"),
+            },
+            "updated": False,
+            "nextAction": "none" if fresh else "refresh-global-map",
+        }
+
+
     def refresh_global_map(self, project_root: str) -> dict[str, Any]:
         """Build and verify only the global non-Deep structural map."""
 
@@ -1021,7 +1098,7 @@ class GraftProjectLifecycle:
             verified = self._status(root, provider_report)
         except Exception as error:
             reason = getattr(error, "reason", "graft-update-failed")
-            raise GraftProjectError(reason) from None
+            raise GraftProjectError(reason, **graft_failure_details(error)) from None
         if verified.get("freshness") != "fresh":
             raise GraftProjectError("graft-global-map-not-fresh")
         return {
@@ -1088,7 +1165,7 @@ class GraftProjectLifecycle:
                 )
         except Exception as error:
             reason = getattr(error, "reason", "graft-provider-failed")
-            raise GraftProjectError(reason) from None
+            raise GraftProjectError(reason, **graft_failure_details(error)) from None
         if not isinstance(result, Mapping):
             raise GraftProjectError("graft-query-invalid")
         enriched = dict(result)
@@ -1116,6 +1193,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "unavailable",
                 "graphStatus": "unknown", "reason": reason,
+                **graft_failure_details(error),
             }
         try:
             status = self._status(root, provider_report)
@@ -1125,6 +1203,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "verified",
                 "graphStatus": "unknown", "reason": reason,
+                **graft_failure_details(error),
             }
         if status["freshness"] != "missing":
             return {"status": "ready", **status}
@@ -1138,6 +1217,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "verified",
                 "graphStatus": "unknown", "reason": reason,
+                **graft_failure_details(error),
             }
         return {"status": "initialized", "build": dict(build), **final}
 
@@ -1153,6 +1233,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "unavailable", "graphStatus": "unknown",
                 "pending": False, "reason": reason,
+                **graft_failure_details(error),
             }
         _ensure_ignore(root)
         with _WorkerLock(state):
@@ -1173,6 +1254,7 @@ class GraftProjectLifecycle:
 
     def run_once(
         self, project_root: str, *, conversation_id: str,
+        include_topic: bool = True,
     ) -> dict[str, Any]:
         root = _safe_root(project_root)
         conversation_id = _conversation_id(conversation_id)
@@ -1185,6 +1267,7 @@ class GraftProjectLifecycle:
                 "providerId": "graft", "status": "unverified",
                 "providerStatus": "unavailable", "graphStatus": "unknown",
                 "pending": True, "retryable": True, "reason": reason,
+                **graft_failure_details(error),
                 "conversationId": conversation_id,
             }
         with _WorkerLock(state):
@@ -1201,9 +1284,17 @@ class GraftProjectLifecycle:
                 }
             _write_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
             active = list(paths)
-        topic_refresh = _topic_refresh_status(root, conversation_id)
-        if topic_refresh is None:
-            raise GraftProjectError("graft-topic-refresh-result-missing")
+        if include_topic:
+            topic_refresh = _topic_refresh_status(root, conversation_id)
+            if topic_refresh is None:
+                raise GraftProjectError("graft-topic-refresh-result-missing")
+        else:
+            topic_refresh = {
+                "status": "skipped",
+                "action": "none",
+                "reason": "deep-not-requested",
+                "conversationId": conversation_id,
+            }
         if topic_refresh["action"] == "run-graft-deep":
             # Topic freshness is the task-critical path. Keep the write event
             # durable and let ProviderManager refresh the Topic before the
@@ -1264,6 +1355,7 @@ class GraftProjectLifecycle:
                 "reason": topic_refresh.get("reason", "graft-topic-refresh-unverified"),
             }
         global_failure: str | None = None
+        global_failure_details: dict[str, Any] = {}
         build: Mapping[str, Any] | None = None
         global_freshness: str | None = None
         try:
@@ -1278,6 +1370,7 @@ class GraftProjectLifecycle:
         except Exception as error:
             reason = getattr(error, "reason", "graft-update-failed")
             global_failure = reason
+            global_failure_details = graft_failure_details(error)
             with _WorkerLock(state):
                 queue_path = state / "queue.json"
                 queue = _read_json(queue_path, {"schemaVersion": 1, "changedPaths": []})
@@ -1325,9 +1418,18 @@ class GraftProjectLifecycle:
             result["build"] = dict(build) if isinstance(build, Mapping) else build
         if global_failure is not None:
             result["reason"] = global_failure
-        topic_refresh = _topic_refresh_status(root, conversation_id)
-        if topic_refresh is None:
-            raise GraftProjectError("graft-topic-refresh-result-missing")
+            result.update(global_failure_details)
+        if include_topic:
+            topic_refresh = _topic_refresh_status(root, conversation_id)
+            if topic_refresh is None:
+                raise GraftProjectError("graft-topic-refresh-result-missing")
+        else:
+            topic_refresh = {
+                "status": "skipped",
+                "action": "none",
+                "reason": "deep-not-requested",
+                "conversationId": conversation_id,
+            }
         result["topicRefresh"] = topic_refresh
         result["nextAction"] = (
             topic_refresh["action"]

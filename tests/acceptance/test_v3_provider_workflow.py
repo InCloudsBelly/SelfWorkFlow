@@ -54,11 +54,14 @@ class _Manager:
 
     def graft_topic_select(
         self, project_root, conversation_id, *, topic_id=None, disable=False,
+        global_only=False,
     ):
         self.calls.append((
-            "graft-topic-select", project_root, conversation_id, topic_id, disable,
+            "graft-topic-select", project_root, conversation_id, topic_id,
+            disable, global_only,
         ))
-        return {"providerId": "graft", "status": "disabled" if disable else "bound"}
+        status = "disabled" if disable else "global-only" if global_only else "bound"
+        return {"providerId": "graft", "status": status}
 
     def graft_deep(
         self, project_root, model, reasoning_effort, *, conversation_id,
@@ -218,7 +221,20 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
             ]), 0)
         self.assertEqual(manager.calls, [
             ("graft-topics", "C:/project", "thread-new"),
-            ("graft-topic-select", "C:/project", "thread-new", None, True),
+            ("graft-topic-select", "C:/project", "thread-new", None, True, False),
+        ])
+
+    def test_new_conversation_can_choose_global_map_without_a_topic(self):
+        manager = _Manager()
+        with mock.patch(
+            "selfworkflow.cli._provider_manager", return_value=manager
+        ), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main([
+                "provider", "graft-topic-select", "--project-root", "C:/project",
+                "--conversation-id", "thread-global", "--global-only",
+            ]), 0)
+        self.assertEqual(manager.calls, [
+            ("graft-topic-select", "C:/project", "thread-global", None, False, True),
         ])
 
     def test_list_is_available_but_unverified_diagnostics_fail_closed(self):
@@ -290,7 +306,7 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         ), mock.patch("sys.stdout", StringIO()):
             self.assertEqual(main(arguments), 0)
         manager.graft_deep.assert_called_once_with(
-            "C:/work/project", "gpt-5.6-luna", "xhigh",
+            "C:/work/project", "gpt-6-astra", "medium",
             conversation_id="thread-acceptance-test",
             topic_id="kgpr-coverage", scope_files=["Source/main.cpp"],
         )
@@ -315,7 +331,7 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
             "thread-host-context", "kgpr-coverage", ("Source/main.cpp",),
         )])
 
-    def test_graft_deep_fails_closed_without_complete_host_context(self):
+    def test_graft_deep_uses_v1_default_without_host_context(self):
         manager = _Manager()
         arguments = [
             "provider", "graft-deep", "--project-root", "C:/work/project",
@@ -324,12 +340,13 @@ class V3ProviderWorkflowAcceptanceTests(unittest.TestCase):
         ]
         with mock.patch(
             "selfworkflow.cli._provider_manager", return_value=manager
-        ), mock.patch.dict(os.environ, {}, clear=True), mock.patch(
-            "sys.stderr", StringIO()
-        ):
-            self.assertEqual(main(arguments), 70)
+        ), mock.patch.dict(os.environ, {}, clear=True), mock.patch("sys.stdout", StringIO()):
+            self.assertEqual(main(arguments), 0)
 
-        self.assertEqual(manager.calls, [])
+        self.assertEqual(manager.calls, [(
+            "graft-deep", "C:/work/project", "gpt-6-astra", "medium",
+            "thread-missing-context", "kgpr-coverage", (),
+        )])
 
     def test_graft_deep_rejects_stale_arguments_when_host_context_disagrees(self):
         manager = _Manager()

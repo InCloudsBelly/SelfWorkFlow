@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 import hashlib
 import json
 import ntpath
+import os
+import re
 from typing import Any, Callable
 
 from selfworkflow.v3.providers.codegraph import CommandPort, CommandResult
@@ -28,14 +30,57 @@ _REQUIRED_COMMANDS = frozenset({
     "build", "check", "ask", "map", "grep", "callers", "skeleton",
 })
 _MAINTENANCE_ACTIONS = frozenset({"initialize", "sync", "rebuild"})
+_SENSITIVE_FIELD = r"api[_-]?key|token|secret|password|passwd|authorization|cookie|credential"
 
 
 class GraftAdapterError(ValueError):
-    """Stable adapter error without command output, paths, or credentials."""
+    """Stable reason plus bounded, redacted command diagnostics."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, diagnostics: dict[str, Any] | None = None) -> None:
         self.reason = reason
+        self.diagnostics = diagnostics
         super().__init__(reason)
+
+
+def _diagnostic_tail(text: str) -> str:
+    """Redact before truncation so a tail cannot expose a cut-off credential."""
+    sensitive = re.compile(_SENSITIVE_FIELD, re.IGNORECASE)
+    for name, value in os.environ.items():
+        if value and sensitive.search(name):
+            text = text.replace(value, "[REDACTED]")
+    text = re.sub(
+        r"(?s)-----BEGIN [^-]*PRIVATE KEY-----.*?(?:-----END [^-]*PRIVATE KEY-----|$)",
+        "[REDACTED]", text,
+    )
+    text = re.sub(r"(?i)(https?://)[^\s/@]+:[^\s/@]+@", r"\1[REDACTED]@", text)
+    text = re.sub(
+        rf"(?im)^[^\n]*(?:{_SENSITIVE_FIELD})[^\n]*[:=][ \t]*\r?\n[^\n]*",
+        "[REDACTED]", text,
+    )
+    text = "\n".join("[REDACTED]" if sensitive.search(line) else line for line in text.splitlines())
+    return text.encode("utf-8")[-4096:].decode("utf-8", errors="ignore")
+
+
+def _command_diagnostics(
+    result: CommandResult, operation: str, *, failure_kind: str | None = None,
+    exception_type: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "operation": operation,
+        "failureKind": failure_kind or result.failure_kind or "nonzero-exit",
+        "childExitCode": None if result.failure_kind else result.exit_code,
+        "durationMs": result.duration_ms,
+        "timeoutMs": result.timeout_ms,
+        "exceptionType": exception_type or result.exception_type,
+        "stdoutTail": _diagnostic_tail(result.stdout),
+        "stderrTail": _diagnostic_tail(result.stderr),
+    }
+
+
+def graft_failure_details(error: Exception) -> dict[str, Any]:
+    """Carry adapter diagnostics through wrappers without serializing exceptions."""
+    diagnostics = getattr(error, "diagnostics", None)
+    return {"diagnostics": dict(diagnostics)} if isinstance(diagnostics, dict) else {}
 
 
 def _canonical(value: object) -> bytes:
@@ -187,23 +232,42 @@ class GraftAdapter:
             or not isinstance(result.stderr, str)
         ):
             raise GraftAdapterError("graft-command-result-invalid")
+        if result.failure_kind in {"timeout", "start-failed"}:
+            raise GraftAdapterError(
+                "graft-command-" + result.failure_kind,
+                diagnostics=_command_diagnostics(result, arguments[0]),
+            )
         if (
             len(result.stdout.encode("utf-8")) > output_limit_bytes
             or len(result.stderr.encode("utf-8")) > _MAX_OUTPUT_BYTES
         ):
-            raise GraftAdapterError("graft-command-output-too-large")
+            raise GraftAdapterError(
+                "graft-command-output-too-large",
+                diagnostics=_command_diagnostics(
+                    result, arguments[0],
+                    failure_kind="nonzero-exit" if result.exit_code not in allow_exit_codes else "output-too-large",
+                ),
+            )
         if result.exit_code not in allow_exit_codes:
-            raise GraftAdapterError("graft-command-failed")
+            raise GraftAdapterError(
+                "graft-command-failed",
+                diagnostics=_command_diagnostics(result, arguments[0]),
+            )
         return result
 
     @staticmethod
-    def _parse_json(output: str, reason: str) -> dict[str, Any]:
+    def _parse_json(result: CommandResult, reason: str, operation: str) -> dict[str, Any]:
         try:
-            value = json.loads(output)
-        except (TypeError, ValueError):
-            raise GraftAdapterError(reason) from None
+            value = json.loads(result.stdout)
+        except (TypeError, ValueError) as error:
+            raise GraftAdapterError(reason, diagnostics=_command_diagnostics(
+                result, operation, failure_kind="response-invalid",
+                exception_type=type(error).__name__,
+            )) from None
         if not isinstance(value, dict):
-            raise GraftAdapterError(reason)
+            raise GraftAdapterError(reason, diagnostics=_command_diagnostics(
+                result, operation, failure_kind="response-invalid",
+            ))
         return value
 
     def status(
@@ -217,14 +281,16 @@ class GraftAdapter:
             allow_exit_codes=frozenset({0, 1}),
             output_limit_bytes=_STATUS_OUTPUT_BYTES,
         )
-        value = self._parse_json(result.stdout, "graft-status-invalid")
+        value = self._parse_json(result, "graft-status-invalid", "check")
         context = value.get("context")
         graph = value.get("graph")
         if (
             not isinstance(context, Mapping)
             or (graph is not None and not isinstance(graph, Mapping))
         ):
-            raise GraftAdapterError("graft-status-invalid")
+            raise GraftAdapterError("graft-status-invalid", diagnostics=_command_diagnostics(
+                result, "check", failure_kind="response-invalid",
+            ))
         context_missing = context.get("missing") is True
         graph_missing = graph is None or graph.get("missing") is True
         if context_missing and graph_missing:
@@ -313,7 +379,7 @@ class GraftAdapter:
             "sideEffectClass": "none",
             "supportStatus": "unverified",
             "freshness": status["freshness"],
-            "data": self._parse_json(result.stdout, "graft-query-invalid"),
+            "data": self._parse_json(result, "graft-query-invalid", query_kind),
         }
 
     def plan_query(
