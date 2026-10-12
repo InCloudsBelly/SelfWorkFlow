@@ -14,3 +14,8 @@ phases:
 invariants:
   privateModelReasoning: forbidden
   missingBackendForCodeTask: knowledge-sync-todo
+defaultRouting:
+  profile: knowledge
+  backend: selfopenwiki
+  intents: [wiki-visualize, wiki-summary, wiki-organize, wiki-update]
+  fallback: forbidden
