@@ -1,16 +1,16 @@
 # SelfWorkFlow：核心策略
 
-仅加载当前阶段需要的规则；普通轻量模式不使用 PlanGraph/RunLedger，显式契约管理模式才使用确定性解析和账本。
+本文件是核心策略的展开参考；普通任务已加载 `WORKFLOW.md` 和选定模式时不重复读取，仅策略核对或契约 Host 明确引用时加载。仅加载当前阶段需要的规则；普通轻量模式不使用 PlanGraph/RunLedger，显式契约管理模式才使用确定性解析和账本。
 
 ## 输出与代码任务增强
 
-所有沟通和工程文档使用中文；代码、命令、错误、路径和协议字段按事实保留。代码任务加载 Ponytail；非代码任务不自动加载。Ponytail 的 mode 为 `full` 时仍受当前代码任务范围约束。已有 fresh 全局非 Deep Code Map 自动使用，stale（过期）先询问更新，缺失不自动初始化；细则读取 `graft-read`。Agent 写入及撤回后自动同步已有 Map；外部漂移在下次读取前检查。Deep 仅显式调用。失败或文本回退须说明并标为 `unverified`，不冒充新鲜结构证据。
+所有沟通和工程文档使用中文；代码、命令、错误、路径和协议字段按事实保留。代码任务加载 Ponytail；非代码任务不自动加载。Ponytail 的 mode 为 `full` 时仍受当前代码任务范围约束。项目级 `.codegraph/` 是全局 CodeMap：缺失时自动初始化，stale（过期）自动同步并在必要时全量重建；细则读取 `codegraph-read` 和 `codegraph-update`。Agent 写入及撤回后自动同步 Map；外部漂移在下次读取前检查。失败或文本回退须说明并标为 `unverified`，不冒充新鲜结构证据。
 
 ## 核心流程
 
 `Discover → Capability Check → Classify → Design → Plan → Implement/Debug → Review → Verify → optional Knowledge → Complete`。
 
-按复杂度 × 风险 × 副作用选择 Light、Full、Deep；边界不明向上升级。流程深度与能力 Skill 选择相互独立；加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。Full 和 Deep 必须加载 TEA；行为修改使用 TDD，落地前后都要 Review，完成只依据新鲜证据。
+按复杂度 × 风险 × 副作用选择 Light、Full、Deep；边界不明向上升级。流程深度与能力 Skill 选择相互独立；加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。行为任务中，Full 和 Deep 必须加载 TEA；仅加载当前阶段所需部分。行为修改使用 TDD，落地前后都要 Review，完成只依据新鲜证据。
 
 ## 发散与收敛
 
@@ -30,11 +30,11 @@
 
 ## 实施前整体 Review
 
-正式设计、测试设计和实施计划在实施前由独立 SubAgent Review；至少两份正式文档时必须提交完整文档包和最终文档包 hash，不能由同一 Agent 冒充独立 Review，发现关键问题先暂停实施。Full/Deep 需完整文档包 Review；落地后执行 post-landing Review，Full/Deep 使用独立 Standards/Spec Review 和 TEA Review，Light 做窄结构化自审。Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision。Review SubAgent 只读 hash-bound package/evidence，不调用 Graft、provider、验证、写入、知识更新或下级 Agent。Review 模型只作用于该 SubAgent。
+正式设计、测试设计和实施计划在实施前由独立 SubAgent Review；至少两份正式文档时必须提交完整文档包和最终文档包 hash，不能由同一 Agent 冒充独立 Review，发现关键问题先暂停实施。Full/Deep 需完整文档包 Review；落地后执行 post-landing Review，Full/Deep 使用独立 Standards/Spec Review，行为任务再执行 TEA Review，Light 做窄结构化自审。Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision。Review SubAgent 只读 hash-bound package/evidence，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent。Review 模型只作用于该 SubAgent。
 
 ## 按需能力
 
-按任务命中模块：代码读取/写入加载 `workflow/modules/code.md`；Graft 查询、专题 Deep、写后更新分别加载 `graft-read.md`、`graft-deep.md`、`graft-update.md`；Review、留痕和知识加载对应模块。Matt `grilling` 只在 Full/Deep 的 Design/Plan 自动一次；显式 `grill-me` 才额外加载。Full/Deep 必须加载 TEA，但 `tea-atdd`、`tea-trace`、`tea-nfr` 仅显式选择。
+按任务命中模块：代码读取/写入加载 `workflow/modules/code.md`；CodeGraph 读取和写后更新分别加载 `codegraph-read.md`、`codegraph-update.md`；Review、留痕和知识加载对应模块。Matt `grilling` 只在 Full/Deep 的 Design/Plan 自动一次；显式 `grill-me` 才额外加载。Full/Deep 的行为任务按阶段加载 TEA，非行为任务不自动加载； `tea-atdd`、`tea-trace`、`tea-nfr` 仅显式选择。
 
 ## 安全底线
 
