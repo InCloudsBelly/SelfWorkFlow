@@ -6,8 +6,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:e8efc1ddb1de932de709df481f427c8a36ec522de66520250e9809938b715c95
     aliases: []
     triggers: []
     exclusions: [implicit selection]
@@ -105,8 +105,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:e8efc1ddb1de932de709df481f427c8a36ec522de66520250e9809938b715c95
     aliases:
       - name: ponytail-code
         target: ponytail
@@ -136,8 +136,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:e8efc1ddb1de932de709df481f427c8a36ec522de66520250e9809938b715c95
     aliases: []
     triggers: [over-engineering audit, delete unnecessary code]
     exclusions: [pure content generation, non-code document]
@@ -165,8 +165,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:e8efc1ddb1de932de709df481f427c8a36ec522de66520250e9809938b715c95
     aliases: []
     triggers: [ponytail help, ponytail commands, ponytail mode]
     exclusions: []
@@ -194,8 +194,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:e8efc1ddb1de932de709df481f427c8a36ec522de66520250e9809938b715c95
     aliases: []
     triggers: [over-engineering review, minimal diff review]
     exclusions: [pure content generation, non-code document]

@@ -178,8 +178,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/tea.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:e6460386b21d042d34a6eb2df2de6dc23ce23cde254911d996441fc9ebd7bc03
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:5d665482c69f4b6edccfdf1d606a53eee0d69021372ccca608fb58c551b4b997
     aliases:
       - name: tea-quality
         target: tea-quality-foundation
@@ -209,8 +209,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/matt-pocock-skills.lock.yaml
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:ffb842b85a1364417040156163c06d86478989635892e594d85d9a753682dcf2
+      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
+      contentHash: sha256:6712dc991295968773e26bb0c73385d79f7339ad152d2d9fbe0fc1ce5cdad8fe
     aliases:
       - name: matt-skills
         target: matt-skills-foundation
