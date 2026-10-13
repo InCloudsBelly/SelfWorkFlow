@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -219,7 +220,23 @@ try {
         self.assertIn("@colbymchenry/codegraph v1.6.2", script)
         self.assertIn("codegraph serve --mcp", script)
         self.assertIn("codegraph-runtime-install-failed", script)
+        self.assertIn("windowsassetsha256", script)
+        self.assertIn("download-andverifyfile", script)
+        self.assertNotIn("raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1", script)
         self.assertNotIn("dependencies\\upstream\\graft", script)
+
+    def test_codegraph_lock_pins_release_metadata_and_asset_hash(self):
+        lock = (self.ROOT / "dependencies" / "locks" / "codegraph.lock.yaml").read_text(
+            encoding="utf-8"
+        ).casefold()
+        self.assertIn("releasetag: v1.6.2", lock)
+        self.assertIn(
+            "windowsasseturl: https://github.com/colbymchenry/codegraph/releases/download/v1.6.2/codegraph-win32-x64.zip",
+            lock,
+        )
+        self.assertRegex(lock, r"windowsassetsha256:\s*sha256:[0-9a-f]{64}")
+        self.assertRegex(lock, r"entrysha256:\s*sha256:[0-9a-f]{64}")
+        self.assertNotIn("/main/", lock)
 
     def _run_installer(self, root, *arguments, env=None):
         environment = (env or os.environ).copy()
@@ -281,7 +298,7 @@ try {
             self.assertEqual(summary["cleanupPending"], [])
             self.assertEqual(
                 summary["mattSkills"]["commit"],
-                "b0618bc436ad893b3c5e84e55fba86586d34a404",
+                "49dd158d1076134a641b33efb035946536778336",
             )
             self.assertTrue(
                 (root / "agents/skills/matt-pocock/grill-me/SKILL.md").is_file()

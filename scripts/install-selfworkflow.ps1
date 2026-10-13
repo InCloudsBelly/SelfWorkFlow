@@ -107,6 +107,64 @@ function Get-Sha256Hex {
     finally { $stream.Dispose() }
 }
 
+function Read-CodeGraphLock {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Stop-Install "codegraph-runtime" 27 "codegraph-lock-missing" }
+    $text = [IO.File]::ReadAllText($Path)
+    $versionMatch = [regex]::Match($text, '(?m)^\s+version:\s*([^\s#]+)\s*$')
+    $tagMatch = [regex]::Match($text, '(?m)^\s+releaseTag:\s*([^\s#]+)\s*$')
+    $packageJsonHashMatch = [regex]::Match($text, '(?m)^\s+packageJsonHash:\s*(sha256:[0-9a-fA-F]{64})\s*$')
+    $packageLockHashMatch = [regex]::Match($text, '(?m)^\s+packageLockHash:\s*(sha256:[0-9a-fA-F]{64})\s*$')
+    $packageJsonUrlMatch = [regex]::Match($text, '(?m)^\s+packageJsonUrl:\s*(\S+)\s*$')
+    $packageLockUrlMatch = [regex]::Match($text, '(?m)^\s+packageLockUrl:\s*(\S+)\s*$')
+    $entryHashMatch = [regex]::Match($text, '(?m)^\s+entrySha256:\s*(sha256:[0-9a-fA-F]{64})\s*$')
+    $assetUrlMatch = [regex]::Match($text, '(?m)^\s+windowsAssetUrl:\s*(\S+)\s*$')
+    $assetHashMatch = [regex]::Match($text, '(?m)^\s+windowsAssetSha256:\s*(sha256:[0-9a-fA-F]{64})\s*$')
+    if (-not ($versionMatch.Success -and $tagMatch.Success -and $packageJsonHashMatch.Success -and
+            $packageLockHashMatch.Success -and $packageJsonUrlMatch.Success -and $entryHashMatch.Success -and
+            $packageLockUrlMatch.Success -and $assetUrlMatch.Success -and $assetHashMatch.Success)) {
+        Stop-Install "codegraph-runtime" 27 "codegraph-lock-invalid"
+    }
+    $lock = [ordered]@{
+        version = $versionMatch.Groups[1].Value
+        releaseTag = $tagMatch.Groups[1].Value
+        packageJsonHash = $packageJsonHashMatch.Groups[1].Value.ToLowerInvariant()
+        packageLockHash = $packageLockHashMatch.Groups[1].Value.ToLowerInvariant()
+        packageJsonUrl = $packageJsonUrlMatch.Groups[1].Value
+        packageLockUrl = $packageLockUrlMatch.Groups[1].Value
+        entrySha256 = $entryHashMatch.Groups[1].Value.ToLowerInvariant()
+        windowsAssetUrl = $assetUrlMatch.Groups[1].Value
+        windowsAssetSha256 = $assetHashMatch.Groups[1].Value.ToLowerInvariant()
+    }
+    if ($lock.version -ne $CodeGraphVersion.TrimStart("v") -or $lock.releaseTag -ne $CodeGraphVersion) {
+        Stop-Install "codegraph-runtime" 27 "codegraph-lock-version-mismatch"
+    }
+    $tagRoot = "https://raw.githubusercontent.com/colbymchenry/codegraph/$($lock.releaseTag)/"
+    if ($lock.packageJsonUrl -ne ($tagRoot + "package.json") -or
+        $lock.packageLockUrl -ne ($tagRoot + "package-lock.json") -or
+        $lock.windowsAssetUrl -ne "https://github.com/colbymchenry/codegraph/releases/download/$($lock.releaseTag)/codegraph-win32-x64.zip" -or
+        $lock.windowsAssetUrl -match "/main/|/latest/|/master/") {
+        Stop-Install "codegraph-runtime" 27 "codegraph-lock-source-unpinned"
+    }
+    return $lock
+}
+
+function Download-AndVerifyFile {
+    param(
+        [string]$Uri,
+        [string]$Destination,
+        [string]$ExpectedHash,
+        [string]$FailurePrefix
+    )
+    try { Invoke-WebRequest -Uri $Uri -OutFile $Destination -UseBasicParsing }
+    catch { Stop-Install "codegraph-runtime" 27 ($FailurePrefix + "-download-failed") }
+    $actualHash = "sha256:" + (Get-Sha256Hex $Destination)
+    if ($actualHash -ine $ExpectedHash) {
+        Stop-Install "codegraph-runtime" 27 ($FailurePrefix + "-hash-mismatch")
+    }
+    return $actualHash
+}
+
 function Invoke-NativeLogged {
     param([string]$Executable, [string[]]$Arguments = @(), [string]$WorkingDirectory)
     $previousPreference = $ErrorActionPreference
@@ -195,6 +253,7 @@ function Test-CodeGraphCommand {
 }
 
 function Ensure-CodeGraphRuntime {
+    param([object]$Lock)
     if ($CodeGraphPath) {
         $explicit = Resolve-FullPath $CodeGraphPath
         if (-not (Test-Path -LiteralPath $explicit -PathType Container)) { Stop-Install "codegraph-runtime" 27 "codegraph-runtime-path-invalid" }
@@ -207,28 +266,62 @@ function Ensure-CodeGraphRuntime {
     $installBase = Join-Path $DependencyRoot "codegraph\1.6.2"
     $current = Join-Path $installBase "current"
     if (-not (Test-CodeGraphCommand $current)) {
-        $curl = Get-Command "curl.exe" -ErrorAction SilentlyContinue
-        $officialScript = Join-Path $script:LogDirectory "codegraph-install.ps1"
-        try {
-            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1" -OutFile $officialScript -UseBasicParsing
-        }
-        catch { Stop-Install "codegraph-runtime" 27 "codegraph-download-failed" }
-        $oldVersion = $env:CODEGRAPH_VERSION
-        $oldInstall = $env:CODEGRAPH_INSTALL_DIR
-        try {
-            $env:CODEGRAPH_VERSION = $CodeGraphVersion
-            $env:CODEGRAPH_INSTALL_DIR = $installBase
-            $exit = Invoke-NativeLogged "powershell.exe" @(
-                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $officialScript
-            )
-        }
-        finally {
-            if ($null -eq $oldVersion) { Remove-Item Env:CODEGRAPH_VERSION -ErrorAction SilentlyContinue } else { $env:CODEGRAPH_VERSION = $oldVersion }
-            if ($null -eq $oldInstall) { Remove-Item Env:CODEGRAPH_INSTALL_DIR -ErrorAction SilentlyContinue } else { $env:CODEGRAPH_INSTALL_DIR = $oldInstall }
-        }
-        if ($exit -ne 0 -or -not (Test-CodeGraphCommand $current)) { Stop-Install "codegraph-runtime" 27 "codegraph-runtime-install-failed" }
+        $metadataRoot = Join-Path $script:LogDirectory "codegraph-lock"
+        [IO.Directory]::CreateDirectory($metadataRoot) | Out-Null
+        Download-AndVerifyFile $Lock.packageJsonUrl (Join-Path $metadataRoot "package.json") $Lock.packageJsonHash "codegraph-package-json" | Out-Null
+        Download-AndVerifyFile $Lock.packageLockUrl (Join-Path $metadataRoot "package-lock.json") $Lock.packageLockHash "codegraph-package-lock" | Out-Null
+        $archivePath = Join-Path $script:LogDirectory "codegraph-win32-x64.zip"
+        Download-AndVerifyFile $Lock.windowsAssetUrl $archivePath $Lock.windowsAssetSha256 "codegraph-asset" | Out-Null
+        $stageRoot = Join-Path $script:LogDirectory "codegraph-stage"
+        try { Expand-Archive -LiteralPath $archivePath -DestinationPath $stageRoot -Force }
+        catch { Stop-Install "codegraph-runtime" 27 "codegraph-asset-extract-failed" }
+        $candidates = @([IO.DirectoryInfo]$stageRoot)
+        $candidates += @(Get-ChildItem -LiteralPath $stageRoot -Directory -Recurse -Force)
+        $runtimeCandidate = $candidates |
+            Where-Object {
+                (Test-CodeGraphCommand $_.FullName) -and
+                (Test-Path -LiteralPath (Join-Path $_.FullName "node.exe") -PathType Leaf)
+            } |
+            Select-Object -First 1
+        if ($null -eq $runtimeCandidate) { Stop-Install "codegraph-runtime" 27 "codegraph-asset-entry-missing" }
+        if (Test-Path -LiteralPath $current) { Stop-Install "codegraph-runtime" 27 "codegraph-runtime-invalid-existing" }
+        [IO.Directory]::CreateDirectory($installBase) | Out-Null
+        try { Move-Item -LiteralPath $runtimeCandidate.FullName -Destination $current }
+        catch { Stop-Install "codegraph-runtime" 27 "codegraph-runtime-install-failed" }
+        if (-not (Test-CodeGraphCommand $current)) { Stop-Install "codegraph-runtime" 27 "codegraph-runtime-install-failed" }
     }
     return (Resolve-FullPath $current)
+}
+
+function Assert-CodeGraphRuntime {
+    param([string]$Root, [object]$Lock)
+    $packageCandidates = @(
+        (Join-Path $Root "lib\package.json"),
+        (Join-Path $Root "package.json")
+    )
+    $packagePath = $packageCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if ($null -eq $packagePath) { Stop-Install "codegraph-runtime" 27 "codegraph-package-json-missing" }
+    try { $packageValue = Get-Content -Raw -LiteralPath $packagePath | ConvertFrom-Json }
+    catch { Stop-Install "codegraph-runtime" 27 "codegraph-package-json-invalid" }
+    if ($packageValue.name -ne "@colbymchenry/codegraph" -or $packageValue.version -ne $Lock.version) {
+        Stop-Install "codegraph-runtime" 27 "codegraph-package-identity-mismatch"
+    }
+    $packageHash = "sha256:" + (Get-Sha256Hex $packagePath)
+    if ($packageHash -ine $Lock.packageJsonHash) { Stop-Install "codegraph-runtime" 27 "codegraph-package-json-hash-mismatch" }
+    $entryCandidates = @(
+        (Join-Path $Root "lib\dist\bin\codegraph.js"),
+        (Join-Path $Root "dist\bin\codegraph.js")
+    )
+    $entryPath = $entryCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if ($null -eq $entryPath) { Stop-Install "codegraph-runtime" 27 "codegraph-entry-missing" }
+    $entryHash = "sha256:" + (Get-Sha256Hex $entryPath)
+    if ($entryHash -ine $Lock.entrySha256) { Stop-Install "codegraph-runtime" 27 "codegraph-entry-hash-mismatch" }
+    return [ordered]@{
+        status = "verified"
+        packageJsonHash = $packageHash
+        entrySha256 = $entryHash
+        version = $packageValue.version
+    }
 }
 
 function Ensure-HostLauncher {
@@ -377,10 +470,21 @@ try {
     if ($env:OS -ne "Windows_NT") { Stop-Install "preflight" 20 "windows-required" }
     if (-not (Get-Command "git.exe" -ErrorAction SilentlyContinue)) { Stop-Install "preflight" 20 "git-required" }
     if ($SuperpowersChoice -ne "Skip") { Stop-Install "preflight" 20 "superpowers-external-only" }
+    $codeGraphLock = Read-CodeGraphLock $CodeGraphLockPath
     $script:PythonExecutable = Ensure-RepositoryEnvironment
 
     Set-InstallStage "codegraph-runtime" 27
-    $runtimeRoot = Ensure-CodeGraphRuntime
+    $runtimeRoot = Ensure-CodeGraphRuntime $codeGraphLock
+    if ($CodeGraphPath) {
+        $codeGraphVerification = [ordered]@{
+            status = "explicit-local-override"
+            path = $runtimeRoot
+            lock = "not-applied-to-user-override"
+        }
+    }
+    else {
+        $codeGraphVerification = Assert-CodeGraphRuntime $runtimeRoot $codeGraphLock
+    }
     $runtimeReport = Invoke-SelfWorkflow @("provider", "inspect", "--codegraph-path", $runtimeRoot) (Join-Path $script:LogDirectory "codegraph-source.json")
     if (-not $runtimeReport.sourceHash) { Stop-Install "codegraph-runtime" 27 "codegraph-source-unverified" }
 
@@ -430,7 +534,8 @@ try {
     Write-JsonFile (Join-Path $script:LogDirectory "confirmation-summary.json") ([ordered]@{
         planHash = $plan.planHash; profile = $plan.profile; artifactFiles = $plan.artifactFiles
         agentsRoot = $AgentsRoot; codexRoot = $CodexRoot; stateRoot = $StateRoot
-        codegraph = $runtimeReport; ponytail = $ponytailReport; superpowers = "external-only"
+        codegraph = $runtimeReport; codegraphLock = $codeGraphVerification
+        ponytail = $ponytailReport; superpowers = "external-only"
     })
 
     Set-InstallStage "confirmation" 50
@@ -478,7 +583,7 @@ try {
     $summary = [ordered]@{
         schemaVersion = 1; status = "installed"; profile = $Profile
         cleanupPending = $cleanupPending
-        codegraph = $runtimeReport; codegraphProvider = $providerReport
+        codegraph = $runtimeReport; codegraphLock = $codeGraphVerification; codegraphProvider = $providerReport
         hostLauncher = $hostReport; codegraphMcpLauncher = $launcherReport
         codexCodeGraphMcp = $codexReport; ponytail = $ponytailReport
         mattSkills = $mattSkillsReport

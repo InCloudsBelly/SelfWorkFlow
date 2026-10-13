@@ -5,9 +5,12 @@ package:
   version: 1.6.2
   releaseTag: v1.6.2
   node: '>=20.0.0 <25.0.0'
-  packageJsonHash: sha256:d5fc51d6abad770a85e7872b79e77bd682b555a3c18d67ff37a1559e9f221bf7
-  packageLockHash: sha256:78a7fd790271bd87cfd39a880cd12e48aca7854dd426d34f82af0652ee2faa10
+  packageJsonHash: sha256:a1fd8eaecbf5e3fb3662e63e915c70af5e3ed20cc05235ffd18c593ab95f9736
+  packageLockHash: sha256:4658dc30e38cd12fda40e58a96541ec0cef639250d5454a699b5065711c23bc2
+  packageJsonUrl: https://raw.githubusercontent.com/colbymchenry/codegraph/v1.6.2/package.json
+  packageLockUrl: https://raw.githubusercontent.com/colbymchenry/codegraph/v1.6.2/package-lock.json
   entry: dist/bin/codegraph.js
+  entrySha256: sha256:435e2a09ac8e960319ef996fd0150107f04d10782826bf451a19999530a15f9b
   standaloneWindowsAsset: codegraph-win32-x64.zip
   license: MIT
 install:
@@ -16,3 +19,5 @@ install:
   command: bin/codegraph.cmd
   mcpArgs: [serve, --mcp]
   projectIndexDirectory: .codegraph
+  windowsAssetUrl: https://github.com/colbymchenry/codegraph/releases/download/v1.6.2/codegraph-win32-x64.zip
+  windowsAssetSha256: sha256:7455e817ee8032666867a1badeb799b8a884c5f4fea9b444e088a02069b6deea

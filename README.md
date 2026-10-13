@@ -195,6 +195,10 @@ configuration, logs, indexes and caches are never packaged.
 
 CodeGraph is the default local code-reading Provider and is pinned to
 `@colbymchenry/codegraph` `v1.6.2` by `dependencies/locks/codegraph.lock.yaml`.
+The Windows installer downloads only the lock's tagged release asset and verifies
+the package metadata, archive, package identity and final entry hash before use.
+An explicit `-CodeGraphPath` is recorded as a local override and is not treated
+as a reproducible managed runtime.
 The official `codegraph serve --mcp` entry remains responsible for its watcher,
 daemon, locking and graph implementation; SelfWorkFlow only owns project
 boundary checks and lifecycle routing.
