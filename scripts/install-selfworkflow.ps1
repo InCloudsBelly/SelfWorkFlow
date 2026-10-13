@@ -333,54 +333,171 @@ function Ensure-HostLauncher {
     return [ordered]@{ status = "installed"; path = $TargetPath; artifactHash = $identity.artifactHash; snapshot = $identity.snapshot }
 }
 
-function Ensure-CodeGraphMcpLauncher {
-    param([string]$RuntimeRoot, [string]$TargetPath)
-    $command = Join-Path $RuntimeRoot "bin\codegraph.cmd"
-    $script = Join-Path $RuntimeRoot "dist\bin\codegraph.js"
-    $node = $null
-    if (-not (Test-Path -LiteralPath $command -PathType Leaf)) {
-        if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { Stop-Install "codegraph-mcp" 28 "codegraph-mcp-entry-missing" }
-        $nodeCommand = Get-Command "node.exe" -ErrorAction SilentlyContinue
-        if ($null -eq $nodeCommand) { Stop-Install "codegraph-mcp" 28 "node-runtime-missing" }
-        $node = $nodeCommand.Source
+function Get-McpBytesHash {
+    param([byte[]]$Bytes)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
+function Assert-McpFilePath {
+    param([string]$Path)
+    $current = [IO.Path]::GetFullPath($Path)
+    while ($current) {
+        if (Test-Path -LiteralPath $current) {
+            $item = Get-Item -Force -LiteralPath $current
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "mcp-file-reparse-path" }
+        }
+        $current = [IO.Path]::GetDirectoryName($current)
     }
+    if (Test-Path -LiteralPath $Path -PathType Container) { throw "mcp-file-path-conflict" }
+}
+
+function Get-McpFileHash {
+    param([string]$Path)
+    Assert-McpFilePath $Path
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return Get-Sha256Hex $Path }
+    return "missing"
+}
+
+function Get-McpFileState {
+    param([string]$Path)
+    $Path = [IO.Path]::GetFullPath($Path)
+    if ($script:McpFileStates.ContainsKey($Path)) { return $script:McpFileStates[$Path] }
+    Assert-McpFilePath $Path
+    $exists = [IO.File]::Exists($Path)
+    $bytes = [byte[]]@()
+    if ($exists) { $bytes = [IO.File]::ReadAllBytes($Path) }
+    $beforeHash = if ($exists) { Get-McpBytesHash $bytes } else { "missing" }
+    $backup = Join-Path $script:LogDirectory ("mcp-before-" + [Guid]::NewGuid().ToString("N") + ".bin")
+    if ($exists) { [IO.File]::WriteAllBytes($backup, $bytes) }
+    $state = @{ Path = $Path; BeforeExists = $exists; BeforeBytes = $bytes; BeforeHash = $beforeHash;
+        BackupPath = $backup; AfterHash = $null; Written = $false; Unverified = $false }
+    $script:McpFileStates[$Path] = $state
+    Save-McpFileJournal
+    return $state
+}
+
+function Save-McpFileJournal {
+    $records = @($script:McpFileStates.Values | ForEach-Object {
+        [ordered]@{ path = $_.Path; beforeHash = $_.BeforeHash; backupPath = $_.BackupPath;
+            afterHash = $_.AfterHash; written = $_.Written; unverified = $_.Unverified }
+    })
+    Write-JsonFile (Join-Path $script:LogDirectory "mcp-file-state.json") $records
+}
+
+function Write-McpStage {
+    param([string]$Path, [byte[]]$Bytes)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.Write($Bytes, 0, $Bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+}
+
+function Set-McpFileBytes {
+    param([hashtable]$State, [byte[]]$Bytes, [int]$RecoveryBudget = 1)
+    $path = $State.Path
+    $expected = if ($State.Written) { $State.AfterHash } else { $State.BeforeHash }
+    $desired = Get-McpBytesHash $Bytes
+    $lockId = Get-McpBytesHash ([Text.Encoding]::UTF8.GetBytes($path.ToLowerInvariant()))
+    $mutex = [Threading.Mutex]::new($false, "Local\SelfWorkFlow-Mcp-" + $lockId)
+    $held = $false
+    $temporary = $null
+    $captured = $null
+    $discardCaptured = $false
+    $commitAttempted = $false
+    try {
+        try { $held = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw "mcp-file-busy" }
+        if ((Get-McpFileHash $path) -ne $expected) { throw "mcp-file-precondition-conflict" }
+        if ($desired -eq $expected) { return }
+        $parent = [IO.Path]::GetDirectoryName($path)
+        [IO.Directory]::CreateDirectory($parent) | Out-Null
+        $temporary = Join-Path $parent (".selfworkflow-mcp-" + [Guid]::NewGuid().ToString("N") + ".tmp")
+        $captured = Join-Path $parent (".selfworkflow-mcp-" + [Guid]::NewGuid().ToString("N") + ".before")
+        Write-McpStage $temporary $Bytes
+        if ((Get-McpFileHash $path) -ne $expected) { throw "mcp-file-precondition-conflict" }
+        $commitAttempted = $true
+        if ($expected -eq "missing") { [IO.File]::Move($temporary, $path) }
+        else { [IO.File]::Replace($temporary, $path, $captured) }
+        $State.AfterHash = $desired
+        $State.Written = $true
+        if ([IO.File]::Exists($captured) -and (Get-Sha256Hex $captured) -ne $expected) {
+            $State.BeforeBytes = [IO.File]::ReadAllBytes($captured)
+            $State.BeforeHash = Get-McpBytesHash $State.BeforeBytes
+            $State.BeforeExists = $true
+            $State.BackupPath = Join-Path $script:LogDirectory ("mcp-conflict-" + [Guid]::NewGuid().ToString("N") + ".bin")
+            [IO.File]::Copy($captured, $State.BackupPath)
+            $discardCaptured = $true
+            Save-McpFileJournal
+            if ($RecoveryBudget -gt 0) { Set-McpFileBytes $State $State.BeforeBytes ($RecoveryBudget - 1) }
+            throw "mcp-file-precondition-conflict"
+        }
+        $discardCaptured = $true
+        Save-McpFileJournal
+    }
+    catch {
+        if ($commitAttempted -and -not $State.Written -and (Get-McpFileHash $path) -ne $expected) {
+            $State.Unverified = $true
+        }
+        throw
+    }
+    finally {
+        if ($temporary -and [IO.File]::Exists($temporary)) { [IO.File]::Delete($temporary) }
+        if ($discardCaptured -and $captured -and [IO.File]::Exists($captured)) { [IO.File]::Delete($captured) }
+        if ($held) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
+function Restore-McpFiles {
+    $failed = $false
+    $restored = $false
+    foreach ($state in @($script:McpFileStates.Values)) {
+        if ($state.Unverified) { $failed = $true; continue }
+        if (-not $state.Written) { continue }
+        try {
+            if ($state.BeforeExists) { Set-McpFileBytes $state $state.BeforeBytes }
+            else {
+                if ((Get-McpFileHash $state.Path) -ne $state.AfterHash) { throw "mcp-file-rollback-conflict" }
+                $holding = $state.Path + ".rollback-" + [Guid]::NewGuid().ToString("N")
+                [IO.File]::Move($state.Path, $holding)
+                if ((Get-Sha256Hex $holding) -ne $state.AfterHash) {
+                    if (-not [IO.File]::Exists($state.Path)) { [IO.File]::Move($holding, $state.Path) }
+                    throw "mcp-file-rollback-conflict"
+                }
+                [IO.File]::Delete($holding)
+            }
+            $state.Written = $false
+            $restored = $true
+        }
+        catch { $failed = $true; Write-InstallLog ("MCP ROLLBACK FAILED: " + $_.Exception.Message) }
+    }
+    Save-McpFileJournal
+    if ($failed) { throw "mcp-file-rollback-failed" }
+    if ($restored) { return "rolled-back" }
+    return "not-required"
+}
+
+function Ensure-CodeGraphMcpLauncher {
+    param([string]$RuntimeRoot, [string]$TargetPath, [string[]]$CommandPrefix)
+    if ($CommandPrefix.Count -lt 2 -or -not (Test-Path -LiteralPath $CommandPrefix[0] -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $CommandPrefix[-1] -PathType Leaf)) {
+        Stop-Install "codegraph-mcp" 28 "codegraph-mcp-entry-missing"
+    }
+    $prefix = (@($CommandPrefix | ForEach-Object { '"' + $_.Replace('%', '%%').Replace('"', '""') + '"' }) -join " ")
     $parent = Split-Path -Parent $TargetPath
     [IO.Directory]::CreateDirectory($parent) | Out-Null
-    if ($node) {
-        $quotedNode = $node.Replace('"', '""')
-        $quotedScript = $script.Replace('"', '""')
-        $content = @"
+    $content = @"
 @echo off
-setlocal
-set "SELFWORKFLOW_CODEGRAPH_NODE=$quotedNode"
-set "SELFWORKFLOW_CODEGRAPH_SCRIPT=$quotedScript"
-if not exist "%SELFWORKFLOW_CODEGRAPH_NODE%" (
-  >&2 echo SelfWorkFlow: Node runtime missing; rerun the installer.
-  exit /b 20
-)
-if not exist "%SELFWORKFLOW_CODEGRAPH_SCRIPT%" (
-  >&2 echo SelfWorkFlow: CodeGraph checkout missing; rerun the installer.
-  exit /b 20
-)
-"%SELFWORKFLOW_CODEGRAPH_NODE%" "%SELFWORKFLOW_CODEGRAPH_SCRIPT%" %*
-exit /b %ERRORLEVEL%
+setlocal DisableDelayedExpansion
+for /f "tokens=2 delims=:" %%p in ('chcp') do set "SELFWORKFLOW_CODEGRAPH_CODEPAGE=%%p"
+chcp 65001 >nul
+$prefix %*
+set "SELFWORKFLOW_CODEGRAPH_EXIT=%ERRORLEVEL%"
+if defined SELFWORKFLOW_CODEGRAPH_CODEPAGE chcp %SELFWORKFLOW_CODEGRAPH_CODEPAGE% >nul
+exit /b %SELFWORKFLOW_CODEGRAPH_EXIT%
 "@.TrimStart("`r", "`n") + "`r`n"
-    }
-    else {
-        $quoted = $command.Replace('"', '""')
-        $content = @"
-@echo off
-setlocal
-set "SELFWORKFLOW_CODEGRAPH_CLI=$quoted"
-if not exist "%SELFWORKFLOW_CODEGRAPH_CLI%" (
-  >&2 echo SelfWorkFlow: CodeGraph runtime missing; rerun the installer.
-  exit /b 20
-)
-"%SELFWORKFLOW_CODEGRAPH_CLI%" %*
-exit /b %ERRORLEVEL%
-"@.TrimStart("`r", "`n") + "`r`n"
-    }
-    try { [IO.File]::WriteAllText($TargetPath, $content, [Text.UTF8Encoding]::new($false)) }
+    try { Set-McpFileBytes (Get-McpFileState $TargetPath) ([Text.UTF8Encoding]::new($false).GetBytes($content)) }
     catch { Stop-Install "codegraph-mcp" 28 "codegraph-mcp-write-failed" }
     return [ordered]@{ status = "installed"; path = $TargetPath; runtimeRoot = $RuntimeRoot }
 }
@@ -399,7 +516,8 @@ command = "$($LauncherPath.Replace('\', '\\').Replace('"', '\"'))"
 args = ["serve", "--mcp"]
 $end
 "@.Trim("`r", "`n")
-    $existing = if (Test-Path -LiteralPath $CodexConfigPath) { [IO.File]::ReadAllText($CodexConfigPath) } else { "" }
+    $state = Get-McpFileState $CodexConfigPath
+    $existing = if ($state.BeforeExists) { [Text.Encoding]::UTF8.GetString($state.BeforeBytes).TrimStart([char]0xFEFF) } else { "" }
     $oldBegin = "# selfworkflow:graft-mcp:begin"
     $oldEnd = "# selfworkflow:graft-mcp:end"
     if ($existing.Contains($oldBegin) -and $existing.Contains($oldEnd)) {
@@ -416,10 +534,10 @@ $end
     }
     elseif ([string]::IsNullOrWhiteSpace($existing)) { $updated = $section + "`r`n" }
     else { $updated = $existing.TrimEnd("`r", "`n") + "`r`n`r`n" + $section + "`r`n" }
-    if ($updated -ne $existing) {
-        try { [IO.File]::WriteAllText($CodexConfigPath, $updated, [Text.UTF8Encoding]::new($false)) }
-        catch { Stop-Install "codegraph-mcp" 28 "codex-codegraph-mcp-write-failed" }
-    }
+    $bytes = $state.BeforeBytes
+    if ($updated -ne $existing) { $bytes = [Text.UTF8Encoding]::new($false).GetBytes($updated) }
+    try { Set-McpFileBytes $state $bytes }
+    catch { Stop-Install "codegraph-mcp" 28 "codex-codegraph-mcp-write-failed" }
     return [ordered]@{ status = "installed"; configPath = $CodexConfigPath; launcherPath = $LauncherPath; toolSource = "official-codegraph-mcp" }
 }
 
@@ -464,6 +582,7 @@ $script:PythonExecutable = $null
 $applyResult = $null
 $cleanupPending = @()
 $codeGraphRollbackToken = $null
+$script:McpFileStates = @{}
 
 try {
     Write-InstallLog ("SelfWorkFlow repository: " + $RepositoryRoot)
@@ -474,15 +593,29 @@ try {
     $script:PythonExecutable = Ensure-RepositoryEnvironment
 
     Set-InstallStage "codegraph-runtime" 27
-    $runtimeRoot = Ensure-CodeGraphRuntime $codeGraphLock
-    if ($CodeGraphPath) {
+    $providerBeforeHash = if (Test-Path -LiteralPath $ProviderConfigFile -PathType Leaf) { Get-Sha256Hex $ProviderConfigFile } else { "missing" }
+    $existing = Invoke-SelfWorkflow @("provider", "list", "--config-file", $ProviderConfigFile) (Join-Path $script:LogDirectory "provider-list-before.json")
+    $existingCodeGraph = @($existing.providers | Where-Object { $_.providerId -eq "codegraph" -and $_.managementStatus -eq "managed-metadata-available" })
+    $existingUserLocal = @($existingCodeGraph | Where-Object { $_.ownership -eq "user-local" })
+    $preserveSource = ($existingUserLocal.Count -gt 0 -and -not $ReplaceCodeGraphOverride) -or ($CodeGraphMcpLauncherOnly -and $existingCodeGraph.Count -gt 0)
+    if ($preserveSource) {
+        $providerDocument = Get-Content -Raw -Encoding UTF8 -LiteralPath $ProviderConfigFile | ConvertFrom-Json
+        $sourceEntry = @($providerDocument.providers | Where-Object { $_.providerId -eq "codegraph" })[0]
+        if ($sourceEntry.bindingHash -ne $existingCodeGraph[0].bindingHash -or (Get-Sha256Hex $ProviderConfigFile) -ne $providerBeforeHash) {
+            Stop-Install "codegraph-runtime" 27 "provider-config-precondition-conflict"
+        }
+        $runtimeRoot = $sourceEntry.sourcePath
+        $codeGraphVerification = [ordered]@{ status = "preserved-user-local-override"; path = $runtimeRoot; lock = "not-applied-to-preserved-source" }
+    }
+    else { $runtimeRoot = Ensure-CodeGraphRuntime $codeGraphLock }
+    if (-not $preserveSource -and $CodeGraphPath) {
         $codeGraphVerification = [ordered]@{
             status = "explicit-local-override"
             path = $runtimeRoot
             lock = "not-applied-to-user-override"
         }
     }
-    else {
+    elseif (-not $preserveSource) {
         $codeGraphVerification = Assert-CodeGraphRuntime $runtimeRoot $codeGraphLock
     }
     $runtimeReport = Invoke-SelfWorkflow @("provider", "inspect", "--codegraph-path", $runtimeRoot) (Join-Path $script:LogDirectory "codegraph-source.json")
@@ -490,9 +623,14 @@ try {
 
     if ($CodeGraphMcpLauncherOnly) {
         if (-not $ConfirmApply) { Stop-Install "confirmation" 50 "explicit-apply-confirmation-required" }
+        Get-McpFileState $CodeGraphMcpLauncherPath | Out-Null
+        Get-McpFileState $CodexCodeGraphMcpConfigPath | Out-Null
         Set-InstallStage "codegraph-mcp-launcher-only" 75
-        $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath
+        $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath $runtimeReport.commandPrefix
         $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath
+        if ($preserveSource -and (Get-McpFileHash $ProviderConfigFile) -ne $providerBeforeHash) {
+            Stop-Install "codegraph-mcp" 75 "provider-config-precondition-conflict"
+        }
         Write-JsonFile (Join-Path $script:LogDirectory "summary.json") ([ordered]@{
             schemaVersion = 1; status = "launcher-only"; codegraphMcpLauncher = $launcherReport
             codexCodeGraphMcp = $codexReport; logDirectory = $script:LogDirectory
@@ -544,6 +682,8 @@ try {
         if ((Read-Host "Type APPLY to publish this exact plan and dependency hashes") -cne "APPLY") { Stop-Install "confirmation" 50 "installation-cancelled" }
     }
 
+    Get-McpFileState $CodeGraphMcpLauncherPath | Out-Null
+    Get-McpFileState $CodexCodeGraphMcpConfigPath | Out-Null
     Set-InstallStage "apply" 60
     $applyPath = Join-Path $script:LogDirectory "apply-result.json"
     $applyResult = Invoke-SelfWorkflow @("install", "apply", "--plan", $planPath, "--confirm-plan-hash", $plan.planHash) $applyPath
@@ -557,15 +697,20 @@ try {
     Set-InstallStage "host-cli" 74
     $hostReport = Ensure-HostLauncher $HostLauncherPath
     Set-InstallStage "codegraph-mcp" 75
-    $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath
+    $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath $runtimeReport.commandPrefix
     $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) (Join-Path $script:LogDirectory "doctor-after.json") | Out-Null
 
     Set-InstallStage "codegraph-provider-configure" 76
+    $providerCurrentHash = if (Test-Path -LiteralPath $ProviderConfigFile -PathType Leaf) { Get-Sha256Hex $ProviderConfigFile } else { "missing" }
+    if ($providerCurrentHash -ne $providerBeforeHash) { Stop-Install "codegraph-provider-configure" 76 "provider-config-precondition-conflict" }
     $existing = Invoke-SelfWorkflow @("provider", "list", "--config-file", $ProviderConfigFile) (Join-Path $script:LogDirectory "provider-list.json")
-    $existingCodeGraph = @($existing.providers | Where-Object { $_.providerId -eq "codegraph" })
+    $existingCodeGraph = @($existing.providers | Where-Object { $_.providerId -eq "codegraph" -and $_.managementStatus -eq "managed-metadata-available" })
     $existingUserLocal = @($existingCodeGraph | Where-Object { $_.ownership -eq "user-local" })
-    if ($existingUserLocal.Count -gt 0 -and -not $ReplaceCodeGraphOverride) {
+    if ($preserveSource) {
+        if ($existingUserLocal.Count -ne 1 -or $existingUserLocal[0].bindingHash -ne $sourceEntry.bindingHash) {
+            Stop-Install "codegraph-provider-configure" 76 "provider-config-precondition-conflict"
+        }
         $providerReport = [ordered]@{ status = "preserved-user-local-override"; existing = $existingUserLocal[0] }
     }
     else {
@@ -576,6 +721,14 @@ try {
             "--rollback-token", $codeGraphRollbackToken, "--replace-existing"
         )
         $providerReport = Invoke-SelfWorkflow $configureArgs (Join-Path $script:LogDirectory "codegraph-provider-configure.json")
+        $receiptPath = Join-Path (Split-Path -Parent $ProviderConfigFile) (".provider-transactions/" + $codeGraphRollbackToken + ".json")
+        Assert-McpFilePath $receiptPath
+        $receipt = Get-Content -Raw -Encoding UTF8 -LiteralPath $receiptPath | ConvertFrom-Json
+        $expectedPreimage = if ($providerBeforeHash -eq "missing") { "missing" } else { "sha256:" + $providerBeforeHash }
+        if ($receipt.rollbackToken -ne $codeGraphRollbackToken -or $receipt.state -ne "applied" -or
+            $receipt.preimageHash -ne $expectedPreimage) {
+            Stop-Install "codegraph-provider-configure" 76 "provider-config-precondition-conflict"
+        }
     }
     Invoke-SelfWorkflow @("provider", "retire", "--config-file", $ProviderConfigFile, "--provider-id", "graft") (Join-Path $script:LogDirectory "legacy-provider-retire.json") | Out-Null
     Remove-LegacyState $ProviderConfigFile
@@ -606,11 +759,20 @@ catch {
     $failure = $_.Exception.Message
     Write-InstallLog ("FAILED [{0}]: {1}" -f $script:CurrentStage, $failure)
     $rollbackStatus = "not-required"
+    $rollbackFailed = $false
+    try {
+        $mcpRollback = Restore-McpFiles
+        if ($mcpRollback -eq "rolled-back") { $rollbackStatus = "rolled-back" }
+    }
+    catch { $rollbackFailed = $true; Write-InstallLog ("MCP ROLLBACK FAILED: " + $_.Exception.Message) }
     try {
         if ($codeGraphRollbackToken) {
             $rollback = Invoke-SelfWorkflow @("provider", "rollback-config", "--config-file", $ProviderConfigFile, "--rollback-token", $codeGraphRollbackToken, "--if-issued") (Join-Path $script:LogDirectory "codegraph-provider-rollback.json")
             if ($rollback.status -eq "rolled-back") { $rollbackStatus = "rolled-back" }
         }
+    }
+    catch { $rollbackFailed = $true; Write-InstallLog ("PROVIDER ROLLBACK FAILED: " + $_.Exception.Message) }
+    try {
         if ($applyResult -and $applyResult.status -eq "applied") {
             $rollbackPlanPath = Join-Path $script:LogDirectory "rollback-plan.json"
             Invoke-SelfWorkflow @("install", "rollback-plan", "--transaction", $applyResult.transactionPath, "--output", $rollbackPlanPath) $null | Out-Null
@@ -620,10 +782,10 @@ catch {
         }
     }
     catch {
-        $rollbackStatus = "failed"
-        $script:FailureExitCode = 80
+        $rollbackFailed = $true
         Write-InstallLog ("ROLLBACK FAILED: " + $_.Exception.Message)
     }
+    if ($rollbackFailed) { $rollbackStatus = "failed"; $script:FailureExitCode = 80 }
     Write-JsonFile (Join-Path $script:LogDirectory "summary.json") ([ordered]@{
         schemaVersion = 1; status = "failed"; stage = $script:CurrentStage
         cleanupPending = $cleanupPending

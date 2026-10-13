@@ -116,7 +116,7 @@ entries:
     source:
       kind: skill
       path: skills/workflow-quality/SKILL.md
-      revision: git:0387e8f0130e8d4a63e49b322c17967b1c64f5f7
+      revision: git:7133e5cad2aeb716c091e07128adc48b16461c10
       contentHash: sha256:38c5aff77c66cc307e96e9135d1c8584fef188127613bae5d3972e816484b880
     aliases:
       - name: quality-guardrails
@@ -147,7 +147,7 @@ entries:
     source:
       kind: skill
       path: skills/testing-review-quality/SKILL.md
-      revision: git:0387e8f0130e8d4a63e49b322c17967b1c64f5f7
+      revision: git:7133e5cad2aeb716c091e07128adc48b16461c10
       contentHash: sha256:a612ba90ba1b058419742cd4b878c2703c2d7ca504b4122b70598112be804888
     aliases:
       - name: testing-review-gate

@@ -99,6 +99,18 @@ def _hash_file(path: Path) -> str:
         raise PonytailSourceError("ponytail-source-invalid") from None
 
 
+def _locked_license_bytes(path: Path, expected: str) -> bytes:
+    try:
+        content = path.read_bytes()
+    except OSError:
+        raise PonytailSourceError("ponytail-source-invalid") from None
+    lf = content.replace(b"\r\n", b"\n")
+    for candidate in (content, lf, lf.replace(b"\n", b"\r\n")):
+        if _hash_bytes(candidate) == expected:
+            return candidate
+    raise PonytailSourceError("ponytail-source-drift")
+
+
 def _relative_file(root: Path, relative: str) -> Path:
     if not isinstance(relative, str) or not relative or "\\" in relative:
         raise PonytailSourceError("ponytail-lock-invalid")
@@ -208,8 +220,7 @@ def verify_ponytail_source(repository_root: str | Path) -> dict[str, object]:
     if commit != lock["gitlinkCommit"] or tree != lock["gitTree"] or dirty:
         raise PonytailSourceError("ponytail-source-drift")
     license_path = _relative_file(upstream, lock["license"]["path"])
-    if _hash_file(license_path) != lock["license"]["hash"]:
-        raise PonytailSourceError("ponytail-source-drift")
+    _locked_license_bytes(license_path, lock["license"]["hash"])
     for item in lock["selectedSkills"]:
         skill_root = upstream / item["path"]
         _reject_reparse_chain(skill_root)
@@ -365,7 +376,7 @@ def copy_ponytail_skills(
     if target_license.exists() or os.path.lexists(target_license):
         raise PonytailSourceError("ponytail-runtime-target-invalid")
     target_license.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(license_path, target_license)
+    target_license.write_bytes(_locked_license_bytes(license_path, report["license"]["hash"]))
     if _hash_file(target_license) != report["license"]["hash"]:
         raise PonytailSourceError("ponytail-runtime-hash-mismatch")
     return report

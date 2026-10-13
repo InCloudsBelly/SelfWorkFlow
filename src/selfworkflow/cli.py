@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -74,6 +75,9 @@ class _SubprocessCommandPort:
 
         started = time.monotonic()
         try:
+            entry = Path(argv[0])
+            if entry.suffix.casefold() in {".cmd", ".bat"} or entry.name.casefold() in {"cmd", "cmd.exe"}:
+                raise OSError("Batch provider entries are not supported; rebind the native runtime.")
             result = subprocess.run(
                 list(argv), cwd=cwd, check=False, capture_output=True,
                 text=True, encoding="utf-8", errors="replace", timeout=3600,
@@ -138,29 +142,86 @@ def _inspect_provider_source_identity(source_value: str):
         raise _SourceInspectionError("invalid-source", "metadata") from None
 
 
+def _codegraph_runtime_material(source: Path, node: Path, trees: tuple[Path, ...]) -> dict[str, object]:
+    digests = {}
+
+    def digest(path: Path) -> str:
+        if path in digests:
+            return digests[path]
+        value = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                value.update(block)
+        digests[path] = value.hexdigest()
+        return digests[path]
+
+    def link_target(path: Path) -> Path:
+        target = path.resolve(strict=True)
+        if not any(target.is_relative_to(root) for root in trees):
+            raise ValueError("codegraph-source-invalid")
+        return target
+
+    files = {}
+    for root in trees:
+        if not root.exists():
+            continue
+        if not root.is_dir() or _is_reparse(root):
+            raise ValueError("codegraph-source-invalid")
+        for parent, directories, names in os.walk(root, followlinks=False):
+            for name in directories[:]:
+                path = Path(parent) / name
+                if _is_reparse(path):
+                    target = link_target(path)
+                    files[path.relative_to(source).as_posix()] = "link:" + target.relative_to(source).as_posix()
+                    directories.remove(name)
+            for name in names:
+                path = Path(parent) / name
+                if _is_reparse(path):
+                    target = link_target(path)
+                    files[path.relative_to(source).as_posix()] = "link:" + target.relative_to(source).as_posix()
+                    path = target
+                if not path.is_file():
+                    raise ValueError("codegraph-source-invalid")
+                files[path.relative_to(source).as_posix()] = digest(path)
+    for name in ("package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "VERSION", "version.txt"):
+        path = source / name
+        if path.is_file() and name not in files:
+            if _is_reparse(path):
+                raise ValueError("codegraph-source-invalid")
+            files[name] = digest(path)
+    return {"nodePath": str(node), "nodeHash": digest(node), "files": files}
+
+
 def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
     """Hash a CodeGraph checkout or managed runtime without executing it."""
     source = _absolute_path(source_value).resolve(strict=True)
     local_script = source / "dist" / "bin" / "codegraph.js"
-    managed_command = source / "bin" / "codegraph.cmd"
-    if local_script.is_file() and not _is_reparse(local_script):
+    managed_script = source / "lib" / "dist" / "bin" / "codegraph.js"
+    if managed_script.is_file():
+        source_type = "managed-runtime"
+        script = managed_script
+        node = source / "node.exe"
+        path_chain = (source, source / "lib", source / "lib" / "dist", script.parent, script, node)
+        command_prefix = (str(node), "--liftoff-only", "--disable-warning=ExperimentalWarning", str(script))
+    elif local_script.is_file() and not _is_reparse(local_script):
         source_type = "local-git"
         script = local_script
         path_chain = (source, source / "dist", source / "dist" / "bin", script)
-        command_prefix = ("node", str(script))
-    elif managed_command.is_file() and not _is_reparse(managed_command):
-        source_type = "managed-runtime"
-        script = managed_command
-        path_chain = (source, source / "bin", script)
-        command_prefix = (str(script),)
+        node_value = shutil.which("node.exe") or shutil.which("node")
+        if node_value is None:
+            raise ValueError("codegraph-source-invalid")
+        node = Path(node_value).resolve(strict=True)
+        command_prefix = (str(node), str(script))
     else:
         raise ValueError("codegraph-source-invalid")
     if any(not item.exists() or _is_reparse(item) for item in path_chain):
         raise ValueError("codegraph-source-invalid")
+    if not node.is_file() or _is_reparse(node):
+        raise ValueError("codegraph-source-invalid")
     if script.stat().st_size > 16 * 1024 * 1024:
         raise ValueError("codegraph-source-inspection-failed")
 
-    package_candidates = [source / "package.json"]
+    package_candidates = [source / "lib" / "package.json", source / "package.json"] if source_type == "managed-runtime" else [source / "package.json"]
     nested_package = source / "node_modules" / "@colbymchenry" / "codegraph" / "package.json"
     if nested_package not in package_candidates:
         package_candidates.append(nested_package)
@@ -214,6 +275,11 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
             raise _SourceInspectionError("output-limit", arguments[0])
         return result.stdout
 
+    runtime = _codegraph_runtime_material(
+        source, node,
+        (source / "lib",) if source_type == "managed-runtime" else (source / "dist", source / "node_modules"),
+    )
+    runtime["commandPrefix"] = command_prefix
     if source_type == "local-git":
         top = Path(git_bytes("rev-parse", "--show-toplevel").decode("utf-8").strip())
         if top.resolve(strict=True) != source:
@@ -233,15 +299,11 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
             "tree": tree,
             "statusHash": "sha256:" + hashlib.sha256(status).hexdigest(),
             "relevantDiffHash": "sha256:" + hashlib.sha256(relevant_diff).hexdigest(),
-            "entryHash": "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest(),
+            "runtime": runtime,
         }
         dirty = bool(status)
     else:
-        material = {"entry": hashlib.sha256(script.read_bytes()).hexdigest()}
-        for item in (package_path, source / "VERSION", source / "version.txt", source / "dist" / "bin" / "codegraph.js"):
-            if item is not None and item.is_file() and not _is_reparse(item):
-                material[str(item.relative_to(source)).replace("\\", "/")] = hashlib.sha256(item.read_bytes()).hexdigest()
-        source_material = {"runtime": material, "version": version or "unverified"}
+        source_material = {"runtime": runtime, "version": version or "unverified"}
         commit = hashlib.sha256(json.dumps(source_material, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:40]
         dirty = False
     source_hash = "sha256:" + hashlib.sha256(

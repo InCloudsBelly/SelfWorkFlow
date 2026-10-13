@@ -1,6 +1,9 @@
 from pathlib import Path
 import json
 import csv
+import os
+import shutil
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -8,6 +11,7 @@ from unittest import mock
 
 from selfworkflow.adapters import AdapterError, build_runtime
 from selfworkflow.cli import main
+from selfworkflow.v3.catalog import compile_catalog as compile_v3_catalog
 
 
 class RuntimeSnapshotTests(unittest.TestCase):
@@ -199,6 +203,83 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 (root / "maintainer/WORKFLOW.md").read_bytes(),
                 (self.ROOT / "WORKFLOW.md").read_bytes(),
             )
+            for profile in ("knowledge", "maintainer"):
+                catalog = compile_v3_catalog(root / profile / "catalog/v3/index.yaml")
+                self.assertTrue(catalog.document["catalog"]["modules"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows sharing semantics")
+    def test_maintainer_build_avoids_unpublished_upstream_git_sharing_conflicts(self):
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                      wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handles = []
+        original_copy = shutil.copyfile
+
+        def copy_with_git_reader(source, destination, *args, **kwargs):
+            result = original_copy(source, destination, *args, **kwargs)
+            if Path(destination).parts[-4:] == ("dependencies", "upstream", "ponytail", ".git"):
+                handle = kernel.CreateFileW(str(destination), 0x80000000, 1, None, 3, 0x80, None)
+                if handle == ctypes.c_void_p(-1).value:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                handles.append(handle)
+            return result
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            runtime = Path(temporary) / "runtime"
+            try:
+                with mock.patch("selfworkflow.adapters.shutil.copyfile", side_effect=copy_with_git_reader):
+                    manifest = build_runtime(self.ROOT, runtime, "0.1.0.dev0", profile="maintainer")
+                self.assertEqual(manifest["profile"], "maintainer")
+                self.assertTrue((runtime / "skills/ponytail/SKILL.md").is_file())
+                self.assertFalse((runtime / "dependencies/upstream/ponytail").exists())
+            finally:
+                for handle in handles:
+                    kernel.CloseHandle(handle)
+
+    def test_build_canonicalizes_clean_matt_checkouts_and_rejects_content_drift(self):
+        import yaml
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            subprocess.run(["git", "clone", "-q", "--no-local", "--recurse-submodules", str(self.ROOT), str(source)], check=True)
+            tracked = subprocess.run(["git", "ls-files"], cwd=self.ROOT,
+                                     capture_output=True, text=True, check=True).stdout.splitlines()
+            # Hold main-repository bytes fixed; only the real submodule checkout varies.
+            for relative in tracked:
+                original = self.ROOT / relative
+                if relative.startswith("dependencies/upstream/") or not original.is_file():
+                    continue
+                destination = source / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(original.read_bytes())
+            upstream = source / "dependencies/upstream/matt-pocock-skills"
+            lock = yaml.safe_load((source / "dependencies/locks/matt-pocock-skills.lock.yaml").read_text(encoding="utf-8"))
+            first = build_runtime(self.ROOT, root / "current", "0.1.0.dev0")
+            clean = subprocess.run(["git", "status", "--porcelain"], cwd=upstream,
+                                   capture_output=True, text=True, check=True)
+            self.assertEqual(clean.stdout.strip(), "")
+            second = build_runtime(source, root / "fresh", "0.1.0.dev0")
+            self.assertEqual(first["runtimeHash"], second["runtimeHash"])
+            import hashlib
+            for item in lock["selectedSkills"]:
+                published_entry = root / "fresh/skills/matt-pocock" / item["id"] / "SKILL.md"
+                self.assertEqual("sha256:" + hashlib.sha256(published_entry.read_bytes()).hexdigest(), item["hash"])
+            self.assertEqual("sha256:" + hashlib.sha256((root / "fresh/skills/matt-pocock/LICENSE").read_bytes()).hexdigest(), lock["license"]["hash"])
+            ponytail_lock = yaml.safe_load((source / "dependencies/locks/ponytail.lock.yaml").read_text(encoding="utf-8"))
+            self.assertEqual("sha256:" + hashlib.sha256((root / "fresh/skills/ponytail/LICENSE").read_bytes()).hexdigest(), ponytail_lock["license"]["hash"])
+            for published in (root / "current/skills/matt-pocock").rglob("*"):
+                if published.is_file():
+                    self.assertEqual(published.read_bytes(), (root / "fresh" / published.relative_to(root / "current")).read_bytes())
+            entry = upstream / lock["selectedSkills"][0]["path"] / "SKILL.md"
+            entry.write_bytes(entry.read_bytes() + b"\r\nactual content drift\r\n")
+            with self.assertRaisesRegex(AdapterError, "matt-skills-source-drift"):
+                build_runtime(source, root / "drift", "0.1.0.dev0")
 
     def test_unknown_runtime_profile_is_rejected(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

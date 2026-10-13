@@ -13,7 +13,9 @@ from typing import Any, Callable, Protocol
 
 _MAX_OUTPUT_BYTES = 1024 * 1024
 _SYNC_LOCK_ERROR = re.compile(
-    r"(?:✗|\[ERR\]) Failed to sync: CodeGraph database is locked by another process"
+    r"(?:✗|\[ERR\]) Failed to sync: "
+    r"(?:Sync could not acquire the file lock; retry when the index is available\. )?"
+    r"CodeGraph database is locked by another process"
     r"(?: \(PID [0-9]+\))?\. If this is stale, run 'codegraph unlock' or delete .+"
 )
 _MAINTENANCE_COMMANDS = {

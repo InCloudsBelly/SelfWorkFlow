@@ -31,6 +31,26 @@ class PonytailSourceTests(unittest.TestCase):
             ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-help", "ponytail-debt"],
         )
 
+    def test_copy_recovers_locked_license_endings_and_rejects_content_drift(self):
+        license_path = self.ROOT / "dependencies/upstream/ponytail/LICENSE"
+        original_read = Path.read_bytes
+        original = original_read(license_path)
+        crlf = original.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        lock = load_ponytail_lock(self.ROOT)
+        for changed in (False, True):
+            content = crlf + (b"actual license content drift\r\n" if changed else b"")
+            def checkout_read(path):
+                return content if path == license_path else original_read(path)
+            with self.subTest(content_drift=changed), mock.patch.object(Path, "read_bytes", checkout_read):
+                with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+                    if changed:
+                        with self.assertRaisesRegex(PonytailSourceError, "ponytail-source-drift"):
+                            copy_ponytail_skills(self.ROOT, temporary)
+                    else:
+                        copy_ponytail_skills(self.ROOT, temporary)
+                        published = Path(temporary) / "skills/ponytail/LICENSE"
+                        self.assertEqual("sha256:" + hashlib.sha256(published.read_bytes()).hexdigest(), lock["license"]["hash"])
+
     def test_debt_runtime_preserves_scan_and_requires_separate_write_authorization(self):
         source = (self.ROOT / "dependencies/upstream/ponytail/skills/ponytail-debt/SKILL.md").read_bytes()
         adapted = _adapt_ponytail_skill(source, "ponytail-debt")

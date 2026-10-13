@@ -192,7 +192,7 @@ class _SpyPort:
                         "layer": "generic",
                         "id": "matt-pocock.code-review",
                         "path": "skills/engineering/code-review",
-                        "contentHash": "sha256:3abbdfe52540f9242e16589fae2cc423b3d98994c37683944462b29bab89495c",
+                        "contentHash": "sha256:9e6d1b00c31e10a002ac3e5fb49014c9589166f668c62996e80a36d23ca21e70",
                         "required": True,
                     }]
                 ),

@@ -525,13 +525,7 @@ def _dispatch_review(
     skill_manifest = (
         payload.get("projectReview", {}).get("skillManifest", [])
         if isinstance(payload.get("projectReview"), Mapping)
-        else [{
-            "layer": "generic",
-            "id": "matt-pocock.code-review",
-            "path": "skills/engineering/code-review",
-            "contentHash": "sha256:3abbdfe52540f9242e16589fae2cc423b3d98994c37683944462b29bab89495c",
-            "required": True,
-        }]
+        else [{key: value for key, value in ordered_skill_manifest(None)[0].items() if key != "role"}]
     )
     skill_hash = skill_manifest_hash(list(skill_manifest))
     package_hash = None if normalized_package is None else normalized_package["packageHash"]

@@ -102,6 +102,20 @@ class CodeGraphAdapterTests(unittest.TestCase):
                 self.assertEqual(caught.exception.reason, "codegraph-command-failed")
                 self.assertNotIn("private", str(caught.exception))
 
+    def test_official_162_sync_lock_routes_to_bounded_busy_handling(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
+
+        message = (
+            "[ERR] Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
+            "CodeGraph database is locked by another process (PID 123). "
+            "If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock\n"
+        )
+        adapter = self._adapter(FakeCommandPort(self._result(1, stderr=message)))
+        plan = adapter.plan_maintenance("sync", "C:/work/project")
+        with self.assertRaises(CodeGraphAdapterError) as caught:
+            adapter.execute_maintenance(plan, "C:/work/project", confirmed_plan_hash=plan["planHash"])
+        self.assertEqual(caught.exception.reason, "codegraph-project-busy")
+
     def test_query_and_status_lock_text_do_not_become_sync_busy(self):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
 

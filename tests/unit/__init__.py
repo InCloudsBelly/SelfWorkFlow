@@ -1,33 +1,21 @@
 """Deterministic aggregate entry for all SelfWorkFlow unit tests."""
 
 import unittest
+from pathlib import Path
 
 
-UNIT_TEST_MODULES = (
-    "tests.unit.test_capability_gate",
-    "tests.unit.test_catalog",
-    "tests.unit.test_classifier",
-    "tests.unit.test_config",
-    "tests.unit.test_contract_schemas",
-    "tests.unit.test_evidence",
-    "tests.unit.test_git_policy",
-    "tests.unit.test_imports",
-    "tests.unit.test_knowledge_contract",
-    "tests.unit.test_ledger",
-    "tests.unit.test_pipeline",
-    "tests.unit.test_ponytail_scope",
-    "tests.unit.test_ponytail_source",
-    "tests.unit.test_project_review_profile",
-    "tests.unit.test_protected_rules",
-    "tests.unit.test_quality_gate",
-    "tests.unit.test_resolver",
-    "tests.unit.test_review_models",
-    "tests.unit.test_router",
-    "tests.unit.test_sources",
-    "tests.unit.test_superpowers_overlay",
-    "tests.unit.test_work_artifacts",
-    "tests.unit.test_workflow_compression",
+UNIT_TEST_MODULES = tuple(
+    "tests.unit." + ".".join(path.relative_to(Path(__file__).parent).with_suffix("").parts)
+    for path in sorted(Path(__file__).parent.rglob("test_*.py"))
 )
+
+
+def _cases(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from _cases(item)
+        else:
+            yield item
 
 
 def load_tests(
@@ -39,6 +27,10 @@ def load_tests(
 
     del tests, pattern
     suite = unittest.TestSuite()
+    seen = set()
     for module_name in UNIT_TEST_MODULES:
-        suite.addTests(loader.loadTestsFromName(module_name))
+        for case in _cases(loader.loadTestsFromName(module_name)):
+            if case.id() not in seen:
+                seen.add(case.id())
+                suite.addTest(case)
     return suite

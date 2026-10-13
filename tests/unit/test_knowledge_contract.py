@@ -106,6 +106,30 @@ class KnowledgeContractTests(unittest.TestCase):
                 with self.assertRaises(KnowledgeContractError):
                     normalize_result("update", payload)
 
+    def test_execution_rejects_update_receipt_bound_to_another_request_base(self):
+        class WrongBaseBackend:
+            def execute(self, request):
+                return {"status": "published", "confirmedByUser": True,
+                        "expectedBase": "rev-2", "actualBase": "rev-2", "reviewStatus": "passed"}
+
+        request = KnowledgeRequest(action="update", confirmed_by_user=True, expected_base="rev-1")
+        self.assertEqual(execute_knowledge(WrongBaseBackend(), request, code_task=False)["status"], "failed")
+        self.assertEqual(execute_knowledge(WrongBaseBackend(), request, code_task=True)["status"], "knowledge-sync-todo")
+
+    def test_update_receipt_requires_valid_bases_and_review_for_publication(self):
+        valid = {"status": "published", "confirmedByUser": True,
+                 "expectedBase": "rev-1", "actualBase": "rev-1", "reviewStatus": "passed"}
+        for change in (
+            {"reviewStatus": "not-run"},
+            {"reviewStatus": "follow-up"},
+            {"status": "published-with-follow-up"},
+            {"status": "review-requires-attention"},
+            {"expectedBase": "", "actualBase": ""},
+            {"status": "conflict", "actualBase": None, "reviewStatus": "not-run"},
+        ):
+            with self.subTest(change=change), self.assertRaises(KnowledgeContractError):
+                normalize_result("update", {**valid, **change})
+
     def test_missing_backend_does_not_block_code_delivery_and_private_reasoning_is_rejected(self):
         class MissingBackend:
             def execute(self, request):

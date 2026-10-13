@@ -150,8 +150,10 @@ def load_adapters(adapter_root: str | Path, schema_path: str | Path) -> list[dic
     return sorted(result, key=lambda item: item["id"])
 
 
-def _copy_tree(source: Path, destination: Path) -> None:
+def _copy_tree(source: Path, destination: Path, *, excluded_roots: tuple[Path, ...] = ()) -> None:
     for path in sorted(source.rglob("*")):
+        if any(path == root or root in path.parents for root in excluded_roots):
+            continue
         if path.is_symlink():
             raise AdapterError("runtime-source-link-rejected")
         relative = path.relative_to(source)
@@ -220,6 +222,14 @@ def _copy_matt_skills(
         raise AdapterError("matt-skills-source-invalid") from None
     if commit != lock["gitlinkCommit"] or tree != lock["gitTree"] or dirty:
         raise AdapterError("matt-skills-source-drift")
+
+    def locked_text_bytes(content: bytes, expected: str, reason: str) -> bytes:
+        lf = content.replace(b"\r\n", b"\n")
+        for candidate in (content, lf, lf.replace(b"\n", b"\r\n")):
+            if "sha256:" + hashlib.sha256(candidate).hexdigest() == expected:
+                return candidate
+        raise AdapterError(reason)
+
     selected: set[str] = set()
     for item in lock["selectedSkills"]:
         if not isinstance(item, dict) or set(item) != {"id", "path", "hash"}:
@@ -245,10 +255,16 @@ def _copy_matt_skills(
         entry = skill_root / "SKILL.md"
         if skill_root.is_symlink() or not entry.is_file() or entry.is_symlink():
             raise AdapterError("matt-skills-source-invalid")
-        actual_hash = "sha256:" + hashlib.sha256(entry.read_bytes()).hexdigest()
-        if actual_hash != expected_hash:
-            raise AdapterError("matt-skills-source-drift")
-        _copy_tree(skill_root, destination / "skills" / "matt-pocock" / skill_id)
+        locked_entry = locked_text_bytes(entry.read_bytes(), expected_hash, "matt-skills-source-drift")
+        target = destination / "skills" / "matt-pocock" / skill_id
+        _copy_tree(skill_root, target)
+        for published in target.rglob("*"):
+            if published.is_file() and published.suffix in {".md", ".sh", ".yaml"}:
+                content = published.read_bytes()
+                canonical = content.replace(b"\r\n", b"\n")
+                if canonical != content:
+                    published.write_bytes(canonical)
+        (target / "SKILL.md").write_bytes(locked_entry)
 
     license_path = upstream / "LICENSE"
     license_lock = lock["license"]
@@ -259,13 +275,11 @@ def _copy_matt_skills(
         or not isinstance(license_lock.get("hash"), str)
         or not license_path.is_file()
         or license_path.is_symlink()
-        or "sha256:" + hashlib.sha256(license_path.read_bytes()).hexdigest()
-        != license_lock["hash"]
     ):
         raise AdapterError("matt-skills-source-invalid")
     license_target = destination / "skills" / "matt-pocock" / "LICENSE"
     license_target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(license_path, license_target)
+    license_target.write_bytes(locked_text_bytes(license_path.read_bytes(), license_lock["hash"], "matt-skills-source-invalid"))
 
 
 def _copy_anthropic_skill_creator(source: Path, destination: Path) -> None:
@@ -628,23 +642,12 @@ def build_runtime(
             ):
                 candidate = source / directory
                 if candidate.is_dir():
-                    _copy_tree(candidate, temporary / directory)
-            copied_upstream = temporary / "dependencies/upstream/matt-pocock-skills"
-            if copied_upstream.exists():
-                shutil.rmtree(copied_upstream)
-            copied_tea = temporary / "dependencies/upstream/tea"
-            if copied_tea.exists():
-                shutil.rmtree(copied_tea)
-            copied_ponytail = temporary / "dependencies/upstream/ponytail"
-            if copied_ponytail.exists():
-                shutil.rmtree(copied_ponytail)
-            copied_anthropic = temporary / "dependencies/upstream/anthropic-skills"
-            if copied_anthropic.exists():
-                shutil.rmtree(copied_anthropic)
-            for source_id in _COMMUNITY_SOURCES:
-                copied_source = temporary / "dependencies/upstream" / source_id
-                if copied_source.exists():
-                    shutil.rmtree(copied_source)
+                    excluded = tuple(
+                        candidate / "upstream" / source_id
+                        for source_id in ("matt-pocock-skills", "tea", "ponytail", "anthropic-skills", *_COMMUNITY_SOURCES)
+                    ) if directory == "dependencies" else ()
+                    _copy_tree(candidate, temporary / directory, excluded_roots=excluded)
+            _copy_runtime_path(source, temporary, "catalog/v3")
             for legacy in (
                 temporary / "skills/grill-me",
                 temporary / "overlays/superpowers",

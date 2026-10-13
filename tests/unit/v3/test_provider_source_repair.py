@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +18,99 @@ class NoDispatchPort:
 
 
 class ProviderSourceRepairTests(unittest.TestCase):
+    def _managed_runtime(self, root):
+        source = root / "managed runtime"
+        (source / "bin").mkdir(parents=True)
+        (source / "lib/dist/bin").mkdir(parents=True)
+        shutil.copyfile(shutil.which("node.exe") or shutil.which("node"), source / "node.exe")
+        (source / "lib/package.json").write_text('{"name":"@colbymchenry/codegraph","version":"1.6.2"}', encoding="utf-8")
+        (source / "lib/dist/bin/codegraph.js").write_text(
+            "const args=process.argv.slice(2); console.log(JSON.stringify(args[0]==='status'?"
+            "{initialized:true,index:{state:'complete'}}:args));\n", encoding="utf-8")
+        (source / "bin/codegraph.cmd").write_text(
+            '@"%~dp0..\\node.exe" "%~dp0..\\lib\\dist\\bin\\codegraph.js" %*\r\n', encoding="utf-8")
+        return source
+
+    def _inspect(self, source):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(cli.main(["provider", "inspect", "--codegraph-path", str(source)]), 0)
+        return json.loads(output.getvalue())
+
+    def test_managed_query_keeps_shell_metacharacters_as_literal_data(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = self._managed_runtime(root)
+            report = self._inspect(source)
+            adapter = CodeGraphAdapter(command_port=cli._SubprocessCommandPort(),
+                                       command_prefix=report["commandPrefix"], ownership="selfworkflow-managed")
+            marker = root / "audit-marker.txt"
+            query = "symbol&echo.audit>" + str(marker)
+            result = adapter.query(str(root), query)
+            self.assertFalse(marker.exists(), "query data must never be interpreted by cmd")
+            self.assertEqual(json.loads(result["data"])[1], query)
+
+    def test_legacy_batch_binding_fails_without_executing_query_commands(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapter, CodeGraphAdapterError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = self._managed_runtime(root)
+            adapter = CodeGraphAdapter(command_port=cli._SubprocessCommandPort(),
+                                       command_prefix=(str(source / "bin/codegraph.cmd"),), ownership="selfworkflow-managed")
+            marker = root / "audit-marker.txt"
+            with self.assertRaises(CodeGraphAdapterError):
+                adapter.query(str(root), "symbol&echo.audit>" + str(marker))
+            self.assertFalse(marker.exists())
+
+    def test_managed_dependency_drift_changes_inspected_source_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self._managed_runtime(Path(temporary).resolve())
+            dependency = source / "lib/dist/sdk/index.js"
+            dependency.parent.mkdir(parents=True)
+            dependency.write_text("module.exports=1;\n", encoding="utf-8")
+            before = self._inspect(source)
+            self.assertEqual(before["sourceHash"], self._inspect(source)["sourceHash"])
+            dependency.write_text("module.exports=2;\n", encoding="utf-8")
+            self.assertNotEqual(before["sourceHash"], self._inspect(source)["sourceHash"])
+
+    def test_ignored_local_sdk_changes_invalidate_an_otherwise_clean_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary).resolve()
+            (source / "dist/bin").mkdir(parents=True)
+            (source / "dist/bin/codegraph.js").write_text("require('../sdk/index.js');\n", encoding="utf-8")
+            dependency = source / "dist/sdk/index.js"
+            dependency.parent.mkdir()
+            dependency.write_text("module.exports=1;\n", encoding="utf-8")
+            (source / ".gitignore").write_text("dist/\n", encoding="utf-8")
+            (source / "package.json").write_text('{"name":"@colbymchenry/codegraph","version":"1"}', encoding="utf-8")
+            for args in (("init", "-q"), ("config", "--local", "core.autocrlf", "false"), ("add", "."),
+                         ("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "source")):
+                subprocess.run(["git", *args], cwd=source, check=True, capture_output=True)
+            before = self._inspect(source)
+            self.assertFalse(before["dirty"])
+            dependency.write_text("module.exports=2;\n", encoding="utf-8")
+            after = self._inspect(source)
+            self.assertFalse(after["dirty"])
+            self.assertNotEqual(before["sourceHash"], after["sourceHash"])
+
+    def test_internal_pnpm_junction_is_supported_and_bound_to_its_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = self._managed_runtime(root)
+            target = source / "lib/node_modules/.pnpm/pkg/node_modules/pkg"
+            target.mkdir(parents=True)
+            module = target / "index.js"
+            module.write_text("module.exports=1;\n", encoding="utf-8")
+            link = source / "lib/node_modules/pkg"
+            subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+                           check=True, capture_output=True)
+            before = self._inspect(source)
+            module.write_text("module.exports=2;\n", encoding="utf-8")
+            self.assertNotEqual(before["sourceHash"], self._inspect(source)["sourceHash"])
+
     def test_real_identity_drift_reports_changed_fields_without_dispatch(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()

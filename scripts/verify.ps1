@@ -49,7 +49,7 @@ if ($Suite -eq "native") {
 
 if ($Suite -eq "all") {
     $TestScript = Join-Path $PSScriptRoot "test.ps1"
-    $PowerShellExecutable = Join-Path $PSHOME "powershell.exe"
+    $PowerShellExecutable = (Get-Process -Id $PID).Path
     $UnitArguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $TestScript)
     if ($Test) {
         $UnitArguments += @("-Test", $Test)

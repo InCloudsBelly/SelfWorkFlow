@@ -1,5 +1,7 @@
 from pathlib import Path
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 
@@ -259,6 +261,42 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
                 confirmed_git_authorization=True,
             )
             self.assertEqual(command[-1], "--confirm-git-authorization")
+
+    def test_install_rejects_wiki_inside_backend_repository(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            repo = Path(temporary).resolve() / "backend"
+            repo.mkdir()
+            self.repo(repo)
+            inside = repo / "upstream" / "wiki"
+            inside.mkdir(parents=True)
+            for wiki in (repo, inside):
+                with self.subTest(wiki=wiki), self.assertRaisesRegex(SelfOpenWikiError, "wiki-root-inside-repository"):
+                    SelfOpenWikiAdapter.install_command(repo, wiki, confirmed_data_safety=True,
+                                                       confirmed_git_authorization=True)
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction boundary")
+    def test_install_resolves_junctions_before_validating_wiki_boundary(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary).resolve()
+            repo = root / "backend"
+            repo.mkdir()
+            self.repo(repo)
+            inside = repo / "wiki"
+            outside = root / "personal-wiki"
+            inside.mkdir()
+            outside.mkdir()
+            for name, target, allowed in (("inside-link", inside, False), ("outside-link", outside, True)):
+                link = root / name
+                created = subprocess.run(["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+                                         capture_output=True, text=True)
+                self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+                if allowed:
+                    command = SelfOpenWikiAdapter.install_command(repo, link, confirmed_data_safety=True)
+                    self.assertEqual(command[2], str(outside))
+                else:
+                    with self.assertRaisesRegex(SelfOpenWikiError, "wiki-root-inside-repository"):
+                        SelfOpenWikiAdapter.install_command(repo, link, confirmed_data_safety=True)
+                self.assertFalse((target / ".selfopenwiki").exists())
 
     def test_setup_and_visualizer_commands_are_exact_and_nonexecuting(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

@@ -1009,8 +1009,8 @@ class AggregateTestEntryTests(unittest.TestCase):
         import tests.unit as unit_package
 
         expected = tuple(
-            f"tests.unit.{path.stem}"
-            for path in sorted((REPOSITORY_ROOT / "tests/unit").glob("test_*.py"))
+            "tests.unit." + ".".join(path.relative_to(REPOSITORY_ROOT / "tests/unit").with_suffix("").parts)
+            for path in sorted((REPOSITORY_ROOT / "tests/unit").rglob("test_*.py"))
         )
         self.assertEqual(unit_package.UNIT_TEST_MODULES, expected)
 
@@ -1032,9 +1032,9 @@ class AggregateTestEntryTests(unittest.TestCase):
         discovery_unit_ids = [
             test_id for test_id in _test_ids(discovery) if ".unit." in test_id
         ]
-        self.assertEqual(len(explicit_ids), len(set(explicit_ids)))
-        self.assertEqual(aggregate_ids, explicit_ids)
-        self.assertEqual(discovery_unit_ids, explicit_ids)
+        self.assertEqual(len(aggregate_ids), len(set(aggregate_ids)))
+        self.assertEqual(set(aggregate_ids), set(explicit_ids))
+        self.assertEqual(discovery_unit_ids, aggregate_ids)
 
 
 if __name__ == "__main__":

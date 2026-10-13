@@ -342,6 +342,8 @@ class SelfOpenWikiAdapter:
             confirmed_data_safety=confirmed_data_safety,
             confirmed_git_authorization=confirmed_git_authorization,
         )
+        if wiki.is_relative_to(root):
+            raise SelfOpenWikiError("wiki-root-inside-repository")
         command = [
             str(installer),
             "--wiki-root",

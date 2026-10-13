@@ -133,6 +133,10 @@ def _catalog_source(
             capture_output=True,
         )
         subprocess.run(
+            ["git", "config", "--local", "core.autocrlf", "false"],
+            cwd=repository_root, check=True, capture_output=True,
+        )
+        subprocess.run(
             [
                 "git",
                 "add",

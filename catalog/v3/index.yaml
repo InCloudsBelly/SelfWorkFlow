@@ -21,7 +21,7 @@ modules:
     hash: sha256:772520c55848a6691a6fc4b446ff5d7cf91eec3a31c1cf8eb31abb0642af26d8
   - id: ponytail-debt
     ref: modules/ponytail-debt.yaml
-    hash: sha256:d688b59de00e3fcb7b4b28e96d271c906175753c95313c53b8201f05318383aa
+    hash: sha256:bf975932fc77574fd494ffb10b31c52307c27ab7615187b288aa90ef462c35b9
   - id: implement-spec
     ref: modules/implement-spec.yaml
     hash: sha256:92861765f7633903e56f9c7a59893f2a40b79b971240e35f42a06fde01ad9afc
@@ -105,7 +105,7 @@ modules:
     hash: sha256:2bc6157bd48b8a7c02d8d37b39902b65286804a558fcc90388c15b0b273e65cd
   - id: review-code-review
     ref: modules/review-code-review.yaml
-    hash: sha256:eb284a0b46d64f9ae9ec7e7d443eb5ba95f5ed884e1564e0cdfb2abbe0fc6e5f
+    hash: sha256:9c2fec2466366869d0fcd7d990ee33a3d0396c222410bf842f2a84b7671d4631
   - id: verify-execution
     ref: modules/verify-execution.yaml
     hash: sha256:bbc4b269988c9b4cb7c68db9b7daffbffc7373173141f0c4b4434377dfaa8efe

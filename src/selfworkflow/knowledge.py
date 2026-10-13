@@ -22,6 +22,11 @@ _FAILURE_STAGES = {
     "result_schema_invalid",
     "result_binding_mismatch",
 }
+_REVIEW_FOR_TERMINAL_STATUS = {
+    "published": "passed",
+    "published-with-follow-up": "follow-up",
+    "review-requires-attention": "requires-attention",
+}
 
 
 class KnowledgeContractError(ValueError):
@@ -39,7 +44,8 @@ class KnowledgeRequest:
         if self.action not in {"read", "propose", "update"}:
             raise KnowledgeContractError("knowledge-action-invalid")
         if self.action == "update" and (
-            self.confirmed_by_user is not True or not self.expected_base
+            self.confirmed_by_user is not True
+            or not isinstance(self.expected_base, str) or not self.expected_base
         ):
             raise KnowledgeContractError("knowledge-update-guard-missing")
 
@@ -98,6 +104,9 @@ def normalize_result(action: str, payload: dict[str, object]) -> dict[str, objec
             payload.get("status") not in _UPDATE_STATES
             or payload.get("confirmedByUser") is not True
             or not isinstance(payload.get("expectedBase"), str)
+            or not payload.get("expectedBase")
+            or not isinstance(payload.get("actualBase"), str)
+            or not payload.get("actualBase")
             or (
                 payload.get("actualBase") == payload.get("expectedBase")
                 if payload.get("status") == "conflict"
@@ -106,6 +115,10 @@ def normalize_result(action: str, payload: dict[str, object]) -> dict[str, objec
             or payload.get("reviewStatus") not in {
                 "passed", "follow-up", "requires-attention", "not-run"
             }
+            or (
+                payload.get("status") in _REVIEW_FOR_TERMINAL_STATUS
+                and payload.get("reviewStatus") != _REVIEW_FOR_TERMINAL_STATUS[payload["status"]]
+            )
             or (
                 "nativeResult" in payload
                 and not isinstance(payload.get("nativeResult"), dict)
@@ -122,7 +135,10 @@ def execute_knowledge(
     code_task: bool,
 ) -> dict[str, object]:
     try:
-        return normalize_result(request.action, backend.execute(request))
+        result = normalize_result(request.action, backend.execute(request))
+        if request.action == "update" and result["expectedBase"] != request.expected_base:
+            raise KnowledgeContractError("knowledge-update-binding-invalid")
+        return result
     except Exception as exception:
         result: dict[str, object] = {
             "status": "knowledge-sync-todo" if code_task else "failed",
