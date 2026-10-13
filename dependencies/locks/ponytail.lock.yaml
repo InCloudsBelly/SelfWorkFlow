@@ -2,9 +2,9 @@ schemaVersion: 1
 sourceId: ponytail
 canonicalUrl: https://github.com/DietrichGebert/ponytail.git
 path: dependencies/upstream/ponytail
-gitlinkCommit: 9cc65d03aa2da1db7121b912d03596409ee340b8
-gitTree: 42320b8382d3bd9eb59521e6b7f2735edcd9b649
-upstreamVersion: 5.1.0
+gitlinkCommit: 2961b52fc1fe6a5a87c7a959a79512e5c2f3ffe5
+gitTree: ce7bdb1a8ff7666d8040f34a673598b823fc32ef
+upstreamVersion: 5.2.0
 license:
   path: LICENSE
   spdx: MIT
@@ -28,5 +28,5 @@ selectedSkills:
     runtimeHash: sha256:6db4ea2a6d6dcdb00b675fc5eed1ce154dc7b91b0a3aecf5a66317a3a98fdbf6
   - id: ponytail-debt
     path: skills/ponytail-debt
-    hash: sha256:1478a4339e4d8c888e75d72ac91befd1fbbcc5bc4dc51c9bd67bf07b43bb49ef
-    runtimeHash: sha256:51b165b32ae68be08063fac0fc0e2ce2c78e98239ad5c833be7645204bdaa093
+    hash: sha256:4666dfd5fbab7b8b4a6a0d8f5ccae20603fe773443e958d47aa00845d888c0c4
+    runtimeHash: sha256:01ec34f20e78f12913263949c6d3848721cdec031e3c617c11b0018bcca0116c

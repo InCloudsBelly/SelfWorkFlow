@@ -227,7 +227,8 @@ class V3PipelineLoaderTests(unittest.TestCase):
         )
         serialized = loaded.content.decode("utf-8")
         self.assertNotIn("provider", serialized.lower())
-        self.assertNotIn("tea", serialized.lower())
+        self.assertIn("tea-framework", serialized.lower())
+        self.assertIn("tea-ci", serialized.lower())
         self.assertNotIn("c++", serialized.lower())
         slots = {
             slot["id"]: slot
@@ -331,6 +332,7 @@ class V3PipelineLoaderTests(unittest.TestCase):
             {"all": [
                 {"eq": ["writeTask", True]},
                 {"eq": ["operationType", "implement"]},
+                {"not": {"contains": ["explicitModuleIds", "implement-spec"]}},
             ]},
         )
 

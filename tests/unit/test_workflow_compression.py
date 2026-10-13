@@ -26,9 +26,8 @@ class WorkflowCompressionTests(unittest.TestCase):
     )
     MODULES = (
         "workflow/modules/code.md",
-        "workflow/modules/graft-read.md",
-        "workflow/modules/graft-deep.md",
-        "workflow/modules/graft-update.md",
+        "workflow/modules/codegraph-read.md",
+        "workflow/modules/codegraph-update.md",
         "workflow/modules/review.md",
         "workflow/modules/knowledge.md",
         "workflow/modules/artifacts.md",
@@ -245,16 +244,15 @@ class WorkflowCompressionTests(unittest.TestCase):
                 )
                 self.assertEqual(route.selected_modules, ())
 
-    def test_graft_is_the_only_code_graph_provider_with_rg_fallback(self):
+    def test_codegraph_is_the_only_code_graph_provider_with_rg_fallback(self):
         active_files = (
             "WORKFLOW.md",
             "workflow/core.md",
             "workflow/modules/code.md",
-            "workflow/modules/graft-read.md",
-            "workflow/modules/graft-deep.md",
-            "workflow/modules/graft-update.md",
+            "workflow/modules/codegraph-read.md",
+            "workflow/modules/codegraph-update.md",
             "skills/cpp-core/SKILL.md",
-            "docs/providers/graft.md",
+            "docs/providers/codegraph.md",
             "README.md",
             "scripts/install-selfworkflow.ps1",
         )
@@ -262,8 +260,7 @@ class WorkflowCompressionTests(unittest.TestCase):
             (ROOT / relative).read_text(encoding="utf-8")
             for relative in active_files
         ).casefold()
-        self.assertNotIn("codegraph", active_text)
-        self.assertIn("graft", active_text)
+        self.assertIn("codegraph", active_text)
         self.assertIn("rg", active_text)
 
     def test_non_code_document_plan_skips_behavior_gates_without_blocking(self):
@@ -384,18 +381,18 @@ class WorkflowCompressionTests(unittest.TestCase):
                 if slot["slotId"] in {"design.specialists", "plan.gate"}:
                     self.assertEqual(slot["selectedModules"], [])
 
-    def test_read_only_keeps_write_protection_and_graft_is_explicitly_bounded(self):
+    def test_read_only_keeps_write_protection_and_codegraph_is_bounded(self):
         text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         for phrase in (
             "writeTask=false",
             "禁止编辑",
             "禁止副作用",
-            "Graft",
+            "CodeGraph",
             "失败关闭",
         ):
             self.assertIn(phrase, text)
 
-    def test_runtime_package_contains_split_files_and_graft_lock(self):
+    def test_runtime_package_contains_split_files_and_codegraph_lock(self):
         output_parent = Path(tempfile.mkdtemp(prefix="selfworkflow-compression-"))
         output = output_parent / "runtime"
         try:
@@ -417,10 +414,10 @@ class WorkflowCompressionTests(unittest.TestCase):
                         hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(),
                         entries[relative],
                     )
-            self.assertIn("dependencies/locks/graft.lock.yaml", entries)
+            self.assertIn("dependencies/locks/codegraph.lock.yaml", entries)
             self.assertEqual(
-                entries["dependencies/locks/graft.lock.yaml"],
-                hashlib.sha256((ROOT / "dependencies/locks/graft.lock.yaml").read_bytes()).hexdigest(),
+                entries["dependencies/locks/codegraph.lock.yaml"],
+                hashlib.sha256((ROOT / "dependencies/locks/codegraph.lock.yaml").read_bytes()).hexdigest(),
             )
         finally:
             shutil.rmtree(output_parent, ignore_errors=True)

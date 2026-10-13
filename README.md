@@ -14,17 +14,17 @@ Install_SelfWorkFlow.bat -Profile knowledge
 ```
 
 The installer checks or prepares the repository Python environment, initializes
-the pinned Git Submodules, builds the pinned Graft CLI with Node >=20, and packages only the curated Matt Pocock Skills
+the pinned Git Submodules, installs the pinned CodeGraph runtime with Node >=20, and packages only the curated Matt Pocock Skills
 listed in `dependencies/locks/matt-pocock-skills.lock.yaml`. The upstream
 `grilling` and `grill-me` are installed with that curated set. Full automatically
 routes to `grilling`; Deep routes to `grill-me`, whose upstream workflow runs the
 deeper `grilling` frontier. Light remains explicit-only.
 SelfWorkflow does not require, install, or default-route to Superpowers.
 
-The installer verifies and builds only the pinned Graft submodule. It never scans
-disks for another code graph or binds an alternate provider. Project graph
-initialization is lazy and task-scoped; an explicit update is required before
-rebuilding a stale graph.
+The installer verifies the pinned CodeGraph runtime and never scans disks for
+another code graph or binds an alternate provider. The project `.codegraph/`
+index is initialized automatically on the first code task and is synchronized
+after edits; a full rebuild is used only when the status requires it.
 
 The Matt Skills source is the repository's fixed
 `dependencies/upstream/matt-pocock-skills` Gitlink. Upgrades are explicit source
@@ -54,6 +54,50 @@ For unattended sandboxing or diagnostics, inspect all parameters first:
 ```
 
 ## Default workflow
+
+The default is an instruction-based `agent-policy`, not a conforming Host.
+Full/Deep describe task depth; they do not activate contract APIs. Ordinary
+tasks reuse explicit authorization within unchanged scope and fresh evidence
+within unchanged inputs. Read-only analysis uses one independent reviewer;
+Full/Deep changes retain the pre-implementation review and post-change
+Standards/Spec pair. Contract-only dispatch, runner, receipts and cleanup
+attestation apply only to explicit contract-managed work or tasks accepted by a conforming Host under its contract. Host capability alone does not switch the task mode.
+Unavailable contract capability stops that mode; it is never silently downgraded.
+Instructions do not provide OS-level isolation or replace host permissions.
+
+### 个人入口与来源备份
+
+默认自然语言请求使用 canonical Skill；本机 `patent-disclosure-local` 和
+`skill-creator-local` 在各自 `agents/openai.yaml` 设置
+`policy.allow_implicit_invocation=false`，保留显式指定本地版本的入口。
+改名本身不解决语义重复；调用策略与 Skill 正文分别维护。
+
+迁移 hash-bound runtime 时，应检查 catalog 引用的 Git revision 是否被普通
+分支或标签覆盖。不可达来源必须与交付材料一起保存为完整 Git bundle，记录
+来源路径、revision/ref、contentHash 与 bundle SHA256，并在独立 bare repository
+恢复、比较 OID 和对应文件字节。不要仅备份某一个自定义 ref；当前三个受管
+Skill 分别需要 `e2ef4d49d8dc60a6e7fb514ff66c5d0e0ef561c3` 和
+`0387e8f0130e8d4a63e49b322c17967b1c64f5f7` 两条来源提交。
+
+打包可在独立 bare repository 中从主仓库只读 fetch 所需 OID，建立临时来源
+ref 后生成 bundle；主仓库的 ref、分支和索引保持原状。迁移时先校验 bundle
+SHA256 与 `git bundle verify`，再将其中 ref fetch 到目标仓库并核对来源字节。
+后续 catalog revision 改变时重新计算需要携带的来源，不复用旧清单作新来源证明。
+bundle 仅保存可达 Git 对象，不能代替工作区、索引或安装快照的备份；不要用
+reset 或覆盖用户修改完成恢复。当前备份与恢复证据位于
+`selfworkflow/20261013-workflow-followup/`，该目录不自动加入 Git。
+
+The runtime manifest is `<snapshot>/artifact-manifest.json`. Read only identity
+and relevant hashes instead of loading the complete file list or searching old
+installation logs. TEA packages its knowledge references and one canonical
+assessment entry per name. Nested TEA entries are explicit-only; the main adapter
+selects methods without restarting upstream menus, teams or confirmation loops.
+
+Installation result `cleanupPending` separates verified publication from lock
+cleanup. A committed install with an unreleased lock returns `applied` and a
+visible warning; this is not a rolled-back or uncommitted installation. Do not
+delete an unknown/active process's lock. A later conflicting writer still fails
+closed. File verification does not attest cleanup or native skill activation.
 
 Ordinary work loads the installed root `WORKFLOW.md` and only the capability
 needed for the current stage:
@@ -145,76 +189,40 @@ repository-scoped Provider management entry is deliberately not packaged into
 the static Agent snapshot. These files are loaded only by matching V3 requests; machine
 configuration, logs, indexes and caches are never packaged.
 
-## Default Graft code provider
+## Default CodeGraph code provider
 
-Graft is the default local code-reading Provider and is pinned at
-`dependencies/upstream/graft` with `dependencies/locks/graft.lock.yaml`. The
-installer verifies the gitlink, source tree, package/lockfile/license hashes,
-then runs `npm ci --ignore-scripts`, a controlled native-package rebuild,
-`npm run build`, and a CLI runtime smoke test. The installed Agent query path is
-the official Graft MCP; SelfWorkFlow does not reimplement Graft's graph or query
-protocol.
-The project graph is initialized lazily when a global map is explicitly
-confirmed for creation or update; Deep Topic binding does not initialize it. The
-installer publishes the official MCP launcher at
-`%LOCALAPPDATA%\SelfWorkFlow\bin\graft-mcp.cmd`, which starts
-`graft mcp <current-working-directory>` so each project keeps its own `graft/`.
-The SelfWorkFlow Host CLI at
-`%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd` is retained for lifecycle
-checks, explicit maintenance, and recovery. After an Agent writes code,
-SelfWorkFlow triggers the official Graft structural update; ordinary reads do
-not run Deep, while a code write in a conversation bound to a Topic continues
-automatically in the same Worker call into that Topic's scoped Deep. It does not
-run a second graph implementation, watcher, or daemon. A Deep build uses the current Agent model through
-a one-shot loopback Codex bridge. Before any graph decision,
-`graft-preflight` first verifies
-the real Provider runtime (`--version` and the required commands); an
-existing `graft/` directory alone is not evidence that Graft is usable. See
-`docs/providers/graft.md`.
+默认 `selfworkflow.cmd` 使用安装快照中的 Host 代码和冻结依赖，不继承 `PYTHONPATH`。`--host-info` 返回已校验的 artifact 和 CLI 路径；开发源码改变后须重新 build/install。Python 解释器保留共享安装，但版本、平台和文件 hash 必须匹配，变化后重新构建安装。Host launcher 纳入安装计划的可选 `hostLauncher`，与快照一起验证并可回滚；旧 API/计划仍兼容。
 
-Official `graft init` can register Graft's native MCP and hooks. SelfWorkFlow
-uses the official MCP as the primary query path and keeps only a thin lifecycle
-gate around it; the launcher is bound to the current working directory rather
-than a fixed project path.
+CodeGraph is the default local code-reading Provider and is pinned to
+`@colbymchenry/codegraph` `v1.6.2` by `dependencies/locks/codegraph.lock.yaml`.
+The official `codegraph serve --mcp` entry remains responsible for its watcher,
+daemon, locking and graph implementation; SelfWorkFlow only owns project
+boundary checks and lifecycle routing.
+
+Every code task uses the current project root. If `.codegraph/` is missing,
+SelfWorkFlow runs a full `init`; stale indexes are synchronized and rebuilt with
+`index --force` only when the status requires it. After an Agent writes, deletes,
+renames or rolls back code, one `sync` covers the merged changed paths. No Deep,
+Topic or conversation graph is required.
 
 ```powershell
-node dependencies/upstream/graft/dist/cli.js build D:\project --no-gitignore --no-ignore
-node dependencies/upstream/graft/dist/cli.js map D:\project --json --no-refresh
-
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-preflight --project-root D:\project
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-sync --project-root D:\project --conversation-id <current-conversation-id> --changed-path Source\main.cpp
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-ensure --project-root D:\project --conversation-id <current-conversation-id>
-%LOCALAPPDATA%\SelfWorkFlow\bin\selfworkflow.cmd provider graft-deep --project-root D:\project --conversation-id <current-conversation-id>
+& "$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd" provider preflight --project-root D:\project
+& "$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd" provider query --project-root D:\project --query "Where is the request flow?"
+& "$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd" provider sync --project-root D:\project --changed-path Source\main.cpp
 ```
 
-The active Host automatically injects the current conversation model and
-reasoning effort for this internal command; users do not choose them. If the
-Host cannot provide both values, the command fails closed. Topic and official
-Graft manifests record only the last run; they are never defaults.
-These values are historical; they are not defaults.
-
-When automatic Topic refresh cannot complete, the Worker returns a visible
-`partial`/`unverified` result with `retry-topic-deep`. The conversation may
-continue, but the workflow must not silently replace Graft with `rg` or report
-the Topic as fresh.
+The project `.codegraph/` directory is a local, reproducible cache and is not
+automatically added, committed or pushed. An explicitly requested cleanup may
+remove a legacy `<repo>\graft\` cache; it is not used as CodeGraph input.
 
 ## Code reading
 
-Graft is the only code-graph Provider. The official MCP supplies structural
-queries and freshness; the workflow verifies its project binding before use.
-If Graft is missing, stale, unavailable, or does not cover a target, the
-workflow marks that limitation and falls back to `rg` for exact text and
-uncovered files. `rg` is not structural evidence and does not replace a
-required fresh Graft result. See
-`docs/providers/graft.md`.
-
-For a code task, an existing fresh global non-Deep Code Map is used automatically;
-no explicit opt-in or Topic binding is required. `graft-ensure` checks it before
-reading. A stale map requires user confirmation before update; a missing map is
-not initialized automatically. After an Agent code write, including rollback,
-delete, or rename, `graft-sync` updates the affected global map paths. Deep Topic
-freshness/builds are never checked automatically; they require an explicit user
-request and an existing binding.
+CodeGraph is the only code-graph Provider. The official MCP supplies structural
+queries; the workflow verifies its project binding and freshness before use.
+If CodeGraph is unavailable, the workflow reports `unverified`; `rg` remains
+available for exact text but is not structural evidence. A missing project map
+is initialized automatically, and a stale map is synchronized and rebuilt when
+required. No Deep, Topic or conversation binding is involved.
 A missing or failed capability is reported explicitly; it is not silently
 replaced with `rg` as structural evidence.
 
@@ -228,9 +236,10 @@ replaced with `rg` as structural evidence.
 - V3 schemas, versioned Catalog/Pipeline loaders, immutable PlanGraph/RunLedger
   validation, bounded selector kernel, TEA candidate routing, C++ content-addressed
   routing, the Matt Skills foundation, the fail-closed post-Grill contract gate,
-  Graft source binding, non-executing source inspection, write-ahead
-  CAS-protected installer and content-addressed maintenance planning are implemented
-  and automated-tested. The checked-in V3 request intentionally remains `paused`
+  CodeGraph source binding, non-executing source inspection, write-ahead
+  CAS-protected installer, automatic project-index lifecycle and content-addressed
+  maintenance planning are implemented and automated-tested. The checked-in V3
+  request intentionally remains `paused`
   until a conforming Host supplies fresh supported evidence.
 - OpenSpec routing, a generic specialist Review selector/aggregate execution path,
   and Heavy/Forensic adapters and dependencies remain outside this release.
@@ -606,6 +615,51 @@ methods). All 35 v2 confirmed-plan tests and all 16 smoke tests were Green. The
 removed `-IcaclsCommand` injection interface. This run is a migration inventory,
 not a product-regression claim; those old tests were intentionally not bulk
 rewritten in this task step.
+
+## Skill 与工作流维护
+
+`anthropics/skills` 通过 `dependencies/upstream/anthropic-skills` submodule 固定版本接入。
+normal 依赖初始化只按父仓库 gitlink 同步；runtime 打包同时验证
+`dependencies/locks/anthropic-skills.lock.yaml`、Git tree、dirty 和所选文件 hash。
+
+当用户明确要求新增、融合、改造个人 Skill/工作流或优化触发时，加载
+`workflow-skill-maintenance`。例如“把新的科学绘图 Skill 接入个人工作流”。
+普通开发、写文档、绘图或使用现有 Skill 不加载此维护入口。
+
+运行时只发布一个本地维护入口；上游 skill-creator 的完整方法引用和许可证位于
+`references/anthropic-skills/skill-creator`，不进入日常 Skill 发现树。
+安装后的入口按当前对话 bootstrap 的 snapshot 绝对根定位引用。
+上游 Claude CLI/API 和评测脚本按宿主能力与本次授权选择，不自动运行。
+
+本能力支持普通 agent-policy 的维护任务；不新增 V2/V3 契约阶段或调度器。
+源仓库变更经验证后，使用现有安装流程更新个人 snapshot 才会进入新会话。
+不要通过整库安装或覆盖其他 skill-creator 入口重复接入。
+
+## 文档、界面与 Obsidian 能力
+
+三个社区来源作为固定 submodule 加入 normal 依赖集，并以 commit、Git tree、
+干净状态和所选文件 hash 验证。个人发现目录只增加以下五个窄入口：
+
+| 入口 | 自动触发 | 邻近任务不触发 |
+| --- | --- | --- |
+| `ui-ux-pro-max` | 实际 UI 的视觉、布局、交互和可访问性设计 | UI 线程崩溃、GPU 性能、文档排版、静态科学图 |
+| `content-research-writer` | 文章、教程、专题报告的研究与实质写作 | 短问答、摘要、翻译、工作报告、内部计划/Review、仅导出格式 |
+| `obsidian-markdown` | 明确 Obsidian 笔记的专属 Markdown 语法 | 普通 Markdown、README、SKILL.md、通用 frontmatter |
+| `obsidian-bases` | Obsidian Bases/.base 与笔记筛选视图 | Excel/CSV、SQL、Redmine、通用知识库 |
+| `json-canvas` | JSON Canvas/.canvas/Obsidian 画布文件 | 泛称流程图、Mermaid、HTML canvas、PNG/SVG |
+
+来源分别为 `dependencies/upstream/ui-ux-pro-max`、`composio-skills`、
+`obsidian-skills`，锁位于 `dependencies/locks/<source-id>.lock.yaml`。
+完整的所选方法与支持文件位于运行时 `references/community-skills/<source-id>/`，
+不进入 Skill 发现树。入口按当前 bootstrap 的 snapshot 定位并校验引用。
+UI 搜索使用同目录数据与 Python 标准库；只在需要时执行，不默认持久化设计系统。
+Composio 仅接入 `content-research-writer`，不会安装整库连接器。
+Obsidian 不自动扫描或写入未授权 vault，也不代替知识后端确认流程。
+
+UI 与 Obsidian 保留 MIT LICENSE；Composio 所选 writer 无单独 LICENSE，
+保留 README 的 Apache-2.0 声明，并在锁中标记为 `declared`。
+触发描述与正负案例审查不等于真实模型触发率或 Token 节省测量。
+使用现有受管安装流程更新个人 snapshot 后，新会话即可发现这些入口。
 
 ## Project-local work-document lifecycle
 

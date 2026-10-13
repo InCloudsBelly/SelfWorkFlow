@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import tempfile
 import unittest
 from unittest import mock
@@ -10,6 +11,7 @@ import yaml
 from selfworkflow.ponytail_source import (
     PonytailSourceError,
     _adapt_ponytail_skill,
+    copy_ponytail_skills,
     load_ponytail_lock,
     validate_ponytail_lock,
     verify_ponytail_source,
@@ -26,8 +28,42 @@ class PonytailSourceTests(unittest.TestCase):
         self.assertEqual(report["canonicalUrl"], "https://github.com/DietrichGebert/ponytail.git")
         self.assertEqual(
             [item["id"] for item in report["selectedSkills"]],
-            ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-help"],
+            ["ponytail", "ponytail-review", "ponytail-audit", "ponytail-help", "ponytail-debt"],
         )
+
+    def test_debt_runtime_preserves_scan_and_requires_separate_write_authorization(self):
+        source = (self.ROOT / "dependencies/upstream/ponytail/skills/ponytail-debt/SKILL.md").read_bytes()
+        adapted = _adapt_ponytail_skill(source, "ponytail-debt")
+        text = adapted.decode("utf-8")
+        self.assertEqual(text.split("## Boundaries")[0], source.decode("utf-8").replace("\r\n", "\n").split("## Boundaries")[0])
+        self.assertIn("explicit one-shot", text)
+        self.assertIn("does not activate Ponytail coding or session mode", text)
+        self.assertIn("separate explicit user authorization", text)
+        self.assertNotIn("To persist it, ask and it writes", text)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            copy_ponytail_skills(self.ROOT, temporary)
+            runtime = Path(temporary) / "skills/ponytail-debt/SKILL.md"
+            self.assertEqual(runtime.read_bytes(), adapted)
+            self.assertFalse((Path(temporary) / "skills/ponytail-gain").exists())
+        selected = load_ponytail_lock(self.ROOT)["selectedSkills"]
+        debt = next(item for item in selected if item["id"] == "ponytail-debt")
+        self.assertEqual(debt["hash"], "sha256:" + hashlib.sha256(source).hexdigest())
+        self.assertEqual(debt["runtimeHash"], "sha256:" + hashlib.sha256(adapted).hexdigest())
+
+    def test_debt_adaptation_fails_closed_when_boundary_changes(self):
+        with self.assertRaisesRegex(PonytailSourceError, "ponytail-source-adaptation-invalid"):
+            _adapt_ponytail_skill(b"## Boundaries\nChanged upstream policy.\n", "ponytail-debt")
+
+    def test_debt_hash_drift_fails_closed(self):
+        for field, reason in (("hash", "ponytail-source-drift"), ("runtimeHash", "ponytail-runtime-hash-mismatch")):
+            with self.subTest(field=field):
+                lock = load_ponytail_lock(self.ROOT)
+                debt = next(item for item in lock["selectedSkills"] if item["id"] == "ponytail-debt")
+                debt[field] = "sha256:" + "0" * 64
+                with mock.patch("selfworkflow.ponytail_source.load_ponytail_lock", return_value=lock):
+                    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+                        with self.assertRaisesRegex(PonytailSourceError, reason):
+                            copy_ponytail_skills(self.ROOT, temporary)
 
     def test_catalog_hashes_match_adapted_runtime_skill_bytes(self):
         catalog = yaml.safe_load(

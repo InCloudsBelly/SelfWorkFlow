@@ -12,6 +12,7 @@ from selfworkflow.selfopenwiki import (
     SelfOpenWikiAdapter,
     SelfOpenWikiError,
     validate_external_status,
+    validate_visualizer_status,
 )
 
 
@@ -41,6 +42,15 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
                 "runtimeRoot": "D:/wiki_zxh.selfopenwiki",
                 "wikiRoot": "D:/wiki_zxh",
             },
+            "visualizer": {
+                "id": "selfopenwiki.zxh_wiki_viewer",
+                "contractSchema": 1,
+                "launcherPath": "D:/SelfOpenWiki/Visualize.bat",
+                "loopbackOnly": True,
+                "autoOpen": False,
+                "wikiRootInput": {"kind": "argument", "flag": "--wiki-root"},
+                "urlTemplate": "http://127.0.0.1:{port}/wiki/local",
+            },
             "capabilities": [
                 {"id": capability}
                 for capability in sorted(EXTERNAL_CAPABILITIES)
@@ -52,9 +62,18 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
     def repo(self, root):
         (root / "Setup.bat").write_text("@echo off\n", encoding="utf-8")
         (root / "Install.bat").write_text("@echo off\n", encoding="utf-8")
-        visualizer = root / ".work/openwiki/dist/cli/cli.js"
-        visualizer.parent.mkdir(parents=True)
-        visualizer.write_text("// fixture\n", encoding="utf-8")
+        (root / "Visualize.bat").write_text("@echo off\n", encoding="utf-8")
+
+    @staticmethod
+    def personal_status():
+        return SelfOpenWikiAdapterTests.status(
+            capabilities=[
+                {"id": capability}
+                for capability in sorted(
+                    EXTERNAL_CAPABILITIES | set(selfopenwiki.PERSONAL_CAPABILITIES)
+                )
+            ]
+        )
 
     def test_status_is_first_call_and_requires_external_pair(self):
         client = _FakeClient(self.status())
@@ -175,6 +194,23 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
                 )
             )
 
+    def test_visualizer_status_requires_the_new_selfopenwiki_contract(self):
+        ready = self.personal_status()
+        self.assertEqual(
+            validate_visualizer_status(ready)["visualizer"]["id"],
+            "selfopenwiki.zxh_wiki_viewer",
+        )
+        for visualizer in (
+            None,
+            {**ready["visualizer"], "id": "openwiki.legacy"},
+            {**ready["visualizer"], "loopbackOnly": False},
+            {**ready["visualizer"], "wikiRootInput": {"kind": "argument", "flag": "--root"}},
+        ):
+            with self.subTest(visualizer=visualizer):
+                value = {**ready, "visualizer": visualizer}
+                with self.assertRaises(SelfOpenWikiError):
+                    validate_visualizer_status(value)
+
     def test_install_requires_confirmations_and_does_not_create_or_mutate_wiki(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
@@ -232,25 +268,52 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             repo.mkdir()
             wiki.mkdir()
             self.repo(repo)
-            adapter = SelfOpenWikiAdapter(_FakeClient(self.status()))
+            wiki.mkdir(exist_ok=True)
+            status = self.personal_status()
+            status["paths"]["wikiRoot"] = str(wiki.resolve()).replace("\\", "/")
+            status["visualizer"]["launcherPath"] = str(
+                (repo / "Visualize.bat").resolve()
+            ).replace("\\", "/")
+            adapter = SelfOpenWikiAdapter(
+                _FakeClient([status, status, status])
+            )
             self.assertEqual(
                 adapter.setup_command(repo, with_mcp=True),
                 [str((repo / "Setup.bat").resolve()), "--with-mcp"],
             )
             self.assertEqual(
-                adapter.visualizer_command(repo, wiki),
+                adapter.visualizer_command(repo, wiki, port=4321),
                 [
-                    "node",
-                    str((repo / ".work/openwiki/dist/cli/cli.js").resolve()),
-                    "visualize",
-                    str(wiki.resolve()),
-                    "--port",
-                    "4321",
-                    "--no-open",
+                    "cmd.exe",
+                    "/d",
+                    "/s",
+                    "/c",
+                    f'"{(repo / "Visualize.bat").resolve()}" --wiki-root "{wiki.resolve()}" --port 4321',
                 ],
             )
+            spec = adapter.visualizer_spec(port=4321)
+            self.assertEqual(spec["url"], "http://127.0.0.1:4321/wiki/local")
             with self.assertRaisesRegex(SelfOpenWikiError, "visualizer-port-invalid"):
                 adapter.visualizer_command(repo, wiki, port=0)
+
+            missing_launcher = {
+                **status,
+                "visualizer": {
+                    **status["visualizer"],
+                    "launcherPath": str((repo / "missing-Visualize.bat").resolve()),
+                },
+            }
+            with self.assertRaisesRegex(SelfOpenWikiError, "visualizer-missing"):
+                SelfOpenWikiAdapter(_FakeClient(missing_launcher)).visualizer_spec()
+
+            other_wiki = root / "other-wiki"
+            other_wiki.mkdir()
+            with self.assertRaisesRegex(
+                SelfOpenWikiError, "personal-wiki-root-mismatch"
+            ):
+                SelfOpenWikiAdapter(_FakeClient(status)).visualizer_spec(
+                    wiki_root=other_wiki
+                )
 
     def test_contract_and_knowledge_runtime_contain_no_machine_specific_evidence(self):
         adapter = yaml.safe_load(
@@ -281,6 +344,29 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             "openwiki_status.paths.wikiRoot",
         )
         self.assertEqual(
+            adapter["visualizer"],
+            {
+                "source": "openwiki_status.visualizer",
+                "requiredForDefault": True,
+                "id": "selfopenwiki.zxh_wiki_viewer",
+                "contractSchema": 1,
+                "launcherPath": "status.visualizer.launcherPath",
+                "wikiRootInput": ["--wiki-root", "<wiki-root>"],
+                "urlTemplate": "http://127.0.0.1:{port}/wiki/local",
+                "loopbackOnly": True,
+                "autoOpen": False,
+            },
+        )
+        self.assertEqual(
+            adapter["defaultRouting"],
+            {
+                "profile": "knowledge",
+                "backend": "selfopenwiki",
+                "intents": ["wiki-visualize", "wiki-summary", "wiki-organize", "wiki-update"],
+                "fallback": "forbidden",
+            },
+        )
+        self.assertEqual(
             adapter["hostBinding"],
             {
                 "entrypoint": "selfworkflow.selfopenwiki:SelfOpenWikiAdapter",
@@ -299,6 +385,14 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         self.assertEqual(
             contract["personalLifecycle"]["overrideRouting"]["source"],
             "openwiki_status.paths.wikiRoot",
+        )
+        self.assertEqual(
+            contract["visualizer"]["source"],
+            "openwiki_status.visualizer",
+        )
+        self.assertEqual(
+            contract["defaultRouting"]["fallback"],
+            "forbidden",
         )
         self.assertIn("openwiki_finish", contract["personalLifecycle"]["sequence"])
         for path in (

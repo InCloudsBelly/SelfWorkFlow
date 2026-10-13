@@ -30,6 +30,58 @@ def _commit(root):
 class OneClickInstallerContractTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
+    def test_post_apply_failure_preserves_pending_cleanup_and_failed_rollback(self):
+        source = (self.ROOT / "scripts/install-selfworkflow.ps1").read_text(encoding="utf-8")
+        # Exercise the real apply-to-catch orchestration with boundary failures;
+        # do not run dependency installation or touch the user's live state.
+        tail = source[source.index('    Set-InstallStage "apply" 60'):]
+        harness = r'''
+param([string]$LogDirectory)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$script:LogDirectory = $LogDirectory
+$script:FailureExitCode = 60
+$script:CurrentStage = "apply"
+$applyResult = $null
+$cleanupPending = @()
+$codeGraphRollbackToken = $null
+$planPath = "fixture-plan"
+$plan = [pscustomobject]@{ planHash = "fixture-hash" }
+$HostLauncherPath = "fixture-launcher"
+function Set-InstallStage($Stage, $Code) { $script:CurrentStage = $Stage; $script:FailureExitCode = $Code }
+function Write-InstallLog($Message) { }
+function Write-JsonFile($Path, $Value) { $Value | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $Path -Encoding UTF8 }
+function Ensure-HostLauncher($Path) { throw "injected-host-launcher-failure" }
+function Invoke-SelfWorkflow($Arguments, $OutputPath) {
+    if ($Arguments[0] -eq "install" -and $Arguments[1] -eq "apply") {
+        return [pscustomobject]@{status="applied";manifestPath="fixture-manifest";transactionPath="fixture-transaction";cleanupPending=@("installer-lock-release-failed")}
+    }
+    if ($Arguments[1] -eq "verify") { return [pscustomobject]@{status="verified"} }
+    if ($Arguments[1] -eq "rollback-plan") {
+        Write-JsonFile $Arguments[5] ([ordered]@{planHash="rollback-hash"})
+        return
+    }
+    if ($Arguments[1] -eq "rollback") { throw "installer-locked" }
+    throw "unexpected-command"
+}
+try {
+'''
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            script = root / "fault.ps1"
+            script.write_text(harness + tail, encoding="utf-8")
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), str(root)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 80, result.stdout + result.stderr)
+            summary = json.loads((root / "summary.json").read_text(encoding="utf-8-sig"))
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["stage"], "host-cli")
+            self.assertEqual(summary["reason"], "injected-host-launcher-failure")
+            self.assertEqual(summary["rollback"], "failed")
+            self.assertEqual(summary["cleanupPending"], ["installer-lock-release-failed"])
+
     def test_batch_entry_is_thin_forwards_arguments_and_preserves_exit_code(self):
         batch = self.ROOT / "Install_SelfWorkFlow.bat"
         self.assertTrue(batch.is_file())
@@ -82,18 +134,26 @@ class OneClickInstallerContractTests(unittest.TestCase):
             launcher = root / "localappdata/SelfWorkFlow/bin/selfworkflow.cmd"
             self.assertTrue(launcher.is_file())
             launcher_text = launcher.read_text(encoding="utf-8").casefold()
-            self.assertIn("selfworkflow.cli", launcher_text)
             self.assertIn("managed", launcher_text)
-            graft_mcp = root / "localappdata/SelfWorkFlow/bin/graft-mcp.cmd"
-            self.assertTrue(graft_mcp.is_file())
-            graft_mcp_text = graft_mcp.read_text(encoding="utf-8").casefold()
-            self.assertIn("official graft mcp launcher", graft_mcp_text)
-            self.assertIn(" mcp ", graft_mcp_text)
-            self.assertIn("%cd%", graft_mcp_text)
+            information = subprocess.run(
+                [str(launcher), "--host-info"], cwd=root,
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(information.returncode, 0, information.stderr)
+            host = json.loads(information.stdout)
+            self.assertEqual(
+                Path(host["cliPath"]), Path(host["snapshot"]) / "src/selfworkflow/cli.py"
+            )
+            self.assertNotEqual(Path(host["cliPath"]), self.ROOT / "src/selfworkflow/cli.py")
+            codegraph_mcp = root / "localappdata/SelfWorkFlow/bin/codegraph-mcp.cmd"
+            self.assertTrue(codegraph_mcp.is_file())
+            codegraph_mcp_text = codegraph_mcp.read_text(encoding="utf-8").casefold()
+            self.assertIn("codegraph", codegraph_mcp_text)
+            self.assertIn("%*", codegraph_mcp_text)
             codex_config = (root / "codex/config.toml").read_text(encoding="utf-8")
-            self.assertIn("# selfworkflow:graft-mcp:begin", codex_config)
-            self.assertIn("[mcp_servers.graft]", codex_config)
-            self.assertIn("graft-mcp.cmd", codex_config)
+            self.assertIn("# selfworkflow:codegraph-mcp:begin", codex_config)
+            self.assertIn("[mcp_servers.codegraph]", codex_config)
+            self.assertIn("codegraph-mcp.cmd", codex_config)
 
             (root / "arbitrary-working-directory").mkdir()
             environment = os.environ.copy()
@@ -108,7 +168,25 @@ class OneClickInstallerContractTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             providers = json.loads(result.stdout)["providers"]
-            self.assertEqual([item["providerId"] for item in providers], ["graft"])
+            self.assertEqual([item["providerId"] for item in providers], ["codegraph"])
+
+    def test_launcher_only_repairs_codegraph_mcp_without_touching_runtime_roots(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            result = self._run_installer(
+                root, "-CodeGraphMcpLauncherOnly", "-ConfirmApply"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            launcher = root / "localappdata/SelfWorkFlow/bin/codegraph-mcp.cmd"
+            self.assertTrue(launcher.is_file())
+            launcher_text = launcher.read_text(encoding="utf-8").casefold()
+            self.assertIn("codegraph", launcher_text)
+            log_directory = self._single_log_directory(root)
+            summary = json.loads((log_directory / "summary.json").read_text())
+            self.assertEqual(summary["status"], "launcher-only")
+            self.assertFalse((log_directory / "install-plan.json").exists())
+            self.assertFalse((root / "agents").exists())
+            self.assertFalse((root / "state").exists())
 
     def test_powershell_help_documents_pinned_matt_logs_and_explicit_apply(self):
         script = self.ROOT / "scripts" / "install-selfworkflow.ps1"
@@ -130,24 +208,28 @@ class OneClickInstallerContractTests(unittest.TestCase):
         self.assertIn("superpowers is external-only", output)
         self.assertIn("apply", output)
         self.assertIn("log", output)
-        self.assertNotIn("codegraphoverridechoice", output)
-        self.assertNotIn("codegraphpath", output)
+        self.assertIn("codegraphpath", output)
         self.assertIn("profile", output)
         self.assertIn("knowledge", output)
 
-    def test_graft_install_rebuilds_native_packages_and_smoke_checks_runtime(self):
+    def test_codegraph_install_is_pinned_and_uses_the_official_mcp_entry(self):
         script = (self.ROOT / "scripts" / "install-selfworkflow.ps1").read_text(
             encoding="utf-8"
         ).casefold()
-        self.assertIn('"rebuild", "--foreground-scripts"', script)
-        self.assertIn("graft-native-build-failed", script)
-        self.assertIn("graft-runtime-check-failed", script)
-        self.assertNotIn('"prune", "--omit=dev"', script)
+        self.assertIn("@colbymchenry/codegraph v1.6.2", script)
+        self.assertIn("codegraph serve --mcp", script)
+        self.assertIn("codegraph-runtime-install-failed", script)
+        self.assertNotIn("dependencies\\upstream\\graft", script)
 
     def _run_installer(self, root, *arguments, env=None):
         environment = (env or os.environ).copy()
         local_app_data = root / "localappdata"
         environment["LOCALAPPDATA"] = str(local_app_data)
+        codegraph = root / "codegraph-runtime"
+        (codegraph / "bin").mkdir(parents=True, exist_ok=True)
+        (codegraph / "bin" / "codegraph.cmd").write_text(
+            "@echo off\r\nexit /b 0\r\n", encoding="utf-8"
+        )
         return subprocess.run(
             [
                 "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -160,6 +242,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
                 str(local_app_data / "SelfWorkFlow/config/providers.local.yaml"),
                 "-DependencyRoot", str(root / "dependencies"),
                 "-LogRoot", str(root / "logs"),
+                "-CodeGraphPath", str(codegraph),
                 *arguments,
             ],
             cwd=self.ROOT,
@@ -195,6 +278,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             self.assertEqual(summary["status"], "installed")
             self.assertEqual(summary["superpowers"], "external-only")
             self.assertEqual(summary["writeCapability"], "enabled")
+            self.assertEqual(summary["cleanupPending"], [])
             self.assertEqual(
                 summary["mattSkills"]["commit"],
                 "b0618bc436ad893b3c5e84e55fba86586d34a404",
@@ -284,7 +368,7 @@ class OneClickInstallerContractTests(unittest.TestCase):
             )["agentsRoot"]["treeHash"]
             self.assertEqual(second_hash, first_hash)
             codex_config = (root / "codex/config.toml").read_text(encoding="utf-8")
-            self.assertEqual(codex_config.count("[mcp_servers.graft]"), 1)
+            self.assertEqual(codex_config.count("[mcp_servers.codegraph]"), 1)
 
 
 if __name__ == "__main__":

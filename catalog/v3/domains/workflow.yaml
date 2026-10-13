@@ -1,6 +1,7 @@
 schemaVersion: 3
 id: workflow
 modules:
+  - implement-spec
   - discover-context
   - capability-check
   - classify-task

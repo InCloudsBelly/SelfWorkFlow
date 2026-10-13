@@ -7,6 +7,7 @@ Wiki, inspect credentials, or infer undocumented MCP fields.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -54,7 +55,9 @@ _PERSONAL_STATUSES = {
     },
 }
 MCP_ENTRY = Path("self-openwiki") / "mcp-server" / "dist" / "index.js"
-VISUALIZER_ENTRY = Path(".work") / "openwiki" / "dist" / "cli" / "cli.js"
+VISUALIZER_ID = "selfopenwiki.zxh_wiki_viewer"
+VISUALIZER_CONTRACT_SCHEMA = 1
+VISUALIZER_URL_TEMPLATE = "http://127.0.0.1:{port}/wiki/local"
 
 
 class SelfOpenWikiError(RuntimeError):
@@ -98,6 +101,12 @@ def _require_wiki_root(
     if is_git and confirmed_git_authorization is not True:
         raise SelfOpenWikiError("confirm-git-authorization-required")
     return root
+
+
+def _paths_equal(left: str | Path, right: str | Path) -> bool:
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+        os.path.abspath(right)
+    )
 
 
 def validate_external_status(value: object) -> dict[str, object]:
@@ -175,6 +184,38 @@ def validate_personal_status(value: object) -> dict[str, object]:
     }
     if not PERSONAL_CAPABILITIES <= capability_ids:
         raise SelfOpenWikiError("personal-capability-missing")
+    return result
+
+
+def validate_visualizer_status(value: object) -> dict[str, object]:
+    """Require the live SelfOpenWiki-owned Viewer contract."""
+
+    result = validate_personal_status(value)
+    visualizer = result.get("visualizer")
+    if not isinstance(visualizer, dict) or set(visualizer) != {
+        "id",
+        "contractSchema",
+        "launcherPath",
+        "loopbackOnly",
+        "autoOpen",
+        "wikiRootInput",
+        "urlTemplate",
+    }:
+        raise SelfOpenWikiError("visualizer-contract-missing")
+    if (
+        visualizer.get("id") != VISUALIZER_ID
+        or visualizer.get("contractSchema") != VISUALIZER_CONTRACT_SCHEMA
+        or not isinstance(visualizer.get("launcherPath"), str)
+        or not Path(visualizer["launcherPath"]).is_absolute()
+        or visualizer.get("loopbackOnly") is not True
+        or visualizer.get("autoOpen") is not False
+        or not isinstance(visualizer.get("wikiRootInput"), dict)
+        or set(visualizer["wikiRootInput"]) != {"kind", "flag"}
+        or visualizer["wikiRootInput"].get("kind") != "argument"
+        or visualizer["wikiRootInput"].get("flag") != "--wiki-root"
+        or visualizer.get("urlTemplate") != VISUALIZER_URL_TEMPLATE
+    ):
+        raise SelfOpenWikiError("visualizer-contract-invalid")
     return result
 
 
@@ -311,34 +352,64 @@ class SelfOpenWikiAdapter:
             command.append("--confirm-git-authorization")
         return command
 
-    @staticmethod
-    def visualizer_command(
-        repository_root: str | Path,
-        wiki_root: str | Path,
+    def visualizer_spec(
+        self,
         *,
-        port: int = 4321,
-    ) -> list[str]:
-        root = _existing_absolute(repository_root, label="selfopenwiki-root", directory=True)
-        wiki = _existing_absolute(
-            wiki_root,
+        port: int = 3000,
+        wiki_root: str | Path | None = None,
+    ) -> dict[str, object]:
+        status = validate_visualizer_status(self.personal_status())
+        paths = status["paths"]
+        assert isinstance(paths, dict)
+        live_wiki = _existing_absolute(
+            paths["wikiRoot"],
             label="wiki-root",
             directory=True,
         )
-        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
-            raise SelfOpenWikiError("visualizer-port-invalid")
-        entry = _existing_absolute(
-            root / VISUALIZER_ENTRY,
+        if wiki_root is not None:
+            requested_wiki = _existing_absolute(
+                wiki_root,
+                label="wiki-root",
+                directory=True,
+            )
+            if not _paths_equal(requested_wiki, live_wiki):
+                raise SelfOpenWikiError("personal-wiki-root-mismatch")
+        visualizer = status["visualizer"]
+        assert isinstance(visualizer, dict)
+        launcher = _existing_absolute(
+            visualizer["launcherPath"],
             label="visualizer",
             directory=False,
         )
-        # The CLI contract supplies --no-open and a loopback-only deployment
-        # requirement; no undocumented --host argument is invented here.
-        return [
-            "node",
-            str(entry),
-            "visualize",
-            str(wiki),
-            "--port",
-            str(port),
-            "--no-open",
-        ]
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            raise SelfOpenWikiError("visualizer-port-invalid")
+        command_line = (
+            f'"{launcher}" --wiki-root "{live_wiki}" --port {port}'
+        )
+        return {
+            "command": "cmd.exe",
+            "args": ["/d", "/s", "/c", command_line],
+            "url": visualizer["urlTemplate"].replace("{port}", str(port)),
+            "wikiRoot": str(live_wiki),
+        }
+
+    def visualizer_command(
+        self,
+        repository_root: str | Path | None = None,
+        wiki_root: str | Path | None = None,
+        *,
+        port: int = 3000,
+    ) -> list[str]:
+        """Return the live SelfOpenWiki launcher command.
+
+        ``repository_root`` is retained only for call-site compatibility; the
+        command never derives a launcher from it.
+        """
+
+        del repository_root
+        spec = self.visualizer_spec(port=port, wiki_root=wiki_root)
+        command = spec["command"]
+        args = spec["args"]
+        assert isinstance(command, str)
+        assert isinstance(args, list)
+        return [command, *args]

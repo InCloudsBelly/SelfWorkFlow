@@ -6,6 +6,8 @@ import json
 import re
 from typing import Mapping
 
+from selfworkflow.implement_spec import ImplementSpecEvidenceError, validate_implement_spec_evidence
+
 
 _EXTENSION = re.compile(r"\.[a-z0-9][a-z0-9+._-]{0,31}")
 _REASON_ORDER = {
@@ -79,6 +81,9 @@ class ModuleRouteRequest:
     explicit_module_ids: tuple[str, ...] = ()
     project_default_module_ids: tuple[str, ...] = ()
     capability_states: Mapping[str, str] | None = None
+    implement_spec_evidence: Mapping[str, object] | None = None
+    durable_spec: bool | None = None
+    requirements_maturity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -418,6 +423,19 @@ def route_modules(
         candidates: list[tuple[int, int, str, dict[str, object]]] = []
         excluded: list[tuple[str, str]] = []
         early_reasons: set[str] = set()
+        implement_spec_ready = True
+        if "implement-spec" in explicit:
+            implement_spec_ready = (
+                request.operation_type == "implement"
+                and request.write_task is True
+                and request.durable_spec is True
+                and request.requirements_maturity == "approved"
+            )
+            if implement_spec_ready:
+                try:
+                    validate_implement_spec_evidence(request.implement_spec_evidence)
+                except (KeyError, ImplementSpecEvidenceError, TypeError):
+                    implement_spec_ready = False
         known_ids = {module.get("id") for module in modules if type(module) is dict}
         for module in modules:
             if type(module) is not dict or type(module.get("id")) is not str:
@@ -428,11 +446,19 @@ def route_modules(
             when = module["when"]
             if when["operationTypes"] and request.operation_type not in when["operationTypes"]:
                 excluded.append((module_id, "condition-not-matched"))
+                if module_id in explicit:
+                    early_reasons.add("explicit-selection-inapplicable")
                 continue
             if request.strength not in when["strengths"] or (
                 when["writeTask"] != "any" and when["writeTask"] is not request.write_task
             ):
                 excluded.append((module_id, "condition-not-matched"))
+                if module_id in explicit:
+                    early_reasons.add("explicit-selection-inapplicable")
+                continue
+            if module_id == "implement-spec" and module_id in explicit and not implement_spec_ready:
+                excluded.append((module_id, "implement-spec-precondition-unverified"))
+                early_reasons.add("implement-spec-precondition-unverified")
                 continue
             activation = module["activation"]
             rank = 0

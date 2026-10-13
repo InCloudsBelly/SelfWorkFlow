@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import hashlib
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 import yaml
 
 from selfworkflow.adapters import AdapterError, _copy_matt_skills
+from selfworkflow.implement_spec import ticket_dag_hash
 
 
 class MattSkillsFoundationTests(unittest.TestCase):
@@ -19,6 +21,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
         "grilling",
         "codebase-design",
         "implement",
+        "implement-spec",
         "tdd",
         "diagnosing-bugs",
         "code-review",
@@ -33,6 +36,102 @@ class MattSkillsFoundationTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
+
+    def test_optional_extensions_are_explicit_and_hash_bound(self):
+        expected = {
+            "tea-framework": ("planned", "plan.assessment", "test-quality", "skills/tea-quality/assessments/framework/SKILL.md"),
+            "tea-ci": ("verified", "verify.ci", "test-quality", "skills/tea-quality/assessments/ci/SKILL.md"),
+            "ponytail-debt": ("reviewed", "review.debt", "code", "skills/ponytail-debt/SKILL.md"),
+            "implement-spec": ("implemented", "implement.spec", "workflow", "skills/implement-spec/SKILL.md"),
+        }
+        v2 = yaml.safe_load((self.ROOT / "catalog/modules.yaml").read_text("utf-8"))
+        modules = {item["id"]: item for item in v2["modules"]}
+        entries = {}
+        for path in (self.ROOT / "catalog/domains").glob("*.yaml"):
+            entries.update({item["id"]: item for item in yaml.safe_load(path.read_text("utf-8"))["entries"]})
+        index = yaml.safe_load((self.ROOT / "catalog/v3/index.yaml").read_text("utf-8"))
+        refs = {item["id"]: item for item in index["modules"]}
+        debt_lock = yaml.safe_load((self.ROOT / "dependencies/locks/ponytail.lock.yaml").read_text("utf-8"))
+        debt_hash = next(item["runtimeHash"] for item in debt_lock["selectedSkills"] if item["id"] == "ponytail-debt")
+        for module_id, (stage, slot, domain, source) in expected.items():
+            with self.subTest(module=module_id):
+                self.assertIn(module_id, modules)
+                module = modules[module_id]
+                self.assertEqual(set(module["supportEvidence"].values()), {"supported"})
+                self.assertEqual(module["activation"], "explicit")
+                self.assertEqual((module["stage"], module["slot"]), (stage, slot))
+                entry = entries[module["sourceEntryId"]]
+                self.assertEqual(entry["supportStatus"], "supported")
+                self.assertFalse(entry["mandatory"])
+                self.assertTrue(all(not value for value in entry["selectors"].values()))
+                self.assertEqual(entry["triggers"], [])
+                self.assertIn(module_id, refs)
+                path = self.ROOT / "catalog/v3" / refs[module_id]["ref"]
+                self.assertEqual(refs[module_id]["hash"], "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest())
+                v3 = yaml.safe_load(path.read_text("utf-8"))
+                self.assertEqual((v3["stage"], v3["slot"]), (stage, slot))
+                self.assertEqual(v3["selectionMode"], "static")
+                self.assertEqual(set(v3["supportEvidence"].values()), {"supported"})
+                self.assertEqual(v3["invocation"], module["invocation"])
+                source_hash = debt_hash if module_id == "ponytail-debt" else "sha256:" + hashlib.sha256((self.ROOT / source).read_bytes()).hexdigest()
+                self.assertEqual(v3["sourceHash"], source_hash)
+                domain_ref = next(item for item in index["domains"] if item["id"] == domain)
+                domain_path = self.ROOT / "catalog/v3" / domain_ref["ref"]
+                self.assertEqual(domain_ref["hash"], "sha256:" + hashlib.sha256(domain_path.read_bytes()).hexdigest())
+                self.assertIn(module_id, yaml.safe_load(domain_path.read_text("utf-8"))["modules"])
+
+    def test_v2_optional_routes_require_explicit_selection_and_host_capabilities(self):
+        from selfworkflow.router import ModuleRouteRequest, route_modules
+
+        # Exercise the router with current module bytes; Git revision provenance
+        # is checked separately by the catalog compiler after integration.
+        catalog = yaml.safe_load((self.ROOT / "catalog/modules.yaml").read_text("utf-8"))
+        payload = json.dumps(catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        envelope = {"schemaVersion": 2, "catalog": catalog,
+                    "catalogHash": "sha256:" + hashlib.sha256(payload).hexdigest()}
+        ids = {"tea-framework", "tea-ci", "ponytail-debt", "implement-spec"}
+        for module in catalog["modules"]:
+            if module["id"] not in ids:
+                continue
+            with self.subTest(module=module["id"]):
+                common = dict(slot_id=module["slot"], cardinality="zero-or-one",
+                              operation_type=module["when"]["operationTypes"][0],
+                              strength="Light", write_task=module["id"] == "implement-spec")
+                capabilities = {name: "supported" for name in module["requiredCapabilities"]}
+                implicit = route_modules(envelope, ModuleRouteRequest(**common, capability_states=capabilities))
+                self.assertEqual(implicit.selected_modules, ())
+                if module["id"] == "implement-spec":
+                    tickets = [
+                        {"id": "ticket-a", "dependencies": [], "acceptanceHash": "sha256:" + "a" * 64},
+                        {"id": "ticket-b", "dependencies": ["ticket-a"], "acceptanceHash": "sha256:" + "b" * 64},
+                    ]
+                    common.update(
+                        implement_spec_evidence={
+                            "specHash": "sha256:" + "c" * 64,
+                            "tickets": tickets,
+                            "ticketDagHash": ticket_dag_hash(tickets),
+                            "planReviewHash": "sha256:" + "d" * 64,
+                            "implementationConfirmationHash": "sha256:" + "e" * 64,
+                            "independentAgentsHash": "sha256:" + "f" * 64,
+                            "independentReviewHash": "sha256:" + "1" * 64,
+                            "gitPermissionsHash": "sha256:" + "2" * 64,
+                            "planReviewStatus": "passed",
+                            "implementationConfirmationStatus": "confirmed",
+                            "independentAgentsStatus": "supported",
+                            "independentReviewStatus": "supported",
+                            "gitPermissionsStatus": "confirmed",
+                        },
+                        durable_spec=True,
+                        requirements_maturity="approved",
+                    )
+                explicit = route_modules(envelope, ModuleRouteRequest(
+                    **common, explicit_module_ids=(module["id"],), capability_states=capabilities))
+                self.assertEqual(explicit.status, "routed")
+                self.assertEqual(explicit.selected_modules, (module["id"],))
+                missing = route_modules(envelope, ModuleRouteRequest(
+                    **common, explicit_module_ids=(module["id"],), capability_states={}))
+                self.assertEqual(missing.status, "paused")
+                self.assertIn("required-capability-unavailable", missing.reason_codes)
 
     def test_submodule_and_selected_skills_are_commit_and_hash_bound(self):
         modules = configparser.ConfigParser()
@@ -154,8 +253,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
 
         workflow = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
         self.assertIn("Full 和 Deep 必须加载 TEA", workflow)
-        self.assertIn("Graft", workflow)
-        self.assertNotIn("CodeGraph", workflow)
+        self.assertIn("CodeGraph", workflow)
         self.assertIn("过期", workflow)
         self.assertIn("Ponytail", workflow)
         self.assertIn("非代码任务不自动加载", workflow)
@@ -164,20 +262,20 @@ class MattSkillsFoundationTests(unittest.TestCase):
 
         active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         self.assertIn("代码/C++/UE/跨层行为", active_workflow)
-        self.assertIn("graft-read.md", active_workflow)
+        self.assertIn("codegraph-read.md", active_workflow)
         cpp_skill = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("代码阅读优先级", cpp_skill)
-        self.assertIn("Graft 缺失、过期", cpp_skill)
+        self.assertIn("CodeGraph 缺失、过期", cpp_skill)
         self.assertIn("新对话第一次命中代码任务", cpp_skill)
         self.assertIn("本对话偏好", cpp_skill)
-        provider_doc = (self.ROOT / "docs/providers/graft.md").read_text(
+        provider_doc = (self.ROOT / "docs/providers/codegraph.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("官方 Graft MCP 是代码阅读入口", provider_doc)
+        self.assertIn("CodeGraph 是 SelfWorkFlow 唯一的代码图 Provider", provider_doc)
         self.assertIn("`rg` 不是默认阅读入口", provider_doc)
-        self.assertNotIn("CodeGraph", provider_doc)
+        self.assertIn("CodeGraph", provider_doc)
 
     def test_installer_defaults_to_matt_without_superpowers_or_duplicate_grill(self):
         installer = (self.ROOT / "scripts/install-selfworkflow.ps1").read_text(

@@ -1,0 +1,26 @@
+schemaVersion: 1
+sourceId: obsidian-skills
+canonicalUrl: https://github.com/kepano/obsidian-skills.git
+path: dependencies/upstream/obsidian-skills
+gitlinkCommit: 3ccff5338ea700537839b21900aa5358a0402c98
+gitTree: c9a52b408a89bd5a42b0ea6ab65c39221c1d64f2
+resources:
+- LICENSE
+- skills/obsidian-markdown
+- skills/obsidian-bases
+- skills/json-canvas
+license:
+  path: LICENSE
+  spdx: MIT
+  status: verified
+  hash: sha256:64c64d48361edfe8610016441bf593256ea9b67f133b00f47c55aa29ee878567
+files:
+  LICENSE: sha256:64c64d48361edfe8610016441bf593256ea9b67f133b00f47c55aa29ee878567
+  skills/json-canvas/SKILL.md: sha256:97d1ae0728955c4203922753d5656890e5e4dd371b8306ea11884f9b510f1b85
+  skills/json-canvas/references/EXAMPLES.md: sha256:f5ce15a4b74643122396265e8c37c828874a4005794de2aee7030662968768eb
+  skills/obsidian-bases/SKILL.md: sha256:c0037f20926c7d8591cdd040365e4c0e4c0c4146386a506f28f241faee9a27d9
+  skills/obsidian-bases/references/FUNCTIONS_REFERENCE.md: sha256:208fd63aead9bca1975626fea52605e6ab9434dc0529d923feb36b18b8877d3b
+  skills/obsidian-markdown/SKILL.md: sha256:7ad72e1f0a9081ed325e76b6402ad5de50a00e63e2341fd403a92f147234a007
+  skills/obsidian-markdown/references/CALLOUTS.md: sha256:9912ec2e3f8711f65b8ceb82cc19cbffc5e6f8ccf2ab627e18926c522c383d8b
+  skills/obsidian-markdown/references/EMBEDS.md: sha256:63b6205507e28fb58cf200bc348a2b139e50ae739743e2e6316732148973cb7a
+  skills/obsidian-markdown/references/PROPERTIES.md: sha256:392953b5838c3ab3df135b5a914f100ae7b95e4501b6a2e5c8dc63da3ac7558b

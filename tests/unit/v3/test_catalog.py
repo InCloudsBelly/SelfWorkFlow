@@ -441,11 +441,13 @@ class V3CatalogCompilerTests(unittest.TestCase):
         serialized = compiled.content.decode("utf-8")
         self.assertNotIn("provider", serialized.lower())
         tea = [module for module in modules if module["id"].startswith("tea-")]
-        self.assertEqual(len(tea), 5)
+        self.assertEqual(len(tea), 7)
         self.assertEqual(
             {module["id"]: module["selectionMode"] for module in tea},
             {
                 "tea-atdd": "bounded-runtime",
+                "tea-ci": "static",
+                "tea-framework": "static",
                 "tea-nfr": "bounded-runtime",
                 "tea-test-design": "static",
                 "tea-test-review": "static",
@@ -460,6 +462,8 @@ class V3CatalogCompilerTests(unittest.TestCase):
             },
             {
                 "tea-atdd": "supported",
+                "tea-ci": "supported",
+                "tea-framework": "supported",
                 "tea-nfr": "supported",
                 "tea-test-design": "supported",
                 "tea-test-review": "supported",

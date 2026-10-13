@@ -1,0 +1,12 @@
+schemaVersion: 3
+id: implement-spec
+sourceHash: sha256:f6d87cff0d17380bb474eea65ee308dd22288486161899fa4bb80e19fe2ebe7d
+stage: implemented
+slot: implement.spec
+selectionMode: static
+invocation: {kind: skill, ref: selfworkflow:implement-spec}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 256, estimatedExecutionCost: 128}
+# Support describes the local adapter contract; it does not attest Host execution.
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

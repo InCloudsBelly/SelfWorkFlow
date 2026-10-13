@@ -9,6 +9,7 @@ import json
 
 _CODE_OPERATIONS = {"implement", "debug"}
 _SIGNALLED_OPERATIONS = {"analyze", "design", "plan", "review", "verify"}
+_DEBT_OPERATIONS = {"analyze", "review", "implement", "debug"}
 _CODE_EXTENSIONS = {
     ".c", ".cc", ".cpp", ".cppm", ".cs", ".cu", ".cuh", ".cxx", ".go",
     ".h", ".hh", ".hpp", ".hxx", ".inl", ".ixx", ".java", ".js", ".jsx",
@@ -21,12 +22,14 @@ _CODE_TERMS = {
 _MODES = {"lite", "full", "ultra", "off"}
 _EXPLICIT_SKILLS = {
     "ponytail", "ponytail-review", "ponytail-audit", "ponytail-help",
+    "ponytail-debt",
 }
 _SKILL_MODULES = {
     "ponytail": "ponytail-coding",
     "ponytail-review": "ponytail-review",
     "ponytail-audit": "ponytail-audit",
     "ponytail-help": "ponytail-help",
+    "ponytail-debt": "ponytail-debt",
 }
 
 
@@ -83,6 +86,10 @@ def select_ponytail_route(
 
     if explicit_skill == "ponytail-help":
         return PonytailRoute(True, ("ponytail-help",), mode, "explicit-help")
+    if explicit_skill == "ponytail-debt":
+        if operation_type not in _DEBT_OPERATIONS:
+            raise ValueError("ponytail-explicit-operation-invalid")
+        return PonytailRoute(True, ("ponytail-debt",), mode, "explicit-debt")
 
     extensions = {value.casefold() for value in file_extensions}
     terms = {value.casefold() for value in semantic_terms}

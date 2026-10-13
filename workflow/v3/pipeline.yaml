@@ -72,6 +72,17 @@ stages:
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native]
         selectionMode: static
+      - id: plan.assessment
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {contains: [explicitModuleIds, tea-framework]}
+            - any:
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
       - id: test.quality.plan
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
@@ -109,6 +120,18 @@ stages:
           all:
             - {eq: [writeTask, true]}
             - {eq: [operationType, implement]}
+            - not: {contains: [explicitModuleIds, implement-spec]}
+      - id: implement.spec
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - {eq: [operationType, implement]}
+            - {eq: [durableSpec, true]}
+            - {eq: [requirementsMaturity, approved]}
+            - {contains: [explicitModuleIds, implement-spec]}
       - id: implement.method
         cardinality: zero-or-one
         allowedInvocationKinds: [skill]
@@ -135,6 +158,18 @@ stages:
         condition: {gte: [testLevelFloor, T2]}
   - id: reviewed
     slots:
+      - id: review.debt
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {contains: [explicitModuleIds, ponytail-debt]}
+            - any:
+                - {eq: [operationType, review]}
+                - {eq: [operationType, analyze]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
       - id: review.self
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
@@ -161,6 +196,18 @@ stages:
             - {gte: [testLevelFloor, T2]}
   - id: verified
     slots:
+      - id: verify.ci
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {contains: [explicitModuleIds, tea-ci]}
+            - any:
+                - {eq: [operationType, verify]}
+                - {eq: [operationType, publish]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
       - id: verify.execution
         cardinality: exactly-one
         allowedInvocationKinds: [skill]

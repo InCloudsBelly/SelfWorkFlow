@@ -4,6 +4,40 @@ from selfworkflow.ponytail_scope import select_ponytail_route
 
 
 class PonytailScopeTests(unittest.TestCase):
+    def test_explicit_debt_is_one_shot_without_coding_skill(self):
+        for operation in ("analyze", "review", "implement", "debug"):
+            for mode in ("lite", "full", "ultra"):
+                with self.subTest(operation=operation, mode=mode):
+                    route = select_ponytail_route(
+                        operation, explicit_skill="ponytail-debt", mode=mode,
+                    )
+                    self.assertTrue(route.enabled)
+                    self.assertEqual(route.skill_ids, ("ponytail-debt",))
+                    self.assertEqual(route.module_ids, ("ponytail-debt",))
+                    self.assertEqual(route.reason, "explicit-debt")
+                    self.assertEqual(route.as_dict()["selectedModuleIds"], ["ponytail-debt"])
+        self.assertFalse(select_ponytail_route("analyze").enabled)
+        self.assertEqual(select_ponytail_route("implement").skill_ids, ("ponytail",))
+
+    def test_debt_is_never_implicit_and_preserves_route_guards(self):
+        for operation in ("analyze", "implement", "review"):
+            route = select_ponytail_route(
+                operation, semantic_terms=("code", "ponytail-debt", "shortcut", "debt"),
+            )
+            self.assertNotIn("ponytail-debt", route.skill_ids)
+        off = select_ponytail_route("analyze", explicit_skill="ponytail-debt", mode="off")
+        self.assertFalse(off.enabled)
+        self.assertEqual(off.skill_ids, ())
+        self.assertEqual(off.reason, "explicitly-off")
+        with self.assertRaisesRegex(ValueError, "ponytail-explicit-operation-invalid"):
+            select_ponytail_route("document", explicit_skill="ponytail-debt")
+        for operation in ("design", "plan", "verify"):
+            with self.subTest(operation=operation):
+                with self.assertRaisesRegex(ValueError, "ponytail-explicit-operation-invalid"):
+                    select_ponytail_route(operation, explicit_skill="ponytail-debt")
+        with self.assertRaisesRegex(ValueError, "ponytail-skill-invalid"):
+            select_ponytail_route("analyze", explicit_skill="ponytail-gain")
+
     def test_implementation_and_debug_are_code_scoped_by_operation(self):
         for operation in ("implement", "debug"):
             with self.subTest(operation=operation):

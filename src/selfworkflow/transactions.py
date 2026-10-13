@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 
 
 class TransactionError(RuntimeError):
@@ -37,15 +38,30 @@ def exclusive_install_lock(state_root: str | Path):
         descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         raise TransactionError("installer-locked") from None
+    body_failure = None
     try:
         os.write(descriptor, str(os.getpid()).encode("ascii"))
         os.close(descriptor)
         descriptor = -1
         yield lock_path
+    except BaseException as failure:
+        body_failure = failure
+        raise
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-        lock_path.unlink(missing_ok=True)
+        for attempt in range(3):
+            try:
+                lock_path.unlink(missing_ok=True)
+                break
+            except OSError:
+                if attempt < 2:
+                    time.sleep(0.1)
+                    continue
+                if body_failure is not None:
+                    body_failure.add_note("installer-lock-release-failed")
+                else:
+                    raise TransactionError("installer-lock-release-failed") from None
 
 
 def recover_transactions(state_root: str | Path) -> list[dict[str, str]]:

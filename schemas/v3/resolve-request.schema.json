@@ -54,6 +54,7 @@
       "enum": ["single-file", "single-module", "cross-module", "cross-project"]
     },
     "durableSpec": {"type": "boolean"},
+    "implementSpecEvidence": {"$ref": "#/$defs/implementSpecEvidence"},
     "classificationConfidence": {
       "type": "number",
       "minimum": 0,
@@ -78,7 +79,8 @@
     {"if": {"properties": {"risk": {"const": "R2"}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
     {"if": {"properties": {"complexity": {"const": "C3"}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
     {"if": {"properties": {"risk": {"const": "R3"}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
-    {"if": {"properties": {"writeTask": {"const": true}, "taskArchetype": {"enum": ["bounded-feature", "bugfix", "behavioral-refactor", "architecture-change", "migration"]}}}, "then": {"properties": {"operationType": {"enum": ["implement", "debug"]}}}}
+    {"if": {"properties": {"writeTask": {"const": true}, "taskArchetype": {"enum": ["bounded-feature", "bugfix", "behavioral-refactor", "architecture-change", "migration"]}}}, "then": {"properties": {"operationType": {"enum": ["implement", "debug"]}}}},
+    {"if": {"properties": {"explicitModuleIds": {"contains": {"const": "implement-spec"}}}}, "then": {"required": ["implementSpecEvidence"]}}
   ],
   "$defs": {
     "sha256": {
@@ -236,6 +238,40 @@
         "explicitCppModuleIds": {"$ref": "#/$defs/idList"},
         "userConfirmedHeavy": {"type": "boolean"},
         "projectAllowsExecution": {"type": "boolean"}
+      }
+    },
+    "implementSpecTicket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "dependencies", "acceptanceHash"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "dependencies": {"$ref": "#/$defs/idList"},
+        "acceptanceHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "implementSpecEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "specHash", "tickets", "ticketDagHash", "planReviewHash",
+        "implementationConfirmationHash", "independentAgentsHash",
+        "independentReviewHash", "gitPermissionsHash", "planReviewStatus",
+        "implementationConfirmationStatus", "independentAgentsStatus",
+        "independentReviewStatus", "gitPermissionsStatus"
+      ],
+      "properties": {
+        "specHash": {"$ref": "#/$defs/sha256"},
+        "tickets": {"type": "array", "minItems": 2, "maxItems": 256, "items": {"$ref": "#/$defs/implementSpecTicket"}},
+        "ticketDagHash": {"$ref": "#/$defs/sha256"},
+        "planReviewHash": {"$ref": "#/$defs/sha256"},
+        "implementationConfirmationHash": {"$ref": "#/$defs/sha256"},
+        "independentAgentsHash": {"$ref": "#/$defs/sha256"},
+        "independentReviewHash": {"$ref": "#/$defs/sha256"},
+        "gitPermissionsHash": {"$ref": "#/$defs/sha256"},
+        "planReviewStatus": {"const": "passed"},
+        "implementationConfirmationStatus": {"const": "confirmed"},
+        "independentAgentsStatus": {"const": "supported"},
+        "independentReviewStatus": {"const": "supported"},
+        "gitPermissionsStatus": {"const": "confirmed"}
       }
     }
   }

@@ -1,0 +1,17 @@
+schemaVersion: 1
+sourceId: composio-skills
+canonicalUrl: https://github.com/ComposioHQ/awesome-claude-skills.git
+path: dependencies/upstream/composio-skills
+gitlinkCommit: be2a406907dbc61b73e6827ded415c96139d13a2
+gitTree: 070545c75ce600c2f6e66ee84e78124887accc6f
+resources:
+- README.md
+- content-research-writer
+license:
+  path: README.md
+  spdx: Apache-2.0
+  status: declared
+  hash: sha256:e693f2701840f26fb04c3058d55215f2c6575fff7f1c197ada5b64e2f7ee0c12
+files:
+  README.md: sha256:e693f2701840f26fb04c3058d55215f2c6575fff7f1c197ada5b64e2f7ee0c12
+  content-research-writer/SKILL.md: sha256:27eb5c1a0a88a9c1c64f6fcd9c28782e6a6e70d5da43233c4e99ade946f74825

@@ -15,7 +15,17 @@
     "codexRoot": {"type": "string"},
     "stateRoot": {"type": "string"},
     "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
-    "securityStatus": {"enum": ["verified", "unverified"]}
+    "securityStatus": {"enum": ["verified", "unverified"]},
+    "hostLauncher": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "pythonExecutable", "pythonHash", "contentHash"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "pythonExecutable": {"type": "string", "minLength": 1},
+        "pythonHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
   },
   "$defs": {
     "operation": {

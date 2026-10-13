@@ -7,3 +7,15 @@
 [submodule "dependencies/upstream/ponytail"]
 	path = dependencies/upstream/ponytail
 	url = https://github.com/DietrichGebert/ponytail.git
+[submodule "dependencies/upstream/anthropic-skills"]
+	path = dependencies/upstream/anthropic-skills
+	url = https://github.com/anthropics/skills.git
+[submodule "dependencies/upstream/ui-ux-pro-max"]
+	path = dependencies/upstream/ui-ux-pro-max
+	url = https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git
+[submodule "dependencies/upstream/composio-skills"]
+	path = dependencies/upstream/composio-skills
+	url = https://github.com/ComposioHQ/awesome-claude-skills.git
+[submodule "dependencies/upstream/obsidian-skills"]
+	path = dependencies/upstream/obsidian-skills
+	url = https://github.com/kepano/obsidian-skills.git

@@ -7,10 +7,15 @@ from dataclasses import dataclass
 import hashlib
 import json
 import ntpath
+import re
 from typing import Any, Callable, Protocol
 
 
 _MAX_OUTPUT_BYTES = 1024 * 1024
+_SYNC_LOCK_ERROR = re.compile(
+    r"(?:✗|\[ERR\]) Failed to sync: CodeGraph database is locked by another process"
+    r"(?: \(PID [0-9]+\))?\. If this is stale, run 'codegraph unlock' or delete .+"
+)
 _MAINTENANCE_COMMANDS = {
     "initialize": ("init",),
     "sync": ("sync",),
@@ -100,6 +105,28 @@ def _validate_prefix(value: object) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _status_freshness(value: Mapping[str, Any]) -> str:
+    if value.get("initialized") is not True:
+        return "missing"
+    index = value.get("index")
+    if isinstance(index, Mapping):
+        if index.get("state") in {"indexing", "partial", "failed"}:
+            return "stale"
+        if index.get("reindexRecommended") is True:
+            return "stale"
+        if type(index.get("pendingRefs")) is int and index["pendingRefs"] > 0:
+            return "stale"
+    pending = value.get("pendingChanges")
+    if isinstance(pending, Mapping) and any(
+        type(pending.get(key)) is int and pending[key] > 0
+        for key in ("added", "modified", "removed")
+    ):
+        return "stale"
+    if value.get("worktreeMismatch") is not None:
+        return "stale"
+    return "fresh"
+
+
 class CodeGraphAdapter:
     """Render fixed CodeGraph commands and delegate execution to the Host."""
 
@@ -154,6 +181,10 @@ class CodeGraphAdapter:
         ):
             raise CodeGraphAdapterError("codegraph-command-output-too-large")
         if result.exit_code != 0:
+            if arguments and arguments[0] == "sync":
+                stderr = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.stderr)
+                if any(_SYNC_LOCK_ERROR.fullmatch(line) for line in stderr.splitlines()):
+                    raise CodeGraphAdapterError("codegraph-project-busy")
             raise CodeGraphAdapterError("codegraph-command-failed")
         return result
 
@@ -172,10 +203,32 @@ class CodeGraphAdapter:
             "readOnly": True,
             "supportStatus": "unverified",
             "initialized": value["initialized"],
+            "freshness": _status_freshness(value),
             "projectRootHash": _hash({"projectRoot": root.casefold()}),
         }
-        if isinstance(value.get("revision"), str) and value["revision"]:
-            result["revision"] = value["revision"]
+        index = value.get("index")
+        if isinstance(index, Mapping):
+            if isinstance(index.get("state"), str) and index["state"]:
+                result["indexState"] = index["state"]
+            if type(index.get("reindexRecommended")) is bool:
+                result["reindexRecommended"] = index["reindexRecommended"]
+            if type(index.get("pendingRefs")) is int and index["pendingRefs"] >= 0:
+                result["pendingRefs"] = index["pendingRefs"]
+        pending = value.get("pendingChanges")
+        if isinstance(pending, Mapping):
+            result["pendingChanges"] = {
+                key: pending[key]
+                for key in ("added", "modified", "removed")
+                if type(pending.get(key)) is int and pending[key] >= 0
+            }
+        result["worktreeMismatch"] = value.get("worktreeMismatch") is not None
+        for key in ("fileCount", "nodeCount", "edgeCount", "dbSizeBytes", "walSizeBytes"):
+            if type(value.get(key)) is int and value[key] >= 0:
+                result[key] = value[key]
+        if isinstance(value.get("version"), str) and value["version"]:
+            result["version"] = value["version"]
+        if isinstance(value.get("lastIndexed"), str) and value["lastIndexed"]:
+            result["lastIndexed"] = value["lastIndexed"]
         return result
 
     def version(self) -> dict[str, Any]:
@@ -208,6 +261,8 @@ class CodeGraphAdapter:
         status = self.status(root)
         if not status["initialized"]:
             raise CodeGraphAdapterError("codegraph-project-not-initialized")
+        if status["freshness"] != "fresh":
+            raise CodeGraphAdapterError("codegraph-project-index-stale")
         plan = _with_hash({
             "schemaVersion": 1,
             "providerId": "codegraph",
@@ -217,12 +272,32 @@ class CodeGraphAdapter:
             "queryHash": _hash({"query": query_text}),
             "adapterCommandHash": self.command_hash,
             "indexRevision": status.get("revision", "unknown"),
-            "readOnly": False,
-            "sideEffectClass": "potential-local-write",
+            "readOnly": True,
+            "sideEffectClass": "none",
             "supportStatus": "unverified",
-            "reasonCode": "codegraph-query-no-no-sync",
+            "reasonCode": "codegraph-query-after-ensure",
         })
         return plan
+
+    def query(
+        self, project_root: str, query: str, *, query_kind: str = "ask",
+    ) -> dict[str, Any]:
+        root = _validate_project_root(project_root)
+        query_text = _validate_text(query, "codegraph-query-invalid")
+        kind = _validate_text(query_kind, "codegraph-query-kind-invalid")
+        plan = self.plan_query(root, query_text)
+        output = self._run(("explore", query_text, "--path", root)).stdout
+        return {
+            "providerId": "codegraph",
+            "operation": "query",
+            "readOnly": True,
+            "supportStatus": "unverified",
+            "freshness": "fresh",
+            "queryKind": kind,
+            "queryHash": plan["queryHash"],
+            "projectRootHash": plan["projectRootHash"],
+            "data": output.strip(),
+        }
 
     def plan_maintenance(
         self, action: str, project_root: str,
@@ -288,9 +363,9 @@ class CodeGraphAdapter:
 
         command = _MAINTENANCE_COMMANDS[supplied["action"]]
         if supplied["action"] == "rebuild":
-            arguments = command[:1] + (root,) + command[1:] + ("--json",)
+            arguments = command[:1] + (root,) + command[1:]
         else:
-            arguments = command + (root, "--json")
+            arguments = command + (root,)
         self._run(arguments)
         self._issued_maintenance_plans.discard(plan_hash)
         self._consumed_maintenance_plans.add(plan_hash)

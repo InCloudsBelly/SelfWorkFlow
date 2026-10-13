@@ -21,6 +21,7 @@ from selfworkflow.v3.pipeline import (
     PipelineError,
     _validate_pipeline_semantics,
 )
+from selfworkflow.implement_spec import ImplementSpecEvidenceError, validate_implement_spec_evidence
 
 
 class PlanGraphError(ValueError):
@@ -174,7 +175,7 @@ def build_plan_graph(
         else set(ponytail_route.module_ids)
     )
     explicit_ponytail = explicit & {
-        "ponytail-coding", "ponytail-review", "ponytail-audit", "ponytail-help",
+        "ponytail-coding", "ponytail-review", "ponytail-audit", "ponytail-help", "ponytail-debt",
     }
     if explicit_ponytail and not ponytail_module_ids:
         raise PlanGraphError("v3-ponytail-explicit-not-applicable")
@@ -308,12 +309,18 @@ def _validated_request(request: Mapping[str, Any]) -> dict[str, Any]:
             if duplicate:
                 raise PlanGraphError(f"v3-{label}-module-duplicate")
     try:
-        return load_contract(
+        value = load_contract(
             "resolve-request.schema.json", _canonical_bytes(dict(request)).decode(),
         )
     except (ContractError, UnicodeError) as error:
         reason = error.reason if isinstance(error, ContractError) else "contract-json-invalid"
         raise PlanGraphError(reason) from None
+    if "implement-spec" in value["explicitModuleIds"]:
+        try:
+            validate_implement_spec_evidence(value["implementSpecEvidence"])
+        except (KeyError, ImplementSpecEvidenceError, TypeError):
+            raise PlanGraphError("v3-implement-spec-evidence-invalid") from None
+    return value
 
 
 def _catalog_document(compiled: CompiledCatalog) -> tuple[dict[str, Any], str]:

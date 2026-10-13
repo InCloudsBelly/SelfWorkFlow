@@ -1,0 +1,12 @@
+schemaVersion: 3
+id: tea-ci
+sourceHash: sha256:9d9364d1d6ef214331ef5f9666bdaa043527e5aabc0d3604b83740be90bc075d
+stage: verified
+slot: verify.ci
+selectionMode: static
+invocation: {kind: skill, ref: selfworkflow:tea-quality}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 128, estimatedExecutionCost: 0}
+# Support describes the local adapter contract; it does not attest Host execution.
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

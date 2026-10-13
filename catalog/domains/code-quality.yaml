@@ -1,13 +1,35 @@
 schemaVersion: 1
 domain: code-quality
 entries:
+  - id: ponytail-debt
+    displayName: Explicit ponytail-debt adapter
+    source:
+      kind: workflow
+      path: dependencies/locks/ponytail.lock.yaml
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
+    aliases: []
+    triggers: []
+    exclusions: [implicit selection]
+    selectors: {fileExtensions: [], operationTypes: [], semanticTerms: []}
+    stages: [reviewed]
+    requiredCapabilities: [skill-discovery, filesystem-read]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen: {match: any, scopes: [], fileExtensions: [], operationTypes: []}
+    priority: 250
+    contextCost: 192
+    supportStatus: supported
+    protectedRuleOperations: []
   - id: code-quality
     displayName: Owner-first code quality workflow
     source:
       kind: skill
       path: skills/code-quality/SKILL.md
-      revision: git:03dd1c3895331934d7edaf3e9bfe6cafd995a3fd
-      contentHash: sha256:2105324b91017a635f413ea07a27dc1e71e39be4d6a76ba97211f00bca06c3d9
+      revision: git:e2ef4d49d8dc60a6e7fb514ff66c5d0e0ef561c3
+      contentHash: sha256:7037b2878fcbc0071ffb813885229eb5f49c14c567227268108dbafada4c3111
     aliases:
       - name: owner-first-code-quality
         target: code-quality
@@ -83,8 +105,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:a9b34be00677271c1f55907b2ea877287ba85d97
-      contentHash: sha256:f999dd24942a5c3e70b4aca3d833ee278ff4e948379930dcc3a9d3f458ca7ecb
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
     aliases:
       - name: ponytail-code
         target: ponytail
@@ -114,8 +136,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:a9b34be00677271c1f55907b2ea877287ba85d97
-      contentHash: sha256:f999dd24942a5c3e70b4aca3d833ee278ff4e948379930dcc3a9d3f458ca7ecb
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
     aliases: []
     triggers: [over-engineering audit, delete unnecessary code]
     exclusions: [pure content generation, non-code document]
@@ -143,8 +165,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:a9b34be00677271c1f55907b2ea877287ba85d97
-      contentHash: sha256:f999dd24942a5c3e70b4aca3d833ee278ff4e948379930dcc3a9d3f458ca7ecb
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
     aliases: []
     triggers: [ponytail help, ponytail commands, ponytail mode]
     exclusions: []
@@ -172,8 +194,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/ponytail.lock.yaml
-      revision: git:a9b34be00677271c1f55907b2ea877287ba85d97
-      contentHash: sha256:f999dd24942a5c3e70b4aca3d833ee278ff4e948379930dcc3a9d3f458ca7ecb
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:5eedd2fc9e70f16c1d91f80c019c15e3b4320c6d7066be979f0d824b43227fc5
     aliases: []
     triggers: [over-engineering review, minimal diff review]
     exclusions: [pure content generation, non-code document]

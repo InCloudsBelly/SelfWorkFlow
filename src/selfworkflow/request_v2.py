@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 import json
 
 from selfworkflow.capability_snapshot import normalize_capability_snapshot
+from selfworkflow.implement_spec import ImplementSpecEvidenceError, validate_implement_spec_evidence
 from selfworkflow.pipeline import canonical_hash
 
 
@@ -67,11 +68,24 @@ def normalize_request(request: Mapping[str, object], repository_root: Path) -> t
         value = migrate_v1_request(value)
         diagnostics.append({"code": "legacy-capability-evidence-unverified", "severity": "warning"})
     try:
+        if (
+            isinstance(value.get("explicitModuleIds"), list)
+            and "implement-spec" in value["explicitModuleIds"]
+        ):
+            try:
+                validate_implement_spec_evidence(value.get("implementSpecEvidence"))
+            except (KeyError, ImplementSpecEvidenceError, TypeError):
+                raise RequestV2Error("implement-spec-evidence-invalid") from None
         schema = json.loads((repository_root / "schemas/resolve-request.schema.json").read_text(encoding="utf-8"))
         if next(Draft202012Validator(schema).iter_errors(value), None) is not None:
             raise RequestV2Error("resolve-input-invalid")
         if value["writeTask"] is not (value["operationType"] in _WRITE_OPERATIONS):
             raise RequestV2Error("resolve-input-invalid")
+        if "implement-spec" in value["explicitModuleIds"]:
+            try:
+                validate_implement_spec_evidence(value["implementSpecEvidence"])
+            except (KeyError, ImplementSpecEvidenceError, TypeError):
+                raise RequestV2Error("implement-spec-evidence-invalid") from None
         snapshot, snapshot_hash, states, stale = normalize_capability_snapshot(value["capabilityEvidenceSnapshot"])
     except RequestV2Error:
         raise

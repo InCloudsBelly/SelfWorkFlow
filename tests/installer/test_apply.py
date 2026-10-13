@@ -20,6 +20,44 @@ from tests.installer.support import create_artifact
 
 
 class InstallApplyTests(unittest.TestCase):
+    def test_committed_install_reports_pending_lock_cleanup_without_losing_result(self):
+        from contextlib import redirect_stdout, redirect_stderr
+        from io import StringIO
+        from selfworkflow.cli import main
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            state = root / "state"
+            plan = create_install_plan(artifact, root / "agents", root / "codex", state, "0.1.0")
+            plan_path = root / "plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            unlink = Path.unlink
+
+            def busy_lock(path, *args, **kwargs):
+                if path.name == "install.lock":
+                    raise PermissionError("busy")
+                return unlink(path, *args, **kwargs)
+
+            stdout, stderr = StringIO(), StringIO()
+            with mock.patch.object(Path, "unlink", busy_lock), redirect_stdout(stdout), redirect_stderr(stderr):
+                code = main(["install", "apply", "--plan", str(plan_path), "--confirm-plan-hash", plan["planHash"]])
+            self.assertEqual(code, 0, stderr.getvalue())
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["status"], "applied")
+            self.assertEqual(result["cleanupPending"], ["installer-lock-release-failed"])
+            self.assertEqual(verify_install(result["manifestPath"])["status"], "verified")
+            transaction = json.loads(Path(result["transactionPath"]).read_text(encoding="utf-8"))
+            self.assertEqual(transaction["state"], "completed")
+            self.assertTrue((state / "install.lock").is_file())
+            same = create_install_plan(artifact, root / "agents", root / "codex", state, "0.1.0")
+            self.assertEqual(same["status"], "already-installed")
+            with self.assertRaisesRegex(InstallerError, "installer-locked"):
+                apply_install_plan(same, same["planHash"])
+            with self.assertRaisesRegex(InstallerError, "installer-locked"):
+                other = create_install_plan(artifact, root / "other-agents", root / "other-codex", state, "0.1.1")
+                apply_install_plan(other, other["planHash"])
+
     def test_prepare_operation_binds_backup_bytes_to_the_recorded_preimage(self):
         from selfworkflow import installer
 

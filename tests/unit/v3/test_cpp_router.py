@@ -401,6 +401,72 @@ class CppRouterTests(unittest.TestCase):
         )
         self.assertIn("ponytail-help", specialists["eligibleModules"])
 
+    def _resolve_debt_contract(self, *, stage="reviewed", slot="review.debt"):
+        from selfworkflow.v3.resolver import resolve_request
+        from tests.unit.v3.artifact_fixtures import load_test_artifacts
+        from tests.unit.v3.test_plan_graph import _module
+
+        catalog, pipeline = load_test_artifacts(
+            [_module("ponytail-debt", stage=stage, slot=slot)],
+            target_stage=stage, target_slot=slot,
+        )
+        request = _v3_request()
+        request.update({
+            "operationType": "analyze", "writeTask": False,
+            "taskArchetype": "exploratory-design",
+            "explicitModuleIds": ["ponytail-debt"],
+        })
+        return resolve_request(request, catalog_source=catalog, pipeline_source=pipeline)
+
+    def test_debt_contract_accepts_actual_standalone_route_in_review_debt(self):
+        from selfworkflow.ponytail_scope import select_ponytail_route
+        from selfworkflow.v3.contracts import validate_resolve_result
+
+        result = self._resolve_debt_contract()
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(
+            result["ponytailRoute"],
+            select_ponytail_route("analyze", explicit_skill="ponytail-debt").as_dict(),
+        )
+        validate_resolve_result(result)
+        slots = [
+            (stage["stageId"], slot["slotId"], slot["eligibleModules"])
+            for stage in result["planGraph"]["stages"] for slot in stage["slots"]
+            if "ponytail-debt" in slot["eligibleModules"]
+        ]
+        self.assertEqual(slots, [("reviewed", "review.debt", ["ponytail-debt"])])
+        self.assertNotIn("ponytail-coding", {
+            item["moduleId"] for item in result["planGraph"]["moduleConstraints"]
+        })
+
+    def test_debt_contract_rejects_mixed_coding_and_other_skills(self):
+        from selfworkflow.ponytail_scope import PonytailRoute
+        from selfworkflow.v3.contracts import ContractError, validate_resolve_result
+
+        for skills in (
+            ("ponytail", "ponytail-debt"), ("ponytail-debt", "ponytail"),
+            ("ponytail-help", "ponytail-debt"), ("ponytail-debt", "ponytail-review"),
+        ):
+            with self.subTest(skills=skills):
+                result = {
+                    "schemaVersion": 3, "status": "paused", "reasonCodes": ["test-paused"],
+                    "diagnostics": [], "planGraph": None,
+                    "ponytailRoute": PonytailRoute(True, skills, "full", "explicit-debt").as_dict(),
+                }
+                with self.assertRaisesRegex(ContractError, "ponytail-route-skill-module-mismatch"):
+                    validate_resolve_result(result)
+
+    def test_debt_contract_rejects_wrong_stage_or_slot(self):
+        from selfworkflow.v3.resolver import ResolveError
+
+        for stage, slot in (
+            ("designed", "review.debt"), ("reviewed", "code.reasoning"),
+            ("designed", "code.reasoning"), ("designed", "design.specialists"),
+        ):
+            with self.subTest(stage=stage, slot=slot):
+                with self.assertRaisesRegex(ResolveError, "ponytail-route-plan-mismatch"):
+                    self._resolve_debt_contract(stage=stage, slot=slot)
+
     def test_resolved_cpp_plan_constructs_host_with_original_request(self):
         from selfworkflow.v3.catalog import compile_catalog
         from selfworkflow.v3.pipeline import load_pipeline

@@ -1,11 +1,13 @@
 ---
 name: kg-selfopenwiki
-description: Use when the optional SelfOpenWiki knowledge backend is explicitly selected for local project knowledge.
+description: Use when the knowledge profile routes local project knowledge to the SelfOpenWiki backend.
 ---
 
 # SelfOpenWiki knowledge backend
 
-这是 SelfWorkflow 的可选知识后端适配。它只在用户明确选择 SelfOpenWiki 时加载；普通代码任务不加载，不能替换 SelfWorkflow 的 Design、Plan、Review 或 Verify 门禁。
+这是 SelfWorkflow 的可选知识后端适配。`knowledge` profile 加载后，Wiki 相关意图默认
+路由到 SelfOpenWiki；普通代码任务不加载，不能替换 SelfWorkflow 的 Design、Plan、Review
+或 Verify 门禁。
 
 ## 仓库与数据边界
 
@@ -66,8 +68,8 @@ OAuth-free、`externalAgent.ready=true` 和旧 external capability 对，还必�
 个人 Wiki 已更新。`review_required`、`publish_pending`、`repair_ready` 和
 `needs_clarification` 都是未完成或可恢复状态，不能提前报告成功。
 
-SelfWorkFlow 的 `knowledge.propose` 仍只生成候选，不发布；`knowledge.update` 在明确
-选择 SelfOpenWiki 后走上述六阶段。external 模式没有安全的通用 query，不能把
+SelfWorkFlow 的 `knowledge.propose` 仍只生成候选，不发布；`knowledge.update` 在
+`knowledge` profile 下默认走上述六阶段。external 模式没有安全的通用 query，不能把
 `openwiki_begin` 或本地路径读取伪装成 `knowledge.read`；`openwiki_query`、旧
 `openwiki_update` 和模型工具只在用户明确选择 `legacy_provider` 时使用。
 
@@ -82,12 +84,21 @@ SelfWorkFlow 的 `knowledge.propose` 仍只生成候选，不发布；`knowledge
 
 知识发布不自动 commit/push。commit 前再次询问用户并只做一次 dedicated commit；push 需要单独授权。
 
+## 默认 Wiki 路由
+
+当用户说“打开/可视化 Wiki”“总结/整理 Wiki”或“更新/沉淀到 Wiki”时，目标固定为
+SelfWiki：
+
+1. 第一调用永远是 `openwiki_status`，并以 `paths.wikiRoot` 作为唯一 Wiki root。
+2. 不读取 Agent 自己的 Markdown Wiki，不猜测其他 Wiki 目录。
+3. “总结 Wiki”若没有 verified 的 SelfWiki 安全 query 能力，报告 `unverified` 并停止；
+   不切换 `legacy_provider`。
+4. “打开可视化”必须使用 status 的新版 Viewer contract；缺失时 fail closed。
+
 ## 可视化
 
-只允许 loopback：
-
-```text
-node .work/openwiki/dist/cli/cli.js visualize "<wiki-root>" --port 4321 --no-open
-```
-
-适配器不添加未提供的 CLI 参数；若无法证明命令实际绑定 loopback，结果标记 `unverified`，不得声称已安全暴露。
+SelfOpenWiki status 必须提供 `visualizer.id=selfopenwiki.zxh_wiki_viewer`、绝对
+`launcherPath`、`loopbackOnly=true`、`autoOpen=false`、`--wiki-root` 注入方式和
+`http://127.0.0.1:{port}/wiki/local`。适配器通过 `Visualize.bat --wiki-root <root>`
+启动 Viewer，并返回该 loopback URL；不得调用旧的 `.work/openwiki/dist/cli.js`，也不得
+自动打开非 loopback 地址。

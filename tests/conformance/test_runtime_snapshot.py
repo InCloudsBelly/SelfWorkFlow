@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import csv
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -11,6 +12,30 @@ from selfworkflow.cli import main
 
 class RuntimeSnapshotTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
+
+    def test_tea_publishes_one_assessment_entry_and_complete_knowledge_index(self):
+        import yaml
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            runtime = Path(temporary) / "runtime"
+            build_runtime(self.ROOT, runtime, "0.1.0.dev0", profile="knowledge")
+            names = [
+                yaml.safe_load(path.read_text(encoding="utf-8").split("---", 2)[1])["name"]
+                for path in (runtime / "skills/tea-quality").rglob("SKILL.md")
+            ]
+            self.assertEqual(names.count("tea-ci-validation"), 1)
+            self.assertEqual(names.count("tea-framework-assessment"), 1)
+            references = runtime / "skills/tea-quality/references"
+            knowledge = references / "bmod-tea/knowledge"
+            with (knowledge / "tea-index.csv").open(encoding="utf-8", newline="") as handle:
+                fragments = list(csv.DictReader(handle))
+            self.assertTrue(fragments)
+            for fragment in fragments:
+                self.assertTrue((knowledge / fragment["fragment_file"]).is_file(), fragment)
+            self.assertFalse((knowledge.parent / "SKILL.md").exists())
+            for entry in references.glob("*/SKILL.md"):
+                metadata = yaml.safe_load((entry.parent / "agents/openai.yaml").read_text(encoding="utf-8"))
+                self.assertIs(metadata["policy"]["allow_implicit_invocation"], False)
 
     def test_default_runtime_is_deterministic_lightweight_core(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
@@ -27,6 +52,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertTrue((root / "first/skills/ponytail-audit/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/ponytail-help/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/ponytail/LICENSE").is_file())
+            self.assertTrue((root / "first/dependencies/locks/ponytail.lock.yaml").is_file())
             self.assertFalse((root / "first/skills/caveman").exists())
             self.assertTrue((root / "first/skills/matt-pocock/grilling/SKILL.md").is_file())
             self.assertTrue((root / "first/skills/matt-pocock/tdd/SKILL.md").is_file())
@@ -51,7 +77,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 "Review → 用户确认 → TDD",
                 "确认失效",
                 "非代码任务不自动加载",
-                "官方 Graft MCP",
+                "官方 CodeGraph MCP",
             ):
                 self.assertIn(phrase, workflow_text)
             self.assertFalse((root / "first/extensions").exists())
@@ -77,6 +103,7 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 {
                     "workflow-core", "workflow-quality", "code-quality",
                     "ponytail", "ponytail-review", "ponytail-audit", "ponytail-help",
+                    "ponytail-debt", "implement-spec", "tea-framework", "tea-ci",
                     "matt-skills-foundation", "testing-review-quality",
                     "tea-quality-foundation",
                 },
@@ -88,17 +115,23 @@ class RuntimeSnapshotTests(unittest.TestCase):
             ))
             runtime_root = root / "first"
             policy_path = runtime_root / "workflow/git-policy.yaml"
-            content = b"".join(
-                path.read_bytes() for path in runtime_root.rglob("*") if path.is_file()
-            ).lower()
+            prompt_files = [
+                path for path in runtime_root.rglob("*")
+                if path.is_file() and path.relative_to(runtime_root).parts[0] not in {"src", "host"}
+            ]
+            content = b"".join(path.read_bytes() for path in prompt_files).lower()
             self.assertNotIn(b"caveman", content)
             # The runtime policy may name the pinned gitlink for its allowlist;
             # no upstream tree or source package is copied into the runtime.
             self.assertIn(b"dependencies/upstream/ponytail", policy_path.read_bytes())
             content_without_policy = b"".join(
                 path.read_bytes()
-                for path in runtime_root.rglob("*")
-                if path.is_file() and path != policy_path
+                for path in prompt_files
+                if (
+                    path.is_file()
+                    and path != policy_path
+                    and path != runtime_root / "dependencies/locks/ponytail.lock.yaml"
+                )
             ).lower()
             self.assertNotIn(b"dependencies/upstream/ponytail", content_without_policy)
             self.assertFalse((root / "first/hooks").exists())
@@ -107,9 +140,16 @@ class RuntimeSnapshotTests(unittest.TestCase):
             self.assertNotIn(b"d:\\openwikic7", content)
             for forbidden in ("provider-config.json", ".codegraph", "logs", "cache"):
                 self.assertFalse(any(
-                    forbidden in path.relative_to(root / "first").as_posix().casefold()
+                    forbidden in {part.casefold() for part in path.relative_to(root / "first").parts}
                     for path in (root / "first").rglob("*")
                 ))
+
+    def test_runtime_version_is_closed_before_building(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            for version in ("", " latest", "v1/unsafe", "x" * 65):
+                with self.subTest(version=version):
+                    with self.assertRaisesRegex(AdapterError, "runtime-version-invalid"):
+                        build_runtime(self.ROOT, Path(temporary) / "runtime", version)
 
     def test_runtime_can_explicitly_exclude_grill_me_without_stale_catalog_metadata(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

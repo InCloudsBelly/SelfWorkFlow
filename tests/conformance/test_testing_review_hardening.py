@@ -75,7 +75,7 @@ class TestingReviewHardeningTests(unittest.TestCase):
             ]
         }
 
-    def test_runtime_contains_bounded_tea_adapter_and_all_five_workflows(self):
+    def test_runtime_contains_bounded_tea_adapter_and_all_seven_workflows(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "runtime"
             build_runtime(self.ROOT, runtime, "test", profile="core")
@@ -89,7 +89,10 @@ class TestingReviewHardeningTests(unittest.TestCase):
             expected = {
                 "bmad-testarch-test-design", "bmad-testarch-atdd",
                 "bmad-testarch-test-review", "bmad-testarch-trace",
-                "bmad-testarch-nfr",
+                "bmad-testarch-nfr", "bmad-testarch-framework",
+                "bmad-testarch-ci",
+                "bmod-tea",
+                "bmod-tea",
             }
             self.assertEqual(
                 {path.name for path in references.iterdir() if path.is_dir()},
@@ -97,7 +100,7 @@ class TestingReviewHardeningTests(unittest.TestCase):
             )
             self.assertTrue((references / "LICENSE").is_file())
             self.assertFalse((runtime / "dependencies/upstream/tea").exists())
-            for module_name in ("tea-test-design", "tea-atdd", "tea-test-review", "tea-trace", "tea-nfr"):
+            for module_name in ("tea-test-design", "tea-atdd", "tea-test-review", "tea-trace", "tea-nfr", "tea-framework", "tea-ci"):
                 module = yaml.safe_load((runtime / f"catalog/v3/modules/{module_name}.yaml").read_text(encoding="utf-8"))
                 self.assertEqual(module["invocation"]["ref"], "selfworkflow:tea-quality")
                 self.assertTrue(all(value == "supported" for value in module["supportEvidence"].values()))
@@ -110,6 +113,8 @@ class TestingReviewHardeningTests(unittest.TestCase):
                 "test-review": ({"acceptanceCriteria":"a","implementationDelta":"d","testDesign":"t","verificationEvidence":"v"}, "test-review.md", ["Coverage Review","Failure Paths","Findings"]),
                 "trace": ({"acceptanceCriteria":"a","testInventory":"t","verificationEvidence":"v"}, "trace.md", ["Trace Matrix","Gaps"]),
                 "nfr": ({"design":"d","nfrRequirements":"n","verificationEvidence":"v"}, "nfr.md", ["Performance","Security","Reliability"]),
+                "framework": ({"projectManifest":"manifest","testInventory":"tests","projectRules":"rules","acceptanceCriteria":"criteria"}, "framework.md", ["Framework","Conventions","Commands","Gaps"]),
+                "ci": ({"pipelineFiles":"pipeline","verificationPlan":"plan","projectRules":"rules","runEvidence":"evidence"}, "ci.md", ["Pipeline","Quality Gates","Artifacts","Run Evidence","Gaps"]),
             }
             for workflow_id, (context, filename, headings) in cases.items():
                 invocation = build_packaged_invocation(runtime, workflow_id, context, filename)

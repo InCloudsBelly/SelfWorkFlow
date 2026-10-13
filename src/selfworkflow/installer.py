@@ -11,6 +11,7 @@ import tempfile
 from uuid import uuid4
 
 from selfworkflow.managed_blocks import ManagedBlockError, render_managed_block
+from selfworkflow.host_runtime import legacy_host_launcher, render_host_launcher
 from selfworkflow.transactions import (
     TransactionError,
     exclusive_install_lock,
@@ -329,6 +330,7 @@ def _same_install_identity(
     agents: Path,
     codex: Path,
     state: Path,
+    host_launcher: dict[str, object] | None = None,
 ) -> bool:
     return all(
         (
@@ -338,8 +340,49 @@ def _same_install_identity(
             manifest.get("agentsRoot") == str(agents),
             manifest.get("codexRoot") == str(codex),
             manifest.get("stateRoot") == str(state),
+            manifest.get("hostLauncher") == _host_identity(host_launcher),
         )
     )
+
+
+def _host_identity(binding: dict[str, object] | None) -> dict[str, object] | None:
+    if binding is None:
+        return None
+    return {key: binding[key] for key in ("path", "pythonExecutable", "pythonHash", "contentHash")}
+
+
+def _host_launcher_plan(artifact: Path, agents: Path, launcher: str | Path, python: str | Path,
+                        current: dict[str, object] | None) -> tuple[dict[str, object], list[str]]:
+    raw_target, raw_python = Path(launcher), Path(python)
+    target = _safe_root(raw_target.parent) / raw_target.name
+    executable = _safe_root(raw_python.parent, allow_missing=False) / raw_python.name
+    if target.name.casefold() != "selfworkflow.cmd" or target.is_dir() or (os.path.lexists(target) and _is_reparse(target)):
+        raise InstallerError("host-launcher-target-invalid")
+    if not executable.is_file() or _is_reparse(executable):
+        raise InstallerError("host-python-invalid")
+    if _path_relative_to(target, artifact) is not None:
+        raise InstallerError("host-launcher-overlaps-artifact")
+    try:
+        content = render_host_launcher(artifact, agents, executable)
+    except (OSError, ValueError) as error:
+        raise InstallerError("host-runtime-invalid") from error
+    exists = target.is_file()
+    before_hash = _path_hash(target) if exists else None
+    issues = []
+    owned = next((op for op in (current or {}).get("operations", []) if op.get("target") == str(target)), None)
+    if owned and before_hash != owned.get("afterHash"):
+        issues.append("managed-host-launcher-drift")
+    elif (
+        exists and owned is None
+        and target.read_bytes().replace(b"\r\n", b"\n")
+        != legacy_host_launcher(executable).replace(b"\r\n", b"\n")
+    ):
+        issues.append("unmanaged-host-launcher-conflict")
+    return {
+        "path": str(target), "pythonExecutable": str(executable), "pythonHash": _path_hash(executable),
+        "beforeExists": exists, "beforeHash": before_hash,
+        "contentHash": "sha256:" + hashlib.sha256(content).hexdigest(),
+    }, issues
 
 
 def _retired_skill_files(
@@ -399,6 +442,7 @@ def create_install_plan(
     codex_root: str | Path,
     state_root: str | Path,
     version: str,
+    *, host_launcher: str | Path | None = None, host_python: str | Path | None = None,
 ) -> dict[str, object]:
     if not isinstance(version, str) or not _VERSION.fullmatch(version):
         raise InstallerError("version-invalid")
@@ -431,6 +475,12 @@ def create_install_plan(
         "stateRoot": _managed_surface_hash(state, surfaces["stateRoot"]),
     }
     issues: list[str] = list(retirement_issues)
+    if (host_launcher is None) != (host_python is None):
+        raise InstallerError("host-launcher-options-incomplete")
+    host_binding = None
+    if host_launcher is not None:
+        host_binding, host_issues = _host_launcher_plan(artifact, agents, host_launcher, host_python, current_manifest)
+        issues.extend(host_issues)
     agents_file = codex / "AGENTS.md"
     snapshot = _snapshot_root(agents, version, artifact_hash)
     try:
@@ -466,6 +516,7 @@ def create_install_plan(
         agents=agents,
         codex=codex,
         state=state,
+        host_launcher=host_binding,
     ):
         try:
             if verify_install(Path(current_manifest["manifestPath"]))["status"] == "verified":
@@ -489,6 +540,8 @@ def create_install_plan(
         "issues": sorted(set(issues)),
         "securityStatus": "unverified",
     }
+    if host_binding is not None:
+        plan["hostLauncher"] = host_binding
     plan["planHash"] = _canonical_hash(plan)
     return plan
 
@@ -640,6 +693,8 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
             "securityStatus", "planHash",
         },
     }.get(plan.get("operation"))
+    if expected is not None and plan.get("operation") == "install" and "hostLauncher" in plan:
+        expected = expected | {"hostLauncher"}
     if expected is None or set(plan) != expected or plan.get("schemaVersion") != 1:
         raise InstallerError("plan-invalid")
     supplied = dict(plan)
@@ -672,12 +727,23 @@ def _validate_ready_plan_baseline(
         != plan["baselineHashes"]["stateRoot"]
     ):
         raise InstallerError("target-drift")
+    if "hostLauncher" in plan:
+        binding = plan["hostLauncher"]
+        if not isinstance(binding, dict) or set(binding) != {
+            "path", "pythonExecutable", "pythonHash", "beforeExists", "beforeHash", "contentHash",
+        } or type(binding["beforeExists"]) is not bool:
+            raise InstallerError("host-launcher-plan-invalid")
+        current, issues = _host_launcher_plan(artifact, agents, binding["path"], binding["pythonExecutable"], _load_current_manifest(state))
+        if issues or current != binding:
+            raise InstallerError("host-launcher-drift")
 
 
 def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str, object]:
     _validate_plan_hash(plan, confirmed_hash)
     if plan.get("status") == "already-installed":
         state = _safe_root(plan["stateRoot"], allow_missing=False)
+        if os.path.lexists(state / "install.lock"):
+            raise InstallerError("installer-locked")
         agents = _safe_root(plan["agentsRoot"], allow_missing=False)
         codex = _safe_root(plan["codexRoot"], allow_missing=False)
         manifest = _load_current_manifest(state)
@@ -691,6 +757,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 agents=agents,
                 codex=codex,
                 state=state,
+                host_launcher=plan.get("hostLauncher"),
             )
         ):
             raise InstallerError("installed-state-drift")
@@ -713,6 +780,8 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     backup_root = state / "backups" / transaction_id
     manifest_path = state / "manifests" / f"{transaction_id}.json"
     operations: list[dict[str, object]] = []
+    committed = False
+    cleanup_pending: list[str] = []
     try:
         with exclusive_install_lock(state):
             _validate_ready_plan_baseline(plan, artifact, agents, codex, state)
@@ -730,8 +799,12 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
             try:
                 write_json_atomic(transaction_path, transaction)
 
-                def record(target: Path, content: bytes) -> None:
+                def record(target: Path, content: bytes, *, expected_before: dict[str, object] | None = None) -> None:
                     operation = _prepare_operation(target, content, backup_root)
+                    if expected_before is not None and any(
+                        operation[key] != expected_before[key] for key in ("beforeExists", "beforeHash")
+                    ):
+                        raise InstallerError("host-launcher-drift")
                     operations.append(operation)
                     transaction["operations"] = operations
                     write_json_atomic(transaction_path, transaction)
@@ -781,6 +854,12 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                     separators=(",", ":"),
                 ) + "\n").encode("utf-8")
                 record(agents / "selfworkflow/current.json", pointer)
+                host_binding = plan.get("hostLauncher")
+                if host_binding is not None:
+                    content = render_host_launcher(artifact, agents, Path(host_binding["pythonExecutable"]))
+                    if "sha256:" + hashlib.sha256(content).hexdigest() != host_binding["contentHash"]:
+                        raise InstallerError("host-launcher-content-drift")
+                    record(Path(host_binding["path"]), content, expected_before=host_binding)
                 current_manifest_content = (
                     json.dumps(
                         {"manifestPath": str(manifest_path)},
@@ -804,9 +883,12 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                     "operations": [_manifest_operation(item) for item in operations],
                     "securityStatus": "unverified",
                 }
+                if host_binding is not None:
+                    manifest["hostLauncher"] = _host_identity(host_binding)
                 write_json_atomic(manifest_path, manifest)
                 transaction.update({"state": "completed", "operations": operations, "manifestPath": str(manifest_path)})
                 write_json_atomic(transaction_path, transaction)
+                committed = True
             except BaseException as failure:
                 try:
                     _restore_operations(operations)
@@ -820,14 +902,22 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 raise InstallerError("apply-failed") from None
     except InstallerError:
         raise
-    except (ManagedBlockError, TransactionError) as error:
+    except TransactionError as error:
+        if committed and str(error) == "installer-lock-release-failed":
+            cleanup_pending.append(str(error))
+        else:
+            raise InstallerError(str(error)) from None
+    except ManagedBlockError as error:
         raise InstallerError(str(error)) from None
-    return {
+    result = {
         "status": "applied",
         "manifestPath": str(manifest_path),
         "transactionId": transaction_id,
         "transactionPath": str(transaction_path),
     }
+    if cleanup_pending:
+        result["cleanupPending"] = cleanup_pending
+    return result
 
 
 def verify_install(manifest_path: str | Path) -> dict[str, object]:
@@ -843,6 +933,12 @@ def verify_install(manifest_path: str | Path) -> dict[str, object]:
                 raise InstallerError("installed-file-drift")
         elif not target.is_file() or _path_hash(target) != operation["afterHash"]:
             raise InstallerError("installed-file-drift")
+    host = manifest.get("hostLauncher")
+    if host is not None:
+        raw_python = Path(host["pythonExecutable"])
+        python = _safe_root(raw_python.parent, allow_missing=False) / raw_python.name
+        if not python.is_file() or _is_reparse(python) or _path_hash(python) != host["pythonHash"]:
+            raise InstallerError("installed-host-python-drift")
     return {"status": "verified", "manifestPath": str(path)}
 
 

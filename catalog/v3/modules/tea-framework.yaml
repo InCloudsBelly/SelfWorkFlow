@@ -1,0 +1,12 @@
+schemaVersion: 3
+id: tea-framework
+sourceHash: sha256:fe9528b1c8241f0b0fd88f472291c8643a8702702710e7369a670a8523a921ea
+stage: planned
+slot: plan.assessment
+selectionMode: static
+invocation: {kind: skill, ref: selfworkflow:tea-quality}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 128, estimatedExecutionCost: 0}
+# Support describes the local adapter contract; it does not attest Host execution.
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

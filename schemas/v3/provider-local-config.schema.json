@@ -37,7 +37,7 @@
           "additionalProperties": false,
           "required": ["kind", "version", "commit", "sourceHash", "dirty"],
           "properties": {
-            "kind": {"enum": ["local-override", "managed-submodule"]},
+            "kind": {"enum": ["local-override", "managed-runtime", "managed-submodule"]},
             "version": {"type": "string", "minLength": 1, "maxLength": 256},
             "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
             "sourceHash": {"$ref": "#/$defs/hash"},

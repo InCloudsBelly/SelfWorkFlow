@@ -21,6 +21,7 @@ from selfworkflow.v3.cpp_router import (
     route_cpp_capabilities,
 )
 from selfworkflow.ponytail_scope import PonytailRoute, select_ponytail_route
+from selfworkflow.implement_spec import ImplementSpecEvidenceError, validate_implement_spec_evidence
 
 
 class ResolveError(ValueError):
@@ -82,6 +83,12 @@ class ResolvedPlan:
 def _load_request(request: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(request, Mapping):
         raise ResolveError("v3-request-not-object")
+    explicit = request.get("explicitModuleIds")
+    if isinstance(explicit, list) and "implement-spec" in explicit:
+        try:
+            validate_implement_spec_evidence(request.get("implementSpecEvidence"))
+        except (KeyError, ImplementSpecEvidenceError, TypeError):
+            raise ResolveError("v3-implement-spec-evidence-invalid") from None
     try:
         return load_contract(
             "resolve-request.schema.json",
@@ -130,6 +137,7 @@ def _resolution_inputs(
     explicit_skill = None
     for skill_id, module_id in (
         ("ponytail-help", "ponytail-help"),
+        ("ponytail-debt", "ponytail-debt"),
         ("ponytail-review", "ponytail-review"),
         ("ponytail-audit", "ponytail-audit"),
         ("ponytail", "ponytail-coding"),

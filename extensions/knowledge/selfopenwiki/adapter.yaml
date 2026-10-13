@@ -68,6 +68,17 @@ mcp:
       - personal.lifecycle.finish
       - personal.c7-review-cas-publish
 visualizer:
-  command: [node, .work/openwiki/dist/cli/cli.js, visualize, <wiki-root>, --port, "4321", --no-open]
+  source: openwiki_status.visualizer
+  requiredForDefault: true
+  id: selfopenwiki.zxh_wiki_viewer
+  contractSchema: 1
+  launcherPath: status.visualizer.launcherPath
+  wikiRootInput: [--wiki-root, <wiki-root>]
+  urlTemplate: http://127.0.0.1:{port}/wiki/local
   loopbackOnly: true
   autoOpen: false
+defaultRouting:
+  profile: knowledge
+  backend: selfopenwiki
+  intents: [wiki-visualize, wiki-summary, wiki-organize, wiki-update]
+  fallback: forbidden

@@ -84,7 +84,7 @@
       "oneOf": [
         {
           "type": "array",
-          "prefixItems": [{"const": "writeTask"}, {"type": "boolean"}],
+          "prefixItems": [{"enum": ["writeTask", "durableSpec"]}, {"type": "boolean"}],
           "items": false,
           "minItems": 2,
           "maxItems": 2

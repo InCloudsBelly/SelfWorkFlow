@@ -1,4 +1,4 @@
-"""Machine-local Provider configuration and maintenance transaction core."""
+"""Machine-local CodeGraph configuration and lifecycle routing."""
 
 from __future__ import annotations
 
@@ -14,29 +14,29 @@ import re
 from typing import Any
 import uuid
 
+from selfworkflow.v3.codegraph_lifecycle import (
+    CodeGraphProjectError,
+    CodeGraphProjectLifecycle,
+)
 from selfworkflow.v3.providers.codegraph import (
     CodeGraphAdapter,
     CodeGraphAdapterError,
     CommandPort,
 )
-from selfworkflow.v3.providers.graft import GraftAdapter, GraftAdapterError, graft_failure_details
 from selfworkflow.v3.provider_config import (
     ProviderConfigError,
     load_provider_config,
     validate_provider_source_path,
 )
-from selfworkflow.graft_models import graft_model_context
 
 
 _MAX_CONFIG_BYTES = 1024 * 1024
 _HASH = re.compile(r"sha256:[0-9a-f]{64}")
 _PROVIDER_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}")
-_HOST_MODEL_ENV = "SELFWORKFLOW_HOST_CURRENT_MODEL"
-_HOST_REASONING_ENV = "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT"
 
 
 class ProviderManagerError(ValueError):
-    """Stable manager error which never embeds paths, command output, or secrets."""
+    """Stable manager error which never embeds paths or command output."""
 
     def __init__(self, reason: str, *, diagnostics: dict[str, Any] | None = None) -> None:
         self.reason = reason
@@ -67,10 +67,6 @@ class MachineLocalPaths:
     @property
     def transaction_directory(self) -> Path:
         return self.config_file.parent / ".provider-transactions"
-
-    @property
-    def graft_model_file(self) -> Path:
-        return self.config_file.parent / "graft-model.local.yaml"
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -106,28 +102,6 @@ def _clean_text(value: object, reason: str, *, maximum: int = 256) -> str:
     return value
 
 
-def _current_graft_deep_model_context(
-    config_path: str | Path | None = None,
-) -> tuple[str, str]:
-    """Resolve machine config, with the old Host environment as fallback."""
-
-    if config_path is not None and Path(config_path).exists():
-        return graft_model_context(config_path)
-    model = os.environ.get(_HOST_MODEL_ENV)
-    reasoning_effort = os.environ.get(_HOST_REASONING_ENV)
-    if (
-        not isinstance(model, str) or not model.strip()
-        or not isinstance(reasoning_effort, str) or not reasoning_effort.strip()
-    ):
-        return graft_model_context(config_path)
-    if (
-        model != model.strip() or reasoning_effort != reasoning_effort.strip()
-        or any(ord(character) < 32 for character in model + reasoning_effort)
-    ):
-        raise ProviderManagerError("graft-deep-current-model-context-incomplete")
-    return model, reasoning_effort
-
-
 def _validate_command_prefix(value: object) -> tuple[str, ...]:
     if (
         not isinstance(value, (tuple, list))
@@ -147,7 +121,7 @@ def _validate_command_prefix(value: object) -> tuple[str, ...]:
 
 
 class ProviderManager:
-    """Manage explicit machine-local Provider overrides without disk scanning."""
+    """Manage the one active CodeGraph binding and its project lifecycle."""
 
     def __init__(
         self,
@@ -173,7 +147,7 @@ class ProviderManager:
         self._source_identity_resolver = source_identity_resolver
         self._logger = logger
         self._replace = replace_operation
-        self._adapter_cache: dict[str, tuple[str, object]] = {}
+        self._adapter_cache: tuple[str, CodeGraphAdapter] | None = None
 
     @contextmanager
     def _config_lock(self):
@@ -188,9 +162,11 @@ class ProviderManager:
             handle.seek(0)
             if os.name == "nt":
                 import msvcrt
+
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except Exception:
             try:
@@ -206,9 +182,11 @@ class ProviderManager:
                 handle.seek(0)
                 if os.name == "nt":
                     import msvcrt
+
                     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
                 else:
                     import fcntl
+
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             finally:
                 handle.close()
@@ -269,15 +247,9 @@ class ProviderManager:
             if (
                 not isinstance(source, dict)
                 or set(source) != {"kind", "version", "commit", "sourceHash", "dirty"}
-                or source.get("kind") not in {"local-override", "managed-submodule"}
-                or (
-                    provider_id == "graft"
-                    and source.get("kind") != "managed-submodule"
-                )
-                or (
-                    provider_id != "graft"
-                    and source.get("kind") != "local-override"
-                )
+                or source.get("kind") not in {
+                    "local-override", "managed-runtime", "managed-submodule",
+                }
                 or not isinstance(source.get("version"), str)
                 or not source["version"]
                 or not isinstance(source.get("commit"), str)
@@ -428,7 +400,6 @@ class ProviderManager:
 
     def _read_rollback_transaction(
         self, token: str, *, if_issued: bool = False,
-        verify_postimage: bool = False,
     ) -> tuple[Path, dict[str, Any]] | None:
         path = self._transaction_path(token)
         if not path.exists():
@@ -462,20 +433,10 @@ class ProviderManager:
                 )
             ):
                 raise ProviderManagerError("provider-config-rollback-invalid")
-            try:
-                encoded = transaction["preimage"]
-                preimage = None if encoded is None else base64.b64decode(
-                    encoded, validate=True,
-                )
-            except Exception:
-                raise ProviderManagerError("provider-config-rollback-invalid") from None
+            encoded = transaction["preimage"]
+            preimage = None if encoded is None else base64.b64decode(encoded, validate=True)
             if transaction["preimageHash"] != _payload_hash(preimage):
                 raise ProviderManagerError("provider-config-rollback-invalid")
-            if verify_postimage and transaction["postimageHash"] != _payload_hash(
-                self._paths.config_file.read_bytes()
-                if self._paths.config_file.exists() else None
-            ):
-                raise ProviderManagerError("provider-config-rollback-state-drift")
             return path, transaction
         except ProviderManagerError:
             raise
@@ -518,144 +479,119 @@ class ProviderManager:
         replace_existing: bool = False,
         rollback_token: str | None = None,
     ) -> dict[str, Any]:
+        if provider_id != "codegraph":
+            raise ProviderManagerError("provider-not-supported")
+        if ownership not in {"user-local", "selfworkflow-managed"}:
+            raise ProviderManagerError("provider-ownership-invalid")
+        prefix = _validate_command_prefix(command_prefix)
+        version = _clean_text(source_version, "provider-source-version-invalid")
+        commit = _clean_text(source_commit, "provider-source-commit-invalid")
+        if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+            raise ProviderManagerError("provider-source-commit-invalid")
+        if not isinstance(source_hash, str) or _HASH.fullmatch(source_hash) is None:
+            raise ProviderManagerError("provider-source-hash-invalid")
+        if type(dirty) is not bool:
+            raise ProviderManagerError("provider-source-dirty-invalid")
+        source = {
+            "kind": "managed-runtime" if ownership == "selfworkflow-managed" else "local-override",
+            "version": version,
+            "commit": commit,
+            "sourceHash": source_hash,
+            "dirty": dirty,
+        }
         try:
-            if provider_id not in {"codegraph", "graft"}:
-                raise ProviderManagerError("provider-not-supported")
-            expected_ownership = {
-                "codegraph": "user-local",
-                "graft": "selfworkflow-managed",
-            }[provider_id]
-            if ownership != expected_ownership:
-                raise ProviderManagerError("provider-local-override-ownership-invalid")
-            prefix = _validate_command_prefix(command_prefix)
-            version = _clean_text(source_version, "provider-source-version-invalid")
-            commit = _clean_text(source_commit, "provider-source-commit-invalid")
-            if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
-                raise ProviderManagerError("provider-source-commit-invalid")
-            if not isinstance(source_hash, str) or _HASH.fullmatch(source_hash) is None:
-                raise ProviderManagerError("provider-source-hash-invalid")
-            if type(dirty) is not bool:
-                raise ProviderManagerError("provider-source-dirty-invalid")
-            source = {
-                "kind": "managed-submodule" if provider_id == "graft" else "local-override",
-                "version": version,
-                "commit": commit,
-                "sourceHash": source_hash,
-                "dirty": dirty,
-            }
-            try:
-                validated_source_path = validate_provider_source_path(source_path)
-            except ProviderConfigError:
-                raise ProviderManagerError("provider-source-path-invalid") from None
-            provider = {
-                "providerId": provider_id,
-                "sourcePath": validated_source_path,
-                "enabled": True,
-                "ownership": ownership,
-                "commandPrefix": list(prefix),
-                "commandHash": _hash({"argv": list(prefix)}),
-                "source": source,
-            }
-            provider["bindingHash"] = _hash(provider)
-            token = (
-                self._validate_rollback_token(rollback_token)
-                if rollback_token is not None else None
+            validated_source_path = validate_provider_source_path(source_path)
+        except ProviderConfigError:
+            raise ProviderManagerError("provider-source-path-invalid") from None
+        provider = {
+            "providerId": "codegraph",
+            "sourcePath": validated_source_path,
+            "enabled": True,
+            "ownership": ownership,
+            "commandPrefix": list(prefix),
+            "commandHash": _hash({"argv": list(prefix)}),
+            "source": source,
+        }
+        provider["bindingHash"] = _hash(provider)
+        token = self._validate_rollback_token(rollback_token) if rollback_token is not None else None
+        with self._config_lock():
+            preimage = self._paths.config_file.read_bytes() if self._paths.config_file.exists() else None
+            config = self._read_config()
+            existing = next(
+                (item for item in config["providers"] if item["providerId"] == "codegraph"),
+                None,
             )
-            with self._config_lock():
-                preimage = (
-                    self._paths.config_file.read_bytes()
-                    if self._paths.config_file.exists() else None
-                )
-                config = self._read_config()
-                existing = next(
-                    (item for item in config["providers"] if item["providerId"] == provider_id),
-                    None,
-                )
-                if (
-                    existing is not None
-                    and existing != provider
-                    and replace_existing is not True
-                ):
-                    raise ProviderManagerError("provider-config-conflict")
-                config["providers"] = [
-                    item for item in config["providers"]
-                    if item["providerId"] != provider_id
-                ] + [provider]
-                config["providers"].sort(key=lambda item: item["providerId"])
-                self._validate_config(config)
-                if token is not None:
-                    postimage = _canonical_bytes(config) + b"\n"
-                    self._write_rollback_transaction(token, preimage, postimage)
-                try:
-                    changed = self._write_config(config)
-                    if token is not None:
-                        self._set_rollback_transaction_state(token, "applied")
-                except BaseException as failure:
-                    self._restore_config_preimage(preimage)
-                    if token is not None:
-                        try:
-                            self._set_rollback_transaction_state(
-                                token, "rolled-back",
-                            )
-                        except ProviderManagerError:
-                            pass
-                    if not isinstance(failure, Exception):
-                        raise
-                    raise
-            if changed:
-                self._adapter_cache.pop(provider_id, None)
-            status = "configured" if changed else "unchanged"
-            self._log(
-                "provider.configure.completed",
-                providerId=provider_id,
-                operation="configure",
-                status=status,
-                configurationHash=_hash(config),
-            )
-            result = {
-                "providerId": provider_id,
-                "status": status,
-                "configurationHash": _hash(config),
-                "bindingHash": provider["bindingHash"],
-            }
+            if existing is not None and existing != provider and not replace_existing:
+                raise ProviderManagerError("provider-config-conflict")
+            config["providers"] = [
+                item for item in config["providers"]
+                if item["providerId"] != "codegraph"
+            ] + [provider]
+            config["providers"].sort(key=lambda item: item["providerId"])
+            self._validate_config(config)
             if token is not None:
-                result["rollbackToken"] = token
-            return result
-        except ProviderManagerError as error:
-            self._log(
-                "provider.configure.failed",
-                providerId=provider_id if isinstance(provider_id, str) else "invalid",
-                operation="configure",
-                status="failed",
-                reasonCode=error.reason,
-            )
-            raise
+                self._write_rollback_transaction(token, preimage, _canonical_bytes(config) + b"\n")
+            try:
+                changed = self._write_config(config)
+                if token is not None:
+                    self._set_rollback_transaction_state(token, "applied")
+            except BaseException as failure:
+                self._restore_config_preimage(preimage)
+                if token is not None:
+                    try:
+                        self._set_rollback_transaction_state(token, "rolled-back")
+                    except ProviderManagerError:
+                        pass
+                if not isinstance(failure, Exception):
+                    raise
+                raise
+        if changed:
+            self._adapter_cache = None
+        status = "configured" if changed else "unchanged"
+        self._log(
+            "provider.configure.completed", providerId="codegraph",
+            operation="configure", status=status,
+            configurationHash=_hash(config),
+        )
+        result = {
+            "providerId": "codegraph", "status": status,
+            "configurationHash": _hash(config), "bindingHash": provider["bindingHash"],
+        }
+        if token is not None:
+            result["rollbackToken"] = token
+        return result
 
-    def rollback_config(
-        self, rollback_token: str, *, if_issued: bool = False,
-    ) -> dict[str, Any]:
+    def retire(self, provider_id: str) -> dict[str, Any]:
+        """Remove one obsolete machine-local binding transactionally."""
+
+        if not isinstance(provider_id, str) or _PROVIDER_ID.fullmatch(provider_id) is None:
+            raise ProviderManagerError("provider-id-invalid")
+        if provider_id == "codegraph":
+            raise ProviderManagerError("provider-retire-active-forbidden")
+        with self._config_lock():
+            config = self._read_config()
+            old = len(config["providers"])
+            config["providers"] = [
+                item for item in config["providers"] if item["providerId"] != provider_id
+            ]
+            changed = old != len(config["providers"])
+            if changed:
+                self._write_config(config)
+        return {"providerId": provider_id, "status": "retired" if changed else "absent"}
+
+    def rollback_config(self, rollback_token: str, *, if_issued: bool = False) -> dict[str, Any]:
         token = self._validate_rollback_token(rollback_token)
         with self._config_lock():
-            loaded = self._read_rollback_transaction(
-                token, if_issued=if_issued,
-            )
+            loaded = self._read_rollback_transaction(token, if_issued=if_issued)
             if loaded is None:
                 return {"status": "not-issued"}
             path, transaction = loaded
             if transaction["state"] == "rolled-back" and if_issued:
                 return {"status": "already-rolled-back"}
-            try:
-                encoded = transaction["preimage"]
-                preimage = None if encoded is None else base64.b64decode(
-                    encoded, validate=True,
-                )
-                if preimage is not None and len(preimage) > _MAX_CONFIG_BYTES:
-                    raise ValueError
-            except Exception:
-                raise ProviderManagerError("provider-config-rollback-invalid") from None
+            encoded = transaction["preimage"]
+            preimage = None if encoded is None else base64.b64decode(encoded, validate=True)
             current = _payload_hash(
-                self._paths.config_file.read_bytes()
-                if self._paths.config_file.exists() else None
+                self._paths.config_file.read_bytes() if self._paths.config_file.exists() else None
             )
             if transaction["state"] == "rolled-back":
                 raise ProviderManagerError("provider-config-rollback-invalid")
@@ -667,6 +603,7 @@ class ProviderManager:
                 path.unlink()
             except OSError:
                 raise ProviderManagerError("provider-config-rollback-failed") from None
+        self._adapter_cache = None
         return {"status": "rolled-back"}
 
     def commit_config(self, rollback_token: str) -> dict[str, Any]:
@@ -688,549 +625,162 @@ class ProviderManager:
         try:
             observation = self._source_identity_resolver(provider["sourcePath"])
             if not isinstance(observation, Mapping):
-                raise ProviderManagerError("provider-source-identity-drift")
+                raise ValueError
             report = observation.get("report")
             observed_source = observation.get("source")
             if not isinstance(report, Mapping) or observed_source is None:
-                raise ProviderManagerError("provider-source-identity-drift")
+                raise ValueError
             observed_path = validate_provider_source_path(str(observed_source))
             expected = provider["source"]
             if (
-                observed_path != provider["sourcePath"]
-                or report.get("commit") != expected["commit"]
-                or report.get("sourceHash") != expected["sourceHash"]
-                or report.get("dirty") is not expected["dirty"]
+                not isinstance(report.get("commit"), str)
+                or re.fullmatch(r"[0-9a-f]{40}", report["commit"]) is None
+                or not isinstance(report.get("sourceHash"), str)
+                or _HASH.fullmatch(report["sourceHash"]) is None
+                or type(report.get("dirty")) is not bool
             ):
-                raise ProviderManagerError("provider-source-identity-drift")
+                raise ValueError
+            changed = [field for field in ("commit", "sourceHash", "dirty") if report[field] != expected[field]]
+            if observed_path != provider["sourcePath"]:
+                changed.append("sourcePath")
+            if changed:
+                raise ProviderManagerError("provider-source-identity-drift", diagnostics={
+                    "failureStage": "source-identity", "changedFields": changed,
+                    "expectedSourceHash": expected["sourceHash"], "observedSourceHash": report["sourceHash"],
+                    "recovery": "inspect-and-review-rebinding",
+                })
         except ProviderManagerError:
             raise
-        except Exception:
-            raise ProviderManagerError("provider-source-identity-drift") from None
+        except Exception as error:
+            detail = getattr(error, "diagnostics", {})
+            diagnostics = {"failureStage": "source-inspection", "cause": "read-failed", "recovery": "retry-inspection"}
+            if isinstance(detail, dict):
+                if detail.get("cause") in {"timeout", "start-failed", "dubious-ownership", "git-command-failed", "not-a-repository", "output-limit", "read-failed", "invalid-source"}:
+                    diagnostics["cause"] = detail["cause"]
+                if detail.get("operation") in {"rev-parse", "status", "diff", "metadata"}:
+                    diagnostics["operation"] = detail["operation"]
+                if type(detail.get("exitCode")) is int:
+                    diagnostics["exitCode"] = detail["exitCode"]
+            raise ProviderManagerError("provider-source-inspection-failed", diagnostics=diagnostics) from None
 
-    def _adapter(self, provider_id: str) -> object:
-        if provider_id not in {"codegraph", "graft"}:
-            raise ProviderManagerError("provider-not-supported")
+    def _adapter(self, *, fresh_session: bool = False) -> CodeGraphAdapter:
         config = self._read_config()
         provider = next(
-            (item for item in config["providers"] if item["providerId"] == provider_id),
+            (item for item in config["providers"] if item["providerId"] == "codegraph"),
             None,
         )
         if provider is None:
             raise ProviderManagerError("provider-not-configured")
+        if provider.get("enabled") is not True:
+            raise ProviderManagerError("provider-disabled")
         if "bindingHash" not in provider:
             raise ProviderManagerError("provider-adapter-unavailable")
         self._assert_source_identity(provider)
-        cached = self._adapter_cache.get(provider_id)
-        if cached is not None and cached[0] == provider["bindingHash"]:
-            return cached[1]
+        if (
+            not fresh_session
+            and self._adapter_cache is not None
+            and self._adapter_cache[0] == provider["bindingHash"]
+        ):
+            return self._adapter_cache[1]
         try:
-            adapter_type = GraftAdapter if provider_id == "graft" else CodeGraphAdapter
-            adapter = adapter_type(
+            adapter = CodeGraphAdapter(
                 command_port=self._command_port,
                 command_prefix=tuple(provider["commandPrefix"]),
                 ownership=provider["ownership"],
                 pre_dispatch_validator=lambda: self._assert_source_identity(provider),
             )
-            self._adapter_cache[provider_id] = (provider["bindingHash"], adapter)
-            return adapter
-        except (CodeGraphAdapterError, GraftAdapterError):
+        except CodeGraphAdapterError:
             raise ProviderManagerError("provider-adapter-invalid") from None
+        if not fresh_session:
+            self._adapter_cache = (provider["bindingHash"], adapter)
+        return adapter
 
     def doctor(self, provider_id: str) -> dict[str, Any]:
-        self._log(
-            "provider.doctor.failed", providerId=provider_id,
-            operation="doctor", status="failed",
-            reasonCode="provider-operation-unverified",
-        )
-        raise ProviderManagerError("provider-operation-unverified")
+        if provider_id != "codegraph":
+            raise ProviderManagerError("provider-not-supported")
+        try:
+            adapter = self._adapter()
+            version = adapter.version()
+            help_result = adapter.help()
+        except CodeGraphAdapterError as error:
+            raise ProviderManagerError(error.reason) from None
+        return {
+            "providerId": "codegraph", "status": "ready",
+            "version": version["version"], "helpAvailable": bool(help_result["summary"]),
+        }
+
+    @staticmethod
+    def _lifecycle(adapter: CodeGraphAdapter) -> CodeGraphProjectLifecycle:
+        try:
+            return CodeGraphProjectLifecycle(adapter)
+        except CodeGraphProjectError as error:
+            raise ProviderManagerError(error.reason) from None
 
     def status(
         self, provider_id: str, project_root: str, *,
-        context_dir: str | None = None,
-        conversation_id: str | None = None,
+        context_dir: str | None = None, conversation_id: str | None = None,
     ) -> dict[str, Any]:
-        if provider_id == "graft":
-            try:
-                from selfworkflow.v3.graft_lifecycle import (
-                    GraftProjectError, GraftProjectLifecycle,
-                )
-                return GraftProjectLifecycle(self._adapter(provider_id)).query_status(
-                    project_root, context_dir=context_dir,
-                    conversation_id=conversation_id,
-                )
-            except (
-                GraftAdapterError, GraftProjectError, ProviderManagerError,
-            ) as error:
-                self._log(
-                    "provider.status.failed", providerId=provider_id,
-                    operation="status", status="failed", reasonCode=error.reason,
-                )
-                raise ProviderManagerError(error.reason, **graft_failure_details(error)) from None
-        self._log(
-            "provider.status.failed", providerId=provider_id,
-            operation="status", status="failed",
-            reasonCode="provider-operation-unverified",
-        )
-        raise ProviderManagerError("provider-operation-unverified")
+        if provider_id != "codegraph":
+            raise ProviderManagerError("provider-not-supported")
+        if context_dir is not None or conversation_id is not None:
+            raise ProviderManagerError("codegraph-conversation-context-unsupported")
+        try:
+            return self._lifecycle(self._adapter()).status(project_root)
+        except (CodeGraphProjectError, CodeGraphAdapterError) as error:
+            raise ProviderManagerError(error.reason) from None
+
+    def ensure(self, project_root: str) -> dict[str, Any]:
+        try:
+            return self._lifecycle(self._adapter(fresh_session=True)).ensure(project_root)
+        except (CodeGraphProjectError, CodeGraphAdapterError) as error:
+            raise ProviderManagerError(error.reason) from None
+
+    def sync(self, project_root: str, changed_paths: Sequence[str] = ()) -> dict[str, Any]:
+        try:
+            return self._lifecycle(self._adapter(fresh_session=True)).sync(project_root, changed_paths)
+        except (CodeGraphProjectError, CodeGraphAdapterError) as error:
+            raise ProviderManagerError(error.reason) from None
 
     def query(
-        self, provider_id: str, project_root: str, query: str, *, query_kind: str,
-        context_dir: str | None = None,
-        conversation_id: str | None = None,
+        self, provider_id: str, project_root: str, query: str, *, query_kind: str = "ask",
+        context_dir: str | None = None, conversation_id: str | None = None,
     ) -> dict[str, Any]:
-        if provider_id != "graft":
+        if provider_id != "codegraph":
             raise ProviderManagerError("provider-not-supported")
-        if conversation_id is None:
-            raise ProviderManagerError("graft-conversation-topic-unbound")
-        choice = self._require_graft_enabled(project_root, conversation_id)
-        lifecycle_conversation = (
-            None if choice["decision"] == "global" else conversation_id
-        )
+        if context_dir is not None or conversation_id is not None:
+            raise ProviderManagerError("codegraph-conversation-context-unsupported")
         try:
-            from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
-            return GraftProjectLifecycle(self._adapter(provider_id)).query(
+            return self._lifecycle(self._adapter(fresh_session=True)).query(
                 project_root, query, query_kind=query_kind,
-                context_dir=context_dir,
-                conversation_id=lifecycle_conversation,
             )
-        except (GraftAdapterError, ProviderManagerError) as error:
-            raise ProviderManagerError(error.reason, **graft_failure_details(error)) from None
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-query-failed")
-            raise ProviderManagerError(reason, **graft_failure_details(error)) from None
+        except (CodeGraphProjectError, CodeGraphAdapterError) as error:
+            raise ProviderManagerError(error.reason) from None
 
-    @staticmethod
-    def _require_bound_graft_topic(
-        project_root: str, conversation_id: str,
-    ) -> dict[str, str]:
-        from selfworkflow.v3.graft_lifecycle import require_conversation_topic
-
-        try:
-            return require_conversation_topic(project_root, conversation_id)
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-conversation-topic-unbound")
-            raise ProviderManagerError(reason) from None
-
-    @staticmethod
-    def _require_graft_enabled(
-        project_root: str, conversation_id: str,
-    ) -> dict[str, str]:
-        from selfworkflow.v3.graft_lifecycle import resolve_conversation_choice
-
-        try:
-            choice = resolve_conversation_choice(project_root, conversation_id)
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-conversation-choice-invalid")
-            raise ProviderManagerError(reason) from None
-        if choice is None:
-            return {"decision": "global"}
-        if choice["decision"] == "disabled":
-            raise ProviderManagerError("graft-disabled-for-conversation")
-        return choice
-
-    def graft_preflight(self, project_root: str) -> dict[str, Any]:
-        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
-            raise ProviderManagerError("provider-not-configured")
-        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
-        return GraftProjectLifecycle(self._adapter("graft")).preflight(project_root)
-
-    def graft_topics(
-        self, project_root: str, conversation_id: str,
-    ) -> dict[str, Any]:
-        """List local Deep Topics and the current conversation choice."""
-
-        try:
-            from selfworkflow.v3.graft_lifecycle import conversation_topic_options
-            return {
-                "providerId": "graft",
-                **conversation_topic_options(project_root, conversation_id),
-            }
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-topic-discovery-failed")
-            raise ProviderManagerError(reason) from None
-
-    def graft_topic_select(
-        self, project_root: str, conversation_id: str, *,
-        topic_id: str | None = None, disable: bool = False,
-        global_only: bool = False,
-    ) -> dict[str, Any]:
-        """Persist an explicit user choice without running Graft."""
-
-        if sum(value is not None for value in (topic_id,)) + int(disable) + int(global_only) != 1:
-            raise ProviderManagerError("graft-topic-choice-invalid")
-        try:
-            from selfworkflow.v3.graft_lifecycle import (
-                choose_conversation_topic, disable_conversation_graft,
-                enable_conversation_global,
-            )
-            choice = (
-                disable_conversation_graft(project_root, conversation_id)
-                if disable else enable_conversation_global(project_root, conversation_id)
-                if global_only else choose_conversation_topic(
-                    project_root, conversation_id, topic_id,  # type: ignore[arg-type]
-                )
-            )
-            return {
-                "providerId": "graft",
-                "status": "disabled" if disable else "global-only" if global_only else "bound",
-                "conversationId": conversation_id,
-                "topicId": None if disable else topic_id,
-                "choice": choice,
-            }
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-topic-choice-failed")
-            raise ProviderManagerError(reason) from None
-
-    def graft_enqueue(
-        self, project_root: str, changed_paths: Sequence[str], *,
-        conversation_id: str,
-    ) -> dict[str, Any]:
-        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
-            raise ProviderManagerError("provider-not-configured")
-        self._require_graft_enabled(project_root, conversation_id)
-        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
-        return GraftProjectLifecycle(self._adapter("graft")).enqueue(
-            project_root, changed_paths,
-        )
-
-    @staticmethod
-    def _topic_refresh_failure(
-        result: Mapping[str, Any], reason: str, *, deep: object = None,
-    ) -> dict[str, Any]:
-        """Keep the global result usable while making Topic freshness explicit."""
-
-        failure = dict(result)
-        failure.update({
-            "status": "partial",
-            "topicUpdated": False,
-            "topicFreshness": "unverified",
-            "retryable": True,
-            "completionEligible": False,
-            "nextAction": "retry-topic-deep",
-            "reason": reason,
-        })
-        if deep is not None:
-            failure["topicDeep"] = deep
-        return failure
-
-    def _refresh_bound_topic_after_worker(
-        self, project_root: str, result: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        """Continue one write-triggered worker run into its bound Topic Deep."""
-
-        output = dict(result)
-        if output.get("status") not in {"succeeded", "partial"}:
-            return output
-        topic_refresh = output.get("topicRefresh")
-        if not isinstance(topic_refresh, Mapping):
-            return self._topic_refresh_failure(
-                output, "graft-topic-refresh-result-missing",
-            )
-        action = output.get("nextAction")
-        if action != "run-graft-deep":
-            if action == "stop":
-                reason = topic_refresh.get("reason")
-                return self._topic_refresh_failure(
-                    output,
-                    reason if isinstance(reason, str) else "graft-topic-refresh-unverified",
-                )
-            if action in {"none", "topic-selection-required", "retry-global-map"}:
-                output.update({
-                    "topicUpdated": topic_refresh.get("status") == "fresh",
-                    "completionEligible": True,
-                })
-                return output
-            return self._topic_refresh_failure(
-                output, "graft-topic-refresh-action-invalid",
-            )
-        topic_id = topic_refresh.get("topicId")
-        if not isinstance(topic_id, str) or not topic_id:
-            return self._topic_refresh_failure(
-                output, "graft-topic-refresh-topic-invalid",
-            )
-        try:
-            model, reasoning_effort = _current_graft_deep_model_context(
-                self._paths.graft_model_file,
-            )
-            deep = self.graft_deep(
-                project_root, model, reasoning_effort,
-                conversation_id=str(output["conversationId"]),
-                topic_id=topic_id,
-                scope_files=(),
-            )
-        except ProviderManagerError as error:
-            return self._topic_refresh_failure(output, error.reason)
-        except Exception:
-            return self._topic_refresh_failure(output, "graft-topic-deep-failed")
-        if not isinstance(deep, Mapping) or deep.get("status") != "succeeded":
-            return self._topic_refresh_failure(
-                output, "graft-topic-deep-failed", deep=deep,
-            )
-        try:
-            topic_status = self.status(
-                "graft", project_root,
-                conversation_id=str(output["conversationId"]),
-            )
-        except ProviderManagerError as error:
-            return self._topic_refresh_failure(
-                output, error.reason, deep=deep,
-            )
-        topic_fresh = (
-            isinstance(topic_status, Mapping)
-            and topic_status.get("freshness") == "fresh"
-            and topic_status.get("graphStatus") == "fresh"
-            and topic_status.get("topicFreshness") == "fresh"
-        )
-        if not topic_fresh:
-            return self._topic_refresh_failure(
-                output, "graft-freshness-verification-failed", deep=deep,
-            )
-        global_map_pending = (
-            isinstance(output.get("globalMap"), Mapping)
-            and output["globalMap"].get("status") in {"failed", "deferred"}
-        )
-        output.update({
-            "topicUpdated": True,
-            "topicFreshness": "fresh",
-            "topicDeep": dict(deep),
-            "nextAction": "retry-global-map" if global_map_pending else "none",
-            "completionEligible": True,
-        })
-        return output
-
-    def graft_worker(
-        self, project_root: str, *, conversation_id: str,
-    ) -> dict[str, Any]:
-        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
-            raise ProviderManagerError("provider-not-configured")
-        self._require_graft_enabled(project_root, conversation_id)
-        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
-        result = GraftProjectLifecycle(self._adapter("graft")).run_once(
-            project_root, conversation_id=conversation_id,
-            include_topic=False,
-        )
-        if not isinstance(result, Mapping):
-            raise ProviderManagerError("graft-worker-result-invalid")
-        return self._refresh_bound_topic_after_worker(project_root, result)
-
-    def graft_sync(
-        self, project_root: str, changed_paths: Sequence[str], *,
-        conversation_id: str,
-    ) -> dict[str, Any]:
-        """Run the single write-event-to-worker lifecycle entry point."""
-
-        self._require_graft_enabled(project_root, conversation_id)
-        event = self.graft_enqueue(
-            project_root, changed_paths, conversation_id=conversation_id,
-        )
-        worker = self.graft_worker(project_root, conversation_id=conversation_id)
-        if (
-            isinstance(worker, Mapping)
-            and worker.get("nextAction") == "retry-global-map"
-            and isinstance(worker.get("globalMap"), Mapping)
-            and worker["globalMap"].get("status") == "deferred"
-        ):
-            maintenance = self.graft_ensure(
-                project_root, conversation_id=conversation_id,
-                allow_update=True,
-            )
-            worker = dict(worker)
-            worker["automaticMaintenance"] = maintenance
-            if maintenance.get("status") == "succeeded":
-                try:
-                    completed = self.graft_complete_pending(project_root)
-                except Exception as error:
-                    worker.update({
-                        "status": "partial",
-                        "nextAction": "retry-global-map",
-                        "reason": getattr(error, "reason", "graft-worker-state-failed"),
-                    })
-                else:
-                    worker.update({
-                        "status": "succeeded",
-                        "retryable": False,
-                        "pending": completed["pending"],
-                        "globalMapUpdated": True,
-                        "globalMap": maintenance["globalMap"],
-                        "topicUpdated": maintenance["updated"].get("topic", False),
-                        "topicFreshness": "fresh",
-                        "nextAction": "none",
-                        "completionEligible": True,
-                    })
-            else:
-                worker.update({
-                    "status": "partial",
-                    "nextAction": maintenance.get("nextAction", "retry-global-map"),
-                    "reason": maintenance.get("reason", "graft-maintenance-incomplete"),
-                })
-        return {"event": event, "worker": worker}
-
-    def graft_complete_pending(self, project_root: str) -> dict[str, Any]:
-        """Clear a deferred write event only after both maps are verified fresh."""
-
-        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
-            raise ProviderManagerError("provider-not-configured")
-        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
-        try:
-            return GraftProjectLifecycle(self._adapter("graft")).complete_pending(
-                project_root,
-            )
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-worker-state-failed")
-            raise ProviderManagerError(reason) from None
-
-    def graft_ensure(
-        self, project_root: str, *, conversation_id: str, allow_update: bool = False,
-    ) -> dict[str, Any]:
-        """Check and minimally refresh only the global non-Deep Code Map.
-
-        Deep Topic freshness/builds are never part of automatic maintenance;
-        they require an explicit ``graft_deep`` request from the user.
-        """
-
-        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
-            raise ProviderManagerError("provider-not-configured")
-        self._require_graft_enabled(project_root, conversation_id)
-        from selfworkflow.v3.graft_lifecycle import GraftProjectLifecycle
-
-        lifecycle = GraftProjectLifecycle(self._adapter("graft"))
-        try:
-            initial = lifecycle.check_global_freshness(project_root)
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-freshness-check-failed")
-            raise ProviderManagerError(reason, **graft_failure_details(error)) from None
-        output = {
-            "providerId": "graft",
-            "status": "partial",
-            "conversationId": conversation_id,
-            "topic": {
-                "status": "skipped",
-                "action": "none",
-                "reason": "deep-not-requested",
-            },
-            "globalMap": initial["globalMap"],
-            "updated": {"topic": False, "globalMap": False},
-            "nextAction": initial.get("nextAction", "none"),
-        }
-        if output["globalMap"].get("freshness") != "fresh":
-            if output["globalMap"].get("freshness") == "missing":
-                output.update({
-                    "status": "unavailable",
-                    "nextAction": "global-map-initialization-required",
-                })
-                return output
-            if not allow_update:
-                output.update({
-                    "status": "confirmation_required",
-                    "nextAction": "confirm-global-map-update",
-                })
-                return output
-            try:
-                output["globalMap"] = lifecycle.refresh_global_map(project_root)
-            except Exception as error:
-                reason = getattr(error, "reason", "graft-global-map-failed")
-                output.update({
-                    "reason": reason, "nextAction": "retry-global-map",
-                    **graft_failure_details(error),
-                })
-                return output
-            output["updated"]["globalMap"] = True
-        try:
-            final = lifecycle.check_global_freshness(project_root)
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-freshness-check-failed")
-            output.update({"reason": reason, "nextAction": "retry-global-map", **graft_failure_details(error)})
-            return output
-        output.update({
-            "status": final["status"],
-            "topic": output["topic"],
-            "globalMap": final["globalMap"],
-            "nextAction": final["nextAction"],
-        })
-        if output["status"] != "fresh":
-            output["reason"] = "graft-freshness-verification-failed"
-        else:
-            output["status"] = "succeeded"
-        return output
-
-    def graft_deep(
-        self,
-        project_root: str,
-        model: str,
-        reasoning_effort: str,
-        *,
-        conversation_id: str,
-        topic_id: str | None,
-        scope_files: Sequence[str] = (),
-    ) -> dict[str, Any]:
-        """Run one scoped official Graft Deep build through the current model."""
-
-        if "graft" not in {item["providerId"] for item in self._read_config()["providers"]}:
-            raise ProviderManagerError("provider-not-configured")
-        binding = self._require_bound_graft_topic(project_root, conversation_id)
-        if topic_id is not None and topic_id != binding["topicId"]:
-            raise ProviderManagerError("graft-conversation-topic-mismatch")
-        topic_id = binding["topicId"]
-        try:
-            from selfworkflow.v3.graft_codex_bridge import run_codex_graft_deep
-
-            adapter = self._adapter("graft")
-            command = getattr(adapter, "command_prefix", None)
-            if not isinstance(command, tuple):
-                raise ProviderManagerError("provider-adapter-unavailable")
-            return run_codex_graft_deep(
-                graft_command=command,
-                project_root=project_root,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                conversation_id=conversation_id,
-                topic_id=topic_id,
-                scope_files=scope_files,
-            )
-        except ProviderManagerError:
-            raise
-        except Exception as error:
-            reason = getattr(error, "reason", "graft-deep-failed")
-            raise ProviderManagerError(reason) from None
+    def preflight(self, project_root: str) -> dict[str, Any]:
+        return self.ensure(project_root)
 
     def maintain(
-        self,
-        provider_id: str,
-        action: str,
-        project_root: str,
-        *,
-        plan_only: bool,
-        confirmed_plan_hash: str | None = None,
+        self, provider_id: str, action: str, project_root: str, *,
+        plan_only: bool, confirmed_plan_hash: str | None = None,
     ) -> dict[str, Any]:
-        if provider_id not in {"codegraph", "graft"}:
+        if provider_id != "codegraph":
             raise ProviderManagerError("provider-not-supported")
-        if provider_id == "codegraph" and not plan_only:
-            raise ProviderManagerError("provider-maintenance-apply-unverified")
-        adapter = self._adapter(provider_id)
-        if action == "upgrade-managed-install" and adapter.ownership == "user-local":  # type: ignore[union-attr]
-            raise ProviderManagerError("provider-user-owned-upgrade-forbidden")
+        adapter = self._adapter()
         try:
-            plan = adapter.plan_maintenance(action, project_root)  # type: ignore[union-attr]
-        except (CodeGraphAdapterError, GraftAdapterError) as error:
-            reason = (
-                "provider-user-owned-upgrade-forbidden"
-                if error.reason in {
-                    "codegraph-user-owned-upgrade-forbidden",
-                    "graft-user-owned-upgrade-forbidden",
-                }
-                else "provider-maintenance-plan-invalid"
-            )
-            raise ProviderManagerError(reason) from None
+            plan = adapter.plan_maintenance(action, project_root)
+        except CodeGraphAdapterError as error:
+            raise ProviderManagerError(error.reason) from None
         self._log(
-            "provider.maintain.planned", providerId=provider_id,
+            "provider.maintain.planned", providerId="codegraph",
             operation="maintain", status="planned", planHash=plan["planHash"],
         )
         if plan_only:
             return plan
+        if not isinstance(confirmed_plan_hash, str):
+            raise ProviderManagerError("provider-maintenance-confirmation-required")
         try:
-            return adapter.execute_maintenance(  # type: ignore[union-attr]
-                plan, project_root,
-                confirmed_plan_hash=str(confirmed_plan_hash),
+            return adapter.execute_maintenance(
+                plan, project_root, confirmed_plan_hash=confirmed_plan_hash,
             )
-        except (CodeGraphAdapterError, GraftAdapterError) as error:
-            raise ProviderManagerError(error.reason, **graft_failure_details(error)) from None
+        except CodeGraphAdapterError as error:
+            raise ProviderManagerError(error.reason) from None

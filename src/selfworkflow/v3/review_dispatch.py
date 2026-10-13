@@ -397,16 +397,14 @@ def _dispatch_review(
         "reviewExecutionBoundary": {
             "role": "reviewer",
             "modelScope": "review-only",
-            "graftPolicy": "deny",
+            "codeGraphPolicy": "deny",
             "allowedOperations": [
                 "read-review-package",
                 "write-review-report",
             ],
             "deniedOperations": [
-                "graft.query",
-                "graft.deep",
-                "graft.event",
-                "graft.worker",
+                "codegraph.query",
+                "codegraph.maintain",
                 "provider.maintain",
                 "workspace.write",
                 "verification.run",

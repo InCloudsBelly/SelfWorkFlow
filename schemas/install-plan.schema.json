@@ -23,6 +23,18 @@
     "status": {"enum": ["ready", "paused", "already-installed"]},
     "issues": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "securityStatus": {"enum": ["verified", "unverified"]},
-    "planHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    "planHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "hostLauncher": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "pythonExecutable", "pythonHash", "beforeExists", "beforeHash", "contentHash"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "pythonExecutable": {"type": "string", "minLength": 1},
+        "pythonHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "beforeExists": {"type": "boolean"},
+        "beforeHash": {"type": ["string", "null"]},
+        "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
   }
 }

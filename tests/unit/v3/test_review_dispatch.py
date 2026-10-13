@@ -324,13 +324,13 @@ class ReviewDispatchTests(unittest.TestCase):
         boundary = port.calls[0]["payload"]["reviewExecutionBoundary"]
         self.assertEqual(boundary["role"], "reviewer")
         self.assertEqual(boundary["modelScope"], "review-only")
-        self.assertEqual(boundary["graftPolicy"], "deny")
+        self.assertEqual(boundary["codeGraphPolicy"], "deny")
         self.assertEqual(
             boundary["allowedOperations"],
             ["read-review-package", "write-review-report"],
         )
-        self.assertIn("graft.deep", boundary["deniedOperations"])
-        self.assertIn("graft.query", boundary["deniedOperations"])
+        self.assertIn("codegraph.maintain", boundary["deniedOperations"])
+        self.assertIn("codegraph.query", boundary["deniedOperations"])
         self.assertIn("workspace.write", boundary["deniedOperations"])
 
     def test_dispatch_rejects_host_that_drops_reviewer_boundary(self):

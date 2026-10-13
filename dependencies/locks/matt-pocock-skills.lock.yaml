@@ -2,8 +2,8 @@ schemaVersion: 1
 sourceId: matt-pocock-skills
 canonicalUrl: https://github.com/mattpocock/skills.git
 path: dependencies/upstream/matt-pocock-skills
-gitlinkCommit: b0618bc436ad893b3c5e84e55fba86586d34a404
-gitTree: d4fcf85363f43b6916d81accfc635d6d35d727f6
+gitlinkCommit: 49dd158d1076134a641b33efb035946536778336
+gitTree: 3ce485319972aae46dec0c2ac34cf4a7f28f7414
 license:
   path: LICENSE
   spdx: MIT

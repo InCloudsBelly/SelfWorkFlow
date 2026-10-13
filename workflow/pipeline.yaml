@@ -26,6 +26,10 @@ stages:
     failureOwner: planned
     slots:
       - {id: plan.primary, cardinality: exactly-one, allowedInvocationKinds: [agent-native, skill]}
+      - id: plan.assessment
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, plan]}, {eq: [operationType, implement]}, {eq: [operationType, debug]}]}
       - id: test.quality.plan
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
@@ -41,7 +45,11 @@ stages:
       - id: implement.orchestrator
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
-        condition: {eq: [operationType, implement]}
+        condition: {all: [{eq: [operationType, implement]}, {not: {contains: [explicitModuleIds, implement-spec]}}]}
+      - id: implement.spec
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {all: [{eq: [operationType, implement]}, {eq: [writeTask, true]}, {contains: [explicitModuleIds, implement-spec]}]}
       - id: implement.method
         cardinality: zero-or-one
         allowedInvocationKinds: [agent-native, skill]
@@ -61,6 +69,10 @@ stages:
   - id: reviewed
     failureOwner: implemented
     slots:
+      - id: review.debt
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, review]}, {eq: [operationType, analyze]}, {eq: [operationType, implement]}, {eq: [operationType, debug]}]}
       - id: review.self
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native, skill]
@@ -80,6 +92,10 @@ stages:
   - id: verified
     failureOwner: implemented
     slots:
+      - id: verify.ci
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, verify]}, {eq: [operationType, publish]}, {eq: [operationType, implement]}, {eq: [operationType, debug]}]}
       - id: verify.selection
         cardinality: exactly-one
         allowedInvocationKinds: [agent-native, skill]

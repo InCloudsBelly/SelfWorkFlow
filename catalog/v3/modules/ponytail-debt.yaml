@@ -1,0 +1,12 @@
+schemaVersion: 3
+id: ponytail-debt
+sourceHash: sha256:51b165b32ae68be08063fac0fc0e2ce2c78e98239ad5c833be7645204bdaa093
+stage: reviewed
+slot: review.debt
+selectionMode: static
+invocation: {kind: skill, ref: skills/ponytail-debt/SKILL.md}
+dependencies: []
+conflicts: []
+contextCost: {estimatedContextCost: 192, estimatedExecutionCost: 0}
+# Support describes the local adapter contract; it does not attest Host execution.
+supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

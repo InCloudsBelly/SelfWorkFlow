@@ -18,11 +18,11 @@ workflows:
   - id: ci
     upstreamId: bmad-testarch-ci
     root: skills/bmad-testarch-ci
-    support: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
+    support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: framework
     upstreamId: bmad-testarch-framework
     root: skills/bmad-testarch-framework
-    support: {sourceIntegrity: supported, adapterSupport: unverified, runtimeCapability: unverified, behaviorEvidence: unverified}
+    support: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: unverified, behaviorEvidence: unverified}
   - id: nfr
     upstreamId: bmad-testarch-nfr
     root: skills/bmad-testarch-nfr

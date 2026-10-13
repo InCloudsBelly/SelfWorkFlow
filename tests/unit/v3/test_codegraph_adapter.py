@@ -31,7 +31,7 @@ class CodeGraphAdapterTests(unittest.TestCase):
 
     def test_status_version_and_help_use_only_injected_readonly_port(self):
         port = FakeCommandPort(
-            self._result(stdout='{"initialized":true,"revision":"r1"}'),
+            self._result(stdout='{"initialized":true,"fileCount":2,"index":{"state":"complete"}}'),
             self._result(stdout="1.3.1"),
             self._result(stdout="Usage: codegraph"),
         )
@@ -42,7 +42,8 @@ class CodeGraphAdapterTests(unittest.TestCase):
         help_result = adapter.help()
 
         self.assertTrue(status["initialized"])
-        self.assertEqual(status["revision"], "r1")
+        self.assertEqual(status["fileCount"], 2)
+        self.assertEqual(status["indexState"], "complete")
         self.assertEqual(version["version"], "1.3.1")
         self.assertIn("Usage", help_result["summary"])
         self.assertTrue(status["readOnly"])
@@ -63,6 +64,62 @@ class CodeGraphAdapterTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "codegraph-command-failed")
         self.assertNotIn("do-not-log", str(caught.exception))
 
+    def test_official_sync_lock_error_is_busy_for_both_glyphs_and_ansi(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
+
+        for glyph, pid in (("✗", " (PID 123)"), ("[ERR]", ""), ("\x1b[31m✗\x1b[39m", " (PID 123)")):
+            message = (
+                f"Failed to sync: CodeGraph database is locked by another process{pid}. "
+                "If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock"
+            )
+            with self.subTest(glyph=glyph):
+                adapter = self._adapter(FakeCommandPort(self._result(1, stderr=glyph + " " + message + "\n")))
+                plan = adapter.plan_maintenance("sync", "C:/work/project")
+                with self.assertRaises(CodeGraphAdapterError) as caught:
+                    adapter.execute_maintenance(plan, "C:/work/project", confirmed_plan_hash=plan["planHash"])
+                self.assertEqual(caught.exception.reason, "codegraph-project-busy")
+                self.assertNotIn("private", str(caught.exception))
+
+    def test_sync_lock_classification_rejects_quotes_stdout_and_other_errors(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
+
+        line = (
+            "✗ Failed to sync: CodeGraph database is locked by another process. "
+            "If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock"
+        )
+        results = (
+            self._result(1, stderr="quoted: " + line),
+            self._result(1, stderr='"' + line + '"'),
+            self._result(1, stdout=line),
+            self._result(1, stderr="✗ Failed to sync: EACCES C:/private/codegraph.lock"),
+        )
+        for result in results:
+            with self.subTest(result=result):
+                adapter = self._adapter(FakeCommandPort(result))
+                plan = adapter.plan_maintenance("sync", "C:/work/project")
+                with self.assertRaises(CodeGraphAdapterError) as caught:
+                    adapter.execute_maintenance(plan, "C:/work/project", confirmed_plan_hash=plan["planHash"])
+                self.assertEqual(caught.exception.reason, "codegraph-command-failed")
+                self.assertNotIn("private", str(caught.exception))
+
+    def test_query_and_status_lock_text_do_not_become_sync_busy(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
+
+        line = (
+            "✗ Failed to sync: CodeGraph database is locked by another process. "
+            "If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock"
+        )
+        with self.assertRaises(CodeGraphAdapterError) as status_error:
+            self._adapter(FakeCommandPort(self._result(1, stderr=line))).status("C:/work/project")
+        self.assertEqual(status_error.exception.reason, "codegraph-command-failed")
+        adapter = self._adapter(FakeCommandPort(
+            self._result(stdout='{"initialized":true,"index":{"state":"complete"}}'),
+            self._result(1, stderr=line),
+        ))
+        with self.assertRaises(CodeGraphAdapterError) as query_error:
+            adapter.query("C:/work/project", "find Widget")
+        self.assertEqual(query_error.exception.reason, "codegraph-command-failed")
+
     def test_query_never_initializes_index_implicitly(self):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
 
@@ -74,16 +131,16 @@ class CodeGraphAdapterTests(unittest.TestCase):
         self.assertEqual(len(port.calls), 1)
         self.assertEqual(port.calls[0]["argv"][-3], "status")
 
-    def test_query_plan_declares_unavoidable_potential_local_write(self):
-        port = FakeCommandPort(self._result(stdout='{"initialized":true,"revision":"r2"}'))
+    def test_query_plan_is_readonly_after_lifecycle_maintenance(self):
+        port = FakeCommandPort(self._result(stdout='{"initialized":true,"index":{"state":"complete"}}'))
 
         plan = self._adapter(port).plan_query("C:/work/project", "find Widget")
 
         self.assertEqual(plan["operation"], "query")
-        self.assertFalse(plan["readOnly"])
-        self.assertEqual(plan["sideEffectClass"], "potential-local-write")
+        self.assertTrue(plan["readOnly"])
+        self.assertEqual(plan["sideEffectClass"], "none")
         self.assertEqual(plan["supportStatus"], "unverified")
-        self.assertEqual(plan["reasonCode"], "codegraph-query-no-no-sync")
+        self.assertEqual(plan["reasonCode"], "codegraph-query-after-ensure")
         self.assertRegex(plan["adapterCommandHash"], r"^sha256:[0-9a-f]{64}$")
         self.assertRegex(plan["planHash"], r"^sha256:[0-9a-f]{64}$")
         self.assertNotIn("C:/work/project", str(plan))
@@ -93,10 +150,10 @@ class CodeGraphAdapterTests(unittest.TestCase):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
 
         first = self._adapter(FakeCommandPort(
-            self._result(stdout='{"initialized":true,"revision":"r2"}')
+            self._result(stdout='{"initialized":true,"index":{"state":"complete"}}')
         )).plan_query("C:/work/project", "find Widget")
         second = self._adapter(FakeCommandPort(
-            self._result(stdout='{"initialized":true,"revision":"r2"}')
+            self._result(stdout='{"initialized":true,"index":{"state":"complete"}}')
         )).plan_query("C:/work/project", "find Widget")
         self.assertEqual(first["planHash"], second["planHash"])
 
@@ -133,7 +190,7 @@ class CodeGraphAdapterTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(result["planHash"], plan["planHash"])
-        self.assertEqual(port.calls[0]["argv"][-3:], ("sync", "C:/work/project", "--json"))
+        self.assertEqual(port.calls[0]["argv"][-2:], ("sync", "C:/work/project"))
 
         with self.assertRaises(CodeGraphAdapterError) as caught:
             adapter.execute_maintenance(

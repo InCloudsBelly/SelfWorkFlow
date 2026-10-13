@@ -62,6 +62,12 @@ def build_plan_graph(
         for slot in stage["slots"]:
             applicable = _condition(slot.get("condition"), request, capability_states)
             if not applicable:
+                if any(
+                    module.get("slot") == slot["id"]
+                    and module.get("id") in request["explicitModuleIds"]
+                    for module in envelope["catalog"].get("modules", [])
+                ):
+                    reasons.add("explicit-module-inapplicable")
                 slots.append({"slotId": slot["id"], "cardinality": slot["cardinality"], "applicability": "not-applicable", "selectedModules": [], "gates": []})
                 continue
             route = route_modules(
@@ -70,6 +76,9 @@ def build_plan_graph(
                     slot_id=slot["id"], cardinality=slot["cardinality"], operation_type=request["operationType"],
                     strength=strength, write_task=request["writeTask"], explicit_module_ids=tuple(request["explicitModuleIds"]),
                     project_default_module_ids=tuple(request["projectDefaultModuleIds"]), capability_states=capability_states,
+                    implement_spec_evidence=request.get("implementSpecEvidence"),
+                    durable_spec=request.get("durableSpec"),
+                    requirements_maturity=request.get("requirementsMaturity"),
                 ),
             )
             reasons.update(route.reason_codes)

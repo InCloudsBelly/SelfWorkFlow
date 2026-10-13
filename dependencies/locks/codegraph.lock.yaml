@@ -1,0 +1,18 @@
+schemaVersion: 1
+canonicalUrl: https://github.com/colbymchenry/codegraph.git
+package:
+  name: '@colbymchenry/codegraph'
+  version: 1.6.2
+  releaseTag: v1.6.2
+  node: '>=20.0.0 <25.0.0'
+  packageJsonHash: sha256:d5fc51d6abad770a85e7872b79e77bd682b555a3c18d67ff37a1559e9f221bf7
+  packageLockHash: sha256:78a7fd790271bd87cfd39a880cd12e48aca7854dd426d34f82af0652ee2faa10
+  entry: dist/bin/codegraph.js
+  standaloneWindowsAsset: codegraph-win32-x64.zip
+  license: MIT
+install:
+  kind: managed-runtime
+  defaultRoot: '%LOCALAPPDATA%/SelfWorkFlow/dependencies/codegraph/1.6.2'
+  command: bin/codegraph.cmd
+  mcpArgs: [serve, --mcp]
+  projectIndexDirectory: .codegraph

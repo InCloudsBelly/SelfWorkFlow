@@ -6,8 +6,8 @@ entries:
     source:
       kind: planned
       path: extensions/knowledge/contract.yaml
-      revision: git:18dce22eaa84815fdb6636df635781a93610e492
-      contentHash: sha256:81cfff99175cfc147c3b486f95aba5078a79627503d7a6cbda2c0800ffaa2b3c
+      revision: git:12309e93960f1ccf9cd30aff8a58bb7da29fbfb7
+      contentHash: sha256:6140c5f4c5b46e88c499e44e5ab9fafa533eb5b5298f861aa85c3895bf2cc5c7
     aliases:
       - name: on-demand-knowledge
         target: knowledge-on-demand-loading

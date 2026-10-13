@@ -1018,10 +1018,13 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
             "ponytail-review": "ponytail-review",
             "ponytail-audit": "ponytail-audit",
             "ponytail-help": "ponytail-help",
+            "ponytail-debt": "ponytail-debt",
         }
         if (
-            ponytail_route["skillIds"][0] != "ponytail"
-            and ponytail_route["skillIds"][0] != "ponytail-help"
+            ponytail_route["skillIds"][0] not in {"ponytail", "ponytail-help", "ponytail-debt"}
+        ) or (
+            "ponytail-debt" in ponytail_route["skillIds"]
+            and ponytail_route["skillIds"] != ["ponytail-debt"]
         ) or [
             expected_modules[item] for item in ponytail_route["skillIds"]
         ] != ponytail_route["selectedModuleIds"]:
@@ -1031,16 +1034,17 @@ def _validate_resolve_result(document: dict[str, Any]) -> None:
             )
         plan = document.get("planGraph")
         if plan is not None:
-            route_slot_id = (
-                "design.specialists"
-                if ponytail_route["skillIds"][0] == "ponytail-help"
-                else "code.reasoning"
-            )
+            if ponytail_route["skillIds"][0] == "ponytail-debt":
+                route_stage_id, route_slot_id = "reviewed", "review.debt"
+            elif ponytail_route["skillIds"][0] == "ponytail-help":
+                route_stage_id, route_slot_id = "designed", "design.specialists"
+            else:
+                route_stage_id, route_slot_id = "designed", "code.reasoning"
             code_slots = [
                 slot
                 for stage in plan["stages"]
                 for slot in stage["slots"]
-                if stage["stageId"] == "designed"
+                if stage["stageId"] == route_stage_id
                 and slot["slotId"] == route_slot_id
             ]
             if (

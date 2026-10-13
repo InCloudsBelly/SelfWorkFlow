@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import tempfile
@@ -14,11 +15,13 @@ from jsonschema import Draft202012Validator
 import yaml
 
 from selfworkflow.catalog import compile_catalog
+from selfworkflow.host_runtime import build_host_runtime
 from selfworkflow.ponytail_source import (
     PonytailSourceError,
     copy_ponytail_skills,
 )
-from selfworkflow.v3.tea_adapter import verify_tea_source
+from selfworkflow.v3.submodule_profiles import _native as _run_source_git
+from selfworkflow.v3.tea_adapter import validate_packaged_runtime, verify_tea_source
 
 
 class AdapterError(RuntimeError):
@@ -26,17 +29,22 @@ class AdapterError(RuntimeError):
 
 
 _RUNTIME_PROFILES = {"core", "knowledge", "maintainer"}
+_RUNTIME_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$")
 _CORE_CATALOG_IDS = {
     "workflow-core",
     "workflow-quality",
     "testing-review-quality",
     "tea-quality-foundation",
+    "tea-framework",
+    "tea-ci",
     "code-quality",
     "matt-skills-foundation",
     "ponytail",
     "ponytail-review",
     "ponytail-audit",
     "ponytail-help",
+    "ponytail-debt",
+    "implement-spec",
 }
 _CORE_PATHS = (
     "workflow/core.md",
@@ -45,9 +53,9 @@ _CORE_PATHS = (
     "workflow/modes/full.md",
     "workflow/modes/deep.md",
     "workflow/modules/code.md",
-    "workflow/modules/graft-read.md",
-    "workflow/modules/graft-deep.md",
-    "workflow/modules/graft-update.md",
+    "workflow/modules/optional-integrations.md",
+    "workflow/modules/codegraph-read.md",
+    "workflow/modules/codegraph-update.md",
     "workflow/modules/review.md",
     "workflow/modules/knowledge.md",
     "workflow/modules/artifacts.md",
@@ -60,6 +68,9 @@ _CORE_PATHS = (
     "schemas/run-ledger.schema.json",
     "schemas/resolve-request.schema.json",
     "schemas/resolve-result.schema.json",
+    "schemas/install-plan.schema.json",
+    "schemas/install-manifest.schema.json",
+    "schemas/rollback-plan.schema.json",
     "schemas/git-policy.schema.json",
     "schemas/project-review-profile.schema.json",
     "schemas/review-model-config.schema.json",
@@ -70,11 +81,23 @@ _CORE_PATHS = (
     "skills/workflow-quality",
     "skills/testing-review-quality",
     "skills/tea-quality",
+    "skills/implement-spec",
+    "skills/workflow-skill-maintenance",
+    "skills/ui-ux-pro-max",
+    "skills/content-research-writer",
+    "skills/obsidian-markdown",
+    "skills/obsidian-bases",
+    "skills/json-canvas",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
     "dependencies/locks/matt-pocock-skills.lock.yaml",
     "dependencies/locks/tea.lock.yaml",
-    "dependencies/locks/graft.lock.yaml",
+    "dependencies/locks/ponytail.lock.yaml",
+    "dependencies/locks/codegraph.lock.yaml",
+    "dependencies/locks/anthropic-skills.lock.yaml",
+    "dependencies/locks/ui-ux-pro-max.lock.yaml",
+    "dependencies/locks/composio-skills.lock.yaml",
+    "dependencies/locks/obsidian-skills.lock.yaml",
     "overlays/tea",
     "adapters",
     # V3 is shipped as an explicit, self-contained extension. The lightweight
@@ -87,6 +110,19 @@ _CORE_PATHS = (
 )
 
 _MATT_LOCK_PATH = "dependencies/locks/matt-pocock-skills.lock.yaml"
+_COMMUNITY_SOURCES = {
+    "ui-ux-pro-max": ("https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git", (
+        "LICENSE", "src/ui-ux-pro-max/data", "src/ui-ux-pro-max/scripts/core.py",
+        "src/ui-ux-pro-max/scripts/search.py", "src/ui-ux-pro-max/scripts/design_system.py",
+        "src/ui-ux-pro-max/scripts/reasoning_contract.py", "src/ui-ux-pro-max/templates/base/skill-content.md",
+    ), "MIT", "verified"),
+    "composio-skills": ("https://github.com/ComposioHQ/awesome-claude-skills.git", (
+        "README.md", "content-research-writer",
+    ), "Apache-2.0", "declared"),
+    "obsidian-skills": ("https://github.com/kepano/obsidian-skills.git", (
+        "LICENSE", "skills/obsidian-markdown", "skills/obsidian-bases", "skills/json-canvas",
+    ), "MIT", "verified"),
+}
 _TEA_RUNTIME_WORKFLOWS = {
     "bmad-testarch-test-design": "skills/bmad-testarch-test-design",
     "bmad-testarch-atdd": "skills/bmad-testarch-atdd",
@@ -232,6 +268,192 @@ def _copy_matt_skills(
     shutil.copyfile(license_path, license_target)
 
 
+def _copy_anthropic_skill_creator(source: Path, destination: Path) -> None:
+    """Package the pinned maintenance reference outside Skill discovery."""
+
+    try:
+        lock = yaml.safe_load(
+            (source / "dependencies/locks/anthropic-skills.lock.yaml").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise AdapterError("anthropic-skills-lock-invalid") from None
+    if (
+        not isinstance(lock, dict)
+        or lock.get("schemaVersion") != 1
+        or lock.get("sourceId") != "anthropic-skills"
+        or lock.get("canonicalUrl") != "https://github.com/anthropics/skills.git"
+        or lock.get("path") != "dependencies/upstream/anthropic-skills"
+        or any(not isinstance(lock.get(key), str) or re.fullmatch(r"[0-9a-f]{40}", lock[key]) is None for key in ("gitlinkCommit", "gitTree"))
+        or not isinstance(lock.get("selectedSkill"), dict)
+        or not isinstance(lock.get("license"), dict)
+    ):
+        raise AdapterError("anthropic-skills-lock-invalid")
+    selected = lock["selectedSkill"]
+    files = selected.get("files")
+    if (
+        selected.get("id") != "skill-creator"
+        or selected.get("path") != "skills/skill-creator"
+        or not isinstance(files, dict)
+        or not {"SKILL.md", "LICENSE.txt"}.issubset(files)
+        or lock["license"].get("path") != "skills/skill-creator/LICENSE.txt"
+        or lock["license"].get("spdx") != "Apache-2.0"
+        or lock["license"].get("hash") != files["LICENSE.txt"]
+    ):
+        raise AdapterError("anthropic-skills-lock-invalid")
+    for relative, expected in files.items():
+        if (
+            not isinstance(relative, str)
+            or not relative
+            or "\\" in relative or ":" in relative
+            or PurePosixPath(relative).is_absolute()
+            or ".." in PurePosixPath(relative).parts
+            or not isinstance(expected, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", expected) is None
+        ):
+            raise AdapterError("anthropic-skills-lock-invalid")
+
+    def hashes(root: Path) -> dict[str, str]:
+        result = {}
+        for path in (root, *sorted(root.rglob("*"))):
+            if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
+                raise AdapterError("anthropic-skills-source-invalid")
+            if path.is_file():
+                # Git checkout line endings vary; the lock binds canonical LF bytes.
+                result[path.relative_to(root).as_posix()] = "sha256:" + hashlib.sha256(
+                    path.read_bytes().replace(b"\r\n", b"\n")
+                ).hexdigest()
+        return result
+
+    upstream = source / lock["path"]
+    skill = upstream / selected["path"]
+    try:
+        if not upstream.is_dir() or not skill.is_dir():
+            raise AdapterError("anthropic-skills-source-invalid")
+        for path in (upstream, upstream / "skills", skill):
+            if path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
+                raise AdapterError("anthropic-skills-source-invalid")
+        gitlink_result = _run_source_git(
+            ["git", "ls-files", "--stage", "--", lock["path"]], source,
+        )
+        if gitlink_result.returncode:
+            raise AdapterError("anthropic-skills-source-invalid")
+        gitlink = gitlink_result.stdout.strip()
+        if gitlink != f"160000 {lock['gitlinkCommit']} 0\t{lock['path']}":
+            raise AdapterError("anthropic-skills-source-drift")
+        results = [_run_source_git(["git", *arguments], upstream) for arguments in (
+            ("rev-parse", "HEAD"), ("rev-parse", "HEAD^{tree}"),
+            ("status", "--porcelain=v1", "--untracked-files=all"),
+        )]
+        if any(result.returncode for result in results):
+            raise AdapterError("anthropic-skills-source-invalid")
+        values = [result.stdout.strip() for result in results]
+        if values != [lock["gitlinkCommit"], lock["gitTree"], ""] or hashes(skill) != files:
+            raise AdapterError("anthropic-skills-source-drift")
+        target = destination / "references/anthropic-skills/skill-creator"
+        _copy_tree(skill, target)
+        if hashes(target) != files:
+            raise AdapterError("anthropic-skills-source-drift")
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        raise AdapterError("anthropic-skills-source-invalid") from None
+
+
+def _copy_community_sources(source: Path, destination: Path) -> None:
+    """Copy only the locked resource closures behind the five local entries."""
+
+    for source_id, (url, resources, spdx, license_status) in _COMMUNITY_SOURCES.items():
+        try:
+            lock = yaml.safe_load((source / f"dependencies/locks/{source_id}.lock.yaml").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            raise AdapterError("community-skills-lock-invalid") from None
+        relative_root = f"dependencies/upstream/{source_id}"
+        if (
+            not isinstance(lock, dict) or type(lock.get("schemaVersion")) is not int
+            or lock.get("schemaVersion") != 1 or lock.get("sourceId") != source_id
+            or lock.get("canonicalUrl") != url or lock.get("path") != relative_root
+            or lock.get("resources") != list(resources)
+            or any(not isinstance(lock.get(key), str) or re.fullmatch(r"[0-9a-f]{40}", lock[key]) is None
+                   for key in ("gitlinkCommit", "gitTree"))
+            or not isinstance(lock.get("files"), dict) or not lock["files"]
+        ):
+            raise AdapterError("community-skills-lock-invalid")
+        files = lock["files"]
+        for relative, expected in files.items():
+            if (
+                not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative
+                or PurePosixPath(relative).is_absolute() or ".." in PurePosixPath(relative).parts
+                or PurePosixPath(relative).as_posix() != relative
+                or not isinstance(expected, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", expected) is None
+            ):
+                raise AdapterError("community-skills-lock-invalid")
+        if lock.get("license") != {"path": resources[0], "spdx": spdx, "status": license_status,
+                                  "hash": files.get(resources[0])}:
+            raise AdapterError("community-skills-lock-invalid")
+
+        def plain(path: Path) -> None:
+            current = path
+            while current != source:
+                if current.is_symlink() or getattr(current.lstat(), "st_file_attributes", 0) & 0x400:
+                    raise AdapterError("community-skills-source-invalid")
+                current = current.parent
+
+        def digest(path: Path) -> str:
+            return "sha256:" + hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+        upstream = source / relative_root
+        try:
+            plain(upstream)
+            commands = [(["git", "ls-files", "--stage", "--", relative_root], source)] + [
+                (["git", *arguments], upstream) for arguments in (
+                    ("rev-parse", "HEAD"), ("rev-parse", "HEAD^{tree}"),
+                    ("status", "--porcelain=v1", "--untracked-files=all"),
+                )
+            ]
+            results = [_run_source_git(command, cwd) for command, cwd in commands]
+            if any(result.returncode for result in results):
+                raise AdapterError("community-skills-source-invalid")
+            expected_git = [f"160000 {lock['gitlinkCommit']} 0\t{relative_root}",
+                            lock["gitlinkCommit"], lock["gitTree"], ""]
+            if [result.stdout.strip() for result in results] != expected_git:
+                raise AdapterError("community-skills-source-drift")
+            selected = {}
+            for relative in resources:
+                resource = upstream / relative
+                plain(resource)
+                if resource.is_file():
+                    selected[relative] = resource
+                elif resource.is_dir():
+                    for path in sorted(resource.rglob("*")):
+                        plain(path)
+                        if path.is_file():
+                            selected[path.relative_to(upstream).as_posix()] = path
+                else:
+                    raise AdapterError("community-skills-source-invalid")
+            if set(selected) != set(files) or any(digest(path) != files[name] for name, path in selected.items()):
+                raise AdapterError("community-skills-source-drift")
+            target_root = destination / "references/community-skills" / source_id
+            for name, path in selected.items():
+                target = target_root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
+                if digest(target) != files[name]:
+                    raise AdapterError("community-skills-source-drift")
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            raise AdapterError("community-skills-source-invalid") from None
+
+
+def _resolve_tea_checklist(upstream: Path, workflow_id: str) -> Path:
+    """Resolve a pinned TEA checklist while accepting the TEA 2.x CI layout."""
+
+    checklist = upstream / "skills" / f"bmad-testarch-{workflow_id}" / "checklist.md"
+    if workflow_id == "ci" and not checklist.is_file():
+        # TEA 2.x keeps the CI checklist beside the framework's CI setup
+        # materials instead of at the former top-level skill path.
+        checklist = upstream / "skills" / "bmad-testarch-framework" / "ci" / "checklist.md"
+    if not checklist.is_file() or checklist.is_symlink():
+        raise AdapterError("tea-source-invalid")
+    return checklist
+
+
 def _copy_tea_quality(source: Path, destination: Path) -> None:
     """Copy only the pinned TEA workflow closures used by the local adapter."""
 
@@ -248,11 +470,37 @@ def _copy_tea_quality(source: Path, destination: Path) -> None:
         if workflow.is_symlink() or not (workflow / "SKILL.md").is_file():
             raise AdapterError("tea-source-invalid")
         _copy_tree(workflow, target / workflow_id)
+    for workflow_id in ("framework", "ci"):
+        reference = target / f"bmad-testarch-{workflow_id}"
+        reference.mkdir(parents=True, exist_ok=True)
+        # Package only the bounded entry and reference checklist. Upstream
+        # creation steps and project-local BMAD bootstrap are not executable here.
+        shutil.copyfile(source / "skills/tea-quality/assessments" / workflow_id / "SKILL.md", reference / "SKILL.md")
+        checklist = _resolve_tea_checklist(upstream, workflow_id)
+        shutil.copyfile(checklist, reference / "checklist.md")
+        # The source adapter remains in the repository; publish one discoverable entry.
+        duplicate = destination / "skills/tea-quality/assessments" / workflow_id / "SKILL.md"
+        duplicate.unlink(missing_ok=True)
+    knowledge = upstream / "skills/bmod-tea/knowledge"
+    if not (knowledge / "tea-index.csv").is_file():
+        raise AdapterError("tea-knowledge-missing")
+    _copy_tree(knowledge, target / "bmod-tea/knowledge")
+    for entry in target.glob("*/SKILL.md"):
+        metadata = entry.parent / "agents/openai.yaml"
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        metadata.write_text(
+            "policy:\n  allow_implicit_invocation: false\n", encoding="utf-8"
+        )
     license_path = upstream / "LICENSE"
     if license_path.is_symlink() or not license_path.is_file():
         raise AdapterError("tea-source-invalid")
     target.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(license_path, target / "LICENSE")
+
+    try:
+        validate_packaged_runtime(destination)
+    except ValueError as error:
+        raise AdapterError(str(error)) from None
 
 
 def _copy_ponytail(source: Path, destination: Path) -> None:
@@ -363,6 +611,8 @@ def build_runtime(
 ) -> dict[str, object]:
     if profile not in _RUNTIME_PROFILES:
         raise AdapterError("runtime-profile-invalid")
+    if not isinstance(version, str) or _RUNTIME_VERSION.fullmatch(version) is None:
+        raise AdapterError("runtime-version-invalid")
     source = Path(repository_root).resolve(strict=True)
     output = Path(output_root).resolve(strict=False)
     if output.exists() or output == source:
@@ -385,12 +635,16 @@ def build_runtime(
             copied_tea = temporary / "dependencies/upstream/tea"
             if copied_tea.exists():
                 shutil.rmtree(copied_tea)
-            copied_graft = temporary / "dependencies/upstream/graft"
-            if copied_graft.exists():
-                shutil.rmtree(copied_graft)
             copied_ponytail = temporary / "dependencies/upstream/ponytail"
             if copied_ponytail.exists():
                 shutil.rmtree(copied_ponytail)
+            copied_anthropic = temporary / "dependencies/upstream/anthropic-skills"
+            if copied_anthropic.exists():
+                shutil.rmtree(copied_anthropic)
+            for source_id in _COMMUNITY_SOURCES:
+                copied_source = temporary / "dependencies/upstream" / source_id
+                if copied_source.exists():
+                    shutil.rmtree(copied_source)
             for legacy in (
                 temporary / "skills/grill-me",
                 temporary / "overlays/superpowers",
@@ -426,12 +680,15 @@ def build_runtime(
         )
         _copy_tea_quality(source, temporary)
         _copy_ponytail(source, temporary)
+        _copy_anthropic_skill_creator(source, temporary)
+        _copy_community_sources(source, temporary)
         catalog_output = temporary / "catalog.json"
         catalog_output.write_bytes(
             _profile_catalog(
                 source, profile, include_grill_me=include_grill_me
             )
         )
+        build_host_runtime(source, temporary)
         files = _runtime_manifest(temporary)
         runtime_hash = "sha256:" + hashlib.sha256(
             json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")

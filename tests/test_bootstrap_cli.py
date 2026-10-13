@@ -698,9 +698,10 @@ while (-not (Test-Path -LiteralPath $env:SELFWORKFLOW_ACL_STOP)) {
         )
 
         combined = result.stdout + result.stderr
+        normalized = "".join(combined.split())
         self.assertNotEqual(result.returncode, 0, combined)
-        self.assertIn("NamedParameterNotFound", combined)
-        self.assertIn(parameter, combined)
+        self.assertIn("NamedParameterNotFound", normalized)
+        self.assertIn(parameter, normalized)
         self.assertNotIn(secret, combined)
         self.assertFalse(node_marker.exists())
         self.assertFalse(bootstrap_root.exists())

@@ -1,13 +1,79 @@
 schemaVersion: 1
 domain: workflow
 entries:
+  - id: tea-framework
+    displayName: Explicit tea-framework adapter
+    source:
+      kind: skill
+      path: skills/tea-quality/assessments/framework/SKILL.md
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:fe9528b1c8241f0b0fd88f472291c8643a8702702710e7369a670a8523a921ea
+    aliases: []
+    triggers: []
+    exclusions: [implicit selection]
+    selectors: {fileExtensions: [], operationTypes: [], semanticTerms: []}
+    stages: [planned]
+    requiredCapabilities: [skill-discovery, filesystem-read]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen: {match: any, scopes: [], fileExtensions: [], operationTypes: []}
+    priority: 250
+    contextCost: 128
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: tea-ci
+    displayName: Explicit tea-ci adapter
+    source:
+      kind: skill
+      path: skills/tea-quality/assessments/ci/SKILL.md
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:9d9364d1d6ef214331ef5f9666bdaa043527e5aabc0d3604b83740be90bc075d
+    aliases: []
+    triggers: []
+    exclusions: [implicit selection]
+    selectors: {fileExtensions: [], operationTypes: [], semanticTerms: []}
+    stages: [verified]
+    requiredCapabilities: [skill-discovery, filesystem-read]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen: {match: any, scopes: [], fileExtensions: [], operationTypes: []}
+    priority: 250
+    contextCost: 128
+    supportStatus: supported
+    protectedRuleOperations: []
+  - id: implement-spec
+    displayName: Explicit implement-spec adapter
+    source:
+      kind: skill
+      path: skills/implement-spec/SKILL.md
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:f6d87cff0d17380bb474eea65ee308dd22288486161899fa4bb80e19fe2ebe7d
+    aliases: []
+    triggers: []
+    exclusions: [implicit selection]
+    selectors: {fileExtensions: [], operationTypes: [], semanticTerms: []}
+    stages: [implemented]
+    requiredCapabilities: [skill-discovery, filesystem-read, filesystem-write, independent-context, test-execution, user-confirmation]
+    dependencies: [workflow-core]
+    conflicts: []
+    composition: augment
+    mandatory: false
+    mandatoryWhen: {match: any, scopes: [], fileExtensions: [], operationTypes: []}
+    priority: 250
+    contextCost: 256
+    supportStatus: supported
+    protectedRuleOperations: []
   - id: workflow-core
     displayName: Core workflow contract
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:d708433a60611ec49a7a5567b6cf4ae025a29cf6
-      contentHash: sha256:ac57747edd2d8fd8694bc2e76e3ab1c42b18ed8160f53b96b78999ec0e1ffb88
+      revision: git:b3b1f35639bb714c83857c459a33ad57733d62d1
+      contentHash: sha256:4b0afe388f8e9dc846862777b5322f0b3ec84c3af65f0fe1bceb09f155b72217
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -50,8 +116,8 @@ entries:
     source:
       kind: skill
       path: skills/workflow-quality/SKILL.md
-      revision: git:0d666311f775f435e915cc3a4d9187e7b1f5d198
-      contentHash: sha256:52ce7b353a9c06516d52d92a8748296efe3c787fe49646f9081d714e67a73860
+      revision: git:0387e8f0130e8d4a63e49b322c17967b1c64f5f7
+      contentHash: sha256:38c5aff77c66cc307e96e9135d1c8584fef188127613bae5d3972e816484b880
     aliases:
       - name: quality-guardrails
         target: workflow-quality
@@ -81,8 +147,8 @@ entries:
     source:
       kind: skill
       path: skills/testing-review-quality/SKILL.md
-      revision: git:4fb10d86dd9df940b1c7b24c6fbe6df7ea0b418a
-      contentHash: sha256:ce696499c73a855c9586aef69206bba95b0203826af52effa61536de30964008
+      revision: git:0387e8f0130e8d4a63e49b322c17967b1c64f5f7
+      contentHash: sha256:a612ba90ba1b058419742cd4b878c2703c2d7ca504b4122b70598112be804888
     aliases:
       - name: testing-review-gate
         target: testing-review-quality
@@ -112,8 +178,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/tea.lock.yaml
-      revision: git:52309a9a6becae620453647d7217334a1d1cbc21
-      contentHash: sha256:9af898d495bbcbfe497fd1169b90b1fd0f238a7d1e6b29cef2dfa51f54084806
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:e6460386b21d042d34a6eb2df2de6dc23ce23cde254911d996441fc9ebd7bc03
     aliases:
       - name: tea-quality
         target: tea-quality-foundation
@@ -143,8 +209,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/matt-pocock-skills.lock.yaml
-      revision: git:4fb84b00022b0242c3dbed4e08a3447d6389d013
-      contentHash: sha256:e7ac2ee8edd9bc962a4b88fd25fa721a49ffa335a560cd57806dcd9715ff553c
+      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
+      contentHash: sha256:ffb842b85a1364417040156163c06d86478989635892e594d85d9a753682dcf2
     aliases:
       - name: matt-skills
         target: matt-skills-foundation

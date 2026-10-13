@@ -26,6 +26,20 @@ class KnowledgeContractTests(unittest.TestCase):
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(document)
         self.assertNotIn("c7", json.dumps(document).casefold())
+        self.assertEqual(
+            document["defaultRouting"],
+            {
+                "profile": "knowledge",
+                "backend": "selfopenwiki",
+                "intents": [
+                    "wiki-visualize",
+                    "wiki-summary",
+                    "wiki-organize",
+                    "wiki-update",
+                ],
+                "fallback": "forbidden",
+            },
+        )
 
     def test_read_requires_source_revision_hash_and_verification(self):
         result = normalize_result("read", {

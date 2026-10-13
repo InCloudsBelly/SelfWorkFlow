@@ -19,3 +19,5 @@ coverage.xml
 .env
 .env.local
 .env.*.local
+# CodeGraph's project-local structural index
+/.codegraph/

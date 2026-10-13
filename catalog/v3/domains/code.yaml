@@ -1,6 +1,7 @@
 schemaVersion: 3
 id: code
 modules:
+  - ponytail-debt
   - cpp-core
   - cpp.ownership
   - cpp.type-system

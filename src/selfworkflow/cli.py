@@ -15,6 +15,7 @@ from selfworkflow import __version__
 from selfworkflow.catalog import compile_catalog
 from selfworkflow.adapters import build_runtime
 from selfworkflow.installer import (
+    InstallerError,
     apply_install_plan,
     apply_rollback_plan,
     create_install_plan,
@@ -40,12 +41,6 @@ from selfworkflow.review_models import (
     resolve_review_model,
     save_review_model,
 )
-from selfworkflow.graft_models import (
-    GraftModelConfigError,
-    graft_model_config_path,
-    resolve_graft_model,
-    save_graft_model,
-)
 from selfworkflow.work_artifacts import WorkArtifactError, WorkArtifactManager
 from selfworkflow.ponytail_source import PonytailSourceError, verify_ponytail_source
 from selfworkflow.sources import (
@@ -61,59 +56,14 @@ from selfworkflow.transactions import write_json_atomic
 
 _REPARSE_POINT = 0x400
 
-# These values are injected by the active Host for one provider invocation.
-# They are deliberately process-scoped: SelfWorkFlow must not persist or infer
-# the current conversation model from a Topic/Graft manifest.
-_HOST_MODEL_ENV = "SELFWORKFLOW_HOST_CURRENT_MODEL"
-_HOST_REASONING_ENV = "SELFWORKFLOW_HOST_CURRENT_REASONING_EFFORT"
 
-
-def _graft_diagnostic_exit(result):
-    """Keep CLI categories separate from the unmodified child exit code."""
-    if not isinstance(result, dict):
-        return None
-    diagnostics = result.get("diagnostics")
-    if isinstance(diagnostics, dict):
-        return {
-            "timeout": 74, "start-failed": 75,
-            "nonzero-exit": 76, "response-invalid": 77, "output-too-large": 77,
-        }.get(diagnostics.get("failureKind"))
-    for key in ("event", "worker"):
-        code = _graft_diagnostic_exit(result.get(key))
-        if code is not None:
-            return code
-    return None
-
-
-def _resolve_graft_deep_model_context(
-    model: str | None, reasoning_effort: str | None,
-    config_file: str | None = None,
-) -> tuple[str, str]:
-    """Resolve explicit compatibility input or the machine Graft default."""
-
-    if (model is None) != (reasoning_effort is None):
-        raise ValueError("graft-deep-current-model-context-incomplete")
-    configured_path = (
-        Path(config_file).parent / "graft-model.local.yaml"
-        if config_file is not None else graft_model_config_path()
-    )
-    if configured_path.exists():
-        resolution = resolve_graft_model(configured_path)
-        return resolution.selection.model, resolution.selection.reasoning_effort
-    host_model = os.environ.get(_HOST_MODEL_ENV)
-    host_reasoning = os.environ.get(_HOST_REASONING_ENV)
-    if host_model or host_reasoning:
-        if not host_model or not host_reasoning:
-            raise ValueError("graft-deep-current-model-context-incomplete")
-        if model is not None and (
-            model != host_model or reasoning_effort != host_reasoning
-        ):
-            raise ValueError("graft-deep-current-model-context-mismatch")
-        return host_model, host_reasoning
-    if model is not None and reasoning_effort is not None:
-        return model, reasoning_effort
-    resolution = resolve_graft_model(configured_path)
-    return resolution.selection.model, resolution.selection.reasoning_effort
+class _SourceInspectionError(ValueError):
+    def __init__(self, cause: str, operation: str, exit_code: int | None = None):
+        self.reason = "provider-source-inspection-failed"
+        self.diagnostics = {"failureStage": "source-inspection", "cause": cause, "operation": operation}
+        if exit_code is not None:
+            self.diagnostics["exitCode"] = exit_code
+        super().__init__(self.reason)
 
 
 class _SubprocessCommandPort:
@@ -126,7 +76,7 @@ class _SubprocessCommandPort:
         try:
             result = subprocess.run(
                 list(argv), cwd=cwd, check=False, capture_output=True,
-                text=True, encoding="utf-8", errors="replace", timeout=120,
+                text=True, encoding="utf-8", errors="replace", timeout=3600,
             )
         except subprocess.TimeoutExpired as error:
             def decoded(value):
@@ -137,20 +87,20 @@ class _SubprocessCommandPort:
             return CommandResult(
                 exit_code=9009, stdout=decoded(error.stdout), stderr=decoded(error.stderr),
                 failure_kind="timeout", duration_ms=int((time.monotonic() - started) * 1000),
-                timeout_ms=120000, exception_type=type(error).__name__,
+                timeout_ms=3600000, exception_type=type(error).__name__,
             )
         except OSError as error:
             return CommandResult(
                 exit_code=9009, failure_kind="start-failed",
                 duration_ms=int((time.monotonic() - started) * 1000),
-                timeout_ms=120000, exception_type=type(error).__name__,
+                timeout_ms=3600000, exception_type=type(error).__name__,
             )
         return CommandResult(
             exit_code=result.returncode,
             stdout=result.stdout,
             stderr=result.stderr,
             duration_ms=int((time.monotonic() - started) * 1000),
-            timeout_ms=120000,
+            timeout_ms=3600000,
         )
 
 
@@ -177,32 +127,64 @@ def _provider_manager(config_file: str | None):
 
 
 def _inspect_provider_source_identity(source_value: str):
-    """Inspect only the explicitly configured provider checkout."""
-    source = _absolute_path(source_value).resolve(strict=True)
-    package = source / "package.json"
-    if package.is_file() and not package.is_symlink():
-        try:
-            package_name = json.loads(package.read_text(encoding="utf-8")).get("name")
-        except (OSError, UnicodeError, ValueError, AttributeError):
-            package_name = None
-        if package_name == "@nanonets/graft":
-            from selfworkflow.v3.graft_source import inspect_graft_source_path
-            return inspect_graft_source_path(str(source))
-    return _inspect_codegraph_source_identity(str(source))
+    """Inspect only the explicitly configured CodeGraph source or runtime."""
+    try:
+        return _inspect_codegraph_source_identity(str(source_value))
+    except _SourceInspectionError:
+        raise
+    except OSError:
+        raise _SourceInspectionError("read-failed", "metadata") from None
+    except ValueError:
+        raise _SourceInspectionError("invalid-source", "metadata") from None
 
 
 def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
-    """Hash a CodeGraph checkout without executing code from that checkout."""
+    """Hash a CodeGraph checkout or managed runtime without executing it."""
     source = _absolute_path(source_value).resolve(strict=True)
-    script = source / "dist" / "bin" / "codegraph.js"
-    path_chain = (source, source / "dist", source / "dist" / "bin", script)
-    if (
-        not script.is_file()
-        or any(not item.exists() or _is_reparse(item) for item in path_chain)
-    ):
+    local_script = source / "dist" / "bin" / "codegraph.js"
+    managed_command = source / "bin" / "codegraph.cmd"
+    if local_script.is_file() and not _is_reparse(local_script):
+        source_type = "local-git"
+        script = local_script
+        path_chain = (source, source / "dist", source / "dist" / "bin", script)
+        command_prefix = ("node", str(script))
+    elif managed_command.is_file() and not _is_reparse(managed_command):
+        source_type = "managed-runtime"
+        script = managed_command
+        path_chain = (source, source / "bin", script)
+        command_prefix = (str(script),)
+    else:
+        raise ValueError("codegraph-source-invalid")
+    if any(not item.exists() or _is_reparse(item) for item in path_chain):
         raise ValueError("codegraph-source-invalid")
     if script.stat().st_size > 16 * 1024 * 1024:
         raise ValueError("codegraph-source-inspection-failed")
+
+    package_candidates = [source / "package.json"]
+    nested_package = source / "node_modules" / "@colbymchenry" / "codegraph" / "package.json"
+    if nested_package not in package_candidates:
+        package_candidates.append(nested_package)
+    package_path = next((item for item in package_candidates if item.is_file() and not _is_reparse(item)), None)
+    package_value = {}
+    if package_path is not None:
+        try:
+            package_value = json.loads(package_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            raise ValueError("codegraph-source-inspection-failed") from None
+        if not isinstance(package_value, dict):
+            raise ValueError("codegraph-source-inspection-failed")
+        package_name = package_value.get("name")
+        if package_name not in {None, "@colbymchenry/codegraph"}:
+            raise ValueError("codegraph-source-invalid")
+
+    version = package_value.get("version") if isinstance(package_value.get("version"), str) else None
+    if version is None and source_type == "managed-runtime":
+        for marker in (source / "VERSION", source / "version.txt"):
+            if marker.is_file() and not _is_reparse(marker):
+                value = marker.read_text(encoding="utf-8").strip()
+                if value:
+                    version = value.splitlines()[0]
+                    break
 
     def git_bytes(*arguments: str, limit: int = 16 * 1024 * 1024) -> bytes:
         environment = os.environ.copy()
@@ -211,36 +193,57 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_OPTIONAL_LOCKS": "0",
         })
-        result = subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", *arguments],
-            cwd=source, check=False, capture_output=True, timeout=120,
-            env=environment,
-        )
-        if result.returncode != 0 or len(result.stdout) > limit:
-            raise ValueError("codegraph-source-inspection-failed")
+        try:
+            result = subprocess.run(
+                ["git", "-c", "safe.directory=", "-c", f"safe.directory={source.as_posix()}",
+                 "-c", "core.fsmonitor=false", *arguments],
+                cwd=source, check=False, capture_output=True, timeout=120,
+                env=environment,
+            )
+        except subprocess.TimeoutExpired:
+            raise _SourceInspectionError("timeout", arguments[0]) from None
+        except OSError:
+            raise _SourceInspectionError("start-failed", arguments[0]) from None
+        if result.returncode != 0:
+            stderr = result.stderr.lower()
+            cause = "dubious-ownership" if b"dubious ownership" in stderr else "git-command-failed"
+            if b"not a git repository" in stderr:
+                cause = "not-a-repository"
+            raise _SourceInspectionError(cause, arguments[0], result.returncode)
+        if len(result.stdout) > limit:
+            raise _SourceInspectionError("output-limit", arguments[0])
         return result.stdout
 
-    top = Path(git_bytes("rev-parse", "--show-toplevel").decode("utf-8").strip())
-    if top.resolve(strict=True) != source:
-        raise ValueError("codegraph-source-invalid")
-    commit = git_bytes("rev-parse", "HEAD").decode("ascii").strip().lower()
-    tree = git_bytes("rev-parse", "HEAD^{tree}").decode("ascii").strip().lower()
-    status = git_bytes(
-        "status", "--porcelain=v1", "-z", "--untracked-files=normal",
-        limit=1024 * 1024,
-    )
-    relevant_diff = git_bytes(
-        "diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--",
-        "dist", "package.json",
-        "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
-    )
-    source_material = {
-        "commit": commit,
-        "tree": tree,
-        "statusHash": "sha256:" + hashlib.sha256(status).hexdigest(),
-        "relevantDiffHash": "sha256:" + hashlib.sha256(relevant_diff).hexdigest(),
-        "entryHash": "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest(),
-    }
+    if source_type == "local-git":
+        top = Path(git_bytes("rev-parse", "--show-toplevel").decode("utf-8").strip())
+        if top.resolve(strict=True) != source:
+            raise ValueError("codegraph-source-invalid")
+        commit = git_bytes("rev-parse", "HEAD").decode("ascii").strip().lower()
+        tree = git_bytes("rev-parse", "HEAD^{tree}").decode("ascii").strip().lower()
+        status = git_bytes(
+            "status", "--porcelain=v1", "-z", "--untracked-files=normal",
+            limit=1024 * 1024,
+        )
+        relevant_diff = git_bytes(
+            "diff", "--no-ext-diff", "--no-textconv", "--binary", "HEAD", "--",
+            "dist", "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+        )
+        source_material = {
+            "commit": commit,
+            "tree": tree,
+            "statusHash": "sha256:" + hashlib.sha256(status).hexdigest(),
+            "relevantDiffHash": "sha256:" + hashlib.sha256(relevant_diff).hexdigest(),
+            "entryHash": "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest(),
+        }
+        dirty = bool(status)
+    else:
+        material = {"entry": hashlib.sha256(script.read_bytes()).hexdigest()}
+        for item in (package_path, source / "VERSION", source / "version.txt", source / "dist" / "bin" / "codegraph.js"):
+            if item is not None and item.is_file() and not _is_reparse(item):
+                material[str(item.relative_to(source)).replace("\\", "/")] = hashlib.sha256(item.read_bytes()).hexdigest()
+        source_material = {"runtime": material, "version": version or "unverified"}
+        commit = hashlib.sha256(json.dumps(source_material, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:40]
+        dirty = False
     source_hash = "sha256:" + hashlib.sha256(
         json.dumps(source_material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -249,10 +252,12 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
         "script": script,
         "report": {
             "providerId": "codegraph",
-            "sourceType": "local-git",
+            "sourceType": source_type,
             "commit": commit,
-            "dirty": bool(status),
+            "dirty": dirty,
             "sourceHash": source_hash,
+            "version": version or "unverified",
+            "commandPrefix": command_prefix,
             "supportStatus": "unverified",
         },
     }
@@ -260,7 +265,7 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
 
 def _inspect_codegraph_source(source_value: str) -> dict[str, object]:
     """Inspect source identity without executing code from the checkout."""
-    observation = _inspect_codegraph_source_identity(source_value)
+    observation = _inspect_provider_source_identity(source_value)
     observation["report"]["version"] = "unverified"
     return observation
 
@@ -280,8 +285,11 @@ def _configure_codegraph(
     return manager.configure(
         provider_id="codegraph",
         source_path=str(observation["source"]),
-        command_prefix=("node", str(observation["script"])),
-        ownership="user-local",
+        command_prefix=tuple(report["commandPrefix"]),
+        ownership=(
+            "selfworkflow-managed"
+            if report.get("sourceType") == "managed-runtime" else "user-local"
+        ),
         source_version=str(report["version"]),
         source_commit=str(report["commit"]),
         source_hash=str(report["sourceHash"]),
@@ -290,39 +298,6 @@ def _configure_codegraph(
         rollback_token=rollback_token,
     )
 
-
-def _configure_graft(
-    manager, source_value: str, *, replace_existing: bool = False,
-    expected_source_hash: str | None = None,
-    rollback_token: str | None = None,
-) -> dict[str, object]:
-    from selfworkflow.v3.graft_source import GraftSourceError, inspect_graft_source_path
-
-    try:
-        observation = inspect_graft_source_path(source_value)
-    except GraftSourceError as error:
-        raise ValueError(error.reason) from None
-    report = observation["report"]
-    if (
-        expected_source_hash is not None
-        and expected_source_hash != report["sourceHash"]
-    ):
-        raise ValueError("graft-source-drift")
-    if report["dirty"]:
-        raise ValueError("graft-source-dirty")
-    source = Path(observation["source"])
-    return manager.configure(
-        provider_id="graft",
-        source_path=str(source),
-        command_prefix=("node", str(source / "dist" / "cli.js")),
-        ownership="selfworkflow-managed",
-        source_version=str(report["version"]),
-        source_commit=str(report["commit"]),
-        source_hash=str(report["sourceHash"]),
-        dirty=False,
-        replace_existing=replace_existing,
-        rollback_token=rollback_token,
-    )
 
 
 def _reject_duplicate_json_keys(
@@ -512,14 +487,10 @@ def main(argv: list[str] | None = None) -> int:
     provider_list = provider_commands.add_parser("list")
     provider_list.add_argument("--config-file")
     provider_inspect = provider_commands.add_parser("inspect")
-    inspect_paths = provider_inspect.add_mutually_exclusive_group(required=True)
-    inspect_paths.add_argument("--codegraph-path")
-    inspect_paths.add_argument("--graft-path")
+    provider_inspect.add_argument("--codegraph-path", required=True)
     provider_configure = provider_commands.add_parser("configure")
     provider_configure.add_argument("--config-file")
-    configure_paths = provider_configure.add_mutually_exclusive_group(required=True)
-    configure_paths.add_argument("--codegraph-path")
-    configure_paths.add_argument("--graft-path")
+    provider_configure.add_argument("--codegraph-path", required=True)
     provider_configure.add_argument("--replace-existing", action="store_true")
     provider_configure.add_argument("--expected-source-hash")
     provider_configure.add_argument("--rollback-token")
@@ -535,10 +506,8 @@ def main(argv: list[str] | None = None) -> int:
     provider_doctor.add_argument("--provider-id", default="codegraph")
     provider_status = provider_commands.add_parser("status")
     provider_status.add_argument("--config-file")
-    provider_status.add_argument("--provider-id", default="graft")
+    provider_status.add_argument("--provider-id", default="codegraph")
     provider_status.add_argument("--project-root", required=True)
-    provider_status.add_argument("--context-dir")
-    provider_status.add_argument("--conversation-id")
     provider_maintain = provider_commands.add_parser("maintain")
     provider_maintain.add_argument("--config-file")
     provider_maintain.add_argument("--provider-id", default="codegraph")
@@ -550,60 +519,26 @@ def main(argv: list[str] | None = None) -> int:
     provider_maintain.add_argument("--confirm-plan-hash")
     provider_query = provider_commands.add_parser("query")
     provider_query.add_argument("--config-file")
-    provider_query.add_argument("--provider-id", default="graft")
+    provider_query.add_argument("--provider-id", default="codegraph")
     provider_query.add_argument("--project-root", required=True)
-    provider_query.add_argument("--context-dir")
-    provider_query.add_argument("--conversation-id")
     provider_query.add_argument("--query", required=True)
     provider_query.add_argument(
         "--query-kind", choices=("ask", "map", "grep", "callers", "skeleton"),
         default="ask",
     )
-    graft_preflight = provider_commands.add_parser("graft-preflight")
-    graft_preflight.add_argument("--config-file")
-    graft_preflight.add_argument("--project-root", required=True)
-    graft_event = provider_commands.add_parser("graft-event")
-    graft_event.add_argument("--config-file")
-    graft_event.add_argument("--project-root", required=True)
-    graft_event.add_argument("--conversation-id", required=True)
-    graft_event.add_argument("--changed-path", action="append", required=True)
-    graft_worker = provider_commands.add_parser("graft-worker")
-    graft_worker.add_argument("--config-file")
-    graft_worker.add_argument("--project-root", required=True)
-    graft_worker.add_argument("--conversation-id", required=True)
-    graft_sync = provider_commands.add_parser("graft-sync")
-    graft_sync.add_argument("--config-file")
-    graft_sync.add_argument("--project-root", required=True)
-    graft_sync.add_argument("--conversation-id", required=True)
-    graft_sync.add_argument("--changed-path", action="append", required=True)
-    graft_ensure = provider_commands.add_parser("graft-ensure")
-    graft_ensure.add_argument("--config-file")
-    graft_ensure.add_argument("--project-root", required=True)
-    graft_ensure.add_argument("--conversation-id", required=True)
-    graft_ensure.add_argument("--allow-update", action="store_true")
-    graft_deep = provider_commands.add_parser("graft-deep")
-    graft_deep.add_argument("--config-file")
-    graft_deep.add_argument("--project-root", required=True)
-    # Internal compatibility parameters.  The active Host normally injects
-    # these through the process-scoped context above; users are not asked to
-    # choose a model for a Deep run.
-    graft_deep.add_argument("--model")
-    graft_deep.add_argument("--reasoning-effort")
-    graft_deep.add_argument("--conversation-id", required=True)
-    graft_deep.add_argument("--topic-id")
-    graft_deep.add_argument("--scope-file", action="append", default=[])
-    graft_topics = provider_commands.add_parser("graft-topics")
-    graft_topics.add_argument("--config-file")
-    graft_topics.add_argument("--project-root", required=True)
-    graft_topics.add_argument("--conversation-id", required=True)
-    graft_topic_select = provider_commands.add_parser("graft-topic-select")
-    graft_topic_select.add_argument("--config-file")
-    graft_topic_select.add_argument("--project-root", required=True)
-    graft_topic_select.add_argument("--conversation-id", required=True)
-    topic_choice = graft_topic_select.add_mutually_exclusive_group(required=True)
-    topic_choice.add_argument("--topic-id")
-    topic_choice.add_argument("--disable", action="store_true")
-    topic_choice.add_argument("--global-only", action="store_true")
+    provider_preflight = provider_commands.add_parser("preflight")
+    provider_preflight.add_argument("--config-file")
+    provider_preflight.add_argument("--project-root", required=True)
+    provider_ensure = provider_commands.add_parser("ensure")
+    provider_ensure.add_argument("--config-file")
+    provider_ensure.add_argument("--project-root", required=True)
+    provider_sync = provider_commands.add_parser("sync")
+    provider_sync.add_argument("--config-file")
+    provider_sync.add_argument("--project-root", required=True)
+    provider_sync.add_argument("--changed-path", action="append", default=[])
+    provider_retire = provider_commands.add_parser("retire")
+    provider_retire.add_argument("--config-file")
+    provider_retire.add_argument("--provider-id", required=True)
     install = commands.add_parser("install")
     install_commands = install.add_subparsers(dest="install_command", required=True)
     install_plan = install_commands.add_parser("plan")
@@ -613,6 +548,8 @@ def main(argv: list[str] | None = None) -> int:
     install_plan.add_argument("--state-root", required=True)
     install_plan.add_argument("--version", required=True)
     install_plan.add_argument("--output", required=True)
+    install_plan.add_argument("--host-launcher")
+    install_plan.add_argument("--host-python")
     install_apply = install_commands.add_parser("apply")
     install_apply.add_argument("--plan", required=True)
     install_apply.add_argument("--confirm-plan-hash", required=True)
@@ -669,17 +606,6 @@ def main(argv: list[str] | None = None) -> int:
         "--confirm", action="store_true",
         help="确认把该选择写入机器本地默认配置",
     )
-    graft_model = commands.add_parser("graft-model")
-    graft_model_commands = graft_model.add_subparsers(
-        dest="graft_model_command", required=True,
-    )
-    graft_model_status = graft_model_commands.add_parser("status")
-    graft_model_status.add_argument("--config-file")
-    graft_model_set = graft_model_commands.add_parser("set")
-    graft_model_set.add_argument("--model", required=True)
-    graft_model_set.add_argument("--reasoning-effort", required=True)
-    graft_model_set.add_argument("--config-file")
-    graft_model_set.add_argument("--confirm", action="store_true")
     artifact = commands.add_parser("artifact")
     artifact_commands = artifact.add_subparsers(dest="artifact_command", required=True)
     artifact_transition = artifact_commands.add_parser("transition")
@@ -734,27 +660,6 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 54
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-        return 0
-    if arguments.command == "graft-model":
-        try:
-            if arguments.graft_model_command == "status":
-                result = resolve_graft_model(arguments.config_file).as_dict()
-            elif arguments.graft_model_command == "set":
-                result = save_graft_model(
-                    arguments.config_file,
-                    arguments.model,
-                    arguments.reasoning_effort,
-                    confirmed=arguments.confirm,
-                ).as_dict()
-            else:
-                raise GraftModelConfigError("graft-model-command-invalid")
-        except GraftModelConfigError as error:
-            print(
-                f"SelfWorkFlow: graft-model-operation-failed:{error.reason}",
-                file=sys.stderr,
-            )
-            return 55
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     if arguments.command == "artifact":
@@ -841,30 +746,18 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "provider":
         try:
             if arguments.provider_command == "inspect":
-                if arguments.graft_path:
-                    from selfworkflow.v3.graft_source import inspect_graft_source_path
-                    result = inspect_graft_source_path(arguments.graft_path)["report"]
-                else:
-                    result = _inspect_codegraph_source(arguments.codegraph_path)["report"]
+                result = _inspect_codegraph_source(arguments.codegraph_path)["report"]
             else:
                 manager = _provider_manager(arguments.config_file)
             if arguments.provider_command == "list":
                 result = manager.list_providers()
             elif arguments.provider_command == "configure":
-                if arguments.graft_path:
-                    result = _configure_graft(
-                        manager, arguments.graft_path,
-                        replace_existing=arguments.replace_existing,
-                        expected_source_hash=arguments.expected_source_hash,
-                        rollback_token=arguments.rollback_token,
-                    )
-                else:
-                    result = _configure_codegraph(
-                        manager, arguments.codegraph_path,
-                        replace_existing=arguments.replace_existing,
-                        expected_source_hash=arguments.expected_source_hash,
-                        rollback_token=arguments.rollback_token,
-                    )
+                result = _configure_codegraph(
+                    manager, arguments.codegraph_path,
+                    replace_existing=arguments.replace_existing,
+                    expected_source_hash=arguments.expected_source_hash,
+                    rollback_token=arguments.rollback_token,
+                )
             elif arguments.provider_command == "rollback-config":
                 result = manager.rollback_config(
                     arguments.rollback_token, if_issued=arguments.if_issued,
@@ -876,8 +769,6 @@ def main(argv: list[str] | None = None) -> int:
             elif arguments.provider_command == "status":
                 result = manager.status(
                     arguments.provider_id, arguments.project_root,
-                    context_dir=arguments.context_dir,
-                    conversation_id=arguments.conversation_id,
                 )
             elif arguments.provider_command == "maintain":
                 plan = manager.maintain(
@@ -898,54 +789,13 @@ def main(argv: list[str] | None = None) -> int:
                 result = manager.query(
                     arguments.provider_id, arguments.project_root, arguments.query,
                     query_kind=arguments.query_kind,
-                    context_dir=arguments.context_dir,
-                    conversation_id=arguments.conversation_id,
                 )
-            elif arguments.provider_command == "graft-preflight":
-                result = manager.graft_preflight(arguments.project_root)
-            elif arguments.provider_command == "graft-event":
-                result = manager.graft_enqueue(
-                    arguments.project_root, arguments.changed_path,
-                    conversation_id=arguments.conversation_id,
-                )
-            elif arguments.provider_command == "graft-worker":
-                result = manager.graft_worker(
-                    arguments.project_root,
-                    conversation_id=arguments.conversation_id,
-                )
-            elif arguments.provider_command == "graft-sync":
-                result = manager.graft_sync(
-                    arguments.project_root,
-                    arguments.changed_path,
-                    conversation_id=arguments.conversation_id,
-                )
-            elif arguments.provider_command == "graft-ensure":
-                result = manager.graft_ensure(
-                    arguments.project_root,
-                    conversation_id=arguments.conversation_id,
-                    **({"allow_update": True} if arguments.allow_update else {}),
-                )
-            elif arguments.provider_command == "graft-deep":
-                current_model, current_reasoning = _resolve_graft_deep_model_context(
-                    arguments.model, arguments.reasoning_effort,
-                    arguments.config_file,
-                )
-                result = manager.graft_deep(
-                    arguments.project_root, current_model, current_reasoning,
-                    conversation_id=arguments.conversation_id,
-                    topic_id=arguments.topic_id,
-                    scope_files=arguments.scope_file,
-                )
-            elif arguments.provider_command == "graft-topics":
-                result = manager.graft_topics(
-                    arguments.project_root, arguments.conversation_id,
-                )
-            elif arguments.provider_command == "graft-topic-select":
-                result = manager.graft_topic_select(
-                    arguments.project_root, arguments.conversation_id,
-                    topic_id=arguments.topic_id, disable=arguments.disable,
-                    global_only=arguments.global_only,
-                )
+            elif arguments.provider_command in {"preflight", "ensure"}:
+                result = manager.preflight(arguments.project_root)
+            elif arguments.provider_command == "sync":
+                result = manager.sync(arguments.project_root, arguments.changed_path)
+            elif arguments.provider_command == "retire":
+                result = manager.retire(arguments.provider_id)
             elif arguments.provider_command == "inspect":
                 pass
             else:
@@ -953,36 +803,11 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as error:
             reason = getattr(error, "reason", "provider-operation-failed")
             print(f"SelfWorkFlow: provider-operation-failed:{reason}", file=sys.stderr)
-            from selfworkflow.v3.providers.graft import graft_failure_details
-            details = graft_failure_details(error)
-            if details:
-                payload = {"providerId": "graft", "status": "error", "reason": reason, **details}
-                print(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-                return _graft_diagnostic_exit(payload) or 70
+            if reason in {"provider-source-inspection-failed", "provider-source-identity-drift"}:
+                print(json.dumps({"error": reason, "diagnostics": getattr(error, "diagnostics", None)},
+                                 ensure_ascii=False, sort_keys=True), file=sys.stderr)
             return 70
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-        diagnostic_exit = _graft_diagnostic_exit(result)
-        if diagnostic_exit is not None:
-            return diagnostic_exit
-        if (
-            arguments.provider_command == "graft-deep"
-            and (not isinstance(result, dict) or result.get("status") != "succeeded")
-        ):
-            return 71
-        if (
-            arguments.provider_command == "graft-sync"
-            and (
-                not isinstance(result, dict)
-                or not isinstance(result.get("worker"), dict)
-                or result["worker"].get("status") != "succeeded"
-            )
-        ):
-            return 71
-        if (
-            arguments.provider_command == "graft-ensure"
-            and (not isinstance(result, dict) or result.get("status") != "succeeded")
-        ):
-            return 71
         return 0
     if arguments.command == "catalog" and arguments.catalog_command == "compile":
         try:
@@ -1135,6 +960,8 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.codex_root,
                 arguments.state_root,
                 arguments.version,
+                host_launcher=arguments.host_launcher,
+                host_python=arguments.host_python,
             )
             write_json_atomic(_absolute_path(arguments.output), result)
         elif arguments.command == "install" and arguments.install_command == "apply":
@@ -1151,6 +978,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             return 0
+    except InstallerError as error:
+        print(f"SelfWorkFlow: install-operation-failed:{error}", file=sys.stderr)
+        return 40
     except Exception:
         print("SelfWorkFlow: install-operation-failed", file=sys.stderr)
         return 40

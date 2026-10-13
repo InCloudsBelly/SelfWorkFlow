@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -27,36 +29,74 @@ _UNRESOLVED_TEMPLATE = re.compile(
     r"\{\{|\$\{|(?<!\{)\{[A-Za-z][A-Za-z0-9_.-]*\}(?!\})"
 )
 _PACKAGED_WORKFLOWS = {
+    "framework": {
+        "directory": "bmad-testarch-framework", "output": "framework.md",
+        "fields": ("projectManifest", "testInventory", "projectRules", "acceptanceCriteria"),
+        "headings": ("Framework", "Conventions", "Commands", "Gaps"),
+    },
+    "ci": {
+        "directory": "bmad-testarch-ci", "output": "ci.md",
+        "fields": ("pipelineFiles", "verificationPlan", "projectRules", "runEvidence"),
+        "headings": ("Pipeline", "Quality Gates", "Artifacts", "Run Evidence", "Gaps"),
+    },
     "test-design": {
         "directory": "bmad-testarch-test-design", "output": "test-design.md",
         "fields": ("requirements", "acceptanceCriteria", "design", "risk"),
         "headings": ("Scope", "Risks", "Coverage", "Cases"),
+        "knowledge": (
+            "risk-governance.md", "probability-impact.md", "test-levels-framework.md",
+            "test-priorities-matrix.md", "adr-quality-readiness-checklist.md",
+            "nfr-criteria.md", "test-quality.md", "contract-testing.md",
+        ),
     },
     "atdd": {
         "directory": "bmad-testarch-atdd", "output": "atdd.md",
         "fields": ("requirements", "acceptanceCriteria", "implementationPlan", "testDesign"),
         "headings": ("Red Evidence", "Acceptance Tests", "Fixtures"),
+        "knowledge": (
+            "data-factories.md", "component-tdd.md", "test-quality.md",
+            "test-healing-patterns.md", "selector-resilience.md", "timing-debugging.md",
+            "fixture-architecture.md", "network-first.md", "test-levels-framework.md",
+            "test-priorities-matrix.md", "ci-burn-in.md", "contract-testing.md",
+        ),
     },
     "test-review": {
         "directory": "bmad-testarch-test-review", "output": "test-review.md",
         "fields": ("acceptanceCriteria", "implementationDelta", "testDesign", "verificationEvidence"),
         "headings": ("Coverage Review", "Failure Paths", "Findings"),
+        "knowledge": (
+            "test-quality.md", "data-factories.md", "test-levels-framework.md",
+            "selective-testing.md", "test-healing-patterns.md", "selector-resilience.md",
+            "timing-debugging.md", "maestro-flows.md", "mobile-test-strategy.md",
+            "fixture-architecture.md", "network-first.md", "playwright-config.md",
+            "component-tdd.md", "ci-burn-in.md", "contract-testing.md",
+        ),
     },
     "trace": {
         "directory": "bmad-testarch-trace", "output": "trace.md",
         "fields": ("acceptanceCriteria", "testInventory", "verificationEvidence"),
         "headings": ("Trace Matrix", "Gaps"),
+        "knowledge": (
+            "test-priorities-matrix.md", "risk-governance.md", "probability-impact.md",
+            "test-quality.md", "selective-testing.md",
+        ),
     },
     "nfr": {
         "directory": "bmad-testarch-nfr", "output": "nfr.md",
         "fields": ("design", "nfrRequirements", "verificationEvidence"),
         "headings": ("Performance", "Security", "Reliability"),
+        "knowledge": (
+            "adr-quality-readiness-checklist.md", "ci-burn-in.md", "test-quality.md",
+            "playwright-config.md", "error-handling.md",
+        ),
     },
 }
 
 # A packaged TEA workflow is only a completion artifact when its output is
 # bound to the exact V3 stage slot and selected module that consumed it.
 _TEA_BINDINGS = {
+    "framework": {"stageId": "planned", "slotId": "plan.assessment", "moduleId": "tea-framework"},
+    "ci": {"stageId": "verified", "slotId": "verify.ci", "moduleId": "tea-ci"},
     "test-design": {
         "stageId": "planned",
         "slotId": "test.quality.plan",
@@ -260,21 +300,29 @@ def load_workflow_candidates(repository: str | Path) -> tuple[dict[str, Any], ..
 def eligible_workflows(
     *, stage: str, test_level: str, grill_me_used: bool = False,
     acceptance_red: bool = False,
+    framework_assessment: bool = False, ci_validation: bool = False,
 ) -> tuple[str, ...]:
     if stage not in _STAGES or test_level not in _LEVELS or type(grill_me_used) is not bool or type(acceptance_red) is not bool:
         raise TeaAdapterError("tea-route-invalid")
+    if (
+        type(framework_assessment) is not bool or type(ci_validation) is not bool
+        or (framework_assessment and stage != "plan")
+        or (ci_validation and stage not in {"verify", "release"})
+    ):
+        raise TeaAdapterError("tea-route-invalid")
+    optional = ("framework",) if framework_assessment else ("ci",) if ci_validation else ()
     effective = max(_LEVELS[test_level], 2 if grill_me_used else 0)
     if effective < 2:
-        return ()
+        return optional
     if stage == "plan":
-        return ("test-design",)
+        return ("test-design",) + optional
     if stage == "review":
         return ("test-review",)
     if stage == "implementation":
         return ("atdd",) if acceptance_red else ()
     if effective >= 3 and stage in {"verify", "release"}:
-        return ("trace", "nfr")
-    return ()
+        return ("trace", "nfr") + optional
+    return optional
 
 
 def load_jit_artifact(
@@ -285,6 +333,20 @@ def load_jit_artifact(
     candidate = candidates.get(workflow_id)
     if candidate is None or candidate["support"]["adapterSupport"] != "supported":
         raise TeaAdapterError("tea-jit-workflow-unavailable")
+    if workflow_id in {"framework", "ci"}:
+        # These are local assessment adapters, never upstream scaffold entry points.
+        if kind != "skill" or relative_path != "SKILL.md":
+            raise TeaAdapterError("tea-jit-path-invalid")
+        target = root / "skills/tea-quality/assessments" / workflow_id / "SKILL.md"
+        try:
+            _assert_no_reparse(target, root)
+            if not target.is_file() or target.stat().st_size > _MAX_ARTIFACT_BYTES:
+                raise ValueError
+            content = target.read_bytes()
+            text = content.decode("utf-8")
+        except (OSError, ValueError, UnicodeError):
+            raise TeaAdapterError("tea-jit-path-invalid") from None
+        return {"workflowId": workflow_id, "kind": kind, "path": target.relative_to(root).as_posix(), "content": text, "contentHash": hash_bytes(content)}
     if kind not in {"skill", "workflow", "step", "resource"} or not isinstance(relative_path, str):
         raise TeaAdapterError("tea-jit-path-invalid")
     try:
@@ -317,6 +379,48 @@ def load_jit_artifact(
     }
 
 
+def _knowledge_entries(skill_root: Path, required: tuple[str, ...]) -> list[dict[str, str]]:
+    """Validate the packaged index before any workflow can consume its fragments."""
+    try:
+        knowledge = skill_root / "references/bmod-tea/knowledge"
+        index = knowledge / "tea-index.csv"
+        _assert_no_reparse(index, skill_root)
+        rows = list(csv.DictReader(io.StringIO(index.read_text(encoding="utf-8-sig")), strict=True))
+        if not rows:
+            raise ValueError
+        fragments: set[str] = set()
+        for row in rows:
+            name = row.get("fragment_file")
+            if not name or "\\" in name or ":" in name:
+                raise ValueError
+            relative = PurePosixPath(name)
+            if (
+                relative.is_absolute() or name != relative.as_posix()
+                or any(part in {".", ".."} for part in relative.parts)
+                or relative.suffix != ".md" or name in fragments
+            ):
+                raise ValueError
+            target = knowledge.joinpath(*relative.parts)
+            _assert_no_reparse(target, skill_root)
+            target.resolve(strict=True).relative_to(knowledge.resolve(strict=True))
+            if not target.is_file():
+                raise ValueError
+            fragments.add(name)
+        # The package must support every possible stack branch under the fixed
+        # headless defaults; runtime selection still reads only relevant fragments.
+        if not set(required) <= fragments:
+            raise ValueError
+        entries = []
+        for path in sorted(knowledge.rglob("*")):
+            if _is_reparse_point(path):
+                raise ValueError
+            if path.is_file():
+                entries.append({"path": path.relative_to(skill_root).as_posix(), "hash": hash_bytes(path.read_bytes())})
+        return entries
+    except (OSError, ValueError, UnicodeError, csv.Error):
+        raise TeaAdapterError("tea-runtime-knowledge-invalid") from None
+
+
 def _runtime_reference(runtime_root: str | Path, workflow_id: str) -> tuple[Path, dict[str, Any], str]:
     spec = _PACKAGED_WORKFLOWS.get(workflow_id)
     if spec is None:
@@ -338,13 +442,24 @@ def _runtime_reference(runtime_root: str | Path, workflow_id: str) -> tuple[Path
             if _is_reparse_point(path):
                 raise ValueError
             if path.is_file():
-                relative = path.relative_to(reference).as_posix()
+                relative = path.relative_to(skill_root).as_posix()
                 entries.append({"path": relative, "hash": hash_bytes(path.read_bytes())})
         if not entries or not (reference / "SKILL.md").is_file():
             raise ValueError
+        for relative in ("SKILL.md", "references/headless-contract.md"):
+            path = skill_root / relative
+            _assert_no_reparse(path, root)
+            entries.append({"path": relative, "hash": hash_bytes(path.read_bytes())})
     except (OSError, ValueError):
         raise TeaAdapterError("tea-runtime-reference-invalid") from None
+    if workflow_id not in {"framework", "ci"}:
+        entries.extend(_knowledge_entries(skill_root, spec["knowledge"]))
     return reference, spec, content_hash(entries)
+
+
+def validate_packaged_runtime(runtime_root: str | Path) -> dict[str, str]:
+    """Preflight all shipped workflows without executing them or reading a project."""
+    return {workflow: _runtime_reference(runtime_root, workflow)[2] for workflow in _PACKAGED_WORKFLOWS}
 
 
 def _output_relative(value: object, expected_name: str) -> str:
