@@ -88,7 +88,7 @@ neverAutomatic:
    不用 reset、强制覆盖或丢弃 dirty 来继续。解决冲突若超出批准范围，返回计划确认。
    确认票据范围与证据后才 merge；每次合入后复跑受影响验证，失败则阻断依赖此 ticket 的 frontier，记录部分完成状态。
 5. 全部 ticket 合入后，对最终 integration HEAD/diff 执行独立 Review，遵循当前模式和项目 Review 规则；
-   Full/Deep 保留 Standards/Spec 两个独立轴。修复 Critical/Important，记录 Minor 处置；代码或基线变化后刷新 Review 和验证。
+   Full/Deep 由一个独立 Reviewer 综合核对 Standards/Spec，不创建双 Reviewer。修复 Critical/Important，记录 Minor 处置；变化只失效受影响结论，必要复核复用同一 Reviewer，并持续推进到验收。
    没有独立 Review 能力或回执则为 `unverified`，不能用自身检查声明通过。
 6. 在同一最终 HEAD 上取得整体验收、失败路径和最窄回归证据，再报告结果。
    完成指代码集成和验收完成，不代表 tracker 已关闭、PR 已发布或工作树已清理。
