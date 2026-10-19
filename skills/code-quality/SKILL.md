@@ -1,6 +1,6 @@
 ---
 name: code-quality
-description: Use when reading or explaining behavior code, diagnosing behavior, fixing bugs, refactoring, or changing configuration consumers, persistence, or cross-layer behavior.
+description: 追踪行为代码的责任层、状态与失效关系，用于解释、诊断或变更行为；纯文档和配置文本维护不触发。
 ---
 
 # Code Quality

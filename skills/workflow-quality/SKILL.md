@@ -1,17 +1,13 @@
 ---
 name: workflow-quality
-description: Use when a task changes files, performs side effects, requires review or verification evidence, or risks affecting existing user work.
+description: 用于文件变更、验收或外部副作用的证据与既有修改保护；纯查询和普通 Review 不因阶段名称触发。
 ---
 
 # Workflow Quality
 
-本 Skill 仅负责跨领域的验收证据、用户已有修改和副作用安全。SelfWorkflow 唯一管理模式、阶段与授权；代码所有权交给 `code-quality`，TDD 与 Review/Verify 细节交给当前阶段选中的 `testing-review-quality`。未命中代码或测试任务不加载它们；已满足的相同门禁复用有效证据，不重新发起 Review、测试或确认。
+仅负责跨领域验收证据、用户已有修改和副作用安全；阶段/授权遵循启动入口，代码责任层用 `code-quality`，测试方法用 `testing-review-quality`，Review 调度只读 `workflow/modules/review.md`。不因引用加载未命中的 Skill。
 
-- Map every acceptance criterion to fresh evidence. Mark non-applicable checks with a reason and unavailable checks as `unverified`.
-- Review the full diff for logic closure, failure paths, safety, intrusion, compatibility, and unrelated changes.
-- Treat credentials, irreversible actions, user changes, and completion evidence as protected invariants.
-- Never replace an unavailable capability with a weaker mechanism without explicit authorization and a recorded limitation.
-- Before completion, verify the direct behavior and the smallest affected regression surface. Documentation changes validate format, links, references, and rendered/generated output when applicable.
-- Side effects use `plan -> review -> confirm -> apply -> reread`; reuse existing explicit authorization for unchanged scope. Failed or partial apply retains recoverable evidence and does not report success. Separate committed content from pending cleanup; neither is proof of the other.
-- Ordinary agent-policy does not require contract runner/receipt/cleanup attestation. Use those only for explicit contract-managed tasks or a conforming Host; unavailable contract capabilities block that mode, not unrelated ordinary tasks. Prompt rules are not an OS sandbox.
-- Reuse explicit implementation consent while scope, owner and material risk stay unchanged. Record the request, approved scope, plan identity and prohibited actions in the existing task record. Evidence updates need affected re-review, not duplicate consent. Record each explicit waiver separately with its missing capability, authorization, task/plan binding and residual unverified evidence; never promote it to a passed test or reuse it for another task.
+- 验收条件对应新鲜证据；记录命令、退出状态和实际消费者结果。不适用说明原因，缺失/未执行/失败标 `unverified`。文档核对格式、链接、引用及适用的生成/呈现结果。
+- 保护用户已有修改、凭据和不可逆边界；副作用按方案、Review、授权执行后复读。范围未变复用授权，证据更新只复核影响项。失败/部分应用保留可恢复状态；内容提交与清理分别验证。
+- 在已有任务状态保留请求、批准范围、方案标识和禁止动作。能力替代/豁免须明确授权，逐项绑定任务/方案、缺失能力和剩余风险，不记为 passed 或跨任务复用。
+- 普通 agent-policy 不要求 runner/receipt/cleanup 回执；仅显式契约或 Host 已按契约承接时加载对应规则。能力缺失只阻塞该模式；提示词不是操作系统沙箱。
