@@ -1,49 +1,35 @@
 # 代码变更规则
 
-仅诊断需要验证的故障，或设计、审查、实施代码变更时加载。SelfWorkflow 管理任务阶段；本文件只约束代码责任层、实施契约和侵入性。测试执行与 Review 调度复用主流程证据，不另起流程。
+仅诊断需验证的故障或准备变更时加载；SelfWorkflow 管阶段与授权，本文件管责任层、实施契约和侵入性，不另起流程。
 
-## Change rules
+## 责任层与证据
 
-Apply this loop only when diagnosing a failure that needs verification or when changing files:
+1. 固定失败边界：预期/实际、精确输入、首次观测点、模式、重试/恢复状态及已有 dirty 修改。
+2. 沿 producer → persisted state → transform → consumer/detection point 建立最小完整切片；用持久化证据区分 last-good / first-bad，不以日志、退出码、dirty 或同进程内存代替消费者成功。
+3. 修复最早拥有数据和不变量的 owner，而非只改检测点。下游可拒绝无效输入/改进诊断，不重建不属于它的数据；应用策略不泄漏到稳定公共 API，除非真实共享需求与兼容性审查证明必要。
+4. 先列持久数据、缓存、checkpoint、恢复记录、临时产物、部分写入及其失效/重建范围；保护用户修改，检查完整 diff 并隔离任务增量，重叠不安全则停止受影响编辑。
+5. 用直接路径、失败路径、状态不变量、受影响共享路径及最窄回归证明 RED/GREEN；复读实际消费者输出。未执行的构建/测试/Review/持久化检查如实 unverified，不虚构结果。
+6. 批量/有副作用配置按 plan → review → confirm → apply → reread，并保留回滚证据；Review 类型按主流程风险选择，不自动添加独立门禁或重复确认。
 
-1. Freeze the failure envelope: expected, actual, exact inputs, first observation point, modes, retry/resume state, and current dirty changes.
-2. Build the smallest complete slice: `producer -> persisted state -> transform -> consumer/detection point`.
-3. Find `last-good` and `first-bad` using persisted evidence, not only logs, exit codes, dirty flags, or same-process transient state.
-4. Separate root-cause owner from detection point. Repair the earliest layer that owns the data and invariant. A downstream consumer may reject invalid input or improve diagnostics; it must not reconstruct data it does not own.
-5. Inventory durable data, caches, checkpoints, recovery records, temporary outputs, and partial writes. Compute invalidation and rebuild scope before changing behavior.
-6. Prefer the narrowest compatible owner-layer change. Application policy must not leak into stable lower-layer public APIs without demonstrated shared need and compatibility review. Apply the intrusion budget below before accepting a design.
-7. Protect the user's existing changes. Inspect the full diff, isolate the task diff, and stop on unsafe overlap.
-8. Prove Red/Green for the direct path, failure path, state invariants, affected shared paths, and the narrowest regression set. A no-op, process success, or in-memory state is not consumer-observable success; reread the actual output.
-9. Report evidence and gaps. Never claim an unrun build, test, review, persistence check, or runtime behavior.
+## 实施契约与确认
 
-For batch or side-effecting configuration changes, enforce `plan -> review -> confirm -> apply -> reread`, plus rollback evidence. Do not silently downgrade when a required capability is unavailable.
+第一次编辑测试、生产代码、shader、构建脚本或行为配置前，给出实施契约并取得明确授权；此前仅只读分析或设计/测试设计/计划文档。
+契约可合并为紧凑方案，覆盖目标、owner、允许文件/符号、至少一个更窄替代方案、影响半径、测试接缝、侵入预算、安全/性能/兼容性/维护成本、回滚与验证缺口。普通方案自审；重大架构/安全/持久化/不可逆风险或显式请求才前置独立 Review。
+同范围已有明确授权复用；补环境事实、阶段变化、等价私有细节不重问。最终审查核对实际侵入增量。
 
-## Implementation contract
+跨已批准 owner/模块，新增公共 API/ABI/Schema、持久格式、全局宏/构建变体，扩大共享热路径、改变关键测试接缝或实质风险/成本时，停止受影响编辑，修订范围/方案/测试/侵入预算，按风险审查并重新确认。
 
-Before the first test or production-code edit, present an implementation contract and obtain explicit implementation confirmation. Until then, restrict work to read-only analysis and design, test-design, or plan documents; do not write tests, shaders, build scripts, behavior configuration, or production code.
+## 收敛与稳定调用者
 
-The contract records the expected owner-layer changes and main files/symbols, at least one alternative, impact radius, test seam, unverified evidence, and the trade-offs for safety, performance, compatibility, maintenance, and rollback. Light uses a compact inline contract. Full/Deep records the code boundary in the design, direct/failure paths and performance evidence in test design, and exact files, no-go boundaries, the approved intrusion budget, TDD, rollback, and verification in the implementation plan; independent whole-package Review precedes user confirmation.
+Plan 冻结目标、验收、owner、允许组件、侵入预算和禁止项。每个代码/测试/工具/文档/流程改动必须服务主目标、根因或必要验收，不增加新目标、组件、维护面。
+发现问题不等于授权修复；相邻、顺手、小改动、沉没成本或广回归失败均不自动扩权。不阻塞当前验收则记录延后；阻塞则展示最小证据、修订 Plan 并取得确认。
+支持工作若新增接口、状态、生命周期、构建变体或迁移无须变化的消费者，先做一次有界收敛检查：是否已批准且必需、有无更窄路径、长期 owner/维护/兼容性代价。计划外支持工作仍需确认。
 
-If implementation crosses the approved owner/module boundary, adds public API/ABI/schema, persistent formats, a global build macro or variant, expands a shared hot path or test-originated production change, changes a key test seam, or materially increases any approved risk or cost, the contract becomes invalid. Stop editing, revise and re-review the documents, then obtain a new explicit implementation confirmation. Equivalent private details inside the approved budget do not require another prompt; report them in final Review.
+保持稳定现有调用者；新功能依赖稳定路径，不为命名一致、单次复用、测试方便或假想未来反向迁移旧调用者。仅当真实共享不变量归同一 owner、无更窄方案且预算已批准时允许有界迁移。
 
-## Convergence and stability
+## 侵入性与测试边界
 
-Allow design exploration to diverge; require implementation convergence after approval. Every code, test, tool, document, or process change must directly serve the primary goal, an acceptance criterion, or an indispensable failure path.
+按影响半径而非行数评估：公共头/枚举/Num/注册矩阵、API/ABI/Schema、持久格式、全局编译宏/Build variant、跨模块基础设施、共享热路径、测试驱动的生产改动均属高侵入信号。记录影响层、公共契约、变体、维护/回滚代价和更窄方案；窄方案可行则拒绝重方案，否则须明确确认。
 
-The approved Plan is the execution boundary: it freezes the objective, acceptance criteria, owner layer, allowed components, intrusion budget, and no-go boundaries. Implementation may choose equivalent private local details that realize the same planned behavior; it may not add a behavior objective, owner, component, or maintenance surface.
-
-Discovering a problem does not authorize solving it. An unplanned finding does not become approved because it is root-cause-adjacent, blocks a broad regression, is small, faces schedule pressure, or has sunk work behind it. If it does not block current acceptance, record and defer it while you complete the current objective. If it blocks acceptance, stop the affected edits, report the minimum evidence, revise the Plan, test scope, and intrusion budget, and obtain confirmation before editing that behavior.
-
-Before support work creates a separate interface, state, lifecycle, build variant, or changes consumers whose behavior need not change, perform one bounded convergence check: verify it is already planned and indispensable to the primary goal, root-cause repair, or acceptance; compare the narrower existing-path design; and identify any new long-lived owner, maintenance surface, or compatibility risk. Unplanned support work follows the rule above even when it remains private and local. Prefer the narrower design; any necessary scope change requires a revised Plan and renewed user confirmation.
-
-Keep stable existing callers unchanged by default. Make a new feature depend on the stable path; do not reverse old callers onto a feature-owned new abstraction for naming consistency, one-line reuse, testing convenience, or hypothetical future use. A bounded migration is eligible only when the abstraction owns a real shared invariant, the owner already governs all affected callers, no narrower design works, and the approved intrusion budget covers it.
-
-## Intrusion budget
-
-Judge intrusion by impact radius, not changed-line count. Public headers, APIs or public enum values, ABI/schema/persistent formats, a global build macro or build variant, cross-module infrastructure, shared hot paths, and test-originated production changes are high-intrusion signals.
-
-Choose the narrowest owner-layer solution that satisfies acceptance. When a high-intrusion signal appears, record the affected files/layers, public contracts, build variants, maintenance and rollback cost, and at least one narrower alternative. If a narrower solution works, reject the heavier design. If none works, crossing the boundary requires explicit user approval as a critical decision. Final Review compares the approved budget with the actual intrusion delta and stops if the diff exceeds it.
-
-Test coverage must not drive production architecture. Prefer a test-owned translation unit or module, an existing extension point, a narrow injected seam, capture tooling, or black-box verification. A local test macro inside a test-owned boundary is valid; do not impose a blanket ban. By default, do not add a test-only public enum slot, change its `Num` or registration matrix, alter object layout, or spread test branches through shared production paths. If required evidence cannot be obtained within the approved budget, mark it `unverified` and state the risk and manual verification method instead of widening production code.
-
-Example: a test cannot reuse a translation-unit-private processor. Adding a test-only public enum slot under a global build macro is rejected when a test-owned adapter, existing hook, or black-box capture can verify the same behavior.
+测试不能反向驱动生产架构。优先测试自有 translation unit/模块、既有扩展点、窄注入接缝、capture 或黑盒；测试边界内局部宏可用，不能一概禁止。默认不为测试新增公共枚举槽/改变 Num 或注册矩阵/对象布局，不在共享生产路径铺测试分支。
+例如私有处理器无法复用时，若自有 adapter、既有 hook 或黑盒 capture 可验证，就不添加全局宏下的测试公共枚举。确实缺证据则说明风险和人工方法，不擅自扩张生产代码；继续寻找批准范围内的有效验证，不以次数或 Token 预算为由放弃完成。

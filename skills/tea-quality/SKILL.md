@@ -1,11 +1,11 @@
 ---
 name: tea-quality
-description: Use for SelfWorkflow Full or Deep test design, ATDD planning, test-quality review, traceability, or NFR evidence review. Runs the pinned TEA workflows through a project-local-runtime-free adapter and must not require a project _bmad directory.
+description: Use only when the user explicitly requests TEA test design, ATDD, test review, traceability, NFR, framework or CI assessment. Full/Deep tasks, test levels, ordinary testing and workflow maintenance do not trigger TEA. Uses pinned references without a project _bmad directory.
 ---
 
 # TEA Quality Adapter
 
-Use this Skill only for the SelfWorkflow stage that selected it. Keep all outputs inside the task's approved documentation or test paths.
+Use this Skill only after an explicit user request selects the current TEA workflow. Mode, test level and project defaults are not authorization. Keep outputs inside approved paths; reuse the one existing Reviewer and never spawn another review team.
 
 ## Required inputs
 

@@ -9,14 +9,13 @@ description: 仅在明确新增、改造或集成个人 Skill/工作流，或优
 
 ## 来源与按需阅读
 
-已安装入口从当前对话 bootstrap 提供的 **snapshot 绝对根目录** 读取
-`references/anthropic-skills/skill-creator/SKILL.md`。先读取该根目录的 `artifact-manifest.json`，核对所需引用的 SHA256 与实际内容；不从发现目录、cwd 或旧快照猜路径。根目录、文件或 hash 不可验证时报告具体缺口并保持 `unverified`。
+日常工作流规则、触发边界、路由与引用维护只读取本 Skill 和受影响文件，不预载整份上游创建指南。新增实质 Skill 或需要创建/评测方法时，才从 bootstrap 的 snapshot 根按需完整读取 `references/anthropic-skills/skill-creator/SKILL.md`；先用 `artifact-manifest.json` 核对身份与所需 SHA256，不输出全清单、不猜旧路径。缺失或漂移标为 `unverified`。
 
 显式维护 SelfWorkflow 仓库源码时，可以使用本任务批准的 repositoryRoot，从
 `dependencies/locks/anthropic-skills.lock.yaml` 和固定 submodule 的
 `skills/skill-creator` 读取对应材料；不要更新上游或修改其源码。
 
-上游只作为创建、迭代与评测方法引用。首次进入本维护任务才读正文；按需要再读上游的 grader、comparator、analyzer 或 schemas。不要预加载整库、全部 references 或脚本。
+上游仅作方法引用；命中方法时正文首次读取并复用，grader/comparator/analyzer/schemas 只按具体评测需要加载。不因维护一个触发条件自动启动成对模型评测、额外审查 Agent 或整库读取。
 
 ## 融合与触发优化
 

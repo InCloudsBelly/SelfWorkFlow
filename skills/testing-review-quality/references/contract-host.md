@@ -7,9 +7,9 @@
 
 Pre-implementation Review receives the final design, test design, plan, rules, and package hash. Post-landing Review uses one readable package containing the approved request, acceptance criteria, final documents, applicable rules, and actual task delta including committed, staged, unstaged, untracked, deleted, binary-hash, and Git file-mode entries. Worktree and index bytes plus modes are bound separately so staged-only and mode-only changes cannot evade Review.
 
-Bind the package and every receipt to the same `workflowMode`. Light uses one structured `self_attested` review against the current package. Full and Deep run Standards and Spec reviews in two distinct independent contexts against that same package; both `host_attested` receipts must return its hash and distinct execution IDs. Reject missing or cross-mode evidence. Preserve the two axes for Full/Deep. Map `critical` to Critical, `high`/`medium` to Important, and `low`/`info` to Minor. Critical and Important must be resolved; each Minor needs a disposition.
+Bind the package and every receipt to the same `workflowMode`. Light uses one structured `self_attested` review. Full and Deep use one independent `host_attested` review with axis `combined`, covering Standards and Spec against the same package. Reject missing, stale or cross-mode evidence; never require two reviewers. Inherit the parent model/settings without a Review-specific override. Map `critical` to Critical, `high`/`medium` to Important, and `low`/`info` to Minor. Critical and Important must be resolved; each Minor needs a disposition.
 
-Review receipts are workflow evidence, not identity, model, or cryptographic proof. If Full/Deep cannot obtain two genuinely independent Host contexts and their observed execution IDs, stop as `unverified`; do not manufacture identifiers.
+Review receipts are workflow evidence, not identity, model, or cryptographic proof. Full/Deep require one genuinely independent Host context and its observed execution ID; missing capability is `unverified`, never manufactured. Ordinary intermediate plans are self-reviewed; a pre-implementation independent gate is reserved for material architecture, security, persistence, irreversible risk or explicit request.
 
 ## Fresh verification and completion
 

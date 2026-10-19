@@ -10,7 +10,7 @@
 
 `Discover → Capability Check → Classify → Design → Plan → Implement/Debug → Review → Verify → optional Knowledge → Complete`。
 
-按复杂度 × 风险 × 副作用选择 Light、Full、Deep；边界不明向上升级。流程深度与能力 Skill 选择相互独立；加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。行为任务中，Full 和 Deep 必须加载 TEA；仅加载当前阶段所需部分。行为修改使用 TDD，落地前后都要 Review，完成只依据新鲜证据。
+按复杂度 × 风险 × 副作用选择 Light、Full、Deep；边界不明向上升级。流程深度与能力 Skill 选择相互独立；加载能力 Skill 不会自动创建 Design、Plan、Review 或 Verify 流程。TEA 和完整 grilling 全部仅显式点名启用；Full/Deep、测试等级和项目默认不自动触发。行为修改保留 TDD、失败路径与最窄回归，完成只依据新鲜证据。
 
 ## 发散与收敛
 
@@ -18,7 +18,7 @@
 
 ## 代码实施契约
 
-只读分析和文档修订不改变行为代码契约；第一次编辑测试或生产代码前，必须形成明确实施确认，写明目标、责任层、允许修改的组件、文件/符号、替代方案、影响半径、批准的侵入性预算、安全、性能、可维护性、兼容性、回滚和关键测试接缝。设计/规格 + TEA/测试设计 + 实施计划先经 Review，再执行 `Review → 用户确认 → TDD Red/Green → 实施`；重大变化需用户明确确认，确认失效即回到设计。实施计划、侵入性预算和回滚必须绑定同一契约；Light 采用紧凑门禁。
+只读分析和文档修订不改变行为代码契约；第一次编辑测试或生产代码前，形成紧凑实施契约并取得明确授权：目标、责任层、允许文件/组件、替代方案、影响半径、侵入预算、安全/性能/兼容性、回滚与测试接缝。普通设计/测试设计/计划合并自审；只有重大架构、安全、持久化、不可逆风险或显式请求才前置独立 Review。已有同范围授权复用，随后 TDD Red/Green 与实施；重大变化重新确认。
 
 ## 侵入性预算
 
@@ -30,11 +30,11 @@
 
 ## 实施前整体 Review
 
-正式设计、测试设计和实施计划在实施前由独立 SubAgent Review；至少两份正式文档时必须提交完整文档包和最终文档包 hash，不能由同一 Agent 冒充独立 Review，发现关键问题先暂停实施。Full/Deep 需完整文档包 Review；落地后执行 post-landing Review，Full/Deep 使用独立 Standards/Spec Review，行为任务再执行 TEA Review，Light 做窄结构化自审。Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision。Review SubAgent 只读 hash-bound package/evidence，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent。Review 模型只作用于该 SubAgent。
+普通中间文档不单开审查；高风险前置审查只接收完整必要包。落地后执行 post-landing Review：Full/Deep 由一个独立 Reviewer 综合 Standards/Spec；Light 窄结构化自审。所有模式取消双 Reviewer；修复复核复用同一上下文、只看影响项，不因预算中止未完成任务。Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision。Review SubAgent 只读 hash-bound package/evidence，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent，不导入作者历史；继承主 Agent 模型/推理配置，不使用专属覆盖。
 
 ## 按需能力
 
-按任务命中模块：代码读取/写入加载 `workflow/modules/code.md`；CodeGraph 读取和写后更新分别加载 `codegraph-read.md`、`codegraph-update.md`；Review、留痕和知识加载对应模块。Matt `grilling` 只在 Full/Deep 的 Design/Plan 自动一次；显式 `grill-me` 才额外加载。Full/Deep 的行为任务按阶段加载 TEA，非行为任务不自动加载； `tea-atdd`、`tea-trace`、`tea-nfr` 仅显式选择。
+代码任务按需读 `workflow/modules/code.md`，CodeGraph 读/写后分别按 `codegraph-read.md` / `codegraph-update.md`；Review、留痕、知识到阶段才加载。Matt grilling 与所有 TEA 能力仅显式选择，已执行的同一 Skill/阶段/证据组合复用。简单环境事实由主 Agent 批量查明，不强制派发 SubAgent；辅助 Agent 不递归、不重做主流程。工具结果先过滤，保持必要前缀稳定，不为缓存保温发请求。
 
 ## 安全底线
 
