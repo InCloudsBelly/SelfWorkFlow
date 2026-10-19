@@ -141,6 +141,8 @@ class _SpyPort:
         self.execution_mode = execution_mode
         self.report = report
         self.last_attestation = None
+        self.issued_at = "2026-08-09T11:59:00Z"
+        self.expires_at = "2026-08-09T12:05:00Z"
 
     def dispatch_review(self, **call):
         self.calls.append(call)
@@ -174,7 +176,7 @@ class _SpyPort:
             "dispatchId": dispatch_id, "reviewMode": call["review_mode"],
             "dispatchNonce": dispatch_nonce,
             "planHash": call["plan_hash"], "attemptRef": call["attempt_ref"],
-            "issuedAt": "2026-08-09T11:59:00Z", "expiresAt": "2026-08-09T12:05:00Z",
+            "issuedAt": self.issued_at, "expiresAt": self.expires_at,
             "forkContext": call["fork_context"], "payload": call["payload"],
             "reviewerAgent": reviewer_agent, "reviewerContext": reviewer_context,
             "result": result,
@@ -190,9 +192,9 @@ class _SpyPort:
                     if isinstance(call.get("payload", {}).get("projectReview"), dict)
                     else [{
                         "layer": "generic",
-                        "id": "matt-pocock.code-review",
-                        "path": "skills/engineering/code-review",
-                        "contentHash": "sha256:9e6d1b00c31e10a002ac3e5fb49014c9589166f668c62996e80a36d23ca21e70",
+                        "id": "selfworkflow.testing-review-quality",
+                        "path": "skills/testing-review-quality/SKILL.md",
+                        "contentHash": "sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08",
                         "required": True,
                     }]
                 ),
@@ -210,7 +212,7 @@ class _SpyPort:
         return HostDispatchObservation(
             dispatch_id=dispatch_id, dispatch_nonce=dispatch_nonce,
             plan_hash=call["plan_hash"], attempt_ref=call["attempt_ref"],
-            issued_at="2026-08-09T11:59:00Z", expires_at="2026-08-09T12:05:00Z",
+            issued_at=self.issued_at, expires_at=self.expires_at,
             review_mode=call["review_mode"],
             fork_context=call["fork_context"], sent_payload=call["payload"],
             host_agent_identity="host-agent", host_context_identity="host-context",
@@ -323,7 +325,7 @@ class ReviewDispatchTests(unittest.TestCase):
 
         boundary = port.calls[0]["payload"]["reviewExecutionBoundary"]
         self.assertEqual(boundary["role"], "reviewer")
-        self.assertEqual(boundary["modelScope"], "review-only")
+        self.assertEqual(boundary["modelPolicy"], "inherit-parent")
         self.assertEqual(boundary["codeGraphPolicy"], "deny")
         self.assertEqual(
             boundary["allowedOperations"],
@@ -349,7 +351,7 @@ class ReviewDispatchTests(unittest.TestCase):
             )
 
     def test_dispatch_binds_valid_review_model_selection_to_host_payload(self):
-        from selfworkflow.v3.review_dispatch import dispatch_independent_review
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_independent_review
 
         selection = {
             "agentId": "codex",
@@ -358,22 +360,21 @@ class ReviewDispatchTests(unittest.TestCase):
             "selectionMode": "default",
         }
         port = _SpyPort()
-        dispatch_independent_review(
-            _verified(), implementation_agent_identity="implementation-agent",
-            implementation_context_identity="implementation-context", port=port,
-            plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
-            review_model=selection,
-        )
-
-        self.assertEqual(port.calls[0]["review_model"], selection)
-        self.assertEqual(port.calls[0]["payload"]["reviewModel"], selection)
+        with self.assertRaisesRegex(ReviewDispatchError, "review-model-override-disabled"):
+            dispatch_independent_review(
+                _verified(), implementation_agent_identity="implementation-agent",
+                implementation_context_identity="implementation-context", port=port,
+                plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+                review_model=selection,
+            )
+        self.assertEqual(port.calls, [])
 
     def test_dispatch_rejects_unvalidated_review_model_selection(self):
         from selfworkflow.v3.review_dispatch import (
             ReviewDispatchError, dispatch_independent_review,
         )
 
-        with self.assertRaisesRegex(ReviewDispatchError, "review-model-payload-invalid"):
+        with self.assertRaisesRegex(ReviewDispatchError, "review-model-override-disabled"):
             dispatch_independent_review(
                 _verified(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context", port=_SpyPort(),
@@ -396,7 +397,7 @@ class ReviewDispatchTests(unittest.TestCase):
             "selectionMode": "default",
         }
         with self.assertRaisesRegex(
-            ReviewDispatchError, "review-model-observation-mismatch"
+            ReviewDispatchError, "review-model-override-disabled"
         ):
             dispatch_independent_review(
                 _verified(), implementation_agent_identity="implementation-agent",
@@ -447,7 +448,7 @@ class ReviewDispatchTests(unittest.TestCase):
         )
         self.assertEqual(
             call["payload"]["projectReview"]["supplementarySkillIds"],
-            ["matt-pocock.code-review"],
+            ["selfworkflow.testing-review-quality"],
         )
         self.assertEqual(call["project_review_context"], context)
         self.assertEqual(
@@ -559,9 +560,9 @@ class ReviewDispatchTests(unittest.TestCase):
                 project_review_context=invalid,
             )
 
-    def test_dual_code_review_runs_distinct_standards_and_spec_dispatches(self):
+    def test_combined_code_review_runs_one_dispatch_covering_both_axes(self):
         from selfworkflow.project_review import build_code_review_context, load_project_review_profile
-        from selfworkflow.v3.review_dispatch import dispatch_dual_code_review
+        from selfworkflow.v3.review_dispatch import dispatch_code_review
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -583,43 +584,37 @@ class ReviewDispatchTests(unittest.TestCase):
                 is_code_task=True, conversation_id="dual-review",
             )
         port = _SpyPort(unique_dispatches=True)
-        result = dispatch_dual_code_review(
+        result = dispatch_code_review(
             _verified(), implementation_agent_identity="implementation-agent",
             implementation_context_identity="implementation-context", port=port,
             plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
             project_review_context=context,
         )
-        self.assertEqual(len(port.calls), 2)
+        self.assertEqual(len(port.calls), 1)
         self.assertEqual(
             [call["review_mode"] for call in port.calls],
-            ["independent-code-review", "independent-code-review"],
+            ["independent-code-review"],
         )
         self.assertEqual(
             [call["payload"]["reviewAxis"] for call in port.calls],
-            ["standards", "spec"],
+            ["combined"],
         )
         self.assertTrue(all("codeReviewSubject" in call["payload"] for call in port.calls))
-        self.assertEqual(
-            port.calls[0]["project_review_context"],
-            port.calls[1]["project_review_context"],
-        )
+        self.assertEqual(port.calls[0]["payload"]["reviewAxes"], ["standards", "spec"])
         self.assertEqual(result["projectReviewHash"], content_hash(
             port.calls[0]["payload"]["projectReview"]
         ))
-        self.assertNotEqual(
-            result["reviewers"]["standards"]["dispatchId"],
-            result["reviewers"]["spec"]["dispatchId"],
-        )
+        self.assertEqual(set(result["reviewers"]), {"combined"})
         self.assertEqual(
-            result["reviewers"]["standards"]["reviewMode"],
+            result["reviewers"]["combined"]["reviewMode"],
             "independent-code-review",
         )
 
     def test_dual_code_review_rejects_unattested_or_non_approving_axis(self):
-        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_dual_code_review
+        from selfworkflow.v3.review_dispatch import ReviewDispatchError, dispatch_code_review
 
         with self.assertRaisesRegex(ReviewDispatchError, "review-code-review-gate-failed"):
-            dispatch_dual_code_review(
+            dispatch_code_review(
                 _verified(), implementation_agent_identity="implementation-agent",
                 implementation_context_identity="implementation-context",
                 port=_SpyPort(attested=False, unique_dispatches=True),

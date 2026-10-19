@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: complete-gate
-sourceHash: sha256:a612ba90ba1b058419742cd4b878c2703c2d7ca504b4122b70598112be804888
+sourceHash: sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08
 stage: completed
 slot: complete.gate
 selectionMode: static

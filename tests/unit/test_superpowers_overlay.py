@@ -58,8 +58,8 @@ class SuperpowersOverlayTests(unittest.TestCase):
         envelope = json.loads(compile_catalog(self.ROOT / "catalog").content)
         modules = {module["id"]: module for module in envelope["catalog"]["modules"]}
         self.assertEqual(modules["design-core"]["slot"], "design.primary")
-        self.assertEqual(modules["design-grilling"]["activation"], "full-default")
-        self.assertEqual(modules["design-grill-me"]["activation"], "deep-default")
+        self.assertEqual(modules["design-grilling"]["activation"], "explicit")
+        self.assertEqual(modules["design-grill-me"]["activation"], "explicit")
         self.assertEqual(modules["plan-core"]["slot"], "plan.primary")
         self.assertEqual(modules["implement-tdd"]["slot"], "implement.tdd")
         self.assertEqual(modules["verify-execution"]["slot"], "verify.execution")

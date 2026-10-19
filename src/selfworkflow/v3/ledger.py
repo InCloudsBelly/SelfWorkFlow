@@ -311,6 +311,20 @@ def apply_stage_result(
 
     plan_stage = _plan_stage(plan_document, active["stageId"])
     slots = {slot["slotId"]: slot for slot in plan_stage["slots"]}
+    for receipt in receipt_documents:
+        from selfworkflow.v3.contracts import validate_selection_receipt
+        try:
+            validate_selection_receipt(receipt, plan_document)
+        except ContractError as error:
+            raise LedgerError(error.reason) from None
+    runtime_selected: dict[str, set[str]] = {}
+    for receipt in new_receipt_documents:
+        if (
+            receipt["stageId"] != active["stageId"]
+            or receipt["attemptRef"] != stage_result["attemptRef"]
+        ):
+            raise LedgerError("v3-stage-result-receipt-binding-invalid")
+        runtime_selected[receipt["slotId"]] = set(receipt["selectedModuleIds"])
     slot_results = copy.deepcopy(stage_result["slotResults"])
     gate_results = copy.deepcopy(stage_result["gateResults"])
     runtime_skips = copy.deepcopy(stage_result["runtimeSkips"])
@@ -335,7 +349,11 @@ def apply_stage_result(
             raise LedgerError("v3-stage-result-slot-result-duplicate")
         seen_slot_results.add(identity)
         slot = slots.get(item["slotId"])
-        if slot is None or item["moduleId"] not in set(slot["selectedModules"]):
+        allowed = (
+            set(slot["selectedModules"]) if slot is not None and slot["selectionMode"] == "static"
+            else runtime_selected.get(item["slotId"], set())
+        )
+        if slot is None or item["moduleId"] not in allowed:
             raise LedgerError("v3-stage-result-module-not-selected")
     tea_receipt_hashes: list[str] = []
     tea_receipt_keys: set[tuple[str, str]] = set()
@@ -405,19 +423,6 @@ def apply_stage_result(
         {"attemptRef": stage_result["attemptRef"], "receiptHash": item["receiptHash"]}
         for item in new_receipt_documents
     ]
-    for receipt in receipt_documents:
-        from selfworkflow.v3.contracts import validate_selection_receipt
-        try:
-            validate_selection_receipt(receipt, plan_document)
-        except ContractError as error:
-            raise LedgerError(error.reason) from None
-    for receipt in new_receipt_documents:
-        if (
-            receipt["stageId"] != active["stageId"]
-            or receipt["attemptRef"] != stage_result["attemptRef"]
-        ):
-            raise LedgerError("v3-stage-result-receipt-binding-invalid")
-
     target = _stage(result, active["stageId"])
     target["status"] = stage_result["status"]
     target["attempts"][-1]["completedAt"] = stage_result["completedAt"]

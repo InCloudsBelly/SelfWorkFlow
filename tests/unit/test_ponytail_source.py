@@ -94,11 +94,12 @@ class PonytailSourceTests(unittest.TestCase):
                 (self.ROOT / "catalog/v3" / item["ref"]).read_text(encoding="utf-8")
             )
             for item in catalog["modules"]
-            if item["id"] in {"ponytail-coding", "ponytail-help"}
+            if item["id"] in {"ponytail-coding", "ponytail-help", "ponytail-review"}
         }
         for module_id, skill_id in {
             "ponytail-coding": "ponytail",
             "ponytail-help": "ponytail-help",
+            "ponytail-review": "ponytail-review",
         }.items():
             source = (
                 self.ROOT / f"dependencies/upstream/ponytail/skills/{skill_id}/SKILL.md"
@@ -107,6 +108,22 @@ class PonytailSourceTests(unittest.TestCase):
                 _adapt_ponytail_skill(source, skill_id)
             ).hexdigest()
             self.assertEqual(modules[module_id]["sourceHash"], expected)
+
+    def test_review_specialist_does_not_duplicate_generic_native_review(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            copy_ponytail_skills(self.ROOT, temporary)
+            entry = Path(temporary) / "skills/ponytail-review/SKILL.md"
+            text = entry.read_text(encoding="utf-8")
+            metadata = yaml.safe_load(text.split("---", 2)[1])
+            description = metadata["description"]
+            self.assertNotIn('Use for "review this"', description)
+            self.assertIn("over-engineered", description)
+            self.assertIn("Generic PR/commit review uses code-review", description)
+            self.assertIn("Do not start another Review or delegate", text)
+            self.assertIn("Lists findings, changes no code.", text)
+            lock = load_ponytail_lock(self.ROOT)
+            selected = next(item for item in lock["selectedSkills"] if item["id"] == "ponytail-review")
+            self.assertEqual(selected["runtimeHash"], "sha256:" + hashlib.sha256(entry.read_bytes()).hexdigest())
 
     def test_missing_or_invalid_lock_fails_closed(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

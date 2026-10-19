@@ -37,6 +37,10 @@ _BEHAVIOR_ARCHETYPES = {
     "bounded-feature", "bugfix", "behavioral-refactor",
     "architecture-change", "migration",
 }
+_EXPLICIT_ONLY_MODULES = {
+    "design-grilling", "design-grill-me", "tea-framework", "tea-ci",
+    "tea-test-design", "tea-test-review", "tea-atdd", "tea-trace", "tea-nfr",
+}
 
 
 @dataclass(frozen=True)
@@ -214,7 +218,12 @@ def build_plan_graph(
                 if module["stage"] == stage["id"] and module["slot"] == slot["id"]
             ]
             if not applicable and any(
-                module["id"] in requested for module in slot_modules
+                module["id"] in requested
+                and (
+                    module["id"] in explicit
+                    or module["id"] not in _EXPLICIT_ONLY_MODULES | {"plan-integrated-review"}
+                )
+                for module in slot_modules
             ):
                 raise PlanGraphError("v3-explicit-module-inapplicable")
             eligible = (
@@ -520,6 +529,7 @@ def _closed_eligible_modules(
         module["id"]: dict(module)
         for module in slot_modules
         if _support_is_eligible(module, allow_unverified)
+        and (module["id"] not in _EXPLICIT_ONLY_MODULES or module["id"] in explicit)
     }
     changed = True
     while changed:
@@ -533,7 +543,7 @@ def _closed_eligible_modules(
             ):
                 del eligible[module_id]
                 changed = True
-    for module_id in requested:
+    for module_id in requested - (_EXPLICIT_ONLY_MODULES - explicit):
         module = all_modules[module_id]
         if module_id in slot_module_ids:
             if module_id not in eligible:

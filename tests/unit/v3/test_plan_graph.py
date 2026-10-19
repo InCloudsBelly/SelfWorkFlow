@@ -171,14 +171,14 @@ class PlanGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(PlanGraphError, "unsupported"):
             build_plan_graph(unsupported, unsupported_catalog, unsupported_pipeline)
 
-    def test_grill_modules_allow_project_defaults_and_explicit_selection(self):
+    def test_grill_modules_require_explicit_selection_not_project_defaults(self):
         for module_id in ("design-grilling", "design-grill-me"):
             with self.subTest(module_id=module_id):
                 catalog, pipeline = self._artifacts(
                     [_module(module_id)], cardinality="zero-or-many",
                 )
                 unrequested = build_plan_graph(self.REQUEST, catalog, pipeline)
-                self.assertIn(module_id, _review_slot(unrequested)["eligibleModules"])
+                self.assertNotIn(module_id, _review_slot(unrequested)["eligibleModules"])
                 selection_input = SelectionInput(
                     artifact_id="design-signal",
                     artifact_hash="sha256:" + "c" * 64,
@@ -195,13 +195,13 @@ class PlanGraphTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     unrequested_selection.receipt.document["selectedModuleIds"],
-                    [module_id],
+                    [],
                 )
 
                 project_default = copy.deepcopy(self.REQUEST)
                 project_default["projectDefaultModuleIds"] = [module_id]
                 project_graph = build_plan_graph(project_default, catalog, pipeline)
-                self.assertIn(module_id, _review_slot(project_graph)["eligibleModules"])
+                self.assertNotIn(module_id, _review_slot(project_graph)["eligibleModules"])
 
                 explicit = copy.deepcopy(self.REQUEST)
                 explicit["explicitModuleIds"] = [module_id]
@@ -215,15 +215,19 @@ class PlanGraphTests(unittest.TestCase):
                     explicit_selection.receipt.document["selectedModuleIds"], [module_id],
                 )
 
-    def test_required_static_slot_auto_selects_grill_module(self):
+    def test_required_static_slot_cannot_auto_enable_grill_module(self):
         catalog, pipeline = self._artifacts(
             [_module("design-grill-me", mode="static")],
             cardinality="exactly-one", mode="static",
         )
-        graph = build_plan_graph(self.REQUEST, catalog, pipeline)
+        with self.assertRaisesRegex(PlanGraphError, "v3-required-module-unavailable"):
+            build_plan_graph(self.REQUEST, catalog, pipeline)
+        explicit = copy.deepcopy(self.REQUEST)
+        explicit["explicitModuleIds"] = ["design-grill-me"]
+        graph = build_plan_graph(explicit, catalog, pipeline)
         self.assertEqual(_review_slot(graph)["selectedModules"], ["design-grill-me"])
 
-    def test_gate_can_auto_select_module_that_depends_on_grill(self):
+    def test_gate_dependency_cannot_bypass_grill_explicit_selection(self):
         catalog, pipeline = self._artifacts(
             [
                 _module("design-grill-me", mode="static"),
@@ -234,7 +238,11 @@ class PlanGraphTests(unittest.TestCase):
             ],
             cardinality="gate", mode="static",
         )
-        graph = build_plan_graph(self.REQUEST, catalog, pipeline)
+        with self.assertRaisesRegex(PlanGraphError, "v3-required-module-unavailable"):
+            build_plan_graph(self.REQUEST, catalog, pipeline)
+        explicit = copy.deepcopy(self.REQUEST)
+        explicit["explicitModuleIds"] = ["design-grill-me"]
+        graph = build_plan_graph(explicit, catalog, pipeline)
         self.assertEqual(
             set(_review_slot(graph)["selectedModules"]),
             {"design-grill-me", "review-wrapper"},

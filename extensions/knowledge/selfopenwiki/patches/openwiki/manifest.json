@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "domain": "selfopenwiki:openwiki-patch-manifest:v2",
+  "upstream": {
+    "url": "https://github.com/langchain-ai/openwiki.git",
+    "commit": "d1c7fc75a6a906da258cd94dbcb1602f98516480"
+  },
+  "patches": []
+}

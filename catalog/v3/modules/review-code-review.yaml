@@ -1,11 +1,11 @@
 schemaVersion: 3
 id: review-code-review
-sourceHash: sha256:9e6d1b00c31e10a002ac3e5fb49014c9589166f668c62996e80a36d23ca21e70
+sourceHash: sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08
 stage: reviewed
 slot: review.independent
 selectionMode: static
-invocation: {kind: skill, ref: matt-pocock:code-review}
+invocation: {kind: skill, ref: selfworkflow:testing-review-quality}
 dependencies: []
 conflicts: []
-contextCost: {estimatedContextCost: 1024, estimatedExecutionCost: 512}
+contextCost: {estimatedContextCost: 128, estimatedExecutionCost: 64}
 supportEvidence: {sourceIntegrity: supported, adapterSupport: supported, runtimeCapability: supported, behaviorEvidence: supported}

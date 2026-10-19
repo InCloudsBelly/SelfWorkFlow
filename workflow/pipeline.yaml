@@ -33,7 +33,7 @@ stages:
       - id: test.quality.plan
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
-        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {contains: [explicitModuleIds, tea-test-design]}]}
       - {id: plan.specialists, cardinality: zero-or-many, allowedInvocationKinds: [skill, mcp]}
       - id: plan.gate
         cardinality: gate
@@ -80,11 +80,11 @@ stages:
       - id: review.independent
         cardinality: zero-or-one
         allowedInvocationKinds: [agent-native, skill]
-        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}, {eq: [operationType, analyze]}, {eq: [operationType, review]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
       - id: test.quality.review
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
-        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {contains: [explicitModuleIds, tea-test-review]}]}
       - id: review.remediation
         cardinality: zero-or-many
         allowedInvocationKinds: [agent-native, skill]

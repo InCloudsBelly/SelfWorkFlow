@@ -70,11 +70,19 @@ def build_plan_graph(
                     reasons.add("explicit-module-inapplicable")
                 slots.append({"slotId": slot["id"], "cardinality": slot["cardinality"], "applicability": "not-applicable", "selectedModules": [], "gates": []})
                 continue
+            explicit_modules = tuple(request["explicitModuleIds"])
+            # R2 also includes security boundaries and persistent data; this
+            # legacy request has no finer risk dimension to safely waive Review.
+            if (
+                slot["id"] == "plan.gate" and request["risk"] in {"R2", "R3"}
+                and "plan-integrated-review" not in explicit_modules
+            ):
+                explicit_modules += ("plan-integrated-review",)
             route = route_modules(
                 envelope,
                 ModuleRouteRequest(
                     slot_id=slot["id"], cardinality=slot["cardinality"], operation_type=request["operationType"],
-                    strength=strength, write_task=request["writeTask"], explicit_module_ids=tuple(request["explicitModuleIds"]),
+                    strength=strength, write_task=request["writeTask"], explicit_module_ids=explicit_modules,
                     project_default_module_ids=tuple(request["projectDefaultModuleIds"]), capability_states=capability_states,
                     implement_spec_evidence=request.get("implementSpecEvidence"),
                     durable_spec=request.get("durableSpec"),

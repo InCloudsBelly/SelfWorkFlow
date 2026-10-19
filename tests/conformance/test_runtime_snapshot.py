@@ -69,19 +69,17 @@ class RuntimeSnapshotTests(unittest.TestCase):
             for phrase in (
                 "SelfWorkflow active: <profile>",
                 "mode: <Light|Full|Deep>",
-                "已完成主阶段/总主阶段",
+                "阶段/总阶段",
                 "独立 SubAgent",
-                "至少两份正式文档",
-                "侵入性预算",
-                "影响半径",
-                "测试覆盖不能反向驱动生产架构",
-                "代码实施契约",
-                "第一次编辑测试或生产代码前",
-                "明确实施确认",
-                "Review → 用户确认 → TDD",
-                "确认失效",
-                "非代码任务不自动加载",
-                "官方 CodeGraph MCP",
+                "所有模式禁止双 Reviewer",
+                "侵入预算",
+                "测试不能反向扩张生产架构",
+                "实施契约",
+                "首次编辑测试/生产代码前",
+                "已有同范围授权复用",
+                "关键风险变化需重新确认",
+                "按实际命中加载",
+                "官方 MCP",
             ):
                 self.assertIn(phrase, workflow_text)
             self.assertFalse((root / "first/extensions").exists())
@@ -248,14 +246,22 @@ class RuntimeSnapshotTests(unittest.TestCase):
             root = Path(temporary)
             source = root / "source"
             subprocess.run(["git", "clone", "-q", "--no-local", "--recurse-submodules", str(self.ROOT), str(source)], check=True)
-            tracked = subprocess.run(["git", "ls-files"], cwd=self.ROOT,
-                                     capture_output=True, text=True, check=True).stdout.splitlines()
-            # Hold main-repository bytes fixed; only the real submodule checkout varies.
-            for relative in tracked:
+            source_files = subprocess.run(
+                ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                cwd=self.ROOT, capture_output=True, text=True, check=True,
+            ).stdout.splitlines()
+            # Keep tracked and untracked source bytes fixed; only upstream varies.
+            for relative in source_files:
                 original = self.ROOT / relative
-                if relative.startswith("dependencies/upstream/") or not original.is_file():
+                if relative.startswith("dependencies/upstream/"):
                     continue
                 destination = source / relative
+                if not original.is_file():
+                    # Overlay deletions too, not just additions/changed bytes;
+                    # otherwise the clone retains retired files from HEAD.
+                    if not original.exists() and destination.is_file():
+                        destination.unlink()
+                    continue
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(original.read_bytes())
             upstream = source / "dependencies/upstream/matt-pocock-skills"
@@ -269,7 +275,10 @@ class RuntimeSnapshotTests(unittest.TestCase):
             import hashlib
             for item in lock["selectedSkills"]:
                 published_entry = root / "fresh/skills/matt-pocock" / item["id"] / "SKILL.md"
-                self.assertEqual("sha256:" + hashlib.sha256(published_entry.read_bytes()).hexdigest(), item["hash"])
+                if item["id"] == "code-review":
+                    self.assertEqual(published_entry.read_bytes(), (source / "workflow/skills/code-review/SKILL.md").read_bytes())
+                else:
+                    self.assertEqual("sha256:" + hashlib.sha256(published_entry.read_bytes()).hexdigest(), item["hash"])
             self.assertEqual("sha256:" + hashlib.sha256((root / "fresh/skills/matt-pocock/LICENSE").read_bytes()).hexdigest(), lock["license"]["hash"])
             ponytail_lock = yaml.safe_load((source / "dependencies/locks/ponytail.lock.yaml").read_text(encoding="utf-8"))
             self.assertEqual("sha256:" + hashlib.sha256((root / "fresh/skills/ponytail/LICENSE").read_bytes()).hexdigest(), ponytail_lock["license"]["hash"])

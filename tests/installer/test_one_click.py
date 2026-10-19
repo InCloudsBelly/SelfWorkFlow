@@ -253,6 +253,7 @@ $scriptPath = Join-Path $Root "runtime.js"
 [IO.File]::WriteAllText($scriptPath, "fixture")
 $runtimeReport = [pscustomobject]@{commandPrefix=@((Get-Command node.exe).Source,$scriptPath);sourceHash="fixture"}
 $Profile = "knowledge"
+$RepositoryRoot = $Root
 $codeGraphVerification = [pscustomobject]@{status="fixture"}
 $ponytailReport = [pscustomobject]@{status="fixture"}
 $mattSkillsReport = [pscustomobject]@{status="fixture"}
@@ -278,6 +279,20 @@ if ($CodeGraphMcpLauncherOnly -and [IO.Path]::GetFileName($Path) -eq "summary.js
 function Ensure-HostLauncher($Path) { return [pscustomobject]@{status="fixture"} }
 function Remove-LegacyState($Path) { }
 function Invoke-SelfWorkflow($Arguments,$OutputPath) {
+    if ($Arguments[0] -eq "wiki") {
+        if ($Arguments[1] -eq "inspect") {
+            $status = if ($Case -eq "wiki-post-failure") { "source-ready" } else { "setup-required" }
+            return [pscustomobject]@{status=$status}
+        }
+        if ($Arguments[1] -eq "register") {
+            $before = [IO.File]::ReadAllBytes($CodexCodeGraphMcpConfigPath)
+            $after = [Text.Encoding]::UTF8.GetBytes([Text.Encoding]::UTF8.GetString($before) + "`n[mcp_servers.self-openwiki]`ncommand = `"new-wiki`"`n")
+            if ($Arguments -contains "--confirm-plan-hash") {
+                [IO.File]::WriteAllBytes($CodexCodeGraphMcpConfigPath, $after)
+            }
+            return [pscustomobject]@{planHash="wiki-plan";beforeConfigHash=("sha256:" + (Get-McpBytesHash $before));afterConfigHash=("sha256:" + (Get-McpBytesHash $after))}
+        }
+    }
     if ($Arguments[0] -eq "doctor") {
         if ($Case -eq "rollback-conflict") { [IO.File]::WriteAllText($CodeGraphMcpLauncherPath,"concurrent-user-change") }
         return [pscustomobject]@{status="fixture"}
@@ -316,6 +331,11 @@ function Invoke-SelfWorkflow($Arguments,$OutputPath) {
         setup = r'''
 Get-McpFileState $CodeGraphMcpLauncherPath | Out-Null
 Get-McpFileState $CodexCodeGraphMcpConfigPath | Out-Null
+if ($Case -eq "wiki-post-failure") {
+    $storageDirectory = Join-Path $Root "localappdata/SelfOpenWiki"
+    [IO.Directory]::CreateDirectory($storageDirectory) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $storageDirectory "config.json"), "fixture")
+}
 if ($Case -in @("provider-race", "provider-preserve-race")) {
     $script:ProviderRaceInjected = $false
     $runtimeRoot = Join-Path $Root "codegraph-runtime"
@@ -388,6 +408,19 @@ try {
                         self.assertEqual(result.returncode, 80)
                     else:
                         self.assertNotEqual(summary["rollback"], "failed")
+
+    def test_failure_after_wiki_registration_restores_the_whole_original_config(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary).resolve()
+            config = root / "config.toml"
+            original = b'model = "keep-user-setting"\n'
+            config.write_bytes(original)
+            (root / "launch.cmd").write_bytes(b"@echo original\r\n")
+            result = self._mcp_fault_install(root, "wiki-post-failure", False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(config.read_bytes(), original, result.stdout + result.stderr)
+            summary = json.loads((root / "summary.json").read_text(encoding="utf-8-sig"))
+            self.assertEqual(summary["rollback"], "rolled-back")
 
     def test_failed_mcp_install_restores_original_absence_in_both_modes(self):
         for only in (False, True):
@@ -538,7 +571,9 @@ try {
         output = result.stdout.casefold()
         self.assertNotIn("grillmechoice", output)
         self.assertIn("pinned matt pocock", output)
-        self.assertIn("strength-routed grilling", output)
+        self.assertIn("grilling and tea are explicit-only", output)
+        self.assertIn("one combined", output)
+        self.assertIn("reviewer inheriting the parent model", output)
         self.assertIn("superpowers is external-only", output)
         self.assertIn("apply", output)
         self.assertIn("log", output)

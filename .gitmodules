@@ -19,3 +19,10 @@
 [submodule "dependencies/upstream/obsidian-skills"]
 	path = dependencies/upstream/obsidian-skills
 	url = https://github.com/kepano/obsidian-skills.git
+[submodule "extensions/knowledge/selfopenwiki/upstream/openwiki"]
+	path = extensions/knowledge/selfopenwiki/upstream/openwiki
+	url = https://github.com/langchain-ai/openwiki.git
+[submodule "extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer"]
+	path = extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer
+	url = https://github.com/InCloudsBelly/zxh_wiki_viewer.git
+	branch = codex/selfopenwiki-local-source

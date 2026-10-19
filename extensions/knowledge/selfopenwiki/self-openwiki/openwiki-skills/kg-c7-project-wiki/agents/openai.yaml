@@ -1,0 +1,4 @@
+interface:
+  display_name: "KG_C7_Project_Wiki"
+  short_description: "把本地 C++/UE 项目证据沉淀为可维护中文 Wiki"
+  default_prompt: "Use $kg-c7-project-wiki to organize the confirmed project sources into evidence-backed Chinese OpenWiki knowledge."

@@ -301,10 +301,12 @@ class OptionalV3RoutingTests(unittest.TestCase):
                 self.assertEqual(_slots(plan)[slot_id]["selectedModules"], [module_id])
                 self.assertEqual(set(_selected(plan)) & OPTIONAL.keys(), {module_id})
 
-    def test_framework_preserves_test_design(self):
+    def test_framework_does_not_implicitly_enable_test_design(self):
         plan = self._resolve(self._request(explicit=("tea-framework",)))
         self.assertEqual(_slots(plan)["plan.assessment"]["selectedModules"], ["tea-framework"])
-        self.assertEqual(_slots(plan)["test.quality.plan"]["selectedModules"], ["tea-test-design"])
+        self.assertEqual(_slots(plan)["test.quality.plan"]["selectedModules"], [])
+        both = self._resolve(self._request(explicit=("tea-framework", "tea-test-design")))
+        self.assertEqual(_slots(both)["test.quality.plan"]["selectedModules"], ["tea-test-design"])
 
     def test_spec_preserves_tdd_and_replaces_legacy_orchestrator(self):
         plan = self._resolve(self._request(operation="implement", explicit=("implement-spec",)))

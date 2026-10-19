@@ -249,7 +249,7 @@ class V3PipelineLoaderTests(unittest.TestCase):
                     {"eq": ["operationType", "implement"]},
                     {"eq": ["operationType", "debug"]},
                 ]},
-                {"gte": ["testLevelFloor", "T2"]},
+                {"contains": ["explicitModuleIds", "tea-test-design"]},
             ]},
         )
         readiness = slots["plan.integrated-review"]
@@ -266,29 +266,17 @@ class V3PipelineLoaderTests(unittest.TestCase):
                     {"eq": ["operationType", "debug"]},
                 ]},
                 {"any": [
-                    {"gte": ["complexity", "C2"]},
                     {"gte": ["risk", "R2"]},
-                    {"gte": ["projectMinimums", "Full"]},
+                    {"eq": ["taskArchetype", "architecture-change"]},
+                    {"eq": ["taskArchetype", "migration"]},
+                    {"contains": ["explicitModuleIds", "plan-integrated-review"]},
                 ]},
             ]},
         )
         deep_grill = slots["design.deep-grill"]
         self.assertEqual(
             deep_grill["condition"],
-            {"all": [
-                {"any": [
-                    {"eq": ["operationType", "design"]},
-                    {"eq": ["operationType", "plan"]},
-                    {"eq": ["operationType", "implement"]},
-                    {"eq": ["operationType", "debug"]},
-                ]},
-                {"any": [
-                    {"gte": ["complexity", "C3"]},
-                    {"gte": ["risk", "R3"]},
-                    {"gte": ["projectMinimums", "Deep"]},
-                    {"contains": ["explicitModuleIds", "design-grill-me"]},
-                ]},
-            ]},
+            {"contains": ["explicitModuleIds", "design-grill-me"]},
         )
         from selfworkflow.v3.plan_graph import _condition_matches
         self.assertFalse(_condition_matches(
@@ -302,7 +290,8 @@ class V3PipelineLoaderTests(unittest.TestCase):
             readiness["condition"],
             {
                 "operationType": "plan", "complexity": "C1",
-                "risk": "R1", "projectMinimums": {"strength": "Full"},
+                "risk": "R2", "taskArchetype": "bugfix", "explicitModuleIds": [],
+                "projectMinimums": {"strength": "Full"},
             },
         ))
         self.assertFalse(_condition_matches(
@@ -311,13 +300,14 @@ class V3PipelineLoaderTests(unittest.TestCase):
         ))
         self.assertTrue(_condition_matches(
             test_quality["condition"],
-            {"operationType": "plan", "testLevelFloor": "T2"},
+            {"operationType": "plan", "testLevelFloor": "T2", "explicitModuleIds": ["tea-test-design"]},
         ))
         self.assertFalse(_condition_matches(
             deep_grill["condition"],
             {
                 "operationType": "analyze", "complexity": "C3",
                 "risk": "R3", "projectMinimums": {"strength": "Deep"},
+                "explicitModuleIds": [],
             },
         ))
         self.assertTrue(_condition_matches(
@@ -325,6 +315,7 @@ class V3PipelineLoaderTests(unittest.TestCase):
             {
                 "operationType": "plan", "complexity": "C1",
                 "risk": "R1", "projectMinimums": {"strength": "Deep"},
+                "explicitModuleIds": ["design-grill-me"],
             },
         ))
         self.assertEqual(

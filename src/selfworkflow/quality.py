@@ -881,6 +881,11 @@ def validate_completion(
     specification: Mapping[str, str],
     package: Mapping[str, Any],
     reviews: Sequence[Mapping[str, Any]],
+    *,
+    code_review_evidence: object = None,
+    review_host: object = None,
+    review_ledger: object = None,
+    review_receipts: Sequence[object] = (),
 ) -> dict[str, Any]:
     """Fail closed unless mode-appropriate Review and fresh verification are current."""
 
@@ -893,7 +898,7 @@ def validate_completion(
         expected_axes = {"self"}
         expected_attestation = "self_attested"
     elif workflow_mode in {"Full", "Deep"}:
-        expected_axes = {"standards", "spec"}
+        expected_axes = {"combined"}
         expected_attestation = "host_attested"
     else:
         raise QualityGateError("quality-review-mode-mismatch")
@@ -940,6 +945,30 @@ def validate_completion(
                 raise QualityGateError("quality-review-invalid")
     if set(by_axis) != expected_axes:
         raise QualityGateError("quality-review-missing")
+    if workflow_mode in {"Full", "Deep"}:
+        from selfworkflow.v3.host import CodeReviewEvidence, Host, HostError
+
+        if (
+            type(code_review_evidence) is not CodeReviewEvidence
+            or not code_review_evidence._is_valid()
+            or code_review_evidence._test_only
+            or code_review_evidence._completion_used
+        ):
+            raise QualityGateError("quality-review-host-unverified")
+        reviewed_content = code_review_evidence._package["content"]
+        receipt = code_review_evidence["reviewers"]["combined"]
+        if (
+            code_review_evidence._mode != workflow_mode
+            or _package_hash(reviewed_content) != package_hash
+            or by_axis["combined"]["executionId"] != receipt["subagentExecutionId"]
+        ):
+            raise QualityGateError("quality-review-evidence-binding-invalid")
+        try:
+            if type(review_host) is not Host:
+                raise HostError("code-review-host-required")
+            Host.validate_code_review_completion(review_host, review_ledger, code_review_evidence, review_receipts)
+        except HostError:
+            raise QualityGateError("quality-review-context-invalid") from None
     plans = _verification_plans(package.get("verificationPlans"))
     owned_verifications = [
         run_verification(repository, package, plan["id"]) for plan in plans
@@ -982,6 +1011,14 @@ def validate_completion(
             raise QualityGateError("quality-verification-failed")
     if seen_plans != set(plans_by_id):
         raise QualityGateError("quality-verification-missing")
+    if workflow_mode in {"Full", "Deep"}:
+        if not code_review_evidence._is_valid():
+            raise QualityGateError("quality-review-host-unverified")
+        try:
+            Host.validate_code_review_completion(review_host, review_ledger, code_review_evidence, review_receipts)
+        except HostError:
+            raise QualityGateError("quality-review-context-invalid") from None
+        object.__setattr__(code_review_evidence, "_completion_used", True)
     return {
         "schemaVersion": 1,
         "status": "complete",

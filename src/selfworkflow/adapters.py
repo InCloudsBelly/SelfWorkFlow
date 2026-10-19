@@ -73,7 +73,6 @@ _CORE_PATHS = (
     "schemas/rollback-plan.schema.json",
     "schemas/git-policy.schema.json",
     "schemas/project-review-profile.schema.json",
-    "schemas/review-model-config.schema.json",
     "schemas/work-artifact-manifest.schema.json",
     "schemas/work-artifact-operation.schema.json",
     "schemas/work-artifact-publication-receipt.schema.json",
@@ -151,10 +150,23 @@ def load_adapters(adapter_root: str | Path, schema_path: str | Path) -> list[dic
 
 
 def _copy_tree(source: Path, destination: Path, *, excluded_roots: tuple[Path, ...] = ()) -> None:
-    for path in sorted(source.rglob("*")):
+    if source.is_symlink() or source.is_junction():
+        raise AdapterError("runtime-source-link-rejected")
+    paths = source.rglob("*")
+    if excluded_roots:
+        paths = []
+        pending = [source]
+        while pending:
+            for path in pending.pop().iterdir():
+                if any(path == root or root in path.parents for root in excluded_roots):
+                    continue
+                paths.append(path)
+                if path.is_dir() and not path.is_symlink() and not path.is_junction():
+                    pending.append(path)
+    for path in sorted(paths):
         if any(path == root or root in path.parents for root in excluded_roots):
             continue
-        if path.is_symlink():
+        if path.is_symlink() or path.is_junction():
             raise AdapterError("runtime-source-link-rejected")
         relative = path.relative_to(source)
         target = destination / relative
@@ -177,6 +189,19 @@ def _copy_runtime_path(source: Path, destination: Path, relative: str) -> None:
         shutil.copyfile(candidate, target)
     else:
         raise AdapterError("runtime-source-invalid")
+
+
+def _wiki_runtime_exclusions(source: Path) -> tuple[Path, ...]:
+    module = source / "extensions/knowledge/selfopenwiki"
+    return tuple(module / relative for relative in (
+        "upstream", "visualizer", ".work", "node_modules", "runtime",
+        ".selfopenwiki-upstream-update.lock", ".selfopenwiki-upstream-update-journal.json",
+        "self-openwiki/runtime", "self-openwiki/mcp-server/node_modules",
+        "self-openwiki/mcp-server/dist", "self-openwiki/mcp-server/coverage",
+        "self-openwiki/win32-helper/bootstrap", "self-openwiki/win32-helper/dist",
+        "self-openwiki/win32-helper/bin", "self-openwiki/win32-helper/obj",
+        "self-openwiki/win32-helper-compat/bin", "self-openwiki/win32-helper-compat/obj",
+    ))
 
 
 def _copy_matt_skills(
@@ -257,6 +282,14 @@ def _copy_matt_skills(
             raise AdapterError("matt-skills-source-invalid")
         locked_entry = locked_text_bytes(entry.read_bytes(), expected_hash, "matt-skills-source-drift")
         target = destination / "skills" / "matt-pocock" / skill_id
+        if skill_id == "code-review":
+            # Keep the pinned source checks above, but publish the workflow-owned
+            # single-review entry for native discovery as well as catalog routing.
+            local_entry = source / "workflow/skills/code-review/SKILL.md"
+            if not local_entry.is_file() or local_entry.is_symlink():
+                raise AdapterError("runtime-source-invalid")
+            _copy_tree(local_entry.parent, target)
+            continue
         _copy_tree(skill_root, target)
         for published in target.rglob("*"):
             if published.is_file() and published.suffix in {".md", ".sh", ".yaml"}:
@@ -645,13 +678,16 @@ def build_runtime(
                     excluded = tuple(
                         candidate / "upstream" / source_id
                         for source_id in ("matt-pocock-skills", "tea", "ponytail", "anthropic-skills", *_COMMUNITY_SOURCES)
-                    ) if directory == "dependencies" else ()
+                    ) if directory == "dependencies" else (
+                        _wiki_runtime_exclusions(source) if directory == "extensions" else ()
+                    )
                     _copy_tree(candidate, temporary / directory, excluded_roots=excluded)
             _copy_runtime_path(source, temporary, "catalog/v3")
             for legacy in (
                 temporary / "skills/grill-me",
                 temporary / "overlays/superpowers",
                 temporary / "dependencies/superpowers.lock.yaml",
+                temporary / "skills/kg-selfopenwiki",
             ):
                 if legacy.is_dir():
                     shutil.rmtree(legacy)
@@ -665,18 +701,20 @@ def build_runtime(
                 _exclude_c7_v3_catalog(temporary)
             if profile == "knowledge":
                 _copy_runtime_path(source, temporary, "extensions/knowledge/contract.yaml")
-                _copy_runtime_path(source, temporary, "extensions/knowledge/selfopenwiki")
+                _copy_tree(
+                    source / "extensions/knowledge/selfopenwiki",
+                    temporary / "extensions/knowledge/selfopenwiki",
+                    excluded_roots=_wiki_runtime_exclusions(source),
+                )
                 generic_skill = temporary / "skills" / "knowledge-backend" / "SKILL.md"
                 generic_skill.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(
                     source / "skills/knowledge-backend/SKILL.md",
                     generic_skill,
                 )
-                selfopenwiki_skill = temporary / "skills" / "kg-selfopenwiki" / "SKILL.md"
-                selfopenwiki_skill.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(
-                    source / "skills/kg-selfopenwiki/SKILL.md",
-                    selfopenwiki_skill,
+                _copy_tree(
+                    source / "skills/kg-selfopenwiki",
+                    temporary / "skills/kg-selfopenwiki",
                 )
         _copy_matt_skills(
             source, temporary, include_grill_me=include_grill_me

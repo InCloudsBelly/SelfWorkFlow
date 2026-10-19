@@ -8,6 +8,8 @@ Wiki, inspect credentials, or infer undocumented MCP fields.
 from __future__ import annotations
 
 import os
+import re
+import hashlib
 from pathlib import Path
 from typing import Protocol
 
@@ -109,7 +111,7 @@ def _paths_equal(left: str | Path, right: str | Path) -> bool:
     )
 
 
-def validate_external_status(value: object) -> dict[str, object]:
+def validate_external_status(value: object, *, require_ready: bool = True) -> dict[str, object]:
     """Validate only the frozen external-agent status fields.
 
     The current frozen status places ``contractSchema`` under ``version``.
@@ -159,7 +161,7 @@ def validate_external_status(value: object) -> dict[str, object]:
             or not active["nextAction"]
         ):
             raise SelfOpenWikiError("external-status-invalid")
-    if external["ready"] is not True:
+    if require_ready and external["ready"] is not True:
         raise SelfOpenWikiError("external-agent-not-ready")
     paths = value.get("paths")
     if (
@@ -274,6 +276,120 @@ class SelfOpenWikiAdapter:
         except Exception:
             raise SelfOpenWikiError("backend-unavailable") from None
         return validate_external_status(value)
+
+    def recovery_status(self) -> dict[str, object]:
+        """Read the bound recovery state without enabling ordinary publication."""
+        try:
+            value = self._client.call_tool("openwiki_status", {})
+        except Exception:
+            raise SelfOpenWikiError("backend-unavailable") from None
+        return validate_external_status(value, require_ready=False)
+
+    def read(self, paths: list[str] | None = None, *, expected_revision: str | None = None) -> dict[str, object]:
+        status = self.recovery_status()
+        if "knowledge.read.safe" not in {item["id"] for item in status["capabilities"]}:
+            raise SelfOpenWikiError("wiki-read-capability-missing")
+        if paths is not None and (
+            not isinstance(paths, list) or not 1 <= len(paths) <= 32
+            or any(not isinstance(item, str) or not item for item in paths)
+            or len(set(paths)) != len(paths)
+        ):
+            raise SelfOpenWikiError("wiki-read-input-invalid")
+        if expected_revision is not None and (not isinstance(expected_revision, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", expected_revision) is None):
+            raise SelfOpenWikiError("wiki-read-input-invalid")
+        arguments: dict[str, object] = {}
+        if paths is not None:
+            arguments["paths"] = list(paths)
+        if expected_revision is not None:
+            arguments["expectedWikiRevision"] = expected_revision
+        try:
+            value = self._client.call_tool("openwiki_read", arguments)
+        except Exception:
+            raise SelfOpenWikiError("backend-unavailable") from None
+        if isinstance(value, dict) and value.get("ok") is False:
+            return validate_personal_result("openwiki_finish", value)
+        if (
+            not isinstance(value, dict) or value.get("ok") is not True
+            or value.get("status") != "wiki_read" or not isinstance(value.get("revision"), str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", value["revision"]) is None
+            or not isinstance(value.get("pages"), list) or not isinstance(value.get("knowledge"), list)
+            or len(value["knowledge"]) != len(paths or [])
+            or expected_revision is not None and value["revision"] != expected_revision
+        ):
+            raise SelfOpenWikiError("wiki-read-result-invalid")
+        pages_by_path = {}
+        for page in value["pages"]:
+            if not isinstance(page, dict) or set(page) != {"path", "size", "contentHash"}:
+                raise SelfOpenWikiError("wiki-read-result-invalid")
+            page_path = page["path"]
+            if (
+                not isinstance(page_path, str) or not page_path.lower().endswith(".md")
+                or "\\" in page_path or ":" in page_path
+                or any(part in {"", ".", "..", ".git", ".claims", ".selfopenwiki"} for part in page_path.split("/"))
+                or page_path in pages_by_path or type(page["size"]) is not int
+                or not 0 <= page["size"] <= 9007199254740991
+                or not isinstance(page["contentHash"], str)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", page["contentHash"]) is None
+            ):
+                raise SelfOpenWikiError("wiki-read-result-invalid")
+            pages_by_path[page_path] = page
+        total_bytes = 0
+        for index, item in enumerate(value["knowledge"]):
+            if (
+                not isinstance(item, dict) or set(item) != {"content", "sourceId", "revision", "contentHash", "verificationStatus"}
+                or not isinstance(item.get("content"), str)
+                or item.get("sourceId") != f"selfopenwiki:{paths[index]}"
+                or item.get("revision") != value["revision"] or item.get("verificationStatus") != "unverified"
+            ):
+                raise SelfOpenWikiError("wiki-read-result-invalid")
+            try:
+                content_bytes = item["content"].encode("utf-8")
+            except UnicodeError:
+                raise SelfOpenWikiError("wiki-read-result-invalid") from None
+            page = pages_by_path.get(paths[index])
+            total_bytes += len(content_bytes)
+            if (
+                page is None or len(content_bytes) != page["size"] or len(content_bytes) > 262144 or total_bytes > 1048576
+                or item["contentHash"] != page["contentHash"]
+                or item["contentHash"] != "sha256:" + hashlib.sha256(content_bytes).hexdigest()
+            ):
+                raise SelfOpenWikiError("wiki-read-result-invalid")
+        return dict(value)
+
+    def abort_external_update(
+        self, transaction_id: str, generation: int, binding_hash: str, *,
+        confirmed_by_user: bool = False,
+    ) -> dict[str, object]:
+        if confirmed_by_user is not True:
+            raise SelfOpenWikiError("confirmation-required")
+        if (
+            not isinstance(transaction_id, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,159}", transaction_id) is None
+            or type(generation) is not int or not 1 <= generation <= 3
+            or not isinstance(binding_hash, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", binding_hash) is None
+        ):
+            raise SelfOpenWikiError("external-abort-input-invalid")
+        self.recovery_status()
+        try:
+            value = self._client.call_tool("openwiki_finalize_external_update", {
+                "action": "abort", "transactionId": transaction_id,
+                "bindingHash": binding_hash, "confirmedByUser": True,
+            })
+        except Exception:
+            raise SelfOpenWikiError("backend-unavailable") from None
+        if isinstance(value, dict) and value.get("ok") is False:
+            return validate_personal_result("openwiki_finish", value)
+        if (
+            not isinstance(value, dict) or value.get("ok") is not True
+            or value.get("status") != "external_update_aborted"
+            or value.get("executionMode") != "external_agent" or value.get("authRequired") is not False
+            or value.get("transactionId") != transaction_id
+            or value.get("generation") != generation or value.get("bindingHash") != binding_hash
+        ):
+            raise SelfOpenWikiError("external-abort-result-invalid")
+        return dict(value)
 
     def personal_status(self) -> dict[str, object]:
         """Call ``openwiki_status`` first and require the v2 personal lifecycle."""

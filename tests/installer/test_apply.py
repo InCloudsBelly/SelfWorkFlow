@@ -19,7 +19,75 @@ from selfworkflow.installer import (
 from tests.installer.support import create_artifact
 
 
+@contextmanager
+def _hold_file_without_delete_sharing(path):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(path), 0x80000000, 3, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield
+    finally:
+        if not kernel.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
 class InstallApplyTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows file sharing")
+    def test_unchanged_write_preserves_a_delete_locked_file(self):
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "SKILL.md"
+            target.write_bytes(b"unchanged skill")
+            before = target.stat()
+            with _hold_file_without_delete_sharing(target):
+                installer._atomic_write(
+                    target, b"unchanged skill",
+                    expected_state=(True, installer._path_hash(target)),
+                )
+                self.assertEqual(target.read_bytes(), b"unchanged skill")
+                self.assertEqual(target.stat().st_mtime_ns, before.st_mtime_ns)
+                self.assertEqual(target.stat().st_ino, before.st_ino)
+
+    @unittest.skipUnless(os.name == "nt", "Windows file sharing")
+    def test_changed_write_keeps_the_delete_locked_file_and_reports_failure(self):
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "SKILL.md"
+            target.write_bytes(b"original skill")
+            with _hold_file_without_delete_sharing(target):
+                with self.assertRaises(PermissionError):
+                    installer._atomic_write(
+                        target, b"changed skill",
+                        expected_state=(True, installer._path_hash(target)),
+                    )
+                self.assertEqual(target.read_bytes(), b"original skill")
+
+    def test_unchanged_desired_hash_still_rejects_a_concurrent_preimage(self):
+        import hashlib
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "SKILL.md"
+            target.write_bytes(b"concurrent user skill")
+            desired = b"planned skill"
+            expected = "sha256:" + hashlib.sha256(desired).hexdigest()
+            with self.assertRaisesRegex(InstallerError, "operation-preimage-drift"):
+                installer._atomic_write(target, desired, expected_state=(True, expected))
+            self.assertEqual(target.read_bytes(), b"concurrent user skill")
+
     def test_committed_install_reports_pending_lock_cleanup_without_losing_result(self):
         from contextlib import redirect_stdout, redirect_stderr
         from io import StringIO
@@ -106,22 +174,19 @@ class InstallApplyTests(unittest.TestCase):
             for phrase in (
                 "SelfWorkflow active: <profile>",
                 "mode: <Light|Full|Deep>",
-                "已完成主阶段/总主阶段",
+                "阶段/总阶段",
                 "当前",
                 "剩余",
                 "预计",
-                "粗略区间",
+                "粗略进度区间",
                 "独立 SubAgent",
-                "至少两份正式文档",
-                "最终文档包 hash",
-                "侵入性预算",
-                "影响半径",
-                "测试覆盖不能反向驱动生产架构",
-                "代码实施契约",
-                "第一次编辑测试或生产代码前",
-                "明确实施确认",
-                "Review → 用户确认 → TDD",
-                "确认失效",
+                "所有模式禁止双 Reviewer",
+                "侵入预算",
+                "测试不能反向扩张生产架构",
+                "实施契约",
+                "首次编辑测试/生产代码前",
+                "已有同范围授权复用",
+                "关键风险变化需重新确认",
             ):
                 self.assertIn(phrase, installed)
 
@@ -198,6 +263,47 @@ class InstallApplyTests(unittest.TestCase):
             self.assertNotIn("core-rule-v1", installed)
             self.assertIn("core-rule-v2", installed)
             self.assertIn(second["artifactHash"], installed)
+
+    def test_bootstrap_deduplicates_only_identical_unmanaged_build_policy(self):
+        policy = "## 编译缓存保护\n\n- 保留 PCH；禁止未经授权 Clean/Rebuild。\n"
+        old = "<!-- selfworkflow:begin -->\nold rules\n<!-- selfworkflow:end -->\n"
+        for label, outside, expected_count in (
+            ("missing", "user-owned-prefix\n", 1),
+            ("suffix", "user-owned-prefix\n" + old + "\n" + policy, 1),
+            ("prefix", policy + "\n" + old + "\nuser-owned-suffix\n", 1),
+            ("different", policy.replace("PCH", "DDC"), 2),
+            ("quoted", "```markdown\n" + policy + "```\n", 2),
+            ("html", "以下仅为引用示例：\n<pre>\n" + policy + "\n## 示例结束\n</pre>\n", 2),
+            ("managed-only", old.replace("old rules", policy.strip()), 1),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+                root = Path(temporary)
+                artifact = create_artifact(root)
+                workflow = "# Installed workflow\n\n" + policy + "\n## Other\n\nKeep this rule.\n"
+                (artifact / "WORKFLOW.md").write_text(workflow, encoding="utf-8")
+                agents, codex, state = root / "agents", root / "codex", root / "state"
+                codex.mkdir()
+                agents_file = codex / "AGENTS.md"
+                original = outside.replace("\n", "\r\n").encode("utf-8")
+                agents_file.write_bytes(original)
+                plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+                self.assertEqual(plan["status"], "ready")
+                applied = apply_install_plan(plan, plan["planHash"])
+                installed = agents_file.read_bytes()
+                text = installed.decode("utf-8").replace("\r\n", "\n")
+                self.assertEqual(text.count("## 编译缓存保护"), expected_count)
+                self.assertIn("Keep this rule.", text)
+                # Replacement may change only the managed span, never user bytes.
+                if b"<!-- selfworkflow:begin -->" in original:
+                    prefix, _, tail = original.partition(b"<!-- selfworkflow:begin -->")
+                    _, _, suffix = tail.partition(b"<!-- selfworkflow:end -->")
+                    self.assertTrue(installed.startswith(prefix))
+                    self.assertTrue(installed.endswith(suffix))
+                else:
+                    self.assertTrue(installed.startswith(original))
+                self.assertEqual((artifact / "WORKFLOW.md").read_text("utf-8"), workflow)
+                self.assertEqual(verify_install(Path(applied["manifestPath"]))["status"], "verified")
+                self.assertEqual(create_install_plan(artifact, agents, codex, state, "0.1.0")["status"], "already-installed")
 
     def test_already_installed_is_bound_to_the_exact_target_roots(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

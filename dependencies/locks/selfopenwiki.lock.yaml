@@ -1,0 +1,15 @@
+schemaVersion: 1
+id: selfopenwiki
+moduleRoot: extensions/knowledge/selfopenwiki
+runtimeProfiles: [knowledge]
+sourceImport: extensions/knowledge/selfopenwiki/source-import.json
+upstreams:
+  - id: openwiki
+    path: extensions/knowledge/selfopenwiki/upstream/openwiki
+    url: https://github.com/langchain-ai/openwiki.git
+    revisionSource: parent-gitlink
+    compatibilityManifest: extensions/knowledge/selfopenwiki/patches/openwiki/manifest.json
+  - id: wiki-viewer
+    path: extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer
+    url: https://github.com/InCloudsBelly/zxh_wiki_viewer.git
+    revisionSource: parent-gitlink

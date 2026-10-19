@@ -18,13 +18,12 @@ class ReviewPackageError(ValueError):
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _KINDS = frozenset({"code", "plan"})
 
-# This is the pinned tree hash from matt-pocock-skills.lock.yaml.  It is a
-# manifest identity, not a claim that this process executed the Skill.
+# Manifest identity only; actual execution still requires Host evidence.
 _GENERIC_CODE_REVIEW_SKILL = {
     "layer": "generic",
-    "id": "matt-pocock.code-review",
-    "path": "skills/engineering/code-review",
-    "contentHash": "sha256:9e6d1b00c31e10a002ac3e5fb49014c9589166f668c62996e80a36d23ca21e70",
+    "id": "selfworkflow.testing-review-quality",
+    "path": "skills/testing-review-quality/SKILL.md",
+    "contentHash": "sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08",
     "required": True,
 }
 

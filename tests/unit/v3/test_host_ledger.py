@@ -75,6 +75,43 @@ def _fresh_snapshots(capability=None):
 
 
 class HostLedgerTests(unittest.TestCase):
+    def test_runtime_slot_uses_valid_current_selection_and_rejects_missing_or_foreign_receipts(self):
+        from selfworkflow.v3.host import Host, HostError
+        from selfworkflow.v3.hashing import content_hash
+        from selfworkflow.v3.plan_graph import build_plan_graph
+        from selfworkflow.v3.selector import SelectionInput, select_modules
+
+        catalog, pipeline = load_test_artifacts([
+            {**_module("review-a"), "selectionMode": "bounded-runtime"},
+        ], mode="bounded-runtime")
+        plan = build_plan_graph(REQUEST, catalog, pipeline)
+        host = Host(plan, REQUEST, catalog, pipeline)
+        ledger = self._advance_to_review(host, plan, host.new_ledger())
+        selection = select_modules(plan, "reviewed", "review.primary", "attempt-review",
+            SelectionInput(artifact_id="review-signal", artifact_hash=INPUT_A))
+        receipt = selection.receipt.as_dict()
+        self.assertEqual(receipt["selectedModuleIds"], ["review-a"])
+        result = {
+            "schemaVersion": 3, "planHash": plan.plan_hash,
+            "stageId": "reviewed", "attemptRef": "attempt-review",
+            "capabilitySnapshotHash": plan["capabilitySnapshotHash"],
+            "inputArtifactHashes": [INPUT_A], "outputArtifactHashes": [OUTPUT_A],
+            "artifactHashes": sorted([INPUT_A, OUTPUT_A]),
+            "slotResults": [{"slotId": "review.primary", "moduleId": "review-a", "artifactHash": OUTPUT_A}],
+            "gateResults": [], "runtimeSkips": [], "status": "passed", "completedAt": "2026-08-09T01:01:00Z",
+        }
+        with self.assertRaisesRegex(HostError, "v3-stage-result-module-not-selected"):
+            host.apply_stage_result(ledger, result)
+        for field, value in (("attemptRef", "other-attempt"), ("selectedModuleIds", ["unknown"])):
+            bad = {**receipt, field: value}
+            bad["receiptHash"] = content_hash({k: v for k, v in bad.items() if k != "receiptHash"})
+            with self.subTest(field=field):
+                with self.assertRaises(HostError):
+                    host.apply_stage_result(ledger, result | {"selectionReceipts": [bad]})
+        passed = host.apply_stage_result(ledger, result | {"selectionReceipts": [receipt]})
+        self.assertEqual(passed["stages"][6]["status"], "passed")
+        self.assertEqual(passed["stages"][6]["selectionReceiptRefs"][0]["receiptHash"], receipt["receiptHash"])
+
     def setUp(self):
         from selfworkflow.v3.host import Host
         from selfworkflow.v3.plan_graph import build_plan_graph
@@ -115,7 +152,7 @@ class HostLedgerTests(unittest.TestCase):
             },
         )
 
-    def _advance_to_review(self, host, plan, ledger, *, input_hash=INPUT_A):
+    def _advance_to_review(self, host, plan, ledger, *, input_hash=INPUT_A, attempt_ref="attempt-review"):
         for ordinal, stage_id in enumerate((
             "discovered", "capability-checked", "classified", "designed",
             "planned", "implemented",
@@ -126,7 +163,7 @@ class HostLedgerTests(unittest.TestCase):
             )
             ledger = self._pass_with(host, plan, ledger, stage_id, attempt)
         return host.start_stage(
-            ledger, "reviewed", "attempt-review", "2026-08-09T01:00:00Z",
+            ledger, "reviewed", attempt_ref, "2026-08-09T01:00:00Z",
             input_artifact_hashes=(input_hash,),
         )
 
@@ -276,8 +313,8 @@ class HostLedgerTests(unittest.TestCase):
         self.assertEqual(extension.new_request["explicitModuleIds"], ["review-extra"])
         self.assertEqual(ledger["status"], "active")
 
-    def test_next_stage_request_can_promote_grill_module(self):
-        from selfworkflow.v3.host import Host
+    def test_next_stage_request_cannot_promote_grill_module(self):
+        from selfworkflow.v3.host import Host, HostError
         from selfworkflow.v3.plan_graph import build_plan_graph
         from selfworkflow.v3.selector import SelectionInput, select_modules
 
@@ -302,11 +339,13 @@ class HostLedgerTests(unittest.TestCase):
         )
 
         self.assertEqual(outcome.status, "next-stage-request")
-        extension = host.extend_from_next_stage_request(
-            ledger, outcome, superseded_at="2026-08-09T01:01:00Z",
-        )
-        self.assertEqual(extension.new_request["explicitModuleIds"], ["design-grill-me"])
-        resolver.assert_called_once()
+        with self.assertRaisesRegex(HostError, "v3-next-stage-request-explicit-user-required"):
+            host.extend_from_next_stage_request(
+                ledger, outcome, superseded_at="2026-08-09T01:01:00Z",
+            )
+        resolver.assert_not_called()
+        self.assertEqual(host.request["explicitModuleIds"], [])
+        self.assertEqual(ledger["status"], "active")
 
     def test_next_stage_request_rejects_stale_attempt_and_unregistered_input(self):
         from selfworkflow.v3.host import Host, HostError

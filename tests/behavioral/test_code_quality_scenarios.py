@@ -43,45 +43,22 @@ class CodeQualityScenarioTests(unittest.TestCase):
         workflow_quality = (ROOT / "skills/workflow-quality/SKILL.md").read_text(
             encoding="utf-8"
         )
+        change_rules = (ROOT / "skills/code-quality/references/change-rules.md").read_text(encoding="utf-8")
+        combined_rules = code_quality + change_rules
+        self.assertIn("references/change-rules.md", code_quality)
         for phrase in (
-            "failure envelope",
-            "last-good",
-            "first-bad",
-            "root-cause owner",
-            "detection point",
-            "caches",
-            "rebuild scope",
-            "shared paths",
-            "no-op",
-            "existing changes",
-            "plan -> review -> confirm -> apply -> reread",
-            "intrusion budget",
-            "impact radius",
-            "test coverage must not drive production architecture",
-            "public enum",
-            "global build macro",
-            "test-owned translation unit",
-            "explicit user approval",
-            "implementation contract",
-            "first test or production-code edit",
-            "explicit implementation confirmation",
-            "safety, performance, compatibility, maintenance, and rollback",
-            "contract becomes invalid",
-            "design exploration",
-            "implementation convergence",
-            "discovering a problem does not authorize solving it",
-            "the approved plan is the execution boundary",
-            "unplanned finding",
-            "blocks a broad regression",
-            "revise the plan",
-            "complete the current objective",
-            "bounded convergence check",
-            "stable existing callers",
-            "shared invariant",
-            "testing convenience",
-            "unverified",
+            "失败边界", "last-good", "first-bad", "owner", "检测点",
+            "缓存", "失效/重建范围", "受影响共享路径", "消费者成功",
+            "用户修改", "plan → review → confirm → apply → reread",
+            "侵入性", "影响半径", "测试不能反向驱动生产架构",
+            "公共枚举", "全局编译宏", "translation unit",
+            "明确确认", "实施契约", "第一次编辑测试",
+            "安全/性能/兼容性/维护成本", "停止受影响编辑",
+            "Plan 冻结目标", "发现问题不等于授权修复",
+            "广回归失败", "修订 Plan", "有界收敛检查",
+            "稳定现有调用者", "真实共享不变量", "测试方便", "unverified",
         ):
-            self.assertIn(phrase.casefold(), code_quality.casefold())
+            self.assertTrue(phrase in combined_rules, phrase)
         self.assertIn("fresh evidence", workflow_quality)
         combined = code_quality + workflow_quality
         for content in (code_quality, workflow_quality):
@@ -105,8 +82,8 @@ class CodeQualityScenarioTests(unittest.TestCase):
         entry = next(item for item in catalog["entries"] if item["id"] == "code-quality")
 
         self.assertIn("reading or explaining behavior code", code_quality)
-        self.assertIn("## Read-only reasoning core", code_quality)
-        self.assertIn("does not activate change rules", code_quality)
+        self.assertIn("## 只读", code_quality)
+        self.assertIn("只读分析不启动 TDD、构建、写入", code_quality)
         self.assertIn("analyze", entry["selectors"]["operationTypes"])
         self.assertIn("read code", entry["selectors"]["semanticTerms"])
 

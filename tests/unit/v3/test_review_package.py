@@ -39,19 +39,11 @@ def _package(kind="code", stage="implemented", attempt="attempt-1"):
 class ReviewPackageTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[3]
 
-    def test_generic_manifest_matches_pinned_skill_bytes(self):
-        lock = yaml.safe_load(
-            (self.ROOT / "dependencies/locks/matt-pocock-skills.lock.yaml")
-            .read_text(encoding="utf-8")
-        )
-        locked = next(
-            item for item in lock["selectedSkills"]
-            if item["id"] == "code-review"
-        )
-        skill = self.ROOT / "dependencies/upstream/matt-pocock-skills/skills/engineering/code-review/SKILL.md"
+    def test_generic_manifest_matches_compact_single_reviewer_skill(self):
+        skill = self.ROOT / "skills/testing-review-quality/SKILL.md"
         actual = "sha256:" + hashlib.sha256(skill.read_bytes()).hexdigest()
-        self.assertEqual(locked["hash"], actual)
         self.assertEqual(ordered_skill_manifest(None)[0]["contentHash"], actual)
+        self.assertEqual(ordered_skill_manifest(None)[0]["path"], "skills/testing-review-quality/SKILL.md")
         catalog = yaml.safe_load(
             (self.ROOT / "catalog/v3/modules/review-code-review.yaml")
             .read_text(encoding="utf-8")
@@ -130,7 +122,7 @@ class ReviewPackageTests(unittest.TestCase):
             [(item["id"], item["role"]) for item in manifest],
             [
                 ("project.review", "primary"),
-                ("matt-pocock.code-review", "supplementary"),
+                ("selfworkflow.testing-review-quality", "supplementary"),
             ],
         )
 

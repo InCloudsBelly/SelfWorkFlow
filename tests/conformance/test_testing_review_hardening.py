@@ -46,10 +46,6 @@ class TestingReviewHardeningTests(unittest.TestCase):
         if operation != "implement":
             explicit_modules.remove("implement-matt")
         project_defaults = []
-        if operation in {"implement", "debug"}:
-            project_defaults = [
-                "design-grill-me" if strength == "Deep" else "design-grilling"
-            ]
         return {
             "schemaVersion": 3, "operationType": operation,
             "complexity": "C2" if strength != "Light" else "C1",
@@ -159,12 +155,13 @@ class TestingReviewHardeningTests(unittest.TestCase):
         modules = yaml.safe_load((self.ROOT / "catalog/modules.yaml").read_text(encoding="utf-8"))["modules"]
         by_id = {module["id"]: module for module in modules}
         self.assertEqual(by_id["design-core"]["activation"], "default")
-        self.assertEqual(by_id["design-grilling"]["activation"], "full-default")
-        self.assertEqual(by_id["design-grill-me"]["activation"], "deep-default")
+        self.assertEqual(by_id["design-grilling"]["activation"], "explicit")
+        self.assertEqual(by_id["design-grill-me"]["activation"], "explicit")
         self.assertEqual(by_id["implement-tdd"]["slot"], "implement.tdd")
         self.assertEqual(set(by_id["implement-tdd"]["when"]["operationTypes"]), {"implement", "debug"})
         for module_id in ("tea-test-design", "tea-test-review"):
             self.assertEqual(by_id[module_id]["invocation"]["ref"], "selfworkflow:tea-quality")
+            self.assertEqual(by_id[module_id]["activation"], "explicit")
         for module_id in ("plan-integrated-review", "review-self", "verify-execution", "complete-gate"):
             self.assertEqual(by_id[module_id]["invocation"]["ref"], "selfworkflow:testing-review-quality")
         pipeline = yaml.safe_load((self.ROOT / "workflow/pipeline.yaml").read_text(encoding="utf-8"))
@@ -246,7 +243,7 @@ class TestingReviewHardeningTests(unittest.TestCase):
         tdd = next(slot for slot in implemented["slots"] if slot["slotId"] == "implement.tdd")
         self.assertEqual(tdd["applicability"], "not-applicable")
 
-    def test_full_pipeline_statically_selects_tea_design_review_and_quality_gates(self):
+    def test_full_pipeline_keeps_core_gates_without_automatic_tea(self):
         catalog = compile_catalog()
         pipeline = load_pipeline(self.ROOT / "workflow/v3/pipeline.yaml")
         request = self._request("implement", "bounded-feature", "Full", "T2")
@@ -260,8 +257,8 @@ class TestingReviewHardeningTests(unittest.TestCase):
             slot["slotId"]: slot["selectedModules"]
             for stage in graph.document["stages"] for slot in stage["slots"]
         }
-        self.assertEqual(selected["test.quality.plan"], ["tea-test-design"])
-        self.assertEqual(selected["test.quality.review"], ["tea-test-review"])
+        self.assertEqual(selected["test.quality.plan"], [])
+        self.assertEqual(selected["test.quality.review"], [])
         self.assertEqual(selected["review.independent"], ["review-code-review"])
         self.assertEqual(selected["verify.execution"], ["verify-execution"])
         self.assertEqual(selected["complete.gate"], ["complete-gate"])
@@ -293,7 +290,7 @@ class TestingReviewHardeningTests(unittest.TestCase):
             "review-self": "selfworkflow:testing-review-quality",
             "verify-execution": "selfworkflow:testing-review-quality",
             "complete-gate": "selfworkflow:testing-review-quality",
-            "review-code-review": "matt-pocock:code-review",
+            "review-code-review": "selfworkflow:testing-review-quality",
         }
         for module_id, ref in expected.items():
             module = yaml.safe_load((self.ROOT / f"catalog/v3/modules/{module_id}.yaml").read_text(encoding="utf-8"))

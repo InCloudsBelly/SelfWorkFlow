@@ -50,8 +50,8 @@ entries:
     source:
       kind: skill
       path: skills/implement-spec/SKILL.md
-      revision: git:7d74e363b21059178e10b098a823419abdb43bb2
-      contentHash: sha256:f6d87cff0d17380bb474eea65ee308dd22288486161899fa4bb80e19fe2ebe7d
+      revision: git:a5446a10e1c281c4fee6a75986e3f93f56a7a1a8
+      contentHash: sha256:d961a0a811325510e32491f99a40365f825d7b77e2f108f5e4ec5408c93094c5
     aliases: []
     triggers: []
     exclusions: [implicit selection]
@@ -72,8 +72,8 @@ entries:
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:b3b1f35639bb714c83857c459a33ad57733d62d1
-      contentHash: sha256:4b0afe388f8e9dc846862777b5322f0b3ec84c3af65f0fe1bceb09f155b72217
+      revision: git:bc42775b08f01ce667a5db1208b088babde67bbe
+      contentHash: sha256:2b6e66826ea31fab6648d72bab9ab1eca8b38ec8220121bc6fe96abc3b64430d
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -147,8 +147,8 @@ entries:
     source:
       kind: skill
       path: skills/testing-review-quality/SKILL.md
-      revision: git:7133e5cad2aeb716c091e07128adc48b16461c10
-      contentHash: sha256:a612ba90ba1b058419742cd4b878c2703c2d7ca504b4122b70598112be804888
+      revision: git:bc42775b08f01ce667a5db1208b088babde67bbe
+      contentHash: sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08
     aliases:
       - name: testing-review-gate
         target: testing-review-quality
@@ -183,12 +183,12 @@ entries:
     aliases:
       - name: tea-quality
         target: tea-quality-foundation
-    triggers: [test design, acceptance tests, test review, traceability, nfr]
-    exclusions: [Light test level]
+    triggers: [explicit TEA request]
+    exclusions: [implicit selection, mode defaults, ordinary testing]
     selectors:
       fileExtensions: []
       operationTypes: [implement, debug, review, verify]
-      semanticTerms: [test design, atdd, test review, traceability, nfr]
+      semanticTerms: [explicit tea request]
     stages: [planned, implemented, reviewed, verified]
     requiredCapabilities: [skill-discovery]
     dependencies: [workflow-core]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import copy
 import inspect
 import json
 import os
@@ -31,7 +32,221 @@ def _git(root: Path, *args: str) -> None:
         raise AssertionError(result.stderr)
 
 
+def _host_review(package, mode="Full", *, apply_review=True, stage_id="reviewed", attempt_ref="attempt-review", risk="R1", bounded_verify=False):
+    """Conforming embedding-Host fixture; never used as real execution evidence."""
+    from selfworkflow.v3.hashing import content_hash
+    from selfworkflow.v3.host import Host
+    from selfworkflow.v3.plan_graph import build_plan_graph
+    from selfworkflow.v3.review_policy import load_post_grill_review_policy
+    from selfworkflow.v3.review_services import bind_review_host_services
+    from tests.unit.v3.artifact_fixtures import load_test_artifacts
+    from tests.unit.v3.test_host_ledger import REQUEST, _module, HostLedgerTests
+    from tests.unit.v3.test_post_grill_review_gate import _Consumer
+    from tests.unit.v3.test_review_dispatch import _SpyPort, _verified
+
+    modules = [{**_module("review-a"), "slot": "review.independent"}]
+    if bounded_verify:
+        modules.append({**_module("verify-fixture"), "stage": "verified", "slot": "verify.fixture", "selectionMode": "bounded-runtime"})
+    catalog, pipeline = load_test_artifacts(
+        modules,
+        target_slot="review.independent", mode="static")
+    request = copy.deepcopy(REQUEST)
+    request.update(operationType="analyze", taskArchetype="mechanical-change",
+        projectMinimums={"strength": mode}, complexity="C3" if mode == "Deep" else "C2",
+        testLevelFloor="T3" if mode == "Deep" else "T2")
+    request["risk"] = risk
+    plan = build_plan_graph(request, catalog, pipeline)
+    policy = load_post_grill_review_policy(Path(__file__).resolve().parents[2] / "workflow/v3/post-grill-review.yaml")
+    port = _SpyPort(unique_dispatches=True)
+    now = datetime.now(timezone.utc)
+    port.issued_at = (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+    port.expires_at = (now + timedelta(minutes=10)).isoformat().replace("+00:00", "Z")
+    consumer = _Consumer()
+    attestation = {
+        "schemaVersion": 3, "backendClass": "external-host",
+        "dispatchPortBound": True, "artifactResolversBound": True,
+        "replayConsumersBound": True, "independentContextAvailable": True,
+        "reviewExecutionMode": "ephemeral-subagent", "reviewPolicyHash": policy.policy_hash,
+    }
+    attestation["attestationHash"] = content_hash(attestation)
+    services = bind_review_host_services(dispatch_port=port,
+        summary_resolver=lambda _: None, summary_attestation_resolver=lambda _: None,
+        grill_completion_resolver=lambda _: None,
+        host_attestation_resolver=lambda ref: port.last_attestation if port.last_attestation and ref == port.last_attestation["attestationHash"] else None,
+        host_attestation_consumer=consumer, fallback_authorization_resolver=lambda _: None,
+        fallback_authorization_consumer=consumer, review_policy=policy, service_attestation=attestation)
+    host = Host(plan, request, catalog, pipeline, review_services=services)
+    ledger = HostLedgerTests()._advance_to_review(host, plan, host.new_ledger(), attempt_ref=attempt_ref)
+    wrapper = {"schemaVersion": 1, "reviewKind": "code", "planHash": plan.plan_hash,
+        "stageId": stage_id, "attemptRef": attempt_ref, "content": package}
+    wrapper["packageHash"] = content_hash(wrapper)
+    evidence = host.dispatch_code_review(_verified(plan_hash=plan.plan_hash),
+        implementation_agent_identity="author", implementation_context_identity="author-context",
+        attempt_ref=attempt_ref, review_package=wrapper, ledger=ledger)
+    receipt = evidence["reviewers"]["combined"]
+    artifacts = sorted([wrapper["packageHash"], receipt["receiptHash"]])
+    result = {"schemaVersion": 3, "planHash": plan.plan_hash, "stageId": "reviewed",
+        "attemptRef": attempt_ref, "capabilitySnapshotHash": plan["capabilitySnapshotHash"],
+        "inputArtifactHashes": ledger["stages"][6]["attempts"][-1]["inputArtifactHashes"], "outputArtifactHashes": artifacts, "artifactHashes": artifacts,
+        "slotResults": [{"slotId": "review.independent", "moduleId": "review-a", "artifactHash": receipt["receiptHash"]}],
+        "gateResults": [], "runtimeSkips": [], "status": "passed", "completedAt": "2026-08-09T01:01:00Z"}
+    result["artifactHashes"] = sorted(set(result["inputArtifactHashes"] + artifacts))
+    if apply_review:
+        ledger = host.apply_stage_result(ledger, result, code_review_evidence=evidence)
+    return host, ledger, evidence, result
+
+
 class QualityGateTests(unittest.TestCase):
+    def test_completion_accepts_real_bounded_runtime_selection_receipts(self):
+        from selfworkflow.v3.selector import SelectionInput, select_modules
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            root = Path(directory)
+            self._repo(root)
+            baseline = capture_review_baseline(root, ["tracked.txt"])
+            (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+            package = build_review_package(root, baseline, self._spec(), [self._plan()])
+            host, ledger, evidence, _ = _host_review(package, bounded_verify=True)
+            signal, output = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+            ledger = host.start_stage(ledger, "verified", "attempt-verified", "2026-08-09T01:02:00Z",
+                input_artifact_hashes=(signal,))
+            selection = select_modules(host.plan, "verified", "verify.fixture", "attempt-verified",
+                SelectionInput(artifact_id="verify-signal", artifact_hash=signal, preferred_module_ids=("verify-fixture",)))
+            self.assertEqual(selection.status, "selected")
+            self.assertEqual(selection.receipt.document["selectedModuleIds"], ["verify-fixture"])
+            receipts = (selection.receipt,)
+            ledger = host.apply_stage_result(ledger, {
+                "schemaVersion": 3, "planHash": host.plan.plan_hash,
+                "stageId": "verified", "attemptRef": "attempt-verified",
+                "capabilitySnapshotHash": host.plan["capabilitySnapshotHash"],
+                "inputArtifactHashes": [signal], "outputArtifactHashes": [output],
+                "artifactHashes": sorted([signal, output]),
+                "slotResults": [{"slotId": "verify.fixture", "moduleId": "verify-fixture", "artifactHash": output}],
+                "selectionReceipts": [selection.receipt.as_dict()],
+                "gateResults": [], "runtimeSkips": [], "status": "passed", "completedAt": "2026-08-09T01:03:00Z",
+            })
+            review = {"axis": "combined", "executionId": evidence["reviewers"]["combined"]["subagentExecutionId"],
+                "attestation": "host_attested", "workflowMode": "Full", "packageHash": package["packageHash"], "findings": []}
+            with self.assertRaisesRegex(QualityGateError, "quality-review-context-invalid"):
+                validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=evidence,
+                    review_host=host, review_ledger=ledger)
+            self.assertEqual(validate_completion(root, baseline, self._spec(), package, [review],
+                code_review_evidence=evidence, review_host=host, review_ledger=ledger, review_receipts=receipts)["status"], "complete")
+
+    def test_completion_requires_current_host_service_plan_attempt_and_reviewed_ledger(self):
+        from selfworkflow.v3.host import Host
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            root = Path(directory)
+            self._repo(root)
+            baseline = capture_review_baseline(root, ["tracked.txt"])
+            (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+            package = build_review_package(root, baseline, self._spec(), [self._plan()])
+            host, ledger, evidence, _ = _host_review(package)
+            review = {"axis": "combined", "executionId": evidence["reviewers"]["combined"]["subagentExecutionId"],
+                "attestation": "host_attested", "workflowMode": "Full", "packageHash": package["packageHash"], "findings": []}
+            other_host, other_ledger, _, _ = _host_review(package, attempt_ref="other-attempt")
+            new_host, new_ledger, _, _ = _host_review(package, risk="R0")
+            same_service_other_attempt = Host(other_host.plan, other_host.request, other_host._catalog, other_host._pipeline,
+                review_services=host._review_services)
+            same_service_other_plan = Host(new_host.plan, new_host.request, new_host._catalog, new_host._pipeline,
+                review_services=host._review_services)
+            for current_host, current_ledger in (
+                (None, None), (host, None), ({}, ledger),
+                (other_host, other_ledger), (same_service_other_attempt, other_ledger),
+                (same_service_other_plan, new_ledger),
+            ):
+                with self.subTest(host_type=type(current_host).__name__, ledger=current_ledger is not None):
+                    with self.assertRaisesRegex(QualityGateError, "quality-review-context-invalid"):
+                        validate_completion(root, baseline, self._spec(), package, [review],
+                            code_review_evidence=evidence, review_host=current_host, review_ledger=current_ledger)
+            self.assertFalse(evidence._completion_used)
+            self.assertEqual(validate_completion(root, baseline, self._spec(), package, [review],
+                code_review_evidence=evidence, review_host=host, review_ledger=ledger)["status"], "complete")
+
+    def test_full_deep_completion_rejects_json_host_attestation_without_host_execution(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            root = Path(directory)
+            self._repo(root)
+            baseline = capture_review_baseline(root, ["tracked.txt"])
+            (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+            for mode in ("Full", "Deep"):
+                spec = self._spec() | {"workflowMode": mode}
+                package = build_review_package(root, baseline, spec, [self._plan()])
+                review = {"axis": "combined", "executionId": "never-dispatched",
+                    "attestation": "host_attested", "workflowMode": mode,
+                    "packageHash": package["packageHash"], "findings": []}
+                with self.subTest(mode=mode):
+                    with self.assertRaisesRegex(QualityGateError, "quality-review-host-unverified"):
+                        validate_completion(root, baseline, spec, package, [review])
+
+    def test_one_host_review_passes_reviewed_then_complete_but_not_replay_or_forgery(self):
+        from selfworkflow.v3.host import CodeReviewEvidence, HostError
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            root = Path(directory)
+            self._repo(root)
+            baseline = capture_review_baseline(root, ["tracked.txt"])
+            (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
+            package = build_review_package(root, baseline, self._spec(), [self._plan()])
+            host, ledger, evidence, result = _host_review(package, apply_review=False)
+            review = {"axis": "combined", "executionId": evidence["reviewers"]["combined"]["subagentExecutionId"],
+                "attestation": "host_attested", "workflowMode": "Full", "packageHash": package["packageHash"], "findings": []}
+            with self.assertRaisesRegex(QualityGateError, "quality-review-context-invalid"):
+                validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=evidence,
+                    review_host=host, review_ledger=ledger)
+
+            with self.assertRaises(AttributeError):
+                copy.copy(evidence)
+            for forged in (dict(evidence), object.__new__(CodeReviewEvidence)):
+                with self.subTest(forged_type=type(forged).__name__):
+                    with self.assertRaisesRegex(QualityGateError, "quality-review-host-unverified"):
+                        validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=forged)
+                    with self.assertRaisesRegex(HostError, "code-review-host-evidence-required"):
+                        host.apply_stage_result(ledger, result, code_review_evidence=forged)
+            with self.assertRaisesRegex(HostError, "code-review-host-evidence-required"):
+                host.apply_stage_result(ledger, result)
+            for target, key, value in (
+                (evidence._result["reviewers"]["combined"], "expiresAt", "2099-01-01T00:00:00Z"),
+                (evidence._package["content"]["specification"], "design", "mutated after dispatch"),
+            ):
+                original = target[key]
+                try:
+                    target[key] = value
+                    with self.assertRaisesRegex(QualityGateError, "quality-review-host-unverified"):
+                        validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=evidence)
+                finally:
+                    target[key] = original
+            with patch("selfworkflow.v3.host._review_now", return_value=datetime.now(timezone.utc) + timedelta(hours=1)):
+                with self.assertRaisesRegex(QualityGateError, "quality-review-host-unverified"):
+                    validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=evidence)
+            for mode in ("Full", "Deep"):
+                changed_spec = self._spec() | {"design": "another design", "workflowMode": mode}
+                other_package = build_review_package(root, baseline, changed_spec, [self._plan()])
+                changed_review = review | {"workflowMode": mode, "packageHash": other_package["packageHash"]}
+                with self.assertRaisesRegex(QualityGateError, "quality-review-evidence-binding-invalid"):
+                    validate_completion(root, baseline, changed_spec, other_package, [changed_review], code_review_evidence=evidence)
+            with self.assertRaisesRegex(QualityGateError, "quality-review-evidence-binding-invalid"):
+                validate_completion(root, baseline, self._spec(), package, [review | {"executionId": "invented"}], code_review_evidence=evidence)
+
+            for invalid_result in (result | {"attemptRef": "other-attempt"}, result | {"outputArtifactHashes": []}):
+                with self.assertRaisesRegex(HostError, "code-review-evidence-binding-invalid"):
+                    host.apply_stage_result(ledger, invalid_result, code_review_evidence=evidence)
+            broken_slot = result | {"slotResults": [{"slotId": "review.independent", "moduleId": "unknown", "artifactHash": result["outputArtifactHashes"][0]}]}
+            with self.assertRaises(HostError):
+                host.apply_stage_result(ledger, broken_slot, code_review_evidence=evidence)
+            self.assertFalse(evidence._stage_used, "failed apply must not consume evidence")
+            passed = host.apply_stage_result(ledger, result, code_review_evidence=evidence)
+            self.assertEqual(next(s for s in passed["stages"] if s["stageId"] == "reviewed")["status"], "passed")
+            with self.assertRaisesRegex(HostError, "code-review-evidence-binding-invalid"):
+                host.apply_stage_result(ledger, result, code_review_evidence=evidence)
+            completed = validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=evidence,
+                review_host=host, review_ledger=passed)
+            self.assertEqual(completed["status"], "complete")
+            self.assertEqual(len(host._review_services.dispatch_port.calls), 1)
+            with self.assertRaisesRegex(QualityGateError, "quality-review-host-unverified"):
+                validate_completion(root, baseline, self._spec(), package, [review], code_review_evidence=evidence)
+
     def _repo(self, root: Path) -> None:
         _git(root, "init")
         _git(root, "config", "user.email", "quality@example.invalid")
@@ -177,31 +392,28 @@ class QualityGateTests(unittest.TestCase):
             package_hash = package["packageHash"]
             reviews = [
                 {
-                    "axis": "standards", "executionId": "standards-1",
-                    "attestation": "host_attested",
-                    "workflowMode": "Full",
-                    "packageHash": package_hash, "findings": [],
-                },
-                {
-                    "axis": "spec", "executionId": "spec-1",
+                    "axis": "combined", "executionId": "combined-1",
                     "attestation": "host_attested",
                     "workflowMode": "Full",
                     "packageHash": package_hash,
                     "findings": [{"severity": "low", "status": "accepted", "disposition": "non-blocking"}],
                 },
             ]
+            _host, _ledger, evidence, _result = _host_review(package)
+            reviews[0]["executionId"] = evidence["reviewers"]["combined"]["subagentExecutionId"]
             verifications = [run_verification(root, package, "green")]
 
             completed = validate_completion(
-                root, baseline, self._spec(), package, reviews,
+                root, baseline, self._spec(), package, reviews, code_review_evidence=evidence,
+                review_host=_host, review_ledger=_ledger,
             )
             self.assertEqual(completed["status"], "complete")
             self.assertEqual(len(completed["verifications"]), 1)
 
             cases = {
-                "quality-review-missing": reviews[:1],
-                "quality-review-not-independent": [reviews[0], {**reviews[1], "executionId": "standards-1"}],
-                "quality-review-open-blocker": [reviews[0], {**reviews[1], "findings": [{"severity": "medium", "status": "open", "disposition": ""}]}],
+                "quality-review-missing": [],
+                "quality-review-not-independent": [{**reviews[0], "executionId": ""}],
+                "quality-review-open-blocker": [{**reviews[0], "findings": [{"severity": "medium", "status": "open", "disposition": ""}]}],
             }
             for reason, case_reviews in cases.items():
                 with self.subTest(reason=reason):
@@ -245,24 +457,19 @@ class QualityGateTests(unittest.TestCase):
                 package = build_review_package(root, baseline, spec, [self._plan()])
                 reviews = [
                     {
-                        "axis": "standards",
-                        "executionId": f"{workflow_mode}-standards",
-                        "attestation": "host_attested",
-                        "workflowMode": workflow_mode,
-                        "packageHash": package["packageHash"],
-                        "findings": [],
-                    },
-                    {
-                        "axis": "spec",
-                        "executionId": f"{workflow_mode}-spec",
+                        "axis": "combined",
+                        "executionId": f"{workflow_mode}-combined",
                         "attestation": "host_attested",
                         "workflowMode": workflow_mode,
                         "packageHash": package["packageHash"],
                         "findings": [],
                     },
                 ]
+                _host, _ledger, evidence, _result = _host_review(package, workflow_mode)
+                reviews[0]["executionId"] = evidence["reviewers"]["combined"]["subagentExecutionId"]
                 self.assertEqual(
-                    validate_completion(root, baseline, spec, package, reviews)[
+                    validate_completion(root, baseline, spec, package, reviews, code_review_evidence=evidence,
+                        review_host=_host, review_ledger=_ledger)[
                         "workflowMode"
                     ],
                     workflow_mode,
@@ -275,7 +482,7 @@ class QualityGateTests(unittest.TestCase):
                         baseline,
                         spec,
                         package,
-                        [{**reviews[0], "workflowMode": "Light"}, reviews[1]],
+                        [{**reviews[0], "workflowMode": "Light"}],
                     )
 
     def test_verification_runner_rejects_unbound_shell_and_outside_cwd(self):

@@ -181,6 +181,21 @@ class MattSkillsFoundationTests(unittest.TestCase):
                 (self.ROOT / "dependencies/locks/matt-pocock-skills.lock.yaml").is_file()
             )
 
+    def test_native_review_entry_uses_local_single_reviewer_policy(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            runtime = Path(temporary) / "runtime"
+            _copy_matt_skills(self.ROOT, runtime, include_grill_me=True)
+            entry = runtime / "skills/matt-pocock/code-review/SKILL.md"
+            text = entry.read_text(encoding="utf-8")
+            self.assertFalse("Runs both reviews in parallel sub-agents" in text)
+            self.assertFalse("Spawn both sub-agents" in text)
+            self.assertIn("一个独立 Reviewer", text)
+            self.assertIn("Standards/Spec", text)
+            self.assertEqual(entry.read_bytes(), (self.ROOT / "workflow/skills/code-review/SKILL.md").read_bytes())
+            # Retain all locked upstream source and licensing checks; only the
+            # published native entry is replaced, not its pinned checkout.
+            self.assertTrue((runtime / "skills/matt-pocock/LICENSE").is_file())
+
     def test_runtime_rejects_dirty_unlocked_matt_skill_support_files(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             source = Path(temporary) / "source"
@@ -221,7 +236,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
             "implement-matt": "matt-pocock:implement",
             "implement-tdd": "matt-pocock:tdd",
             "implement-diagnosing-bugs": "matt-pocock:diagnosing-bugs",
-            "review-code-review": "matt-pocock:code-review",
+            "review-code-review": "selfworkflow:testing-review-quality",
             "verify-execution": "selfworkflow:testing-review-quality",
         }
         self.assertEqual(
@@ -252,7 +267,9 @@ class MattSkillsFoundationTests(unittest.TestCase):
             self.assertIn(expected, module_ids)
 
         workflow = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        self.assertIn("Full 和 Deep 必须加载 TEA", workflow)
+        self.assertNotIn("Full 和 Deep 必须加载 TEA", workflow)
+        self.assertIn("TEA", workflow)
+        self.assertIn("显式", workflow)
         self.assertIn("CodeGraph", workflow)
         self.assertIn("过期", workflow)
         self.assertIn("Ponytail", workflow)

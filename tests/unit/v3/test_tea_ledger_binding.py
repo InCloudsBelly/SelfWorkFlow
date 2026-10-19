@@ -21,7 +21,7 @@ def _request():
         "risk": "R1",
         "writeTask": False,
         "ambiguity": False,
-        "explicitModuleIds": [],
+        "explicitModuleIds": ["tea-test-design"],
         "projectDefaultModuleIds": [],
         "projectMinimums": {"strength": "Light"},
         "capabilityEvidenceSnapshot": {

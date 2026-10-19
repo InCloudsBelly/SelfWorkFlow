@@ -1,0 +1,24 @@
+{
+  "name": "self-openwiki",
+  "version": "0.1.0",
+  "description": "A Windows-first, locally installable OpenWiki knowledge system.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22",
+    "pnpm": "10.33.2"
+  },
+  "os": [
+    "win32"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "configure:storage": "node scripts/configure-storage.mjs",
+    "visualize": "node scripts/visualize.mjs",
+    "materialize:openwiki": "node scripts/materialize-openwiki.mjs",
+    "update:openwiki:plan": "node scripts/update-upstream.mjs",
+    "update:openwiki:apply": "node scripts/update-upstream.mjs --apply"
+  }
+}

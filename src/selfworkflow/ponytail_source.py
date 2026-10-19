@@ -253,6 +253,23 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
         text = content.decode("utf-8").replace("\r\n", "\n")
     except UnicodeDecodeError:
         raise PonytailSourceError("ponytail-source-invalid") from None
+    if skill_id == "ponytail-review":
+        metadata, separator, body = text.partition("\n---\n")
+        report_rule = "This is a report the user asked for, so give it in full."
+        if not metadata.startswith("---\nname: ponytail-review\ndescription:") or not separator or report_rule not in body:
+            raise PonytailSourceError("ponytail-source-adaptation-invalid")
+        metadata = (
+            "---\nname: ponytail-review\ndescription: >\n"
+            "  Review whether a code change is over-engineered, unnecessarily complex,\n"
+            "  or can be a smaller diff; also use for /ponytail-review. Generic PR/commit review uses code-review.\n"
+            "  Ordinary workflow Review does not automatically load this specialist."
+        )
+        body = body.replace(report_rule, (
+            "SelfWorkFlow owns scope, output language, Review and verification.\n"
+            "Use this checklist within the assigned Review. Do not start another Review or delegate.\n"
+            "Reuse complete, current evidence already supplied; report concrete findings and gaps concisely."
+        ))
+        return (metadata + separator + body).encode("utf-8")
     if skill_id == "ponytail-debt":
         old_boundary = (
             "Reads and reports only, changes nothing. To persist it, ask and it writes the\n"
@@ -360,7 +377,7 @@ def copy_ponytail_skills(
                 output.mkdir(parents=True, exist_ok=True)
             elif path.is_file():
                 output.parent.mkdir(parents=True, exist_ok=True)
-                if path.name == "SKILL.md" and item["id"] in {"ponytail", "ponytail-help", "ponytail-debt"}:
+                if path.name == "SKILL.md" and item["id"] in {"ponytail", "ponytail-review", "ponytail-help", "ponytail-debt"}:
                     output.write_bytes(
                         _adapt_ponytail_skill(path.read_bytes(), item["id"])
                     )

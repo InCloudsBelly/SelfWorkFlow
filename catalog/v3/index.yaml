@@ -24,7 +24,7 @@ modules:
     hash: sha256:bf975932fc77574fd494ffb10b31c52307c27ab7615187b288aa90ef462c35b9
   - id: implement-spec
     ref: modules/implement-spec.yaml
-    hash: sha256:92861765f7633903e56f9c7a59893f2a40b79b971240e35f42a06fde01ad9afc
+    hash: sha256:c895de9cc82014c59833f883a256a49f48ab15ecefa9eda9da63d26160fbea3e
   - id: cpp-core
     ref: modules/cpp-core.yaml
     hash: sha256:d291ae9daa072e98670a2631377ca5cfdf67e93a48f88a24c083b416602ab9d5
@@ -60,7 +60,7 @@ modules:
     hash: sha256:5290dd620bf7a3eb87605bddcb4a6ea4a1d559027098688c3e5bbf735cce0d9e
   - id: ponytail-review
     ref: modules/ponytail-review.yaml
-    hash: sha256:9181083cd37f91e3147db471cb9c37dab8b9cfe0bc9ec4d6b3d92121a8c30ac8
+    hash: sha256:87bdd842cd96d367a09f11f7e3663ea1de02d9da8e2fbab491797827d22599e3
   - id: ponytail-audit
     ref: modules/ponytail-audit.yaml
     hash: sha256:00bf10a97127dfb2681721289b7f088631f0bd65d4a9ca8c569f373f5ffeb1ed
@@ -90,7 +90,7 @@ modules:
     hash: sha256:2545c9d445c807f4b182c85b200fdde868b200ce6cef57e37ab9cee0cd44ed18
   - id: plan-integrated-review
     ref: modules/plan-integrated-review.yaml
-    hash: sha256:53afccfd14978e54fa7dd232186b33451a82b824b3c7b80b2b1b89c7bb750a93
+    hash: sha256:468d88aee5f2cc59c3a7bbfde0250d32aadf1205a6361fea72b168d955d84c14
   - id: implement-matt
     ref: modules/implement-matt.yaml
     hash: sha256:6b8d3d70cd0244a20df6eca610a1772a282b35c37597588bb9de9fb0a3578550
@@ -102,16 +102,16 @@ modules:
     hash: sha256:b592f0ec9235f3d10dce9f9defb4f4d16080694bab402ee0a5f05fffcdb8da0b
   - id: review-self
     ref: modules/review-self.yaml
-    hash: sha256:2bc6157bd48b8a7c02d8d37b39902b65286804a558fcc90388c15b0b273e65cd
+    hash: sha256:8138da88e017af019cb5df0cc49d90adab452bfc58d4ea1cf0e00598bd85cc65
   - id: review-code-review
     ref: modules/review-code-review.yaml
-    hash: sha256:9c2fec2466366869d0fcd7d990ee33a3d0396c222410bf842f2a84b7671d4631
+    hash: sha256:883a5d32cf08cae690514b8f262b7e028f3d43c934071de23ff86eb1894e0ce9
   - id: verify-execution
     ref: modules/verify-execution.yaml
-    hash: sha256:bbc4b269988c9b4cb7c68db9b7daffbffc7373173141f0c4b4434377dfaa8efe
+    hash: sha256:512b8620586529b752222db81f9573e0c2ec01749688b8cb58dc0e9165a9389c
   - id: complete-gate
     ref: modules/complete-gate.yaml
-    hash: sha256:c34e5b3dba2519f3b10c18ed97585b71d0252badf4c6da9edf8da4df26eadbe3
+    hash: sha256:d67085b1a0fb32acfea08110969846241176c5dada869d99f0863719ce3437fa
   - id: tea-test-design
     ref: modules/tea-test-design.yaml
     hash: sha256:e4db8266155d0685042dc0b420d3f448e8ab6895b0453b1146617366f40bb1fe

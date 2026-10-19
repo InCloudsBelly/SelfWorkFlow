@@ -9,7 +9,14 @@ hostBinding:
   entrypoint: selfworkflow.selfopenwiki:SelfOpenWikiAdapter
   callBoundary: personal_call
   statusBoundary: personal_status
+  readBoundary: read
+  recoveryStatusBoundary: recovery_status
+  confirmedAbortBoundary: abort_external_update
 repository:
+  selfworkflowModule: extensions/knowledge/selfopenwiki
+  sourceSelection: explicit-selfworkflow-repository
+  inspector: [selfworkflow, wiki, inspect, --repository, <absolute-source-root>]
+  managementEntry: Manage_SelfWorkFlow_Wiki.bat
   officialOpenWikiSubmodule: upstream/openwiki
   privateIntegrationOutsideSubmodule: true
 personalWiki:
@@ -32,6 +39,11 @@ installation:
 mcp:
   entry: self-openwiki/mcp-server/dist/index.js
   firstCall: openwiki_status
+  safeRead:
+    tool: openwiki_read
+    capability: knowledge.read.safe
+    providerRequired: false
+    transactionRequired: false
   requiredStatus:
     contractSchema: 2
     executionMode: external_agent

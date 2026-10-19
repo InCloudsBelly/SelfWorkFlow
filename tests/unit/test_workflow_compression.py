@@ -47,25 +47,22 @@ class WorkflowCompressionTests(unittest.TestCase):
         self.assertFalse(baseline.startswith(b"\xef\xbb\xbf"))
         self.assertLessEqual(len(text), int(len(baseline_text) * 0.30))
         for phrase in (
-            "所有用户沟通和工程文档使用中文",
-            "禁止虚构 capability、Review、test 或 evidence",
-            "禁止静默降级",
-            "保护凭据和敏感数据",
+            "沟通和工程文档用中文",
+            "不伪造能力或降级冒充通过",
+            "凭据",
             "保护用户已有修改",
-            "完成前必须有新鲜验证证据",
+            "完成前核对新鲜证据",
             "任务外异常隔离",
             "workflow/modes/<mode>.md",
-            "分类后必须只读取选定的一个",
-            "只读任务也要先读选定模式文件",
-            "缺失、不可读或哈希漂移",
+            "只读选定的",
+            "缺失、不可读、hash 漂移",
             "unverified",
             "Capability Check",
             "关键决策",
-            "用户明确确认",
-            "runtime manifest 始终加载",
-            "Scope/Plan",
-            "不能替换硬规则",
-            "确认失效",
+            "需重新确认",
+            "artifact-manifest.json",
+            "Plan 是实施边界",
+            "不得省略必需规则冒充优化",
             "当前目标根因或完成验收必需的故障",
             "必须用户明确授权后另行处理",
         ):
@@ -79,40 +76,36 @@ class WorkflowCompressionTests(unittest.TestCase):
         full = (ROOT / "workflow/modes/full.md").read_text(encoding="utf-8")
         deep = (ROOT / "workflow/modes/deep.md").read_text(encoding="utf-8")
         for phrase in (
-            "design-grilling",
-            "tea-test-design",
+            "不自动 Grilling 或 TEA",
             "plan-integrated-review",
-            "review-code-review",
-            "tea-test-review",
+            "一个独立 Reviewer",
             "implement-tdd",
         ):
             self.assertIn(phrase, full)
-        self.assertIn("design-grill-me", deep)
-        self.assertNotIn("design-grilling", deep)
-        self.assertIn("只执行一次", deep)
+        self.assertIn("grilling", deep.casefold())
+        self.assertIn("用户显式点名", deep)
+        self.assertIn("一个独立 Reviewer", deep)
 
     def test_route_order_and_optional_tea_are_explicit(self):
         full = (ROOT / "workflow/modes/full.md").read_text(encoding="utf-8")
         deep = (ROOT / "workflow/modes/deep.md").read_text(encoding="utf-8")
-        self.assertLess(full.index("design-grilling"), full.index("tea-test-design"))
-        self.assertLess(full.index("tea-test-design"), full.index("plan-integrated-review"))
-        self.assertLess(full.index("plan-integrated-review"), full.index("用户明确实施确认"))
-        for optional in ("tea-atdd", "tea-trace", "tea-nfr"):
-            self.assertIn(optional, full)
-            self.assertIn("显式", full)
-            self.assertIn(optional, deep)
-        self.assertIn("TDD", full)
-        self.assertIn("TDD", deep)
+        for text in (full, deep):
+            self.assertIn("显式", text)
+            self.assertIn("TEA", text)
+            self.assertIn("grilling", text.casefold())
+            self.assertIn("plan-integrated-review", text)
+        self.assertIn("tdd", full.casefold())
+        self.assertIn("tdd", deep.casefold())
 
-        self.assertIn("Full/Deep/正式文档：独立 Review；Light：窄 Review", (ROOT / "WORKFLOW.md").read_text(encoding="utf-8"))
+        self.assertIn("Full/Deep 交付前一个独立 SubAgent", (ROOT / "WORKFLOW.md").read_text(encoding="utf-8"))
 
     def test_light_and_full_deep_keep_distinct_review_and_tea_gates(self):
         bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         light = (ROOT / "workflow/modes/light.md").read_text(encoding="utf-8")
         for phrase in (
-            "Full/Deep/正式文档：独立 Review；Light：窄 Review",
-            "Full/Deep 及正式文档门禁使用独立 SubAgent",
-            "Light 可做窄结构化自审",
+            "Full/Deep 交付前一个独立 SubAgent",
+            "Light 窄结构化自审",
+            "所有模式禁止双 Reviewer",
         ):
             self.assertIn(phrase, bootstrap)
         self.assertIn("不自动 Grill 或 TEA", light)
@@ -121,26 +114,38 @@ class WorkflowCompressionTests(unittest.TestCase):
     def test_review_model_boundary_and_compact_dispatch_policy_are_explicit(self):
         review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
         for phrase in (
-            "主 Agent 的 Design、Plan、Implement、Verify、Knowledge 始终使用当前 Host 模型",
-            "只有 `dispatch_post_grill_review`、`dispatch_plan_review`、`dispatch_code_review`",
-            "禁止传播给任何其他 Agent",
-            "实施前文档包调用一次独立 Reviewer",
-            "Full/Deep 落地后仅保留 Standards/Spec 两个必要的独立 Reviewer",
-            "不能因“再确认一次”无限追加昂贵调用",
-            "不接收完整主对话历史、Wiki 或无关文件",
-            "两个轴复用同一 package/evidence",
-            "只有 package、diff、规则、Skill hash 或未关闭发现变化时才重新 Review",
-            "TEA 质量检查复用该证据，不自动增加第三个昂贵 Reviewer",
+            "默认继承主 Agent 模型/推理配置",
+            "不读取机器本地 Review 模型配置",
+            "不传 model/reasoning_effort 覆盖",
+            "普通设计/计划/测试设计合并",
+            "一个独立 SubAgent 同时检查 Standards/Spec",
+            "两个轴不是两个上下文",
+            "不接收完整主历史、Wiki 或无关材料",
+            "修复后只复核未关闭问题及影响项",
+            "不设“超预算中止”",
+            "TEA 仅显式启用",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, review)
+
+    def test_reuse_and_wait_policy_keeps_freshness_and_completion_boundaries(self):
+        text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        for phrase in (
+            "跨阶段/相邻轮次复用", "正文缺失只补受影响内容",
+            "摘要不冒充已读完整规则", "同职责由最窄匹配 Skill 承接",
+            "关键词重叠不叠加编排", "工具端按问题投影",
+            "可中断长等待", "避免秒级空轮询",
+            "不因 Token/次数预算耗尽中止未完成任务",
+        ):
+            with self.subTest(boundary=phrase):
+                self.assertIn(phrase, text)
 
     def test_catalog_routes_match_the_split_mode_contract(self):
         catalog = compile_catalog(ROOT / "catalog").content
         for strength, expected in (
             ("Light", ()),
-            ("Full", ("design-grilling",)),
-            ("Deep", ("design-grill-me",)),
+            ("Full", ()),
+            ("Deep", ()),
         ):
             capabilities = {"skill-discovery": "supported"}
             if strength == "Deep":
@@ -158,7 +163,7 @@ class WorkflowCompressionTests(unittest.TestCase):
             )
             self.assertEqual(route.selected_modules, expected)
 
-    def test_full_read_only_design_and_plan_load_grilling(self):
+    def test_full_read_only_design_and_plan_do_not_auto_load_grilling(self):
         catalog = compile_catalog(ROOT / "catalog").content
         evidence = [
             {
@@ -207,7 +212,7 @@ class WorkflowCompressionTests(unittest.TestCase):
                     for slot in stage["slots"]
                     for module in slot["selectedModules"]
                 ]
-                self.assertIn("design-grilling", selected)
+                self.assertNotIn("design-grilling", selected)
 
     def test_read_only_and_non_code_routes_do_not_load_behavior_modules(self):
         catalog = compile_catalog(ROOT / "catalog").content
@@ -385,10 +390,9 @@ class WorkflowCompressionTests(unittest.TestCase):
         text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         for phrase in (
             "writeTask=false",
-            "禁止编辑",
-            "禁止副作用",
+            "不得编辑或产生副作用",
             "CodeGraph",
-            "失败关闭",
+            "不伪造能力或降级冒充通过",
         ):
             self.assertIn(phrase, text)
 

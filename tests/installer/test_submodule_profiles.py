@@ -169,7 +169,14 @@ class SubmoduleProfileTests(unittest.TestCase):
                 relative = f"dependencies/upstream/{name}"
                 _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), relative)
                 _git(parent / relative, "checkout", "--detach", first)
-            _git(parent, "add", ".gitmodules", "dependencies/upstream/tea", "dependencies/upstream/matt-pocock-skills", "dependencies/upstream/ponytail", "dependencies/upstream/anthropic-skills", *(f"dependencies/upstream/{name}" for name in community))
+            wiki_paths = (
+                "extensions/knowledge/selfopenwiki/upstream/openwiki",
+                "extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer",
+            )
+            for relative in wiki_paths:
+                _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), relative)
+                _git(parent / relative, "checkout", "--detach", first)
+            _git(parent, "add", ".gitmodules", "dependencies/upstream/tea", "dependencies/upstream/matt-pocock-skills", "dependencies/upstream/ponytail", "dependencies/upstream/anthropic-skills", *(f"dependencies/upstream/{name}" for name in community), *wiki_paths)
             _git(parent, "commit", "-m", "pin first")
             parent_remote = root / "parent.git"
             _git(root, "clone", "--bare", str(parent), str(parent_remote))
@@ -187,6 +194,21 @@ class SubmoduleProfileTests(unittest.TestCase):
             for name in community:
                 self.assertEqual(_git(clone / f"dependencies/upstream/{name}", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
+            for relative in wiki_paths:
+                self.assertFalse((clone / relative / ".git").exists())
+            knowledge_result = apply_submodule_profile(
+                clone, "normal", runtime_profile="knowledge", runner=_file_transport_runner,
+            )
+            self.assertEqual(knowledge_result["runtimeProfile"], "knowledge")
+            for relative in wiki_paths:
+                self.assertEqual(_git(clone / relative, "rev-parse", "HEAD").stdout.strip(), first)
+            dirty = clone / wiki_paths[0] / "content.txt"
+            dirty.write_text("personal dirty change", encoding="utf-8")
+            with self.assertRaisesRegex(SubmoduleProfileError, "submodule-dirty"):
+                apply_submodule_profile(clone, runtime_profile="knowledge", runner=_file_transport_runner)
+            apply_submodule_profile(clone, runtime_profile="core", runner=_file_transport_runner)
+            self.assertEqual(dirty.read_text(encoding="utf-8"), "personal dirty change")
+            _git(clone / wiki_paths[0], "restore", "content.txt")
             self.assertEqual(
                 apply_submodule_profile(
                     clone, "normal", runner=_file_transport_runner,
@@ -219,7 +241,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             self.assertEqual(pulled.returncode, 0, pulled.stderr)
             with self.assertRaisesRegex(SubmoduleProfileError, "submodule-update-failed"):
                 apply_submodule_profile(
-                    clone, "normal", runner=_file_transport_runner,
+                    clone, "normal", runtime_profile="knowledge", runner=_file_transport_runner,
                 )
             self.assertEqual(_git(clone / "dependencies/upstream/tea", "rev-parse", "HEAD").stdout.strip(), second)
             self.assertEqual(_git(clone / "dependencies/upstream/matt-pocock-skills", "rev-parse", "HEAD").stdout.strip(), first)
@@ -228,6 +250,8 @@ class SubmoduleProfileTests(unittest.TestCase):
             for name in community:
                 self.assertEqual(_git(clone / f"dependencies/upstream/{name}", "rev-parse", "HEAD").stdout.strip(), first)
             self.assertFalse((clone / "dependencies/heavy").exists())
+            for relative in wiki_paths:
+                self.assertEqual(_git(clone / relative, "rev-parse", "HEAD").stdout.strip(), first)
 
 
 if __name__ == "__main__":

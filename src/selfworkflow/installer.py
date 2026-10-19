@@ -288,7 +288,23 @@ def _managed_instruction(
     *,
     profile: str,
     artifact_hash: str,
+    existing_text: str = "",
 ) -> str:
+    # Only elide our duplicate, never edit user-owned text or infer equivalence.
+    # Any fence/HTML context is ambiguous: keep the rule instead of parsing it.
+    outside = re.split(
+        r"(?s)<!-- selfworkflow:begin -->.*?<!-- selfworkflow:end -->",
+        existing_text.replace("\r\n", "\n"),
+    )
+    if not any(marker in part for part in outside for marker in ("```", "~~~", "<")):
+        section = re.compile(r"(?ms)^## 编译缓存保护\n.*?(?=^#{1,2} |\Z)")
+        existing_sections = {
+            match.group().strip() for part in outside for match in section.finditer(part)
+        }
+        workflow_text = section.sub(
+            lambda match: "" if match.group().strip() in existing_sections else match.group(),
+            workflow_text.replace("\r\n", "\n"),
+        )
     return (
         "## SelfWorkflow bootstrap\n\n"
         "SelfWorkflow 已从安装后的 hash-bound artifact 加载。\n\n"
@@ -491,6 +507,7 @@ def create_install_plan(
                 _read_text(artifact / "WORKFLOW.md"),
                 profile=profile,
                 artifact_hash=artifact_hash,
+                existing_text=_read_text(agents_file),
             ),
         )
     except (ManagedBlockError, UnicodeError):
@@ -567,6 +584,14 @@ def _atomic_write(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _safe_root(path.parent, allow_missing=False)
+    if (
+        expected_state is not None
+        and expected_state[0] is True
+        and expected_state[1] == "sha256:" + hashlib.sha256(content).hexdigest()
+    ):
+        if not _target_matches(path, *expected_state):
+            raise InstallerError("operation-preimage-drift")
+        return
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
     )
@@ -840,6 +865,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                         _read_text(artifact / "WORKFLOW.md"),
                         profile=plan["profile"],
                         artifact_hash=plan["artifactHash"],
+                        existing_text=_read_text(agents_path),
                     ),
                 ).encode("utf-8")
                 record(agents_path, agents_content)

@@ -458,7 +458,7 @@ class RouterTests(unittest.TestCase):
                 capability_states={"skill-discovery": "supported"},
             ),
         )
-        self.assertEqual(full_grill.selected_modules, ("design-grilling",))
+        self.assertEqual(full_grill.selected_modules, ())
 
         deep_grill = route_modules(
             compiled.content,
@@ -471,13 +471,14 @@ class RouterTests(unittest.TestCase):
                 },
             ),
         )
-        self.assertEqual(deep_grill.selected_modules, ("design-grill-me",))
+        self.assertEqual(deep_grill.selected_modules, ())
 
         deep_without_confirmation = route_modules(
             compiled.content,
             ModuleRouteRequest(
                 slot_id="design.specialists", cardinality="zero-or-many",
                 operation_type="implement", strength="Deep", write_task=True,
+                explicit_module_ids=("design-grill-me",),
                 capability_states={"skill-discovery": "supported"},
             ),
         )
@@ -547,7 +548,7 @@ class RouterTests(unittest.TestCase):
                 capability_states={"skill-discovery": "supported"},
             ),
         )
-        self.assertEqual(full.selected_modules, ("design-grilling",))
+        self.assertEqual(full.selected_modules, ())
 
         deep = route_modules(
             catalog,
@@ -561,7 +562,7 @@ class RouterTests(unittest.TestCase):
                 },
             ),
         )
-        self.assertEqual(deep.selected_modules, ("design-grill-me",))
+        self.assertEqual(deep.selected_modules, ())
 
 
 if __name__ == "__main__":

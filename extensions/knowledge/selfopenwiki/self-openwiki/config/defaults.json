@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "provider": "openai-chatgpt",
+  "recommendedModel": {
+    "model": "gpt-5.6-sol",
+    "reasoningEffort": "xhigh"
+  }
+}

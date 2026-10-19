@@ -1,66 +1,50 @@
 # SelfWorkFlow 启动入口
 
-厂商无关、中文优先的轻量工作流。所有用户沟通和工程文档使用中文；代码、路径、命令、错误、模型名、Skill 名和协议字段按事实保留。
+厂商无关；沟通和工程文档用中文，代码、命令、路径和协议字段保留原文。
 
-## 启动
+## 启动与按需加载
 
-每个新任务只做一次：runtime manifest 始终加载（确定路径为安装 snapshot 根目录的 `artifact-manifest.json`），只提取身份与本次模块 hash，不把整份文件清单注入上下文、不搜索历史日志。读取本入口后执行 `Discover → Capability Check → Classify`，报告：
+每个任务一次 Discover → Capability Check → Classify。首条工具/修改进度报告 `SelfWorkflow active: <profile>；mode: <Light|Full|Deep>`，附阶段/总阶段、完成数、粗略进度区间、当前、剩余和预计；后续只在阶段变化、阻塞、重估或完成时更新。
 
-```text
-SelfWorkflow active: <profile>；mode: <Light|Full|Deep>
-进度 <阶段>/<总阶段>（已完成主阶段/总主阶段，约 <粗略区间>%）｜当前：<阶段>｜剩余：<阶段>｜预计：<时间或重估点>
-```
+从 bootstrap 指定的 snapshot 根读取 `artifact-manifest.json`，仅提取身份和本次模块 hash，不输出全清单或搜索历史日志。只读选定的 `workflow/modes/<mode>.md`，当前阶段命中的模块与必要引用首次使用才读。同路径、版本/hash、证据且正文仍完整时跨阶段/相邻轮次复用，不为“使用 Skill”重读或重复验 hash；范围/版本/输入漂移或压缩后正文缺失只补受影响内容，摘要不冒充已读完整规则。缺失、不可读、hash 漂移标为 `unverified`，不得省略必需规则冒充优化。
 
-分类后必须只读取选定的一个 `workflow/modes/<mode>.md`，再读取命中的模块正文和必要引用；只读任务也要先读选定模式文件。普通任务不创建 PlanGraph/RunLedger，也不重复加载 `workflow/core.md` 或契约 Host 的 package/receipt/runner 细则；仅显式 contract-managed task 或由 conforming Host 按契约承接的任务加载它们；宿主具有契约能力本身不切换任务模式。缺失、不可读或哈希漂移的必需模块标为 `unverified`，不得静默跳过。
+普通任务不创建 PlanGraph/RunLedger、不加载 `workflow/core.md` 或契约 package/receipt/runner 规则。只有显式 contract-managed task 或 conforming Host 按契约承接才加载；宿主具备能力不自动切换模式。knowledge profile 不自动升级 Full。
 
-profile 表示能力集合，不决定模式：`knowledge` 不自动升级 Full。局部修复按实际复杂度、风险和项目最低要求分类；不能仅因涉及代码或已有审查就要求整项目设计。进入所选阶段前预检必需适配器的引用闭包；缺失时报告具体文件和影响，不转嫁为项目缺少 `_bmad`。
+## 流程与能力
 
-## 固定流程
+Discover → Capability Check → Classify → 紧凑 Design/Plan → Implement/Debug → Review → Verify → optional Knowledge → Complete。
 
-```text
-Discover → Capability Check → Classify → Design → Plan
-→ Implement/Debug → Review → Verify → optional Knowledge → Complete
-```
+- 代码/C++/UE/跨层行为：`modules/code.md`；责任层与实施契约用 `code-quality`，证据/副作用用 `workflow-quality`，行为变更 TDD/验证用 `testing-review-quality`。Ponytail、C++、项目 Review Skill 按实际命中加载。
+- CodeGraph 是项目级唯一 CodeMap，官方 MCP 为结构化代码阅读入口。主 Agent 按 `codegraph-read.md` / `codegraph-update.md` 维护生命周期；Reviewer 不调用 provider，不虚构 fresh。
+- 仅明确维护 Skill/工作流才用 `workflow-skill-maintenance`。真实 UI 用 ui-ux-pro-max；研究长文用 content-research-writer；Obsidian Markdown/Bases/Canvas 仅对应产物触发；普通 Markdown 不触发它们。
+- TEA 全部能力和完整 `grilling` 仅用户显式点名启用，不因 Full/Deep、测试等级、项目默认或阶段变化自动加载。重要未决选择仍要问，环境事实自行查明；不重启已完成访谈。
+- Review 唯一调度见 `modules/review.md`；知识、留痕及其他显式可选增强到相应阶段才加载。知识按 read → propose → update，update 需确认；不阻塞普通交付。
+- 同职责由最窄匹配 Skill 承接，通用 Skill 只补缺项；关键词重叠不叠加编排或重复正文。上下文恢复保留目标、授权边界、当前增量、有效证据和待办引用，先补缺口，不重启全流程。
 
-按任务和模式按需加载：
+## Review 与授权
 
-- Skill/工作流维护：仅明确新增、改造或集成个人 Skill/工作流，或优化触发描述时加载 `skills/workflow-skill-maintenance/SKILL.md`；日常使用现有能力不加载，Anthropic 上游只按需作为方法引用。
+Light 窄结构化自审；Full/Deep 交付前一个独立 SubAgent 同时检查 Standards/Spec，所有模式禁止双 Reviewer。普通设计/计划/测试设计合并自审；重大架构、安全、持久化、不可逆风险或显式请求才前置独立 Review，尽量复用同一审查者。机械文档同步不单开审查。Review 继承主 Agent 模型/推理配置，不读取专属模型配置或传入覆盖；独立性来自上下文隔离，不导入主历史。
 
-- 界面设计：真实 UI 的视觉、布局、交互或可访问性设计命中 `skills/ui-ux-pro-max/SKILL.md`；纯崩溃/性能排查、普通文档和科学绘图不触发。
-- 研究写作：文章、教程、专题报告的研究、结构或实质改写命中 `skills/content-research-writer/SKILL.md`；短问答、摘要、翻译、工作报告和流程内部留痕不触发；文件导出沿用既有产物 Skill。
-- Obsidian 格式：明确 Obsidian 笔记语法、Bases/.base 或 JSON Canvas/.canvas 产物时，分别加载 `skills/obsidian-markdown/SKILL.md`、`skills/obsidian-bases/SKILL.md`、`skills/json-canvas/SKILL.md`；普通 Markdown、通用表格或流程图不触发，也不自动选择知识后端。
+首次编辑测试/生产代码前明确实施契约：范围、owner、侵入预算、替代方案、影响/兼容性、安全、性能、回滚与测试接缝。已有同范围授权复用；普通任务不是一律 Review → 用户确认 → TDD，前置门禁仅按上述真实风险触发。关键决策、范围/owner/公共接口/持久化/副作用或关键风险变化需重新确认。Plan 是实施边界；测试不能反向扩张生产架构。正式契约回执与防伪验证保留，不伪造能力或降级冒充通过。
 
-- 代码/C++/UE/跨层行为：`modules/code.md`；C++/UE、Ponytail、项目 Review Skill 仅在命中时加载；非代码任务不自动加载，并按需读取 `codegraph-read.md`。
-- Design/Plan：按选定模式读取当前阶段的设计模块；Full/Deep 的 Design/Plan 或行为实现/调试按模式自动一次 `grilling`，纯分析不自动加载。
-- 行为变更：TDD；Full/Deep 按阶段再加载 TEA test-design / test-review，非行为任务不自动加载。`tea-atdd`、`tea-trace`、`tea-nfr` 仅显式需要时加载。
-- 可选增强：仅显式启用 `tea-framework`、`tea-ci`、`ponytail-debt`、`implement-spec` 时读取 `modules/optional-integrations.md`；不改变普通任务默认路径。
-- Review、知识、文档留痕：只加载各自模块；知识是可选扩展，不阻塞普通交付。
-- CodeGraph：项目级 `.codegraph/` 是全局 CodeMap；读取边界与实际代码批次自动核对工作区，missing 初始化、增量同步后验证及必要重建、indexing/busy 有界等待；有效证据复用与触发边界只见 `codegraph-read.md` 和 `codegraph-update.md`。
+## 调用与缓存纪律
 
-只读任务保持 `writeTask=false`，禁止编辑、禁止副作用（代码任务仅允许 `codegraph-read.md` 定义的项目 `.codegraph/` 缓存维护例外）。非代码任务按 operationType 执行。契约模式能力未验证时失败关闭，不静默转普通模式或产生副作用；普通任务不要求契约专用回执，必要工具不可用仍报告阻塞。
+独立只读查询批量执行，工具结果先本地筛选字段/范围再输出；依赖操作按序。已返回完整证据不重取，截断只补缺段。相同输入无新证据不追加审查、测试、全仓扫描或原样失败重试；先定位原因、收窄、合并或换有效路径。修复只复核受影响项，继续到验收，不因 Token/次数预算耗尽中止未完成任务。
 
-## 职责与调用复用
+大清单/网页/日志先在工具端按问题投影，仅返回必要原文、身份/计数、退出状态与失败证据；摘要不替代确需完整读取的规则。长命令由工具持有进程，优先完成通知或可中断长等待，合并独立工作；避免秒级空轮询和逐行转述，遵守宿主等待上限及进度要求。
 
-- 在宿主 system/developer 指令与用户授权边界内，SelfWorkflow 唯一决定模式、阶段、授权与能力选择；专业 Skill 只提供方法和检查项，不重新启动流程。`code-quality` 管代码责任层；`workflow-quality` 管证据与副作用；`testing-review-quality` 管 TDD/验证；Review 统一归 `workflow/modules/review.md`。Superpowers 仅显式启用，不叠加第二套流程。
-- 同一任务只读一次当前入口、runtime manifest 和选定模式；模块正文首次命中才读，同路径同版本且上下文仍完整时复用。范围、模式、规则版本、运行时身份变化或上下文丢失时只补读受影响内容；不能用摘要替代未读的必需规则。
-- 只加载当前阶段所需模块及其必要引用；出现链接、安装某能力或 profile 含该能力不等于触发。后续阶段到达时再加载，能力缺失标为 `unverified`，不靠省略规则节约 token。
-- 独立只读查询尽量批量执行，限定目录、字段和输出量；依赖操作按序执行。相同输入的有效证据复用；相关变更、失败或外部漂移才重查，不无变化轮询、不因重复门禁再请求已获得的授权。
-- 已注入且完整的入口不重复读取；同一 Skill、阶段、输入证据和版本组合只执行一次；同阶段不同职责的 Skill 仍按需调用，证据变化只重做受影响项。按名称出现不等于需要加载。Design/Plan 可合并为一份文档；Grill 只处理未决的重要选择，环境事实自行查明，已授权范围内的实现细节不重复问人。规则不能代替宿主权限隔离。
-- 主 Agent 负责 CodeGraph 生命周期；Reviewer 不调用 provider。全局图检查和写后同步分别按 `workflow/modules/codegraph-read.md`、`codegraph-update.md` 执行；不能永久缓存 fresh 或绕过漂移确认。CodeGraph 失败不得静默伪造 fresh 或无声降级。
+简单事实查询由主 Agent 做；辅助 SubAgent 仅用于分工明确且能减少重复或显著缩短耗时的任务，不递归派发、不与主 Agent 重做同一工作。稳定必要规则/工具及加载次序；不为缓存保温发请求、不保留无用历史、不通过复制作者上下文提高 Reviewer 命中率。实际缓存由宿主决定，不保证同模型必命中。
 
-## 质量门禁
+## 安全与交付
 
-Full/Deep/正式文档：独立 Review；Light：窄 Review。Full/Deep 及正式文档门禁使用独立 SubAgent，Light 可做窄结构化自审。正式设计、测试设计和实施计划由独立 SubAgent Review；至少两份正式文档时提交完整文档包和最终文档包 hash。按影响半径执行侵入性预算；测试覆盖不能反向驱动生产架构。代码实施契约要求第一次编辑测试或生产代码前形成明确实施确认，完成 `Review → 用户确认 → TDD` 后再实施；确认失效即回到设计。关键决策必须用户明确确认；Scope/Plan 是实施边界，简化或可选能力不能替换硬规则。官方 CodeGraph MCP 是代码阅读入口，SelfWorkFlow 只负责项目边界、生命周期路由和写后更新。
+保护用户已有修改、凭据和授权；只读任务 `writeTask=false`，不得编辑或产生副作用，CodeGraph 定义的索引维护例外。任务外异常隔离：报告并延后，不旁路修复；非当前目标根因或完成验收必需的故障必须用户明确授权后另行处理。必要能力缺失如实 `unverified`，真实外部阻塞说明待办，不以预算替代完成责任。
 
-## 硬规则
+完成前核对新鲜证据：直接路径、失败路径、最窄回归和副作用复读；禁编译/测试时遵守并记 not-run/unverified，不能宣称通过。Critical/Important 必须解决，Minor 记录处置。临时记录放 `./selfworkflow/`，不自动 Git add。Superpowers 仅显式启用，不叠加第二套流程。
 
-- 同范围已有明确实施授权可复用，记录请求、批准范围、计划版本/内容 hash 和禁止项；阶段变化、补齐环境事实或窄豁免不自动撤销授权。范围、owner、侵入预算或关键风险变化才重新确认。用户明确禁止编译/测试时遵守，记录 `not-run/unverified`；普通任务可交付已授权的修改及验证缺口，但不得称测试通过。细则见 `testing-review-quality`，契约完成门禁不变。
-- 禁止虚构 capability、Review、test 或 evidence；完成前必须有新鲜验证证据。
-- 禁止静默降级；不可用能力必须明确标记 `unverified` 或失败关闭。
-- Plan 是实施边界；计划外问题只记录。越界、侵入性、公共接口、持久化、安全或副作用变化时停止并重新确认。
-- 代码首次编辑前形成实施契约；完成前执行适用的 Review、最窄充分验证和失败路径检查。
-- 保护凭据和敏感数据，保护用户已有修改、不可逆操作和外部副作用。任务外异常隔离：任务外异常立即报告，不在当前任务旁路修复。
-- 非当前目标根因或完成验收必需的故障，必须用户明确授权后另行处理。
-- 任何 fallback、压缩或可选能力不能替换硬规则；发现当前目标根因或完成验收必需的故障时，先记录证据再处理。
-- 工具、修改或副作用任务首条进度必须包含 profile、mode、进度、当前、剩余和预计；只在阶段变化、阻塞、重估或完成时更新。
-- 知识遵循 `knowledge.read → knowledge.propose → knowledge.update`；update 需用户确认。临时记录放项目 `./selfworkflow/`，不自动 Git add。
+## 编译缓存保护
+
+- 编译检查复用用户现有增量编译环境，允许必要的正常增量更新，不为验证便利使共享缓存失效。执行前核对最近正常构建的命令、日志或配置，保持项目、Target、平台/架构、Configuration、工具链/SDK、全局宏以及 PCH、Unity、Live Coding 编译支持一致；无法确认时先报告，不盲目试编。
+- 优先同环境下最窄充分的增量构建。UE 的 `-Module` 只限制本次动作范围，不隔离共享 Intermediate/PCH；不得擅自添加 `-NoLiveCoding`：它会改变 `WITH_LIVE_CODING`，与 IDE 配置来回切换可使共享头/PCH 失效。保留 Live Coding 编译支持不等于执行 Live Coding 或 Hot Reload。
+- 未获明确授权，不执行 Clean/Rebuild，不删除或清空 Intermediate、Binaries、PCH、DDC 等产物/缓存，不通过切换全局构建选项或改写构建规则“修复”编译检查。
+- 共享头、构建规则或工具链等必要变化仍可能合法触发大范围重编；预计有此影响时，先说明原因、范围和代价并取得用户确认。不同编译环境的验证使用已确认不会覆盖原产物/缓存的隔离输出；不能保证隔离时不执行，保留 `not-run/unverified`，不得把跳过说成通过。
+- 实际动作量显著超出改动影响范围时，不反复切换参数重试；检查 makefile 失效原因、全局定义与 PCH 变化，安全可行时暂停本 Agent 发起的构建并报告，不终止用户或其他任务的构建。

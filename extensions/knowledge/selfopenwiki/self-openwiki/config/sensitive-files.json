@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "rejectedBaseNames": [
+    ".env",
+    ".npmrc",
+    ".pypirc",
+    "credentials.json",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_rsa",
+    "login data",
+    "local state",
+    "token.json"
+  ],
+  "rejectedNamePrefixes": [".env."],
+  "rejectedPathSegments": [
+    ".aws",
+    ".azure",
+    ".ssh",
+    "browser credentials",
+    "oauth tokens"
+  ],
+  "rejectedSuffixes": [".jks", ".key", ".kubeconfig", ".p12", ".pem", ".pfx"],
+  "contentPatterns": [
+    "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----",
+    "\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b",
+    "Authorization\\s*:\\s*Bearer\\s+[^\\s,;]{12,}",
+    "\\bsk-[A-Za-z0-9_-]{20,}\\b",
+    "\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b",
+    "[\"']?(?:api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|password|aws[_-]?(?:secret[_-]?access[_-]?key|session[_-]?token))[\"']?\\s*[:=]\\s*[\"']?[A-Za-z0-9_./+\\-=]{12,}"
+  ]
+}

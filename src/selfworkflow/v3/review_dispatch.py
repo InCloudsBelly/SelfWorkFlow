@@ -22,10 +22,6 @@ from selfworkflow.v3.review_package import (
     ordered_skill_manifest,
     skill_manifest_hash,
 )
-from selfworkflow.review_models import (
-    ReviewModelConfigError,
-    normalize_review_model_payload,
-)
 
 
 class ReviewDispatchError(ValueError):
@@ -64,8 +60,8 @@ class HostDispatchObservation:
 class ReviewDispatchPort(Protocol):
     """Host seam for one ephemeral SubAgent Review.
 
-    Implementations create a fresh reviewer with the requested model, scoped to
-    this Review dispatch only, enforce
+    Implementations create one fresh reviewer inheriting the parent model and
+    reasoning settings, enforce
     the payload's reviewExecutionBoundary, pass only the bounded package,
     return the structured result plus a Markdown summary, and delete the
     reviewer in a finally-equivalent cleanup path. The Host attestation must
@@ -358,19 +354,15 @@ def _dispatch_review(
     normalized = verified_input.summary
     if project_review_context is not None and not isinstance(project_review_context, Mapping):
         raise ReviewDispatchError("project-review-context-invalid")
-    normalized_review_model = None
     if review_model is not None:
-        try:
-            normalized_review_model = normalize_review_model_payload(review_model)
-        except (ReviewModelConfigError, TypeError, ValueError):
-            raise ReviewDispatchError("review-model-payload-invalid") from None
+        raise ReviewDispatchError("review-model-override-disabled")
     if review_axis is None:
         review_mode = "independent-design-review"
         subject_field = "designReviewSummary"
         expected_package_kind = "plan"
         package_stage = "planned"
     else:
-        if review_axis not in {"standards", "spec"}:
+        if review_axis != "combined":
             raise ReviewDispatchError("review-dispatch-input-invalid")
         review_mode = "independent-code-review"
         subject_field = "codeReviewSubject"
@@ -391,12 +383,10 @@ def _dispatch_review(
     payload = {
         "schemaVersion": 3,
         "reviewMode": review_mode,
-        # This fence is part of the hash-bound Review payload.  The Host may
-        # apply the selected model only to this ephemeral Reviewer and must
-        # reject the dispatch if it cannot enforce the fence.
+        # Isolation is independent of model choice; never import author history.
         "reviewExecutionBoundary": {
             "role": "reviewer",
-            "modelScope": "review-only",
+            "modelPolicy": "inherit-parent",
             "codeGraphPolicy": "deny",
             "allowedOperations": [
                 "read-review-package",
@@ -416,8 +406,7 @@ def _dispatch_review(
     }
     if review_axis is not None:
         payload["reviewAxis"] = review_axis
-    if normalized_review_model is not None:
-        payload["reviewModel"] = dict(normalized_review_model)
+        payload["reviewAxes"] = ["standards", "spec"]
     if normalized_package is not None:
         payload["reviewPackage"] = clone(normalized_package)
         payload["reviewPackageHash"] = normalized_package["packageHash"]
@@ -439,8 +428,6 @@ def _dispatch_review(
             "plan_hash": plan_hash,
             "attempt_ref": attempt_ref,
         }
-        if normalized_review_model is not None:
-            dispatch_arguments["review_model"] = dict(normalized_review_model)
         if normalized_project_review_context is not None:
             dispatch_arguments["project_review_context"] = normalized_project_review_context
         observation = port.dispatch_review(
@@ -468,18 +455,8 @@ def _dispatch_review(
         raise ReviewDispatchError("review-dispatch-observation-invalid") from None
     if observed_payload.get("reviewExecutionBoundary") != payload["reviewExecutionBoundary"]:
         raise ReviewDispatchError("review-execution-boundary-mismatch")
-    if normalized_review_model is None:
-        if observation.review_model is not None:
-            raise ReviewDispatchError("review-model-observation-mismatch")
-    else:
-        try:
-            observed_review_model = normalize_review_model_payload(
-                observation.review_model
-            )
-        except (ReviewModelConfigError, TypeError, ValueError):
-            raise ReviewDispatchError("review-model-observation-mismatch") from None
-        if dict(observed_review_model) != dict(normalized_review_model):
-            raise ReviewDispatchError("review-model-observation-mismatch")
+    if observation.review_model is not None:
+        raise ReviewDispatchError("review-model-observation-mismatch")
     if (
         observation.review_mode != review_mode
         or observation.fork_context is not fork_context
@@ -538,10 +515,7 @@ def _dispatch_review(
         implementation_context_identity=implementation_context_identity,
         plan_hash=plan_hash,
         attempt_ref=attempt_ref,
-        observed_review_model=(
-            None if normalized_review_model is None
-            else normalize_review_model_payload(observation.review_model)
-        ),
+        observed_review_model=None,
         skill_hash=skill_hash,
         review_package_hash=package_hash,
         review_report_hash=review_report_hash,
@@ -585,10 +559,7 @@ def _dispatch_review(
         "subagentLifecycle": "created-executed-cleaned",
         "reviewReportMarkdown": review_report,
         "reviewReportHash": review_report_hash,
-        "reviewModel": (
-            None if normalized_review_model is None
-            else dict(normalized_review_model)
-        ),
+        "reviewModel": None,
         "skillManifestHash": skill_hash,
         "reviewPackageHash": package_hash,
     }
@@ -643,7 +614,7 @@ def dispatch_independent_review(
     )
 
 
-def dispatch_dual_code_review(
+def dispatch_code_review(
     verified_input: VerifiedReviewInput,
     *,
     implementation_agent_identity: str,
@@ -655,55 +626,35 @@ def dispatch_dual_code_review(
     review_model: Mapping[str, object] | None = None,
     review_package: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
-    """Run distinct Standards and Spec reviewer dispatches with one bundle."""
+    """One independent reviewer checks both Standards and Spec with one bundle."""
 
     if project_review_context is not None:
         shared_payload, _normalized = _project_review_payload(project_review_context)
         shared_project_review_hash = content_hash(shared_payload)
     else:
         shared_project_review_hash = None
-    receipts = {}
-    for axis in ("standards", "spec"):
-        receipts[axis] = _dispatch_review(
-            verified_input,
-            implementation_agent_identity=implementation_agent_identity,
-            implementation_context_identity=implementation_context_identity,
-            port=port,
-            fork_context=False,
-            fallback_authorization_ref=None,
-            plan_hash=plan_hash,
-            attempt_ref=attempt_ref,
-            project_review_context=project_review_context,
-            review_axis=axis,
-            review_model=review_model,
-            review_package=review_package,
-        )
-    standards = receipts["standards"]
-    spec = receipts["spec"]
+    receipt = _dispatch_review(
+        verified_input,
+        implementation_agent_identity=implementation_agent_identity,
+        implementation_context_identity=implementation_context_identity,
+        port=port, fork_context=False, fallback_authorization_ref=None,
+        plan_hash=plan_hash, attempt_ref=attempt_ref,
+        project_review_context=project_review_context,
+        review_axis="combined", review_model=review_model,
+        review_package=review_package,
+    )
     if (
-        standards["dispatchId"] == spec["dispatchId"]
-        or standards["dispatchNonce"] == spec["dispatchNonce"]
-        or standards["reviewerAgentIdentity"] == spec["reviewerAgentIdentity"]
-        or standards["reviewerContextIdentity"] == spec["reviewerContextIdentity"]
+        receipt["reviewVerdict"] != "approve"
+        or receipt["reviewLevel"] not in {"L2", "L3"}
+        or receipt["independence"] != "independent"
+        or receipt["hostAttestationRef"] is None
     ):
-        raise ReviewDispatchError("review-code-review-not-independent")
-    for receipt in (standards, spec):
-        if (
-            receipt["reviewVerdict"] != "approve"
-            or receipt["reviewLevel"] not in {"L2", "L3"}
-            or receipt["independence"] != "independent"
-            or receipt["hostAttestationRef"] is None
-        ):
-            raise ReviewDispatchError("review-code-review-gate-failed")
-    if standards["reviewPackageHash"] != spec["reviewPackageHash"]:
-        raise ReviewDispatchError("review-code-review-package-mismatch")
-    if standards["skillManifestHash"] != spec["skillManifestHash"]:
-        raise ReviewDispatchError("review-code-review-skill-manifest-mismatch")
+        raise ReviewDispatchError("review-code-review-gate-failed")
     return {
         "schemaVersion": 1,
         "reviewMode": "independent-code-review",
         "projectReviewHash": shared_project_review_hash,
-        "reviewers": receipts,
+        "reviewers": {"combined": receipt},
     }
 
 

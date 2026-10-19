@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import copy
 import hashlib
 import json
+import weakref
 from typing import Any
 
 from selfworkflow.v3.catalog import CompiledCatalog
@@ -20,19 +22,17 @@ from selfworkflow.v3.ledger import (
 from selfworkflow.v3.pipeline import LoadedPipeline
 from selfworkflow.v3.plan_graph import (
     PlanGraphArtifact,
+    _EXPLICIT_ONLY_MODULES,
     build_plan_graph,
 )
 from selfworkflow.v3.selector import SelectionResult
-from selfworkflow.review_models import (
-    ReviewModelConfigError,
-    normalize_review_model_payload,
-    resolve_review_model,
-)
 
 
 _MISSING = object()
 _POST_GRILL_EVIDENCE_TOKEN = object()
 _ISSUED_POST_GRILL_EVIDENCE: set[object] = set()
+_CODE_REVIEW_EVIDENCE_TOKEN = object()
+_ISSUED_CODE_REVIEW_EVIDENCE: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 _SNAPSHOT_KEYS = (
     "capabilitySnapshot",
     "providerPreferenceSnapshot",
@@ -55,6 +55,10 @@ def _value_hash(value: object) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _receipt_documents(receipts: Sequence[Any]) -> tuple[Any, ...]:
+    return tuple(item.as_dict() if hasattr(item, "as_dict") else item for item in receipts)
 
 
 def _canonical_mapping(value: object, reason: str) -> dict[str, Any]:
@@ -144,6 +148,57 @@ class PostGrillReviewEvidence:
         )
 
 
+def _review_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class CodeReviewEvidence(Mapping[str, Any]):
+    """In-process Host result; serializing it does not transfer its authority."""
+
+    __slots__ = (
+        "_result", "_package", "_mode", "_service_identity", "_test_only",
+        "_stage_used", "_completion_used", "__token", "__binding", "__weakref__",
+    )
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("CodeReviewEvidence is issued by Host.dispatch_code_review")
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise AttributeError("CodeReviewEvidence is immutable")
+
+    def __getitem__(self, key: str) -> Any:
+        return copy.deepcopy(self._result[key])
+
+    def __iter__(self):
+        return iter(self._result)
+
+    def __len__(self) -> int:
+        return len(self._result)
+
+    def _binding_hash(self) -> str:
+        return _value_hash({
+            "result": self._result, "package": self._package, "mode": self._mode,
+            "service": self._service_identity, "testOnly": self._test_only,
+        })
+
+    def _is_valid(self) -> bool:
+        if (
+            getattr(self, "_CodeReviewEvidence__token", None) is not _CODE_REVIEW_EVIDENCE_TOKEN
+            or _ISSUED_CODE_REVIEW_EVIDENCE.get(id(self)) is not self
+        ):
+            return False
+        try:
+            receipt = self._result["reviewers"]["combined"]
+            return (
+                self.__binding == self._binding_hash()
+                and datetime.fromisoformat(receipt["issuedAt"].replace("Z", "+00:00"))
+                <= _review_now()
+                < datetime.fromisoformat(receipt["expiresAt"].replace("Z", "+00:00"))
+            )
+        except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+            return False
+
+
 def _issue_post_grill_evidence(
     *, services: object, plan_hash: str, attempt_ref: str, design_hash: str,
     summary_hash: str, receipt: dict[str, Any], decision: object,
@@ -184,8 +239,6 @@ class Host:
         review_test_mode: bool = False,
         project_root: str | None = None,
         conversation_id: str | None = None,
-        review_agent_id: str | None = None,
-        review_model_config_path: str | None = None,
     ) -> None:
         if type(plan) is not PlanGraphArtifact:
             raise HostError("v3-host-plan-not-typed")
@@ -227,19 +280,7 @@ class Host:
         self._project_root = project_root
         self._conversation_id = conversation_id
         self._project_review_session = None
-        if review_agent_id is not None and (
-            type(review_agent_id) is not str
-            or not review_agent_id
-        ):
-            raise HostError("review-agent-identity-invalid")
-        if review_model_config_path is not None and (
-            type(review_model_config_path) is not str
-            or not review_model_config_path
-        ):
-            raise HostError("review-model-config-path-invalid")
         self._review_test_mode = review_test_mode
-        self._review_agent_id = review_agent_id
-        self._review_model_config_path = review_model_config_path
 
     @property
     def plan(self) -> PlanGraphArtifact:
@@ -277,11 +318,13 @@ class Host:
         receipts: tuple[Any, ...] = (),
         *,
         post_grill_review_evidence: PostGrillReviewEvidence | None = None,
+        code_review_evidence: CodeReviewEvidence | None = None,
         tea_runtime_root: str | None = None,
     ) -> dict[str, Any]:
         self._validate_post_grill_stage_gate(
             ledger, stage_result, post_grill_review_evidence,
         )
+        self._validate_code_review_stage_gate(ledger, stage_result, code_review_evidence)
         try:
             result = apply_stage_result(
                 ledger, self._plan, stage_result, receipts,
@@ -291,6 +334,8 @@ class Host:
             raise HostError(getattr(error, "reason", "v3-host-stage-result-failed")) from None
         if post_grill_review_evidence is not None:
             _ISSUED_POST_GRILL_EVIDENCE.discard(post_grill_review_evidence)
+        if code_review_evidence is not None:
+            object.__setattr__(code_review_evidence, "_stage_used", True)
         return result
 
     def dispatch_post_grill_review(
@@ -305,9 +350,12 @@ class Host:
         grill_completion_ref: str,
         fallback_authorization_ref: str | None = None,
         review_model_override: Mapping[str, object] | None = None,
+        receipts: Sequence[Any] = (),
     ) -> PostGrillReviewEvidence:
         """Dispatch and evaluate the mandatory review through Host-owned ports."""
 
+        if review_model_override is not None:
+            raise HostError("review-model-override-disabled")
         if not self._requires_post_grill_review():
             raise HostError("post-grill-independent-review-not-required")
         if self._review_services is None:
@@ -328,7 +376,7 @@ class Host:
             from selfworkflow.v3.review_gate import evaluate_post_grill_review
             from selfworkflow.v3.hashing import require_hash
 
-            assert_valid_ledger(ledger, self._plan)
+            assert_valid_ledger(ledger, self._plan, _receipt_documents(receipts))
             active = [item for item in ledger["stages"] if item["status"] == "active"]
             if len(active) != 1 or active[0]["stageId"] != "designed":
                 raise HostError("post-grill-review-stage-not-active")
@@ -348,12 +396,6 @@ class Host:
             if normalized_summary["summaryHash"] != summary_ref:
                 raise HostError("post-grill-review-summary-reference-invalid")
             if independent_context_available:
-                # A model override is scoped to the fresh Review SubAgent.
-                # The authorized same-agent fallback below must not switch the
-                # parent/current Agent or inherit that override.
-                selected_review_model = self._select_review_model(
-                    implementation_agent_identity, review_model_override,
-                )
                 receipt = dispatch_independent_review(
                     verified_input,
                     implementation_agent_identity=implementation_agent_identity,
@@ -362,7 +404,7 @@ class Host:
                     fallback_authorization_ref=fallback_authorization_ref,
                     plan_hash=self._plan.plan_hash,
                     attempt_ref=attempt_ref,
-                    review_model=selected_review_model,
+                    review_model=review_model_override,
                 )
             else:
                 if fallback_authorization_ref is None:
@@ -479,9 +521,12 @@ class Host:
         review_package: Mapping[str, object] | None = None,
         ledger: Mapping[str, Any] | None = None,
         review_model_override: Mapping[str, object] | None = None,
-    ) -> dict[str, Any]:
+        receipts: Sequence[Any] = (),
+    ) -> CodeReviewEvidence:
         """Dispatch a non-Grill independent code Review with a full package."""
 
+        if review_model_override is not None:
+            raise HostError("review-model-override-disabled")
         if self._review_services is None:
             raise HostError("code-review-host-services-required")
         if not self._review_services.independent_context_available:
@@ -491,27 +536,28 @@ class Host:
         if not self._review_test_mode and ledger is None:
             raise HostError("code-review-ledger-required")
         try:
-            from selfworkflow.v3.review_dispatch import dispatch_dual_code_review
+            from selfworkflow.v3.review_dispatch import dispatch_code_review
+            from selfworkflow.v3.review_package import normalize_review_package
+
+            review_package = normalize_review_package(
+                review_package, expected_kind="code", plan_hash=self._plan.plan_hash,
+                stage_id=("implemented", "reviewed"), attempt_ref=attempt_ref,
+            )
+            if review_package["stageId"] != "reviewed":
+                raise HostError("code-review-reviewed-stage-required")
             if ledger is not None:
                 from selfworkflow.v3.ledger import assert_valid_ledger
-                from selfworkflow.v3.review_package import normalize_review_package
 
-                assert_valid_ledger(ledger, self._plan)
+                assert_valid_ledger(ledger, self._plan, _receipt_documents(receipts))
                 active = [item for item in ledger["stages"] if item["status"] == "active"]
-                if len(active) != 1 or active[0]["stageId"] not in {"implemented", "reviewed"}:
+                if len(active) != 1 or active[0]["stageId"] != "reviewed":
                     raise HostError("code-review-stage-not-active")
                 if active[0]["attempts"][-1]["attemptRef"] != attempt_ref:
                     raise HostError("code-review-attempt-mismatch")
-                normalize_review_package(
-                    review_package, expected_kind="code",
-                    plan_hash=self._plan.plan_hash,
-                    stage_id=("implemented", "reviewed"), attempt_ref=attempt_ref,
-                )
+                if review_package["stageId"] != active[0]["stageId"]:
+                    raise HostError("code-review-stage-mismatch")
 
-            selected_review_model = self._select_review_model(
-                implementation_agent_identity, review_model_override,
-            )
-            return dispatch_dual_code_review(
+            result = dispatch_code_review(
                 verified_input,
                 implementation_agent_identity=implementation_agent_identity,
                 implementation_context_identity=implementation_context_identity,
@@ -519,9 +565,32 @@ class Host:
                 plan_hash=self._plan.plan_hash,
                 attempt_ref=attempt_ref,
                 project_review_context=self.build_project_review_context(),
-                review_model=selected_review_model,
+                review_model=review_model_override,
                 review_package=review_package,
             )
+            from selfworkflow.v3.review_gate import _resolve_attestation
+
+            receipt = result["reviewers"]["combined"]
+            state = _resolve_attestation(
+                receipt, self._review_services.host_attestation_resolver,
+                self._review_services.host_attestation_consumer,
+                now=_review_now(), plan_hash=self._plan.plan_hash,
+                attempt_ref=attempt_ref,
+            )
+            if state != "valid":
+                raise HostError("code-review-host-attestation-" + state)
+            evidence = object.__new__(CodeReviewEvidence)
+            for key, value in {
+                "_result": copy.deepcopy(result), "_package": copy.deepcopy(dict(review_package)),
+                "_mode": self._review_strength(), "_service_identity": id(self._review_services),
+                "_test_only": self._review_services.backend_class == "fake-test",
+                "_stage_used": False, "_completion_used": False,
+                "_CodeReviewEvidence__token": _CODE_REVIEW_EVIDENCE_TOKEN,
+            }.items():
+                object.__setattr__(evidence, key, value)
+            object.__setattr__(evidence, "_CodeReviewEvidence__binding", evidence._binding_hash())
+            _ISSUED_CODE_REVIEW_EVIDENCE[id(evidence)] = evidence
+            return evidence
         except HostError:
             raise
         except Exception as error:
@@ -539,9 +608,12 @@ class Host:
         review_package: Mapping[str, object] | None = None,
         ledger: Mapping[str, Any] | None = None,
         review_model_override: Mapping[str, object] | None = None,
+        receipts: Sequence[Any] = (),
     ) -> dict[str, Any]:
         """Dispatch the planned-stage package through the same SubAgent seam."""
 
+        if review_model_override is not None:
+            raise HostError("review-model-override-disabled")
         if self._review_services is None:
             raise HostError("plan-review-host-services-required")
         if not self._review_services.independent_context_available:
@@ -556,7 +628,7 @@ class Host:
                 from selfworkflow.v3.ledger import assert_valid_ledger
                 from selfworkflow.v3.review_package import normalize_review_package
 
-                assert_valid_ledger(ledger, self._plan)
+                assert_valid_ledger(ledger, self._plan, _receipt_documents(receipts))
                 active = [item for item in ledger["stages"] if item["status"] == "active"]
                 if len(active) != 1 or active[0]["stageId"] != "planned":
                     raise HostError("plan-review-stage-not-active")
@@ -568,9 +640,6 @@ class Host:
                     stage_id="planned", attempt_ref=attempt_ref,
                 )
 
-            selected_review_model = self._select_review_model(
-                implementation_agent_identity, review_model_override,
-            )
             return dispatch_independent_review(
                 verified_input,
                 implementation_agent_identity=implementation_agent_identity,
@@ -578,7 +647,7 @@ class Host:
                 port=self._review_services.dispatch_port,
                 plan_hash=self._plan.plan_hash,
                 attempt_ref=attempt_ref,
-                review_model=selected_review_model,
+                review_model=review_model_override,
                 review_package=review_package,
             )
         except HostError:
@@ -587,37 +656,6 @@ class Host:
             raise HostError(
                 getattr(error, "reason", "plan-review-dispatch-failed")
             ) from None
-
-    def _select_review_model(
-        self,
-        implementation_agent_identity: str,
-        override: Mapping[str, object] | None,
-    ) -> Mapping[str, object] | None:
-        """Resolve the machine-local default or a validated one-time override."""
-
-        agent_id = self._review_agent_id or implementation_agent_identity
-        if override is not None:
-            try:
-                selection = normalize_review_model_payload(dict(override))
-            except (ReviewModelConfigError, TypeError, ValueError):
-                raise HostError("review-model-override-invalid") from None
-            if (
-                selection["selectionMode"] != "one-time"
-                or selection["agentId"] != agent_id
-            ):
-                raise HostError("review-model-override-invalid")
-            return selection
-        if self._review_test_mode:
-            return None
-        try:
-            resolution = resolve_review_model(
-                agent_id, self._review_model_config_path,
-            )
-        except (ReviewModelConfigError, TypeError, ValueError):
-            raise HostError("review-model-config-invalid") from None
-        if resolution.status != "configured" or resolution.selection is None:
-            raise HostError("needs_user_configuration")
-        return resolution.selection.as_dict(selection_mode="default")
 
     def _review_strength(self) -> str:
         """Resolve the plan's effective strength from its immutable request."""
@@ -645,6 +683,60 @@ class Host:
             for slot in stage["slots"]
         )
         return selected
+
+    def _validate_code_review_stage_gate(self, ledger, stage_result, evidence) -> None:
+        required = any(
+            slot["slotId"] == "review.independent" and slot["applicability"] == "applicable"
+            for stage in self._plan.as_dict()["stages"] for slot in stage["slots"]
+        )
+        if stage_result.get("stageId") != "reviewed" or stage_result.get("status") != "passed" or not required:
+            if evidence is not None:
+                raise HostError("code-review-evidence-unexpected")
+            return
+        if type(evidence) is not CodeReviewEvidence or not evidence._is_valid():
+            raise HostError("code-review-host-evidence-required")
+        active = [s for s in ledger.get("stages", []) if s.get("status") == "active"]
+        package = evidence._package
+        if (
+            evidence._stage_used or evidence._completion_used
+            or evidence._service_identity != id(self._review_services)
+            or evidence._mode != self._review_strength()
+            or package["planHash"] != self._plan.plan_hash
+            or package["stageId"] != "reviewed"
+            or len(active) != 1 or active[0].get("stageId") != "reviewed"
+            or not active[0].get("attempts")
+            or active[0]["attempts"][-1].get("attemptRef") != package["attemptRef"]
+            or stage_result.get("attemptRef") != package["attemptRef"]
+        ):
+            raise HostError("code-review-evidence-binding-invalid")
+        receipt = evidence["reviewers"]["combined"]
+        if not {package["packageHash"], receipt["receiptHash"]} <= set(stage_result.get("outputArtifactHashes", [])):
+            raise HostError("code-review-evidence-binding-invalid")
+
+    def validate_code_review_completion(self, ledger, evidence, receipts: Sequence[Any] = ()) -> None:
+        """Validate the embedding Host's current context, not Agent claims."""
+        try:
+            from selfworkflow.v3.ledger import assert_valid_ledger
+
+            assert_valid_ledger(ledger, self._plan, _receipt_documents(receipts))
+        except Exception as error:
+            raise HostError(getattr(error, "reason", "code-review-ledger-invalid")) from None
+        if (
+            type(evidence) is not CodeReviewEvidence or not evidence._is_valid()
+            or not evidence._stage_used or evidence._completion_used
+            or ledger.get("status") == "superseded"
+            or evidence._service_identity != id(self._review_services)
+            or evidence._mode != self._review_strength()
+            or evidence._package["planHash"] != self._plan.plan_hash
+        ):
+            raise HostError("code-review-completion-context-invalid")
+        reviewed = next((s for s in ledger["stages"] if s["stageId"] == "reviewed"), None)
+        if (
+            reviewed is None or reviewed["status"] != "passed" or not reviewed["attempts"]
+            or evidence._package["stageId"] != "reviewed"
+            or reviewed["attempts"][-1]["attemptRef"] != evidence._package["attemptRef"]
+        ):
+            raise HostError("code-review-completion-context-invalid")
 
     def _validate_post_grill_stage_gate(
         self,
@@ -722,6 +814,8 @@ class Host:
             raise HostError("v3-next-stage-request-empty")
         if len(requested) != len(set(requested)):
             raise HostError("v3-next-stage-request-duplicate")
+        if (set(requested) & _EXPLICIT_ONLY_MODULES) - set(self._request["explicitModuleIds"]):
+            raise HostError("v3-next-stage-request-explicit-user-required")
         try:
             # SelectionResult already revalidates its result hash.  Requiring
             # the immutable ledger to be current closes replay and old-plan use.

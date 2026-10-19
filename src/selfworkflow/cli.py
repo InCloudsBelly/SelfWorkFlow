@@ -37,11 +37,6 @@ from selfworkflow.project_review import (
     ProjectReviewProfileError,
     load_project_review_profile,
 )
-from selfworkflow.review_models import (
-    ReviewModelConfigError,
-    resolve_review_model,
-    save_review_model,
-)
 from selfworkflow.work_artifacts import WorkArtifactError, WorkArtifactManager
 from selfworkflow.ponytail_source import PonytailSourceError, verify_ponytail_source
 from selfworkflow.sources import (
@@ -517,6 +512,16 @@ def main(argv: list[str] | None = None) -> int:
     git_policy_check = git_policy_commands.add_parser("check")
     git_policy_check.add_argument("--repo", required=True)
     git_policy_check.add_argument("--policy")
+    wiki_parser = commands.add_parser("wiki")
+    wiki_commands = wiki_parser.add_subparsers(dest="wiki_command", required=True)
+    wiki_inspect = wiki_commands.add_parser("inspect")
+    wiki_inspect.add_argument("--repository", required=True)
+    for action in ("register", "doctor"):
+        wiki_action = wiki_commands.add_parser(action)
+        wiki_action.add_argument("--repository", required=True)
+        wiki_action.add_argument("--config")
+        if action == "register":
+            wiki_action.add_argument("--confirm-plan-hash")
     source_parser = commands.add_parser("source")
     source_commands = source_parser.add_subparsers(
         dest="source_command", required=True
@@ -652,22 +657,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     project_review_validate = project_review_commands.add_parser("validate")
     project_review_validate.add_argument("--project-root", required=True)
-    review_model = commands.add_parser("review-model")
-    review_model_commands = review_model.add_subparsers(
-        dest="review_model_command", required=True,
-    )
-    review_model_status = review_model_commands.add_parser("status")
-    review_model_status.add_argument("--agent", required=True)
-    review_model_status.add_argument("--config-file")
-    review_model_set = review_model_commands.add_parser("set")
-    review_model_set.add_argument("--agent", required=True)
-    review_model_set.add_argument("--model", required=True)
-    review_model_set.add_argument("--reasoning-effort", required=True)
-    review_model_set.add_argument("--config-file")
-    review_model_set.add_argument(
-        "--confirm", action="store_true",
-        help="确认把该选择写入机器本地默认配置",
-    )
     artifact = commands.add_parser("artifact")
     artifact_commands = artifact.add_subparsers(dest="artifact_command", required=True)
     artifact_transition = artifact_commands.add_parser("transition")
@@ -700,30 +689,6 @@ def main(argv: list[str] | None = None) -> int:
             return 53
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 53 if result["status"] == "unverified" and result["blocking"] else 0
-    if arguments.command == "review-model":
-        try:
-            if arguments.review_model_command == "status":
-                result = resolve_review_model(
-                    arguments.agent, arguments.config_file,
-                ).as_dict()
-            elif arguments.review_model_command == "set":
-                result = save_review_model(
-                    arguments.config_file,
-                    arguments.agent,
-                    arguments.model,
-                    arguments.reasoning_effort,
-                    confirmed=arguments.confirm,
-                ).as_dict()
-            else:
-                raise ReviewModelConfigError("review-model-command-invalid")
-        except ReviewModelConfigError as error:
-            print(
-                f"SelfWorkFlow: review-model-operation-failed:{error.reason}",
-                file=sys.stderr,
-            )
-            return 54
-        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
-        return 0
     if arguments.command == "artifact":
         try:
             manager = WorkArtifactManager(arguments.project_root, arguments.task_id)
@@ -803,6 +768,22 @@ def main(argv: list[str] | None = None) -> int:
             reason = getattr(error, "reason", "quality-operation-failed")
             print(f"SelfWorkFlow: quality-operation-failed:{reason}", file=sys.stderr)
             return 73
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
+    if arguments.command == "wiki":
+        from .wiki_module import WikiModuleError, inspect_wiki_module, register_wiki_mcp, doctor_wiki_module
+
+        try:
+            if arguments.wiki_command == "register":
+                result = register_wiki_mcp(arguments.repository, arguments.config,
+                                           confirm_plan_hash=arguments.confirm_plan_hash)
+            elif arguments.wiki_command == "doctor":
+                result = doctor_wiki_module(arguments.repository, arguments.config)
+            else:
+                result = inspect_wiki_module(arguments.repository)
+        except WikiModuleError as error:
+            print(f"SelfWorkFlow: wiki-module-inspection-failed:{error}", file=sys.stderr)
+            return 78
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0
     if arguments.command == "provider":

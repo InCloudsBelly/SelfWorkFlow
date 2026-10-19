@@ -1,3 +1,9 @@
 {
-  "include": ["/src/"]
+  "include": [
+    "/src/",
+    "/extensions/knowledge/selfopenwiki/scripts/",
+    "/extensions/knowledge/selfopenwiki/self-openwiki/mcp-server/src/",
+    "/extensions/knowledge/selfopenwiki/self-openwiki/scripts/",
+    "/extensions/knowledge/selfopenwiki/self-openwiki/win32-helper-compat/"
+  ]
 }

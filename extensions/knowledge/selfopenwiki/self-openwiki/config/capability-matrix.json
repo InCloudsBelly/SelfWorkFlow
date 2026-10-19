@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "openwiki_status",
+      "implementation": "mcp-server/src/runtime.ts#status",
+      "schema": "mcp-server/src/contracts.ts#openwiki_status",
+      "capabilities": ["status.minimal", "status.no-secrets"],
+      "tests": [
+        "mcp-server/test/contracts.c7.ts",
+        "mcp-server/test/runtime.c7.ts",
+        "mcp-server/test/server.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_read",
+      "implementation": "mcp-server/src/runtime.ts#read",
+      "schema": "mcp-server/src/contracts.ts#openwiki_read",
+      "capabilities": ["knowledge.read.safe"],
+      "tests": ["mcp-server/test/runtime.c7.ts", "mcp-server/test/snapshot.c7.ts", "mcp-server/test/server.c7.ts"]
+    },
+    {
+      "name": "openwiki_begin",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_begin",
+      "schema": "mcp-server/src/contracts.ts#openwiki_begin",
+      "capabilities": [
+        "personal.lifecycle.begin",
+        "personal.wiki-root.explicit",
+        "personal.skill-adaptation.bound"
+      ],
+      "tests": [
+        "mcp-server/test/personal-lifecycle.v2.ts",
+        "mcp-server/test/personal-root.v2.ts",
+        "mcp-server/test/personal-run-store.v2.ts"
+      ]
+    },
+    {
+      "name": "openwiki_submit_plan",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_submit_plan",
+      "schema": "mcp-server/src/contracts.ts#openwiki_submit_plan",
+      "capabilities": [
+        "personal.lifecycle.plan",
+        "personal.page-job.queue"
+      ],
+      "tests": [
+        "mcp-server/test/personal-lifecycle.v2.ts",
+        "mcp-server/test/personal-run-store.v2.ts"
+      ]
+    },
+    {
+      "name": "openwiki_next_page",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_next_page",
+      "schema": "mcp-server/src/contracts.ts#openwiki_next_page",
+      "capabilities": [
+        "personal.lifecycle.next-page",
+        "personal.candidate.write-package"
+      ],
+      "tests": [
+        "mcp-server/test/personal-lifecycle.v2.ts",
+        "mcp-server/test/personal-candidate-marker.v2.ts"
+      ]
+    },
+    {
+      "name": "openwiki_inspect_page_claims",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_inspect_page_claims",
+      "schema": "mcp-server/src/contracts.ts#openwiki_inspect_page_claims",
+      "capabilities": [
+        "personal.claims.inspect",
+        "personal.claims.binding"
+      ],
+      "tests": ["mcp-server/test/personal-lifecycle.v2.ts"]
+    },
+    {
+      "name": "openwiki_submit_page",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_submit_page",
+      "schema": "mcp-server/src/contracts.ts#openwiki_submit_page",
+      "capabilities": [
+        "personal.page.validate-assigned",
+        "personal.claims.sparse-decisions"
+      ],
+      "tests": [
+        "mcp-server/test/personal-lifecycle.v2.ts",
+        "mcp-server/test/personal-run-store.v2.ts"
+      ]
+    },
+    {
+      "name": "openwiki_finish",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_finish",
+      "schema": "mcp-server/src/contracts.ts#openwiki_finish",
+      "capabilities": [
+        "personal.lifecycle.finish",
+        "personal.c7-review-cas-publish"
+      ],
+      "tests": [
+        "mcp-server/test/personal-lifecycle.v2.ts",
+        "mcp-server/test/official-lifecycle-adapter.v2.ts"
+      ]
+    },
+    {
+      "name": "openwiki_setup",
+      "implementation": "mcp-server/src/runtime.ts#setup",
+      "schema": "mcp-server/src/contracts.ts#openwiki_setup",
+      "capabilities": ["oauth.loopback.ephemeral", "model.exact-verification"],
+      "tests": [
+        "mcp-server/test/oauth-helper.c7.ts",
+        "mcp-server/test/runtime-model-service.c7.ts",
+        "mcp-server/test/isolated-model-verification.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_prepare_sources",
+      "implementation": "mcp-server/src/runtime.ts#prepareSources",
+      "schema": "mcp-server/src/contracts.ts#openwiki_prepare_sources",
+      "capabilities": [
+        "sources.local-text",
+        "sources.win32-handle-bound",
+        "sources.secret-rejection"
+      ],
+      "tests": [
+        "mcp-server/test/sources.c7.ts",
+        "mcp-server/test/query.c7.ts",
+        "mcp-server/test/update.c7.ts",
+        "mcp-server/test/win32-helper.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_list_skills",
+      "implementation": "mcp-server/src/runtime.ts#listSkills",
+      "schema": "mcp-server/src/contracts.ts#openwiki_list_skills",
+      "capabilities": [
+        "skills.base-required",
+        "skills.ordered-composition",
+        "skills.exact-hash"
+      ],
+      "tests": [
+        "mcp-server/test/skills.c7.ts",
+        "mcp-server/test/transaction.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_query",
+      "implementation": "mcp-server/src/runtime.ts#query",
+      "schema": "mcp-server/src/contracts.ts#openwiki_query",
+      "capabilities": [
+        "query.temp-home",
+        "query.formal-wiki-unchanged",
+        "model.request-bound-evidence"
+      ],
+      "tests": [
+        "mcp-server/test/process.c7.ts",
+        "mcp-server/test/query.c7.ts",
+        "mcp-server/test/transaction.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_update",
+      "implementation": "mcp-server/src/runtime.ts#update",
+      "schema": "mcp-server/src/contracts.ts#openwiki_update",
+      "capabilities": [
+        "update.confirmed-guard",
+        "update.candidate-review-before-publication",
+        "update.atomic-publication",
+        "update.crash-recovery",
+        "update.crash-residue-scrub",
+        "update.same-model-review",
+        "update.two-repairs"
+      ],
+      "tests": [
+        "mcp-server/test/publish.c7.ts",
+        "mcp-server/test/recovery.c7.ts",
+        "mcp-server/test/review.c7.ts",
+        "mcp-server/test/transaction-recovery.c7.ts",
+        "mcp-server/test/update.c7.ts",
+        "mcp-server/test/validation.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_begin_external_update",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_begin_external_update",
+      "schema": "mcp-server/src/contracts.ts#openwiki_begin_external_update",
+      "capabilities": ["update.external-agent.begin"],
+      "tests": [
+        "mcp-server/test/contracts.c7.ts",
+        "mcp-server/test/server.c7.ts",
+        "mcp-server/test/runtime.c7.ts",
+        "mcp-server/test/external-update.c7.ts",
+        "mcp-server/test/external-update-transaction.c7.ts",
+        "mcp-server/test/startup-rehydration.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_finalize_external_update",
+      "implementation": "mcp-server/src/runtime.ts#openwiki_finalize_external_update",
+      "schema": "mcp-server/src/contracts.ts#openwiki_finalize_external_update",
+      "capabilities": ["update.external-agent.reviewed-finalize"],
+      "tests": [
+        "mcp-server/test/contracts.c7.ts",
+        "mcp-server/test/server.c7.ts",
+        "mcp-server/test/runtime.c7.ts",
+        "mcp-server/test/external-update.c7.ts",
+        "mcp-server/test/external-update-transaction.c7.ts",
+        "mcp-server/test/publish.c7.ts",
+        "mcp-server/test/recovery.c7.ts",
+        "mcp-server/test/startup-rehydration.c7.ts"
+      ]
+    },
+    {
+      "name": "openwiki_set_default_model",
+      "implementation": "mcp-server/src/runtime.ts#setDefaultModel",
+      "schema": "mcp-server/src/contracts.ts#openwiki_set_default_model",
+      "capabilities": [
+        "model.explicit-confirmation",
+        "model.no-fallback",
+        "config.atomic-cas"
+      ],
+      "tests": [
+        "mcp-server/test/config.c7.ts",
+        "mcp-server/test/runtime-model-service.c7.ts"
+      ]
+    }
+  ]
+}

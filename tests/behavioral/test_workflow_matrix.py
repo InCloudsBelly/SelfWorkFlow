@@ -16,8 +16,8 @@ class WorkflowMatrixTests(unittest.TestCase):
     def test_strength_routes_bounded_grilling_and_deep_grill_me(self):
         expected = {
             "Light": (),
-            "Full": ("design-grilling",),
-            "Deep": ("design-grill-me",),
+            "Full": (),
+            "Deep": (),
         }
         for strength, selected in expected.items():
             with self.subTest(strength=strength):
@@ -104,8 +104,8 @@ class WorkflowMatrixTests(unittest.TestCase):
     def test_plan_gate_keeps_light_lightweight_and_requires_integrated_review_for_full(self):
         expectations = {
             "Light": ("plan-gate",),
-            "Full": ("plan-integrated-review",),
-            "Deep": ("plan-integrated-review",),
+            "Full": ("plan-gate",),
+            "Deep": ("plan-gate",),
         }
         for strength, expected in expectations.items():
             with self.subTest(strength=strength):
@@ -197,17 +197,17 @@ class LightweightPolicyTextTests(unittest.TestCase):
             self.assertIn(phrase, content)
         self.assertNotIn("Caveman", content)
 
-    def test_formal_document_packages_require_fresh_independent_review(self):
+    def test_intermediate_documents_are_self_reviewed_and_final_review_is_independent(self):
         content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
         for phrase in (
             "Full/Deep",
-            "至少两份正式文档",
-            "独立 SubAgent",
-            "完整文档包",
-            "最终文档包 hash",
-            "同一 Agent",
+            "普通中间文档不单开审查",
+            "高风险前置审查",
+            "完整必要包",
+            "一个独立 Reviewer",
+            "所有模式取消双 Reviewer",
             "unverified",
-            "暂停实施",
+            "修复复核复用同一上下文",
             "post-landing Review",
         ):
             self.assertIn(phrase, content)
@@ -220,7 +220,7 @@ class LightweightPolicyTextTests(unittest.TestCase):
             "测试覆盖不能反向驱动生产架构",
             "公共枚举",
             "全局编译宏",
-            "用户明确确认",
+            "明确授权",
             "超出预算",
             "unverified",
         ):
@@ -259,24 +259,22 @@ class LightweightPolicyTextTests(unittest.TestCase):
             "代码实施契约",
             "第一次编辑测试或生产代码前",
             "只读分析和文档修订",
-            "明确实施确认",
-            "设计/规格",
-            "TEA/测试设计",
-            "实施计划",
-            "安全、性能、可维护性",
-            "Review → 用户确认 → TDD",
-            "确认失效",
+            "明确授权",
+            "普通设计/测试设计/计划合并自审",
+            "安全/性能/兼容性",
+            "TDD Red/Green",
+            "重大变化重新确认",
             "Light",
             "紧凑",
-            "批准的侵入性预算",
+            "侵入预算",
             "共享热路径",
             "测试来源的生产改动",
-            "关键测试接缝",
+            "测试接缝",
         ):
             self.assertIn(phrase, content)
         self.assertRegex(
             content,
-            r"实施计划[\s\S]{0,300}侵入性预算[\s\S]{0,100}回滚",
+            r"实施契约[\s\S]{0,300}侵入预算[\s\S]{0,100}回滚",
         )
 
 

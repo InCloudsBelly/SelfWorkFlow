@@ -28,36 +28,12 @@ stages:
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
         selectionMode: static
-        condition:
-          any:
-            - all:
-                - {eq: [writeTask, true]}
-                - any:
-                    - {gte: [complexity, C2]}
-                    - {gte: [risk, R2]}
-                    - {gte: [projectMinimums, Full]}
-                - not:
-                    any:
-                      - {gte: [complexity, C3]}
-                      - {gte: [risk, R3]}
-                      - {gte: [projectMinimums, Deep]}
-            - {contains: [explicitModuleIds, design-grilling]}
+        condition: {contains: [explicitModuleIds, design-grilling]}
       - id: design.deep-grill
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
         selectionMode: static
-        condition:
-          all:
-            - any:
-                - {eq: [operationType, design]}
-                - {eq: [operationType, plan]}
-                - {eq: [operationType, implement]}
-                - {eq: [operationType, debug]}
-            - any:
-                - {gte: [complexity, C3]}
-                - {gte: [risk, R3]}
-                - {gte: [projectMinimums, Deep]}
-                - {contains: [explicitModuleIds, design-grill-me]}
+        condition: {contains: [explicitModuleIds, design-grill-me]}
       - id: code.reasoning
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]
@@ -94,7 +70,7 @@ stages:
                 - {eq: [operationType, plan]}
                 - {eq: [operationType, implement]}
                 - {eq: [operationType, debug]}
-            - {gte: [testLevelFloor, T2]}
+            - {contains: [explicitModuleIds, tea-test-design]}
       - id: plan.integrated-review
         cardinality: exactly-one
         allowedInvocationKinds: [skill]
@@ -107,9 +83,11 @@ stages:
                 - {eq: [operationType, implement]}
                 - {eq: [operationType, debug]}
             - any:
-                - {gte: [complexity, C2]}
+                # Coarse R2 includes security/persistence, not just compatibility.
                 - {gte: [risk, R2]}
-                - {gte: [projectMinimums, Full]}
+                - {eq: [taskArchetype, architecture-change]}
+                - {eq: [taskArchetype, migration]}
+                - {contains: [explicitModuleIds, plan-integrated-review]}
   - id: implemented
     slots:
       - id: implement.orchestrator
@@ -155,7 +133,7 @@ stages:
         cardinality: zero-or-one
         allowedInvocationKinds: [skill]
         selectionMode: bounded-runtime
-        condition: {gte: [testLevelFloor, T2]}
+        condition: {contains: [explicitModuleIds, tea-atdd]}
   - id: reviewed
     slots:
       - id: review.debt
@@ -181,7 +159,10 @@ stages:
         selectionMode: static
         condition:
           all:
-            - {eq: [writeTask, true]}
+            - any:
+                - {eq: [writeTask, true]}
+                - {eq: [operationType, analyze]}
+                - {eq: [operationType, review]}
             - any:
                 - {gte: [complexity, C2]}
                 - {gte: [risk, R2]}
@@ -193,7 +174,7 @@ stages:
         condition:
           all:
             - {eq: [writeTask, true]}
-            - {gte: [testLevelFloor, T2]}
+            - {contains: [explicitModuleIds, tea-test-review]}
   - id: verified
     slots:
       - id: verify.ci
@@ -216,7 +197,10 @@ stages:
         cardinality: zero-or-many
         allowedInvocationKinds: [skill]
         selectionMode: bounded-runtime
-        condition: {gte: [testLevelFloor, T3]}
+        condition:
+          any:
+            - {contains: [explicitModuleIds, tea-trace]}
+            - {contains: [explicitModuleIds, tea-nfr]}
       - id: code.verify
         cardinality: zero-or-one
         allowedInvocationKinds: [agent-native, skill, mcp]

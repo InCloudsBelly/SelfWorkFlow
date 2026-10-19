@@ -4,6 +4,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import shutil
 
 import yaml
 
@@ -91,6 +92,91 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         ):
             with self.assertRaises(SelfOpenWikiError):
                 validate_external_status(response)
+
+    def test_recovery_abort_remains_accessible_when_publishing_is_not_ready(self):
+        status = self.status(externalAgent={"ready": False, "activeTransaction": None})
+        result = {"ok": True, "status": "external_update_aborted", "executionMode": "external_agent",
+                  "authRequired": False, "transactionId": "external-12345678", "generation": 1,
+                  "bindingHash": "sha256:" + "a" * 64}
+        client = _FakeClient([status, result])
+        adapter = SelfOpenWikiAdapter(client)
+        self.assertEqual(adapter.abort_external_update("external-12345678", 1, "sha256:" + "a" * 64,
+                                                     confirmed_by_user=True), result)
+        self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_finalize_external_update", {
+            "action": "abort", "transactionId": "external-12345678",
+            "bindingHash": "sha256:" + "a" * 64, "confirmedByUser": True,
+        })])
+        with self.assertRaisesRegex(SelfOpenWikiError, "confirmation-required"):
+            SelfOpenWikiAdapter(_FakeClient(status)).abort_external_update("external-12345678", 1,
+                                                                         "sha256:" + "a" * 64)
+
+    def test_safe_read_uses_its_own_capability_and_preserves_evidence(self):
+        import hashlib
+        content = "hello wiki\n"
+        digest = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+        revision = "sha256:" + "b" * 64
+        status = self.status(externalAgent={"ready": False, "activeTransaction": None},
+                             capabilities=[{"id": value} for value in sorted(EXTERNAL_CAPABILITIES | {"knowledge.read.safe"})])
+        response = {"ok": True, "status": "wiki_read", "recovery": {"action": "none"}, "revision": revision,
+                    "pages": [{"path": "intro.md", "size": 11, "contentHash": digest}],
+                    "knowledge": [{"content": content, "sourceId": "selfopenwiki:intro.md", "revision": revision,
+                                   "contentHash": digest, "verificationStatus": "unverified"}]}
+        client = _FakeClient([status, response])
+        self.assertEqual(SelfOpenWikiAdapter(client).read(["intro.md"], expected_revision=revision), response)
+        self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_read", {
+            "paths": ["intro.md"], "expectedWikiRevision": revision,
+        })])
+
+    def test_safe_read_rejects_unbound_page_metadata(self):
+        status = self.status(capabilities=[{"id": value} for value in sorted(EXTERNAL_CAPABILITIES | {"knowledge.read.safe"})])
+        response = {"ok": True, "status": "wiki_read", "recovery": {"action": "none"},
+                    "revision": "sha256:" + "a" * 64, "knowledge": []}
+        for pages in ([{"path": "../private.md", "size": 0, "contentHash": "sha256:" + "b" * 64}],
+                      [{"path": "intro.md", "size": -1, "contentHash": "sha256:" + "b" * 64}],
+                      [{"path": "intro.md", "size": 0, "contentHash": "invalid"}]):
+            with self.subTest(pages=pages):
+                with self.assertRaisesRegex(SelfOpenWikiError, "wiki-read-result-invalid"):
+                    SelfOpenWikiAdapter(_FakeClient([status, {**response, "pages": pages}])).read()
+
+    def test_safe_read_index_accepts_large_unselected_pages(self):
+        status = self.status(capabilities=[{"id": value} for value in sorted(EXTERNAL_CAPABILITIES | {"knowledge.read.safe"})])
+        response = {"ok": True, "status": "wiki_read", "recovery": {"action": "none"},
+                    "revision": "sha256:" + "a" * 64, "knowledge": [],
+                    "pages": [{"path": "large.md", "size": 262145, "contentHash": "sha256:" + "b" * 64}]}
+        self.assertEqual(SelfOpenWikiAdapter(_FakeClient([status, response])).read(), response)
+
+    def test_recovery_abort_rejects_wrong_binding_and_missing_capabilities(self):
+        status = self.status(externalAgent={"ready": False, "activeTransaction": None})
+        result = {"ok": True, "status": "external_update_aborted", "executionMode": "external_agent",
+                  "authRequired": False, "transactionId": "external-12345678", "generation": 1,
+                  "bindingHash": "sha256:" + "b" * 64}
+        with self.assertRaisesRegex(SelfOpenWikiError, "external-abort-result-invalid"):
+            SelfOpenWikiAdapter(_FakeClient([status, result])).abort_external_update(
+                "external-12345678", 1, "sha256:" + "a" * 64, confirmed_by_user=True)
+        client = _FakeClient(self.status(capabilities=[]))
+        with self.assertRaises(SelfOpenWikiError):
+            SelfOpenWikiAdapter(client).abort_external_update(
+                "external-12345678", 1, "sha256:" + "a" * 64, confirmed_by_user=True)
+        self.assertEqual(client.calls, [("openwiki_status", {})])
+
+    def test_recovery_abort_crosses_the_real_strict_mcp_transport(self):
+        status = self.status(externalAgent={"ready": False, "activeTransaction": None})
+        root = self.ROOT
+        class StrictClient:
+            def call_tool(self, name, arguments):
+                if name == "openwiki_status":
+                    return status
+                completed = subprocess.run([shutil.which("node"), str(root / "tests/fixtures/wiki_strict_mcp.mjs")],
+                                           input=json.dumps({"name": name, "arguments": arguments}),
+                                           capture_output=True, text=True, encoding="utf-8", timeout=30)
+                if completed.returncode:
+                    raise RuntimeError(completed.stderr)
+                return json.loads(completed.stdout)
+        result = SelfOpenWikiAdapter(StrictClient()).abort_external_update(
+            "external-12345678", 1, "sha256:" + "a" * 64, confirmed_by_user=True)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["status"], "external_update_aborted")
+        self.assertEqual(result["generation"], 1)
 
     def test_personal_status_requires_v2_capabilities(self):
         self.assertTrue(hasattr(SelfOpenWikiAdapter, "personal_status"))
@@ -410,6 +496,9 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
                 "entrypoint": "selfworkflow.selfopenwiki:SelfOpenWikiAdapter",
                 "callBoundary": "personal_call",
                 "statusBoundary": "personal_status",
+                "readBoundary": "read",
+                "recoveryStatusBoundary": "recovery_status",
+                "confirmedAbortBoundary": "abort_external_update",
             },
         )
         self.assertEqual(

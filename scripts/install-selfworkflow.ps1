@@ -45,8 +45,8 @@ APPLY before publishing workflow files. It writes diagnostic artifacts below
 provider configuration if a later step fails.
 
 An explicit -CodeGraphPath binds a local checkout or managed runtime for
-testing/override. Full mode uses strength-routed grilling for design and plan;
-Deep mode adds the frontier review path. No legacy topic graph or deep model is
+testing/override. Grilling and TEA are explicit-only; Full/Deep use one combined
+independent reviewer inheriting the parent model. No legacy topic graph or deep model is
 installed or activated.
 "@
     exit 0
@@ -641,7 +641,7 @@ try {
 
     Set-InstallStage "submodules" 25
     $submoduleExit = Invoke-NativeLogged $script:PythonExecutable @(
-        "-m", "selfworkflow.v3.submodule_profiles", "--repository", $RepositoryRoot, "--profile", "normal"
+        "-m", "selfworkflow.v3.submodule_profiles", "--repository", $RepositoryRoot, "--profile", "normal", "--runtime-profile", $Profile
     )
     if ($submoduleExit -ne 0) { Stop-Install "submodules" 25 "normal-submodule-profile-failed" }
     if (-not (Test-Path -LiteralPath $MattSkillsLockPath -PathType Leaf)) { Stop-Install "submodules" 25 "matt-skills-lock-missing" }
@@ -701,6 +701,36 @@ try {
     $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath
     Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) (Join-Path $script:LogDirectory "doctor-after.json") | Out-Null
 
+    $wikiReport = [ordered]@{ status = "not-selected" }
+    if ($Profile -eq "knowledge") {
+        Set-InstallStage "wiki-mcp" 76
+        $wikiSource = Invoke-SelfWorkflow @("wiki", "inspect", "--repository", $RepositoryRoot) (Join-Path $script:LogDirectory "wiki-source.json")
+        $wikiStorage = Join-Path $env:LOCALAPPDATA "SelfOpenWiki\config.json"
+        if ($wikiSource.status -eq "source-ready" -and (Test-Path -LiteralPath $wikiStorage -PathType Leaf)) {
+            $wikiPlan = Invoke-SelfWorkflow @("wiki", "register", "--repository", $RepositoryRoot, "--config", $CodexCodeGraphMcpConfigPath) (Join-Path $script:LogDirectory "wiki-registration-plan.json")
+            $wikiState = Get-McpFileState $CodexCodeGraphMcpConfigPath
+            $expectedBefore = if ($wikiState.Written) { $wikiState.AfterHash } else { $wikiState.BeforeHash }
+            $expectedPlanBefore = if ($expectedBefore -eq "missing") { Get-McpBytesHash ([byte[]]@()) } else { $expectedBefore }
+            if ($wikiPlan.beforeConfigHash -ne ("sha256:" + $expectedPlanBefore)) { throw "wiki-host-config-precondition-conflict" }
+            try {
+                $wikiReport = Invoke-SelfWorkflow @("wiki", "register", "--repository", $RepositoryRoot, "--config", $CodexCodeGraphMcpConfigPath, "--confirm-plan-hash", $wikiPlan.planHash) (Join-Path $script:LogDirectory "wiki-registration-result.json")
+            }
+            finally {
+                $currentHash = Get-McpFileHash $CodexCodeGraphMcpConfigPath
+                if (("sha256:" + $currentHash) -eq $wikiPlan.afterConfigHash) {
+                    if ($currentHash -ne $expectedBefore) {
+                        $wikiState.AfterHash = $currentHash
+                        $wikiState.Written = $true
+                    }
+                }
+                elseif ($currentHash -ne $expectedBefore) { $wikiState.Unverified = $true }
+                Save-McpFileJournal
+            }
+        } else {
+            $wikiReport = [ordered]@{ status = "setup-or-binding-required"; sourceStatus = $wikiSource.status; nextStep = "Manage_SelfWorkFlow_Wiki.bat install, then selfworkflow wiki register and wiki doctor" }
+        }
+    }
+
     Set-InstallStage "codegraph-provider-configure" 76
     $providerCurrentHash = if (Test-Path -LiteralPath $ProviderConfigFile -PathType Leaf) { Get-Sha256Hex $ProviderConfigFile } else { "missing" }
     if ($providerCurrentHash -ne $providerBeforeHash) { Stop-Install "codegraph-provider-configure" 76 "provider-config-precondition-conflict" }
@@ -738,7 +768,7 @@ try {
         cleanupPending = $cleanupPending
         codegraph = $runtimeReport; codegraphLock = $codeGraphVerification; codegraphProvider = $providerReport
         hostLauncher = $hostReport; codegraphMcpLauncher = $launcherReport
-        codexCodeGraphMcp = $codexReport; ponytail = $ponytailReport
+        codexCodeGraphMcp = $codexReport; wikiModule = $wikiReport; ponytail = $ponytailReport
         mattSkills = $mattSkillsReport
         superpowers = "external-only"; writeCapability = "enabled"
         manifestPath = $applyResult.manifestPath; logDirectory = $script:LogDirectory

@@ -1,0 +1,869 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "https://github.com/InCloudsBelly/SelfOpenWiki.git",
+  "sourceCommit": "c0cf068a2056de393799d0e1d16825f6adc291ed",
+  "sourceState": "current-worktree-with-uncommitted-changes",
+  "purpose": "original-import-provenance-only",
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "82d462daebcfcf2ac86ed81f3fe13dbd87fecf5478e0886ccb2ae4ac2d9064e7",
+      "bytes": 370
+    },
+    {
+      "path": "docs/plans/2026-08-14-selfopenwiki-v1.md",
+      "sha256": "a6c341db2e93c5f2f264d217e0351da6eed76d1b7ee235327c93f4fa87986553",
+      "bytes": 39842
+    },
+    {
+      "path": "docs/plans/2026-08-17-selfopenwiki-install.md",
+      "sha256": "197cbc9ae53379f3f2154fb2c2ed992674c8b5167f8e21a66b321d1bd5b548c0",
+      "bytes": 2151
+    },
+    {
+      "path": "docs/plans/2026-09-10-selfopenwiki-v2-implementation-plan.md",
+      "sha256": "69e817f6838641b16e234ee2e878de663fd1df03f54163b777627ef4f585d0ab",
+      "bytes": 15914
+    },
+    {
+      "path": "docs/specs/2026-08-14-selfopenwiki-v1-design.md",
+      "sha256": "0ab2236da9b36a5e9a13c263f44bdef3e1d53f26dd9a87c2b8b1460eb4f15aa1",
+      "bytes": 50555
+    },
+    {
+      "path": "docs/specs/2026-08-17-selfopenwiki-install-design.md",
+      "sha256": "7d572790f53ac6a78c5a1872072f1b83c4b7051acc0f81ea29b517b0a4618fab",
+      "bytes": 2004
+    },
+    {
+      "path": "docs/specs/2026-09-10-selfopenwiki-v2-openwiki-integration-design.md",
+      "sha256": "3429586b4020b104c98709987e0eba67a73242e76048b2de930ef8ebd3250737",
+      "bytes": 62431
+    },
+    {
+      "path": "docs/testing/2026-08-14-selfopenwiki-v1-test-design.md",
+      "sha256": "4687cae69ca609ff4bf453685c0174d2af18d2ef06756d7e7e4f1dc356ee91aa",
+      "bytes": 48168
+    },
+    {
+      "path": "docs/testing/2026-09-10-selfopenwiki-v2-test-design.md",
+      "sha256": "962c6ab90f259e541be4edfd407d880c6ca90a1f40a9de8cc6f0a56c621274cc",
+      "bytes": 23281
+    },
+    {
+      "path": "global.json",
+      "sha256": "2693f0081d22422714daa1d306742a5654d9d856ad0a84151b179adac6b789b0",
+      "bytes": 110
+    },
+    {
+      "path": "Install.bat",
+      "sha256": "ab29c127c456d647758a7eeaf5542f0a4a3912a5d2e18ec2f63095ef312285a8",
+      "bytes": 247
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "8ab25ebcfb82fe58d31a6db98584d87f47f5bc118569f01f58bb1eb303ce1f9d",
+      "bytes": 1082
+    },
+    {
+      "path": "package.json",
+      "sha256": "8d77a1d28d1a633ccd0bdbe36944a36dd55995d7cb690b4d280b6fe51bd7afe1",
+      "bytes": 698
+    },
+    {
+      "path": "patches/openwiki/0001-selfopenwiki-runtime-hooks.patch",
+      "sha256": "31caa519e692e05ee90a8a4eb588ef2e2b99acbcea762e539e7c63bad2c20860",
+      "bytes": 76463
+    },
+    {
+      "path": "patches/openwiki/manifest.json",
+      "sha256": "1fcac772822370671a6a8c748e8293424b3729d9feae0116aceaafdf85b2c793",
+      "bytes": 234
+    },
+    {
+      "path": "README.md",
+      "sha256": "ec182d97dc912fdf77adcaadbc14ebfd8d9b673a671891cd3db5c931b5401e2a",
+      "bytes": 7839
+    },
+    {
+      "path": "scripts/build-win32-helper.mjs",
+      "sha256": "8efb2e03991040541ffa5b34e2f882ab0f6da4be8ce7db1a175cae18a48e72ba",
+      "bytes": 7789
+    },
+    {
+      "path": "scripts/configure-storage.mjs",
+      "sha256": "62efc7fdb0804a1bb15863c071d173419b974e7fd49134d5cb40ff68d3d0ce11",
+      "bytes": 1398
+    },
+    {
+      "path": "scripts/install.mjs",
+      "sha256": "99324ccfcab9fdea6028f1c3e6f7025ead9de975d0e1fd0f39db6e4cfb98aec9",
+      "bytes": 5568
+    },
+    {
+      "path": "scripts/materialize-openwiki.mjs",
+      "sha256": "54f4b05465d5d009b8aff077877f8cc8a0a53453a8577ef12a5c2e38d85e0271",
+      "bytes": 31636
+    },
+    {
+      "path": "scripts/parent-source-manifest.mjs",
+      "sha256": "291c71452e4ddc55ff0fd2d3e251b900297de7547a5df545db47fe9a293ec821",
+      "bytes": 13284
+    },
+    {
+      "path": "scripts/setup.mjs",
+      "sha256": "8137c8d3c54f98cab2141bb9eacbc9cb9b4d3c343f219921f1a5833e408047e1",
+      "bytes": 8141
+    },
+    {
+      "path": "scripts/storage-config.mjs",
+      "sha256": "98ffbc072a359dc4b25b9cc34ddbc344516c3425246f2bd1cf367c0f41a0aa3a",
+      "bytes": 10130
+    },
+    {
+      "path": "scripts/update-upstream.mjs",
+      "sha256": "26dba6792577416102241a850a8f2a5cd93e6bc00052830e4649b4705e4d7129",
+      "bytes": 38125
+    },
+    {
+      "path": "scripts/visualize.mjs",
+      "sha256": "ba4a82725afcd1b59d12ea79384ee5347ec57e12372a2d83de2c1ea4b92b0853",
+      "bytes": 6686
+    },
+    {
+      "path": "self-openwiki/agent-skills/self-openwiki/agents/openai.yaml",
+      "sha256": "8eb7dd52b57cbb620410d4d09bdac5e0f01bc3437535dfa9c222791569574a45",
+      "bytes": 254
+    },
+    {
+      "path": "self-openwiki/agent-skills/self-openwiki/evals/run-eval.mjs",
+      "sha256": "76f8d44984f645e8e0dd90626f081625e16b210c8b23773ce9d62132b980f44a",
+      "bytes": 8904
+    },
+    {
+      "path": "self-openwiki/agent-skills/self-openwiki/references/mcp-contract.md",
+      "sha256": "15c416dc3010a5616d138c3f3a6653f1199cf4aee193b67ad3fec0578ba2c073",
+      "bytes": 10225
+    },
+    {
+      "path": "self-openwiki/agent-skills/self-openwiki/references/migration-v2.md",
+      "sha256": "8d12a2604d4df6b973808f81b0725fcdff1a4662868b4f3631ab62fbae4630a0",
+      "bytes": 2003
+    },
+    {
+      "path": "self-openwiki/agent-skills/self-openwiki/SKILL.md",
+      "sha256": "6c069263b9f03d6b7864dbecd325d54995bcc99cbe430933564fb4f5c92dc42f",
+      "bytes": 14123
+    },
+    {
+      "path": "self-openwiki/config/bootstrap-source-manifest.json",
+      "sha256": "df797eea708f56234c2cf5a71637118de405a76cebfbeb63c6f127eaf4c31eb0",
+      "bytes": 2592
+    },
+    {
+      "path": "self-openwiki/config/capability-matrix.json",
+      "sha256": "e9b08e77658334ca826c5405a5f5357cb0ea0395a299a0a9ccde3f7bcfea19c0",
+      "bytes": 7328
+    },
+    {
+      "path": "self-openwiki/config/defaults.json",
+      "sha256": "38640a0ecb788909184a67d6e3a8be46392ff0e4d34dc7c6fa52c7d9aae59095",
+      "bytes": 145
+    },
+    {
+      "path": "self-openwiki/config/personal-openwiki-compatibility.json",
+      "sha256": "67f0eb4b6d5e51a1d823d9361448ebf1e1e12d011b56e3ccf1f9e31b367d1831",
+      "bytes": 4862
+    },
+    {
+      "path": "self-openwiki/config/sensitive-files.json",
+      "sha256": "36e37beee846f7b087acbe869cd86be8a9d8b5be7be56f6ea9de2c2996b42d5a",
+      "bytes": 934
+    },
+    {
+      "path": "self-openwiki/config/toolchain-runtime-lock.json",
+      "sha256": "29099533692dded211d5064ce6a94349f79e8b68eac3582c52d2d98829dd5265",
+      "bytes": 807605
+    },
+    {
+      "path": "self-openwiki/config/trusted-skills.json",
+      "sha256": "b64b72e6a5ccead0688f866b63aee91902a2977189953f4eea00ee8931211efa",
+      "bytes": 381
+    },
+    {
+      "path": "self-openwiki/mcp-server/.prettierignore",
+      "sha256": "e8f7fb86ef32f6b15866f93096206445455629160ccf7798ad245a6fe64211c1",
+      "bytes": 30
+    },
+    {
+      "path": "self-openwiki/mcp-server/package.json",
+      "sha256": "38436b101a9d9bbb32f57812378eb7d13a98ded9178ef9da80536fe36883d175",
+      "bytes": 1106
+    },
+    {
+      "path": "self-openwiki/mcp-server/pnpm-lock.yaml",
+      "sha256": "0d57dc4a1d7dad8e6a110ce5923811fbdbd3032f4ca0674a0bcff85987d998ea",
+      "bytes": 51151
+    },
+    {
+      "path": "self-openwiki/mcp-server/scripts/personal-tool-bindings.mjs",
+      "sha256": "c1241364c1f6e5ea89aeca2e070e7a578209250b81e314130b22545608bc8adb",
+      "bytes": 267
+    },
+    {
+      "path": "self-openwiki/mcp-server/scripts/smoke-mcp.mjs",
+      "sha256": "eac67413b42b35675c4430509db3386448f7ab1817c9aac86a335c93be29b10a",
+      "bytes": 20790
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/auth.ts",
+      "sha256": "216464ac7a88e3f381a5e233d84bef6c92603e69af264303b312504735f378aa",
+      "bytes": 2920
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/bootstrap.ts",
+      "sha256": "054d16e119734789f1dcab3caf8f5f5fd3e57c5de97da9bf156e6e58053b2b4f",
+      "bytes": 36671
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/capabilities.ts",
+      "sha256": "5051f52e46499fad37aea1a816a553a82e86a3eec2a1ad2c43c5a0bb99186efa",
+      "bytes": 12224
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/config.ts",
+      "sha256": "20214d4fa19a6da7cc2b46c7025a8818092d2f006994bbe748b450377c9c2e0c",
+      "bytes": 16311
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/contracts.ts",
+      "sha256": "150786d8012c80bd3d4e05f64b392cc1eba064f42e131f67b93adca73060cf62",
+      "bytes": 59899
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/credential-store.ts",
+      "sha256": "a603e9b37c2386c17ab25abb1d5582c3d186319b84633440833d7db5278e93d1",
+      "bytes": 12417
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/external-update-state.ts",
+      "sha256": "2a1032ebfbd2462edbe7bb8109589c9b3ba30226cbbb7db4a922a7ac60ad5bdf",
+      "bytes": 32448
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/external-update-transaction.ts",
+      "sha256": "e5b2e6887fe7c0ffbf666d0145cda4b00e746ccf3f56321fd136f62e3f894400",
+      "bytes": 105731
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/external-update.ts",
+      "sha256": "36be39b0380c5d6f7c491712ede24d28807988fad6a028be1af42be6fd31efe6",
+      "bytes": 21538
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/index.ts",
+      "sha256": "832d8ae24ee7085413480e4cefe4273e53e09440032ec78568610b572f6c5408",
+      "bytes": 1681
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/model-verification-child.ts",
+      "sha256": "3c9b34b6c99461785b060444ed7773960071c19b042cc12e9d30aee96d7cc1a2",
+      "bytes": 5244
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/model-verification.ts",
+      "sha256": "fe39002ef5fdf7faa90c99c7aa7f5da8c565dbb1b5b3ca958856711931d91194",
+      "bytes": 11199
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/oauth-helper-child.ts",
+      "sha256": "578e375369ad95b4f61527bd98f6c7168403ea2ba8e0a21a3f60f2c28645be29",
+      "bytes": 6741
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/oauth-helper.ts",
+      "sha256": "b680cee78c0810c4365d79a0c8c14547393b92cbec0343aa0fba98d06dc9ea38",
+      "bytes": 14837
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/official-lifecycle-adapter.ts",
+      "sha256": "5cf10c0835b2ce61c865549b20a3581e88149e176f7147f33584ab45dbcb8406",
+      "bytes": 15146
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/openwiki-adapter.ts",
+      "sha256": "0bf5da0372baf89417c9d9a50302dc686afafeefa64cf0adefaa9402936feb70",
+      "bytes": 3677
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/permissions.ts",
+      "sha256": "297accbbf76d3046f6c25a9f2b1f04519ab9040bd0d27e72f38f6a5a06c0c2de",
+      "bytes": 5738
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-candidate-marker.ts",
+      "sha256": "9d2aed44832784c6be8926dd021dd183f34b5640bf6ae6e5de483bffccc307de",
+      "bytes": 6254
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-claims.ts",
+      "sha256": "ec19918db2cc45b85d00741f9fb5af3e697a7d44ab042c915430c1709a096526",
+      "bytes": 24666
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-run-store.ts",
+      "sha256": "635acf075eae0dd85529ddc41f156d33954a40d387a2f7e014e74c8a9255c0c0",
+      "bytes": 35306
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-skill-adapter.ts",
+      "sha256": "f1f3cbe8570c0dba34a09bbc025619224204764426285116bfa4e063f7a71405",
+      "bytes": 17891
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-wiki-lifecycle.ts",
+      "sha256": "0a23f58c90876747b3814a620ac06895a1473638a75fa7777d9aeb25618d0108",
+      "bytes": 78878
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-wiki-root.ts",
+      "sha256": "798144b412a3b373860b02fd87f6db8793dba3b0d0122998b0876c48a835e712",
+      "bytes": 6897
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/personal-wiki-snapshot.ts",
+      "sha256": "d1ad616ab76785eb14df835b0ec763e3942abe33bcb0bf09c5430f30b73c9757",
+      "bytes": 8496
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/process-child.ts",
+      "sha256": "cddef37c736f6428f4862dc3164422e5db02210cca171104d848f2595f2c5e97",
+      "bytes": 8599
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/process.ts",
+      "sha256": "67fc699f44cb33c6b6f85233bfc21683f38cb33f9c118969171e713cb2614f9a",
+      "bytes": 21529
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/publish.ts",
+      "sha256": "c480f5952f8e9a3ab0ae34dd96d86732d6432afeb857b2bff75508d0401c5930",
+      "bytes": 55179
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/query.ts",
+      "sha256": "15bd82bd4ebda7f158a62d63d266484739382734e80de56c60d2b64984071f9a",
+      "bytes": 12708
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/recovery.ts",
+      "sha256": "b993f8054f5694a60c90dd503efb8507dcbc2d8f4e4cf550c5082735bca38644",
+      "bytes": 21287
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/review.ts",
+      "sha256": "6a6f0ffd273244e12ba7d68852664fadac29b46ae4433d61e58b364b08a99f2f",
+      "bytes": 10357
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/run-result.ts",
+      "sha256": "3205c73bf4838c769b72d53ac114e277ed4801eab0e754f6ddb99963ebf67e79",
+      "bytes": 8483
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/runtime-model-service.ts",
+      "sha256": "1b1c3299bcd2d5e2c24085e55e015b79d11e06d6ca119807ecdd111cdac7a755",
+      "bytes": 11038
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/runtime.ts",
+      "sha256": "e0ace982d57ff63afb83cf8aaac826ddd156e9a49506679bf361e16c36128954",
+      "bytes": 22006
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/sensitive-files.ts",
+      "sha256": "7d37808468d71e81c1b2c41e5e2c1908912fddfa2d7f7b0e9db5ae83c418ca0a",
+      "bytes": 3792
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/server.ts",
+      "sha256": "e5443a92bcd3c7f0f9bd804633161c27461f8b78f8abd6f74fa9f1103daa7e8e",
+      "bytes": 6094
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/setup-attempt.ts",
+      "sha256": "763c88922f85627db90431b23fb2cb31a9a663215fbb3a2d9b04542927d2fbd5",
+      "bytes": 21463
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/skills.ts",
+      "sha256": "219def2ed85e475b9c3247328ab8d310db7955499abd58765033faf363f43d71",
+      "bytes": 16045
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/snapshot.ts",
+      "sha256": "af0e7c12346808ee05ce1d2af073c82b6976d6534a2de51b0c0fc9443cd03174",
+      "bytes": 13573
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/sources.ts",
+      "sha256": "0eae1020146ca7e6285fab272813b460addc813fd17a8a24784e352340ddc74e",
+      "bytes": 29796
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/transaction-recovery.ts",
+      "sha256": "1ae5396c541b4a47fa6db5429508fce99f97b77785fae527e96419f2fa4e7800",
+      "bytes": 5439
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/transaction-state.ts",
+      "sha256": "23dc4b884e122f58112f42ad0a9458db5d59bdd4a424a9f62724e73bb150eff1",
+      "bytes": 7401
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/transaction.ts",
+      "sha256": "e472c8cfd35202321129edbf6460216fec59b275ec80bc4cb1f5f450d94dd3be",
+      "bytes": 23515
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/update.ts",
+      "sha256": "828812e531a22d25c006fcc8b9ea092ae463dfaddcc3eecb04ceabf6bef398d4",
+      "bytes": 50087
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/validation.ts",
+      "sha256": "2557a6adeef7e311f0a6523be3f90388ef934fb987b04e5e0d82d2a2fcd7719d",
+      "bytes": 18621
+    },
+    {
+      "path": "self-openwiki/mcp-server/src/win32-helper.ts",
+      "sha256": "8359ed91536e52bcb7e61b3f97caebec47cbf1d053967082276f0085a8ce28a2",
+      "bytes": 10095
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/auth.c7.ts",
+      "sha256": "82a98e45ec7c28d8241384d0aab575cc947f1736a2d5b418aad4d2d794186e46",
+      "bytes": 3412
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/capabilities-contract.c7.ts",
+      "sha256": "7857c6d03cdd256750ce243aac28b23663aef28e56a676689baaebbb54efe24d",
+      "bytes": 14533
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/config.c7.ts",
+      "sha256": "cbcb0b28b34617094e3f668d980aff67be06979526088e48d56cc3fd8c319539",
+      "bytes": 18480
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/contracts.c7.ts",
+      "sha256": "c5267d60cd822394a302542e2715f11f5b63d9fb5e5f9224504c2db719b29989",
+      "bytes": 61605
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/credential-store.c7.ts",
+      "sha256": "95bafcbc61e6c4081c682b6f645485429715c05da52ec604aae440fb4a781366",
+      "bytes": 6736
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/external-update-state.c7.ts",
+      "sha256": "c19af8648649f3be80787fb9b4ea7cfeb0190b0282c85daaa8fde68764969383",
+      "bytes": 21677
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/external-update-transaction.c7.ts",
+      "sha256": "063a9a58cfeb2b86895e13cecc3ad22fbf13eb628e56c2127eb433f48a620ce6",
+      "bytes": 91888
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/external-update.c7.ts",
+      "sha256": "0bf722b3722f34c4459bb03d1722f6648d9756321903a1201f94613872497182",
+      "bytes": 53889
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/fixtures/external-finalize-child.mjs",
+      "sha256": "c48a01d4db9f14a0c6e6c299906bc69a06ed90fc94ed75ec4c34ec8da25709c3",
+      "bytes": 2384
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/fixtures/fake-loopback-oauth-module.mjs",
+      "sha256": "dcf19ee1cdffa236f1e12a8a45c1b62c929aaf88b5f1b15770e68b833fb75159",
+      "bytes": 1879
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/fixtures/fake-oauth-host.mjs",
+      "sha256": "8be47dbfee1f9ea30fe8e7c1b257683f1e14be444c2a349e725e58da0fb9cff1",
+      "bytes": 638
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/fixtures/fake-oauth-module.mjs",
+      "sha256": "d2bc4dfdb4bf485bffb24f0a016e088d612d2001b44393c4586c1913bd47da2e",
+      "bytes": 846
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/fixtures/fake-openwiki.mjs",
+      "sha256": "75170cbd6c9f71c2c3caa8bfe6f809185b7e6682d76c3d5e4f7fd5d367e2025e",
+      "bytes": 1984
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/fixtures/fake-smoke-cli.mjs",
+      "sha256": "d801191b84232afc6a8d2ed42279243d6dc3857ff4458130e26e29cbd3c76c15",
+      "bytes": 2331
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/isolated-model-verification.c7.ts",
+      "sha256": "f2341805c9fa60e82f853a461f77f9ce19042311a82c39072162a677e3f30f3e",
+      "bytes": 7197
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/mcp-surface.v2.ts",
+      "sha256": "a2c3ead8c9a976584ea6b7a5ef3977bf1b7fc5fc0cda618e17b920a31905bc1e",
+      "bytes": 1550
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/model-verification.c7.ts",
+      "sha256": "d013a8988c9a27d37bd18f28c60ec0af49a279551aa525b68d4fa1f7c2f1332b",
+      "bytes": 17262
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/oauth-helper.c7.ts",
+      "sha256": "6b1ac072be8ad2802b90e3f92ce11d80821695ee332d2cf36351e57daaffd02d",
+      "bytes": 12257
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/official-lifecycle-adapter.v2.ts",
+      "sha256": "2f936829bc03fc1ab2e1db8de1963099b48bd43acff6d49f699569132f98743c",
+      "bytes": 7394
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/openwiki-adapter.c7.ts",
+      "sha256": "94687acd1b7305597c6ad85fa5ed72dba35d2a2288b764b1f9dbff7cc400f250",
+      "bytes": 2845
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/permissions.c7.ts",
+      "sha256": "2786134279677eea5b10aee8bc15b3c59f87817cbbfc2739eb2b073698b678f9",
+      "bytes": 4022
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/personal-candidate-marker.v2.ts",
+      "sha256": "3fccf1e2f8f7d1337727489951e7721fb5e88599b15260c2db4966d78184abfa",
+      "bytes": 2087
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/personal-claims.v2.ts",
+      "sha256": "74e5d40a8f7bf9cd068b5f4ce30b0051297552bbe631a151b5d5eee5f30f13bf",
+      "bytes": 4958
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/personal-compatibility.v2.ts",
+      "sha256": "2bdd6797ae004d9e5223a99927283a071d73a5d65e2f6f3a1bf0cf9f5ec70b5b",
+      "bytes": 4650
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/personal-lifecycle.v2.ts",
+      "sha256": "177afa9ba40ff191c787e729d13570a4ba093d3ab2b86e2d187907e8d5b17648",
+      "bytes": 41890
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/personal-root.v2.ts",
+      "sha256": "66b481cdac01ef2a3595dcdfb627695e2fdc754e84ffa38575433d36b5544402",
+      "bytes": 4655
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/personal-run-store.v2.ts",
+      "sha256": "2dad024d21574115651799d65c315111224396228bb4a0ac439dcb1686be730c",
+      "bytes": 12479
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/process.c7.ts",
+      "sha256": "11bdbbff09c2e2e3354d2e51f751ad3d477e29187d7770e8ce067e8896f4c02f",
+      "bytes": 21774
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/publish.c7.ts",
+      "sha256": "e6ed6127c76c5b04469fcfa485202ef7ac13db8d66bb8ffded7568a254ed1e68",
+      "bytes": 25116
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/query.c7.ts",
+      "sha256": "f51975f009715f19afa16ddaf0573730f6cde5809f284d4d664f45d4921d949c",
+      "bytes": 12740
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/recovery.c7.ts",
+      "sha256": "4d30a814d241ff422a979c70440587edad0347ef1aa2490557f68b439e168dcd",
+      "bytes": 11181
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/review.c7.ts",
+      "sha256": "996863c9d9ba3cd0597ed914871b11ef536c47987960fe932bf5f735eca81058",
+      "bytes": 17680
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/run-result.c7.ts",
+      "sha256": "b7592f1d529bfe91244ea1e8aaff24451c1e1d74eb1bf5c4f42615f52da78f5e",
+      "bytes": 3795
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/runtime-model-service.c7.ts",
+      "sha256": "598c361901bd0727d3a6b4e5ea313da45548cc66e0b17a07082a05f69bbfb318",
+      "bytes": 8600
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/runtime.c7.ts",
+      "sha256": "70a5770e7670d0767f0f0a41202987e7474574ffbe31d96e7474d8172bc5588c",
+      "bytes": 30844
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/server.c7.ts",
+      "sha256": "a97db8ef86141aef364843d230e4e001a2230af6f72c9cf5049615ce13c70ea3",
+      "bytes": 12584
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/skill-adaptation.v2.ts",
+      "sha256": "2013418cbe10ba6fc7f41e49081ee4fb4a3daff300af33a74600735535fb8108",
+      "bytes": 1846
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/skill-contract.c7.ts",
+      "sha256": "f036c474deca3aefcab39d570536ff7fca29f6cdc698dba4479006a6feb5ab23",
+      "bytes": 1865
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/skills.c7.ts",
+      "sha256": "c35dfbf7f5c84a385651e326300cc926eeda3a3e69510fcc6c20f9ad96ad2b37",
+      "bytes": 8528
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/snapshot.c7.ts",
+      "sha256": "22dadab213fa1475057f1c0c72729c034ffd8b44736c750d0ac443e610c8efb0",
+      "bytes": 8778
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/sources.c7.ts",
+      "sha256": "176b84bc03224e940e0e012a50bad6cd6c14721d6b07330d2e916832a13fda7f",
+      "bytes": 15351
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/startup-rehydration.c7.ts",
+      "sha256": "70b2d73985fb0d402ccbee6cbe64389de1a6a94a95a3c193f50fef060ccd5700",
+      "bytes": 39168
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/storage-root.c7.ts",
+      "sha256": "ef89e1a8ea37172960f1a47d17eceb8bafa087c997a2f37cfd383a8e1fd40b3d",
+      "bytes": 2278
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/transaction-recovery.c7.ts",
+      "sha256": "b4143ca1d29ec27d2bf7bf7c42714e0b6f329bd4290592436a6a5151c2b12821",
+      "bytes": 3845
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/transaction-state.c7.ts",
+      "sha256": "0f1110ddf18fc60d41cdfca02229bbbc04572172de2a35edecb659f95a661cb3",
+      "bytes": 4502
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/transaction.c7.ts",
+      "sha256": "b2578e846988efbc88f7d1c5ad1c4a25c5edbb1a17899a5c073fabba214cc105",
+      "bytes": 13428
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/update.c7.ts",
+      "sha256": "b7fdbacee00374d634c165dc6a48ed84af3c5f2b7dd4dde342cbef221eaa4ab4",
+      "bytes": 63155
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/validation.c7.ts",
+      "sha256": "888e8dff0c70ac3ba1da3f7170f730d10be06c96a46a02aed1869761932191d7",
+      "bytes": 12692
+    },
+    {
+      "path": "self-openwiki/mcp-server/test/win32-helper.c7.ts",
+      "sha256": "dbafb3a766464111b12aeaec358ff1419f7d939a6e00c13de72c2ab4c665dcaf",
+      "bytes": 7738
+    },
+    {
+      "path": "self-openwiki/mcp-server/tsconfig.json",
+      "sha256": "8a32c81a2f8334623c6d4986e620ad04b7f1ae846e77d1e8f3c998f1774ce142",
+      "bytes": 366
+    },
+    {
+      "path": "self-openwiki/mcp-server/tsconfig.test.json",
+      "sha256": "99b3b0c388265cdb0636bbb8b0b0eb5c78b9959e5192d524fd3ead40d0e090d7",
+      "bytes": 148
+    },
+    {
+      "path": "self-openwiki/mcp-server/vitest.config.ts",
+      "sha256": "70ef9427f49a40a31319bb4d7fcfa594b8312eec3a6c44eacb3141abe48602d0",
+      "bytes": 149
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/agents/openai.yaml",
+      "sha256": "51cf9c8c07e941fc73ba2f3494e9b30f7ec4ec5dabd66a27df35d5d6e25c11cd",
+      "bytes": 265
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/references/performance-and-impact.md",
+      "sha256": "3a11ed6f7f6ed5d902a212bc04ca62b0e33be33dd02403447bf5e39f2e6f44e1",
+      "bytes": 1828
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/references/technical-documentation.md",
+      "sha256": "a0478f79fac597250f11dafb400d0da45711380512a2b1d61380c5651db26837",
+      "bytes": 2355
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/references/ue-project-evidence.md",
+      "sha256": "b62efa38d74c964a8db41fea9d88e523c51084428e76015301506744ff4e5657",
+      "bytes": 1968
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/references/wiki-operations.md",
+      "sha256": "6a4564602097a2aac5b1180e5160c2c02a0a0b32f95cf57681cf89504a82c53e",
+      "bytes": 1804
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/references/work-report-and-session.md",
+      "sha256": "d40e201c25af176b64db6ed7bb20892091333e0ba3b8bafb0f51bc215fb8d5a6",
+      "bytes": 1608
+    },
+    {
+      "path": "self-openwiki/openwiki-skills/kg-c7-project-wiki/SKILL.md",
+      "sha256": "f01386770829fdde4d09f0b3e46495efb896a6a337d32d91a073d3450fc31041",
+      "bytes": 6104
+    },
+    {
+      "path": "self-openwiki/scripts/validate-skills.mts",
+      "sha256": "03cee9f8b0813d7c3d9e1becbf4a0ce5b8d6a4ecfcf6cdfbb692f01b892737bf",
+      "bytes": 1733
+    },
+    {
+      "path": "self-openwiki/scripts/verify-capabilities.mts",
+      "sha256": "e6884ee34fd8dc1e16b8dcc6e4aedee235bd9293b928291d71d8bee22fc3e2f0",
+      "bytes": 13702
+    },
+    {
+      "path": "self-openwiki/win32-helper-compat/Program.cs",
+      "sha256": "3f6e475c1e6fa91efbaf9491feec81ed80e20cb779ee2a22efdfdcf5c987937e",
+      "bytes": 27323
+    },
+    {
+      "path": "self-openwiki/win32-helper-compat/SelfOpenWiki.Win32Helper.csproj",
+      "sha256": "631576fe31ee83953d13c34515c8dbde5d47be3f6ad5f99c41d017796327f3fd",
+      "bytes": 351
+    },
+    {
+      "path": "self-openwiki/win32-helper/bootstrap/win-x64/bootstrap-manifest.json",
+      "sha256": "95400fe1514c8a243225fd56d75635d1f397a2d6072a731c50aa7dd75676563b",
+      "bytes": 694
+    },
+    {
+      "path": "self-openwiki/win32-helper/bootstrap/win-x64/SelfOpenWiki.Win32Helper.exe",
+      "sha256": "5158365a4f5eaccedea1feff7278f4d53eceb9c4fa4c3c6b1c409acea8f83323",
+      "bytes": 36545990
+    },
+    {
+      "path": "self-openwiki/win32-helper/Directory.Build.props",
+      "sha256": "0ab535c3a61b21017ff8b9b4bd854d8789fc36ab10e9209e935a157ae1ef635d",
+      "bytes": 365
+    },
+    {
+      "path": "self-openwiki/win32-helper/Program.cs",
+      "sha256": "680348fc2b159815aabb244e9b6043bdfdf21c8e3828f8a03fbd89bd7deeccec",
+      "bytes": 22809
+    },
+    {
+      "path": "self-openwiki/win32-helper/SelfOpenWiki.Win32Helper.csproj",
+      "sha256": "facc62417ba6bb877a9f2136b8cd45713047433512f12952d09ea300be1ca9d2",
+      "bytes": 963
+    },
+    {
+      "path": "Setup.bat",
+      "sha256": "311e060d0211aad8fe9150c7151dd162fb8d9580a11487493fab8a3841916b3a",
+      "bytes": 239
+    },
+    {
+      "path": "test/configure-storage.test.mjs",
+      "sha256": "b00b732b204d0c3eebb07cabd13fc915f8eaa8268fd2ea2c06804dda8ec51384",
+      "bytes": 2185
+    },
+    {
+      "path": "test/install-script.test.mjs",
+      "sha256": "88da870264887a0e8a4a06e61194d56940e363b22f61ba78a62087fc22716931",
+      "bytes": 5349
+    },
+    {
+      "path": "test/materialize-openwiki.test.mjs",
+      "sha256": "c8559bcba626e80454cd6ae4e9617b25549427e7c71316549e27ac43574f9037",
+      "bytes": 19783
+    },
+    {
+      "path": "test/mcp-package-contract.test.mjs",
+      "sha256": "8893ca8b908a21bb9e22fbcd297d333a4a0d8c836dc96e2968c67a2cca34e537",
+      "bytes": 1343
+    },
+    {
+      "path": "test/parent-source-manifest.v2.test.mjs",
+      "sha256": "97eaa75a3e136b8dac5861e2df954dc7be4e0c9cdaa8500c125bc1b2510e1a1d",
+      "bytes": 2497
+    },
+    {
+      "path": "test/repository-contract.test.mjs",
+      "sha256": "bb6056c6cb7bf061fbeb233b56f56a9ae355737a49982b575b83f686bfad6896",
+      "bytes": 13163
+    },
+    {
+      "path": "test/setup-script.test.mjs",
+      "sha256": "7fe0459906ff2ce33396fc76074c2746d225d22f4af8dc946464f58b44a802b7",
+      "bytes": 4601
+    },
+    {
+      "path": "test/storage-config.test.mjs",
+      "sha256": "95ea19d1d8b6bc6fa3d1fe82ab49d53482e8f2d2133b942ebbbc16cc9ddb8630",
+      "bytes": 4713
+    },
+    {
+      "path": "test/update-upstream.v2.test.mjs",
+      "sha256": "5d7fdd606209ffdfc52580907e4830ec3036f0340ed82d183d8683dd56cd4429",
+      "bytes": 10561
+    },
+    {
+      "path": "test/visualize-script.test.mjs",
+      "sha256": "a5f2040414cdc5dde44d6157f8c179e2f7fb32e7d9282e73f04b279ce21ed27f",
+      "bytes": 3802
+    },
+    {
+      "path": "test/win32-helper-contract.test.mjs",
+      "sha256": "c413d62bb86561d2116c48ebdb6620a78c99616df2b16f5ba90eafbd0e8dd310",
+      "bytes": 3710
+    },
+    {
+      "path": "test/win32-helper-ioboundary.test.mjs",
+      "sha256": "21575019985af7d6437c69055aded9aa2f4043a07795188294bfd63870775fb8",
+      "bytes": 4011
+    },
+    {
+      "path": "test/win32-helper-protocol.test.mjs",
+      "sha256": "e418fb51114753f93e944bddd3e10fbe6b5ba073b6a33dafc46324f7a418cc97",
+      "bytes": 5069
+    },
+    {
+      "path": "test/win32-helper-race.test.mjs",
+      "sha256": "2b9c89b0ef96fb52a306c7afed4d79e205d398ea68f372c27e7e5752ef2ec719",
+      "bytes": 4086
+    },
+    {
+      "path": "Update-Upstream.bat",
+      "sha256": "a4ce19c53e7989e4757ed26009cd20d038dba309f6b8f370ebe76b479615934a",
+      "bytes": 846
+    },
+    {
+      "path": "Visualize.bat",
+      "sha256": "bd66aed9f6c05eb745d9e2b8b912304b7b68b6d84e354b80fada7a9b21e746d3",
+      "bytes": 259
+    }
+  ]
+}

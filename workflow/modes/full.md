@@ -1,17 +1,13 @@
 # Full 模式
 
-适用：中高复杂度或中高风险任务；用户可主动选择。
+适用：中高复杂度/风险；knowledge profile 本身不要求 Full。Full 不等于 contract Host。
 
-`knowledge` profile 本身不要求 Full。局部修复的设计/测试/计划可合并为当前改动的一份文档，不扩张为整个项目或虚构 epic。已有明确授权覆盖审查后范围时直接复用；用户禁止编译/测试按 `testing-review-quality` 记录 not-run/unverified，不以 TDD 名义执行被禁止命令。契约 Host 的 passed 条件不变。
+1. 设计、测试设计、计划合并为当前改动的紧凑方案，主 Agent 自审；只问影响范围/风险/授权的未决选择，复用已知事实和已有授权。
+2. 普通任务不自动 Grilling 或 TEA；用户明确点名才加载指定能力。行为变更仍加载 implement-tdd，覆盖直接路径、失败路径、状态不变量和最窄回归。
+3. 首次编辑前确认实施契约。只有重大架构、安全、持久化、不可逆风险或显式要求才前置 plan-integrated-review；普通中间文档不单开 Reviewer。
+4. 授权后做真实 RED/GREEN 与计划内实施；范围/owner/侵入预算/关键风险变化才重新确认。
+5. 交付前由一个独立 Reviewer 综合 Standards/Spec 与测试证据，按 review.md 隔离；修复复核复用同一 Reviewer，只看受影响项，不能因调用预算中止未完成任务。Review 继承主 Agent 模型/推理配置，无专属覆盖。
+6. 主 Agent 核对新鲜验证，相关输入未变则复用；用户禁编译/测试时记录 not-run/unverified，不虚构通过。
 
-执行方式先按 `workflow/modules/review.md` 区分普通 agent-policy 与 contract；模式 Full 不等于契约 Host。以下为写入任务顺序；纯分析只执行必要阅读、一次独立 Review 和证据核对。
-
-1. Design/Plan 或行为实现/调试阶段自动加载 `design-grilling`（Matt `grilling`），当前 frontier 只执行一次；只问未决的重要选择，复用已授权范围与已知事实，不重复访谈；纯分析不自动加载。
-2. 行为变更加载 `implement-tdd`、`tea-test-design`（T2）；设计测试直接路径、失败路径、状态不变量、侵入性和最窄回归。文档等非行为任务不加载代码 TEA。
-3. 正式文档完成后先执行独立 `plan-integrated-review`；Critical/Important 清零、Minor 有处置后核对用户明确实施确认；同一范围已有明确授权则复用，不因阶段切换再问一次。
-4. 确认后执行真实 TDD Red/Green 和计划内实施。
-5. 落地后用 `review-code-review` 做 Standards/Spec 两个独立临时 SubAgent Review；行为变更才加载 `tea-test-review`，复用同一包检查测试质量。Reviewer 只消费主 Agent 提供的 hash-bound package，不调用 CodeGraph 或其他任务工具；Review override 仅限该 Reviewer；主 Agent 核对新鲜验证证据，未漂移且已通过的同一命令不重跑。
-
-代码任务按需加载 `codegraph-read`；写入后加载 `codegraph-update`。CodeGraph 只维护当前项目级全局图，不接收 conversation、Topic 或 Deep 范围。
-
-`tea-atdd`、`tea-trace`、`tea-nfr` 仅显式选择。项目 Review Skill 若匹配且 hash 通过，优先于通用 Review Skill；不能覆盖硬规则。scope、owner、侵入预算或关键风险变更使确认失效；文档/代码变化使受影响 Review 失效，但同范围澄清、补证据不要求再次实施确认。
+纯分析仅必要阅读、一次独立 Review 和证据核对。机械文档同步做窄自审/解析校验，不新增独立门禁。
+代码按 codegraph-read / codegraph-update 维护项目唯一 CodeMap。知识可选，不扩大任务。显式契约任务继续遵循其回执与防伪约束。

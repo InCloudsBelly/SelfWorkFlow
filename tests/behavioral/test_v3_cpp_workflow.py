@@ -149,7 +149,7 @@ class V3CppWorkflowTests(unittest.TestCase):
         self.assertEqual(slot["allowedInvocationKinds"], ["skill"])
         self.assertEqual(slot["cardinality"], "exactly-one")
         self.assertEqual(slot["selectionMode"], "static")
-        self.assertIn("any", slot["condition"])
+        self.assertEqual(slot["condition"], {"contains": ["explicitModuleIds", "design-grilling"]})
 
         deep_slot = next(
             slot
@@ -166,9 +166,7 @@ class V3CppWorkflowTests(unittest.TestCase):
         self.assertEqual(deep["slot"], "design.deep-grill")
         self.assertEqual(deep_slot["cardinality"], "exactly-one")
         self.assertEqual(deep_slot["selectionMode"], "static")
-        self.assertIn("all", deep_slot["condition"])
-        self.assertIn("any", deep_slot["condition"]["all"][0])
-        self.assertIn("any", deep_slot["condition"]["all"][1])
+        self.assertEqual(deep_slot["condition"], {"contains": ["explicitModuleIds", "design-grill-me"]})
 
         def condition(slot_id, **values):
             slot = next(
@@ -178,7 +176,7 @@ class V3CppWorkflowTests(unittest.TestCase):
             )
             return _condition_matches(slot.get("condition"), values)
 
-        self.assertTrue(condition(
+        self.assertFalse(condition(
             "design.precheck", writeTask=True, complexity="C2", risk="R2",
             projectMinimums={"strength": "Full"}, explicitModuleIds=[],
         ))
@@ -194,7 +192,7 @@ class V3CppWorkflowTests(unittest.TestCase):
         self.assertTrue(condition(
             "design.deep-grill", operationType="design", writeTask=False,
             complexity="C3", risk="R3",
-            projectMinimums={"strength": "Deep"}, explicitModuleIds=[],
+            projectMinimums={"strength": "Deep"}, explicitModuleIds=["design-grill-me"],
         ))
         self.assertFalse(condition(
             "design.precheck", writeTask=True, complexity="C1", risk="R1",
@@ -205,6 +203,7 @@ class V3CppWorkflowTests(unittest.TestCase):
             complexity="C1", risk="R1",
             projectMinimums={"strength": "Light"}, explicitModuleIds=[],
         ))
+        self.assertTrue(condition("design.precheck", explicitModuleIds=["design-grilling"]))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+interface:
+  display_name: "SelfOpenWiki"
+  short_description: "通过实时 OpenWiki MCP 安全维护本地项目知识"
+  default_prompt: "Use $self-openwiki to safely query or maintain my local C7 project Wiki through the live OpenWiki MCP contract."

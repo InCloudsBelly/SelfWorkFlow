@@ -1,0 +1,22 @@
+# Generated patched OpenWiki checkout
+/.work/
+/.selfopenwiki-upstream-update-journal.json
+/.selfopenwiki-upstream-update.lock
+
+# Root capability evidence
+/runtime/
+/self-openwiki/runtime/
+
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+coverage/
+self-openwiki/win32-helper-compat/bin/
+self-openwiki/win32-helper-compat/obj/
+
+
+# Temporary files
+*.tmp
+*.temp

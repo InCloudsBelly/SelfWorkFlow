@@ -1,0 +1,2281 @@
+diff --git a/src/agent/docs-only-backend.ts b/src/agent/docs-only-backend.ts
+index 8419307..3c61c7d 100644
+--- a/src/agent/docs-only-backend.ts
++++ b/src/agent/docs-only-backend.ts
+@@ -13,8 +13,22 @@ import {
+   type ReadResult,
+   type WriteResult,
+ } from "deepagents";
+-import { OPEN_WIKI_DIR } from "../config/constants.js";
++import {
++  OPEN_WIKI_DIR,
++  OPENWIKI_RUN_POLICY_FILE_ENV_KEY,
++  resolveOpenWikiShellMode,
++  type OpenWikiShellMode,
++} from "../config/constants.js";
+ import { OPENWIKI_IGNORE_FILE, OpenWikiIgnore } from "./openwiki-ignore.js";
++import {
++  assertOpenWikiRunPolicyCurrent,
++  checkOpenWikiRunPolicy,
++  checkOpenWikiRunPolicyTree,
++  isOpenWikiRunPolicyDiscoveryResultAllowed,
++  loadOpenWikiRunPolicy,
++  type LoadedOpenWikiRunPolicy,
++  type OpenWikiRunPermission,
++} from "./run-policy.js";
+ import type { OpenWikiOutputMode } from "./types.js";
+ 
+ /**
+@@ -47,6 +61,12 @@ type OpenWikiBackendOptions = LocalShellBackendOptions & {
+    * @default "repository"
+    */
+   outputMode?: OpenWikiOutputMode;
++
++  /** Refuse arbitrary shell commands while preserving controlled file tools. */
++  shellMode?: OpenWikiShellMode;
++
++  /** Strict per-path policy loaded before backend creation. */
++  runPolicy?: LoadedOpenWikiRunPolicy;
+ };
+ 
+ /**
+@@ -137,6 +157,37 @@ function isWorktreeGitScandirError(error: unknown): boolean {
+  * untrusted repository content, so path checks canonicalize before matching.
+  */
+ export class OpenWikiLocalShellBackend extends LocalShellBackend {
++  get connectorsDisabled(): boolean {
++    if (this.runPolicy) assertOpenWikiRunPolicyCurrent(this.runPolicy);
++    return this.runPolicy?.disableConnectors === true;
++  }
++
++  get loadedRunPolicy(): LoadedOpenWikiRunPolicy | undefined {
++    return this.runPolicy;
++  }
++
++  static fromEnvironment(
++    options: Omit<OpenWikiBackendOptions, "runPolicy" | "shellMode">,
++  ): OpenWikiLocalShellBackend {
++    const shellMode = resolveOpenWikiShellMode();
++    const policyPath = process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY];
++    if (policyPath !== undefined && typeof options.rootDir !== "string") {
++      throw new Error(
++        `${OPENWIKI_RUN_POLICY_FILE_ENV_KEY} requires a fixed backend rootDir.`,
++      );
++    }
++    const runPolicy =
++      policyPath !== undefined && typeof options.rootDir === "string"
++        ? loadOpenWikiRunPolicy(policyPath, options.rootDir)
++        : undefined;
++    if (runPolicy && shellMode !== "restricted") {
++      throw new Error(
++        `${OPENWIKI_RUN_POLICY_FILE_ENV_KEY} requires OPENWIKI_SHELL_MODE=restricted.`,
++      );
++    }
++    return new OpenWikiLocalShellBackend({ ...options, runPolicy, shellMode });
++  }
++
+   /**
+    * Whether writes are confined to the `openwiki/` docs tree (repository mode).
+    */
+@@ -152,11 +203,17 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+    */
+   private readonly outputMode: OpenWikiOutputMode;
+ 
++  private readonly shellMode: OpenWikiShellMode | undefined;
++
++  private readonly runPolicy: LoadedOpenWikiRunPolicy | undefined;
++
+   constructor(options: OpenWikiBackendOptions) {
+     super(options);
+     this.docsOnly = options.docsOnly === true;
+     this.openWikiIgnore = options.openWikiIgnore ?? new OpenWikiIgnore([]);
+     this.outputMode = options.outputMode ?? "repository";
++    this.shellMode = options.shellMode;
++    this.runPolicy = options.runPolicy;
+   }
+ 
+   /**
+@@ -167,7 +224,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     offset?: number,
+     limit?: number,
+   ): Promise<ReadResult> {
+-    const error = this.getIgnoredPathError(filePath);
++    const error =
++      this.getRunPolicyError(filePath, "read") ??
++      this.getIgnoredPathError(filePath);
+ 
+     if (error) {
+       return { error };
+@@ -180,7 +239,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+    * Read raw bytes, hard-denying the read if the path is excluded by `.openwikiignore`.
+    */
+   override async readRaw(filePath: string): Promise<ReadRawResult> {
+-    const error = this.getIgnoredPathError(filePath);
++    const error =
++      this.getRunPolicyError(filePath, "read") ??
++      this.getIgnoredPathError(filePath);
+ 
+     if (error) {
+       return { error };
+@@ -199,6 +260,7 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     content: string,
+   ): Promise<WriteResult> {
+     const error =
++      this.getRunPolicyError(filePath, "write") ??
+       this.getIgnoredPathError(filePath) ??
+       this.getDocsOnlyWriteError(filePath);
+ 
+@@ -220,6 +282,7 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     replaceAll?: boolean,
+   ): Promise<EditResult> {
+     const error =
++      this.getRunPolicyError(filePath, "write") ??
+       this.getIgnoredPathError(filePath) ??
+       this.getDocsOnlyWriteError(filePath);
+ 
+@@ -238,7 +301,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+    * filtering out any ignored entries so they never surface to the agent.
+    */
+   override async ls(dirPath: string): Promise<LsResult> {
+-    const error = this.getIgnoredPathError(dirPath, true);
++    const error =
++      this.getRunPolicyError(dirPath, "list") ??
++      this.getIgnoredPathError(dirPath, true);
+ 
+     if (error) {
+       return { error };
+@@ -249,7 +314,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     return {
+       ...result,
+       files: result.files?.filter(
+-        (file) => !this.openWikiIgnore.ignores(file.path, file.is_dir === true),
++        (file) =>
++          this.isRunPolicyPathAllowed(file.path, "list") &&
++          !this.openWikiIgnore.ignores(file.path, file.is_dir === true),
+       ),
+     };
+   }
+@@ -263,6 +330,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     dirPath?: string | null,
+     glob?: string | null,
+   ): Promise<GrepResult> {
++    const searchRoot = dirPath ?? "/";
++    const policyError = this.getRunPolicyTreeError(searchRoot, ["list", "read"]);
++    if (policyError) return { error: policyError, matches: [] };
+     if (dirPath && this.openWikiIgnore.ignores(dirPath, true)) {
+       return { matches: [] };
+     }
+@@ -272,7 +342,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     return {
+       ...result,
+       matches: result.matches?.filter(
+-        (match) => !this.openWikiIgnore.ignores(match.path),
++        (match) =>
++          this.isRunPolicyDiscoveryPathAllowed(match.path, "read", searchRoot) &&
++          !this.openWikiIgnore.ignores(match.path),
+       ),
+     };
+   }
+@@ -285,6 +357,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     pattern: string,
+     searchPath?: string,
+   ): Promise<GlobResult> {
++    const searchRoot = searchPath ?? "/";
++    const policyError = this.getRunPolicyTreeError(searchRoot, ["list"]);
++    if (policyError) return { error: policyError, files: [] };
+     if (isBroadRootGlob(pattern, searchPath)) {
+       return {
+         error:
+@@ -321,7 +396,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     return {
+       ...result,
+       files: result.files?.filter(
+-        (file) => !this.openWikiIgnore.ignores(file.path, file.is_dir === true),
++        (file) =>
++          this.isRunPolicyDiscoveryPathAllowed(file.path, "list", searchRoot) &&
++          !this.openWikiIgnore.ignores(file.path, file.is_dir === true),
+       ),
+     };
+   }
+@@ -337,7 +414,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     files: Array<[string, Uint8Array]>,
+   ): Promise<FileUploadResponse[]> {
+     const allowedFiles = files.filter(
+-      ([filePath]) => !this.isWriteBlocked(filePath),
++      ([filePath]) =>
++        this.isRunPolicyPathAllowed(filePath, "write") &&
++        !this.isWriteBlocked(filePath),
+     );
+ 
+     if (allowedFiles.length === files.length) {
+@@ -350,7 +429,10 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     );
+ 
+     return files.map(([filePath]) => {
+-      if (this.isWriteBlocked(filePath)) {
++      if (
++        !this.isRunPolicyPathAllowed(filePath, "write") ||
++        this.isWriteBlocked(filePath)
++      ) {
+         return { error: "permission_denied", path: filePath };
+       }
+ 
+@@ -368,7 +450,9 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     paths: string[],
+   ): Promise<FileDownloadResponse[]> {
+     const allowedPaths = paths.filter(
+-      (filePath) => !this.openWikiIgnore.ignores(filePath),
++      (filePath) =>
++        this.isRunPolicyPathAllowed(filePath, "read") &&
++        !this.openWikiIgnore.ignores(filePath),
+     );
+ 
+     if (allowedPaths.length === paths.length) {
+@@ -381,7 +465,10 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     );
+ 
+     return paths.map((filePath) => {
+-      if (this.openWikiIgnore.ignores(filePath)) {
++      if (
++        !this.isRunPolicyPathAllowed(filePath, "read") ||
++        this.openWikiIgnore.ignores(filePath)
++      ) {
+         return { content: null, error: "permission_denied", path: filePath };
+       }
+ 
+@@ -402,6 +489,14 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+    * since arbitrary shell cannot be proven not to read an ignored path.
+    */
+   override async execute(command: string): Promise<ExecuteResponse> {
++    if (this.shellMode === "restricted") {
++      return {
++        exitCode: 1,
++        output:
++          "Shell execute is restricted for this OpenWiki run. Use the controlled filesystem tools instead (read_file, ls, glob, grep, write_file, edit_file).",
++        truncated: false,
++      };
++    }
+     if (
+       this.openWikiIgnore.isActive &&
+       !isAllowedShellCommandWithIgnore(command)
+@@ -416,6 +511,50 @@ export class OpenWikiLocalShellBackend extends LocalShellBackend {
+     return super.execute(command);
+   }
+ 
++  private getRunPolicyError(
++    filePath: string,
++    permission: OpenWikiRunPermission,
++  ): string | null {
++    if (!this.runPolicy) return null;
++    const decision = checkOpenWikiRunPolicy(this.runPolicy, filePath, permission);
++    return decision.allowed ? null : decision.reason;
++  }
++
++  private isRunPolicyPathAllowed(
++    filePath: string,
++    permission: OpenWikiRunPermission,
++  ): boolean {
++    return this.getRunPolicyError(filePath, permission) === null;
++  }
++
++  private isRunPolicyDiscoveryPathAllowed(
++    filePath: string,
++    permission: OpenWikiRunPermission,
++    searchRoot: string,
++  ): boolean {
++    return this.runPolicy
++      ? isOpenWikiRunPolicyDiscoveryResultAllowed(
++          this.runPolicy,
++          filePath,
++          searchRoot,
++          permission,
++        )
++      : true;
++  }
++
++  private getRunPolicyTreeError(
++    virtualRoot: string,
++    permissions: readonly OpenWikiRunPermission[],
++  ): string | null {
++    if (!this.runPolicy) return null;
++    const decision = checkOpenWikiRunPolicyTree(
++      this.runPolicy,
++      virtualRoot,
++      permissions,
++    );
++    return decision.allowed ? null : decision.reason;
++  }
++
+   /**
+    * Return a refusal message when a write escapes the docs tree in docs-only
+    * mode, or `null` if the write is allowed. Always allows in `local-wiki` mode
+diff --git a/src/agent/index.ts b/src/agent/index.ts
+index cec26b2..389a90a 100644
+--- a/src/agent/index.ts
++++ b/src/agent/index.ts
+@@ -41,6 +41,7 @@ import {
+   resolveIndexLabels,
+ } from "../okf/index-labels.js";
+ import { OpenWikiLocalShellBackend } from "./docs-only-backend.js";
++import { scopeOpenWikiRunPolicy } from "./run-policy.js";
+ import { getSelectedModelAvailability } from "../model-availability.js";
+ import { createOpenWikiIndexMiddleware } from "./okf-middleware.js";
+ import {
+@@ -109,6 +110,9 @@ import {
+   OPENWIKI_MODEL_ID_ENV_KEY,
+   OPENWIKI_PROVIDER_ENV_KEY,
+   OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY,
++  OPENWIKI_REASONING_EFFORT_ENV_KEY,
++  OPENWIKI_RUN_POLICY_FILE_ENV_KEY,
++  OPENWIKI_SHELL_MODE_ENV_KEY,
+   providerRequiresBaseUrl,
+   providerRequiresRegion,
+   providerRequiresSecretKey,
+@@ -120,6 +124,7 @@ import {
+   resolveOpenRouterProviderOnly,
+   resolveProviderBaseUrl,
+   resolveProviderLocation,
++  resolveReasoningEffort,
+   resolveProviderRegion,
+   resolveProviderRetryAttempts,
+   type OpenWikiProvider,
+@@ -359,7 +364,7 @@ type OpenWikiAgentGraphOptions = OpenWikiAgentOptions & {
+ function createOpenWikiAgentGraph(
+   options: OpenWikiAgentGraphOptions,
+ ): ReturnType<typeof createDeepAgent> {
+-  const wikiBackend = new OpenWikiLocalShellBackend({
++  const wikiBackend = OpenWikiLocalShellBackend.fromEnvironment({
+     docsOnly: options.command !== "chat",
+     openWikiIgnore: options.openWikiIgnore,
+     maxOutputBytes: 100_000,
+@@ -387,7 +392,9 @@ function createOpenWikiAgentGraph(
+ 
+   return createDeepAgent({
+     model: options.model,
+-    tools: createOpenWikiConnectorTools(options.outputMode),
++    tools: shouldRegisterConnectorTools(wikiBackend)
++      ? createOpenWikiConnectorTools(options.outputMode)
++      : [],
+     checkpointer: options.checkpointer,
+     backend,
+     middleware:
+@@ -428,6 +435,7 @@ function createOpenWikiAgentGraph(
+               options.outputMode,
+               indexLabels,
+               conceptType,
++              shouldSynchronizeWikiIndexes(wikiBackend),
+             ),
+           ],
+     skills: ["/skills/"],
+@@ -725,6 +733,18 @@ export const AGENT_FILESYSTEM_PERMISSIONS: FilesystemPermission[] = [
+   },
+ ];
+ 
++export function shouldRegisterConnectorTools(
++  backend: OpenWikiLocalShellBackend,
++): boolean {
++  return !backend.connectorsDisabled;
++}
++
++export function shouldSynchronizeWikiIndexes(
++  backend: OpenWikiLocalShellBackend,
++): boolean {
++  return backend.loadedRunPolicy?.synchronizeWikiIndexes ?? true;
++}
++
+ /**
+  * Wraps the wiki backend with the virtual mounts every agent run layers on
+  * top of the documented repository (or local wiki):
+@@ -746,6 +766,39 @@ export function createAgentBackend(
+     skillsDir = openWikiSkillsDir,
+   }: { historyDir?: string; skillsDir?: string } = {},
+ ): CompositeBackend {
++  const runPolicy = wikiBackend.loadedRunPolicy;
++  if (runPolicy) {
++    const skillsPolicy = scopeOpenWikiRunPolicy(runPolicy, "skills", skillsDir);
++    const skillsBackend = new OpenWikiLocalShellBackend({
++      rootDir: skillsDir,
++      runPolicy: skillsPolicy,
++      shellMode: "restricted",
++      virtualMode: true,
++    });
++    const historyMount = runPolicy.mounts.find(
++      (mount) => mount.id === "conversation-history",
++    );
++    if (historyMount) {
++      const historyPolicy = scopeOpenWikiRunPolicy(
++        runPolicy,
++        "conversation-history",
++        historyDir,
++      );
++      return new OpenWikiCompositeBackend(wikiBackend, {
++        [CONVERSATION_HISTORY_MOUNT]: new OpenWikiLocalShellBackend({
++          rootDir: historyDir,
++          runPolicy: historyPolicy,
++          shellMode: "restricted",
++          virtualMode: true,
++        }),
++        "/skills/": skillsBackend,
++      });
++    }
++    return new OpenWikiCompositeBackend(wikiBackend, {
++      "/skills/": skillsBackend,
++    });
++  }
++
+   return new OpenWikiCompositeBackend(wikiBackend, {
+     [CONVERSATION_HISTORY_MOUNT]: new FilesystemBackend({
+       rootDir: historyDir,
+@@ -1043,6 +1096,7 @@ export function createModel(
+   providerRetryAttempts: number,
+ ) {
+   const retryOptions = { maxRetries: providerRetryAttempts };
++  const reasoningEffort = resolveReasoningEffort();
+ 
+   if (provider === "gemini") {
+     return new ChatGoogle({
+@@ -1118,7 +1172,7 @@ export function createModel(
+           originator: CODEX_ORIGINATOR,
+           "OpenAI-Beta": "responses=experimental",
+         },
+-        fetch: createCodexFetch(modelId),
++        fetch: createCodexFetch(modelId, globalThis.fetch, reasoningEffort),
+       },
+     });
+   }
+@@ -1147,6 +1201,7 @@ export function createModel(
+   }
+ 
+   const baseURL = resolveProviderBaseUrl(provider);
++  const useResponsesApi = providerUsesResponsesApi(provider, modelId);
+ 
+   return new ChatOpenAI({
+     apiKey: getProviderApiKey(provider),
+@@ -1156,7 +1211,10 @@ export function createModel(
+         }
+       : undefined,
+     model: modelId,
+-    useResponsesApi: providerUsesResponsesApi(provider, modelId),
++    useResponsesApi,
++    ...(provider === "openai" && useResponsesApi && reasoningEffort
++      ? { modelKwargs: { reasoning: { effort: reasoningEffort } } }
++      : {}),
+     ...retryOptions,
+   });
+ }
+@@ -2060,9 +2118,15 @@ export function formatEnvironmentDebugValue(
+     return `set(length=${value.length})`;
+   }
+ 
++  if (key === OPENWIKI_RUN_POLICY_FILE_ENV_KEY) {
++    return "set";
++  }
++
+   if (
+     key === OPENWIKI_MODEL_ID_ENV_KEY ||
+     key === OPENWIKI_PROVIDER_ENV_KEY ||
++    key === OPENWIKI_REASONING_EFFORT_ENV_KEY ||
++    key === OPENWIKI_SHELL_MODE_ENV_KEY ||
+     key === OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY ||
+     key === BEDROCK_AWS_REGION_ENV_KEY
+   ) {
+diff --git a/src/agent/okf-middleware.ts b/src/agent/okf-middleware.ts
+index 0c407f0..67afe9f 100644
+--- a/src/agent/okf-middleware.ts
++++ b/src/agent/okf-middleware.ts
+@@ -31,6 +31,7 @@ export function createOpenWikiIndexMiddleware(
+   outputMode: OpenWikiOutputMode,
+   labels: IndexLabels = ENGLISH_INDEX_LABELS,
+   conceptType: string = ENGLISH_CONCEPT_TYPE,
++  shouldSynchronizeWikiIndexes = true,
+ ) {
+   return createMiddleware({
+     name: "OpenWikiIndexMiddleware",
+@@ -71,11 +72,13 @@ export function createOpenWikiIndexMiddleware(
+         () => validateWikiMermaid(backend, outputMode),
+         { errorClass: "okf_error", errorDetail: "mermaid" },
+       );
+-      await inStage(
+-        "finalize",
+-        () => synchronizeWikiIndexes(backend, outputMode, labels, conceptType),
+-        { errorClass: "okf_error", errorDetail: "index_sync" },
+-      );
++      if (shouldSynchronizeWikiIndexes) {
++        await inStage(
++          "finalize",
++          () => synchronizeWikiIndexes(backend, outputMode, labels, conceptType),
++          { errorClass: "okf_error", errorDetail: "index_sync" },
++        );
++      }
+       // Stamp broken internal links in place (do not fail the run) so a later
+       // update can repair them from the inline openwiki comments.
+       await inStage(
+diff --git a/src/agent/openai-chatgpt-oauth.ts b/src/agent/openai-chatgpt-oauth.ts
+index e9e9ffc..9e4bb95 100644
+--- a/src/agent/openai-chatgpt-oauth.ts
++++ b/src/agent/openai-chatgpt-oauth.ts
+@@ -7,6 +7,7 @@ import {
+   OPENAI_CHATGPT_EXPIRES_AT_ENV_KEY,
+   OPENAI_CHATGPT_PLAN_ENV_KEY,
+   OPENAI_CHATGPT_REFRESH_TOKEN_ENV_KEY,
++  type OpenWikiReasoningEffort,
+ } from "../config/constants.js";
+ 
+ /**
+@@ -48,10 +49,12 @@ export const CODEX_RESPONSES_LITE_HEADER =
+ export function createCodexFetch(
+   modelId: string,
+   fetchImpl: typeof fetch = globalThis.fetch,
++  reasoningEffort?: OpenWikiReasoningEffort,
+ ): typeof fetch {
+   return async (input, init) => {
++    const isResponsesRequest = isCodexResponsesRequest(input);
+     const useLunaProtocol =
+-      modelId === CODEX_LUNA_MODEL_ID && isCodexResponsesRequest(input);
++      modelId === CODEX_LUNA_MODEL_ID && isResponsesRequest;
+ 
+     if (init?.body != null && typeof init.body === "string") {
+       try {
+@@ -108,6 +111,14 @@ export function createCodexFetch(
+           changed = true;
+         }
+ 
++        if (isResponsesRequest && reasoningEffort !== undefined) {
++          payload.reasoning = {
++            ...(isRecord(payload.reasoning) ? payload.reasoning : {}),
++            effort: reasoningEffort,
++          };
++          changed = true;
++        }
++
+         if (changed) {
+           init = { ...init, body: JSON.stringify(payload) };
+         }
+diff --git a/src/agent/run-policy.ts b/src/agent/run-policy.ts
+new file mode 100644
+index 0000000..60aaf8f
+--- /dev/null
++++ b/src/agent/run-policy.ts
+@@ -0,0 +1,529 @@
++import { createHash } from "node:crypto";
++import {
++  closeSync,
++  existsSync,
++  fstatSync,
++  openSync,
++  readdirSync,
++  lstatSync,
++  readFileSync,
++  realpathSync,
++  statSync,
++} from "node:fs";
++import path from "node:path";
++import { z } from "zod";
++
++export type OpenWikiRunPermission = "read" | "write" | "list";
++
++type LoadedMount = {
++  id: string;
++  path: string;
++  permissions: ReadonlySet<OpenWikiRunPermission>;
++};
++
++type FileIdentity = {
++  dev: string;
++  ino: string;
++  mtimeNs: string;
++  size: string;
++};
++
++export type LoadedOpenWikiRunPolicy = {
++  disableConnectors: boolean;
++  mounts: readonly LoadedMount[];
++  policyHash: string;
++  policyIdentity: FileIdentity;
++  policyPath: string;
++  rootDir: string;
++  synchronizeWikiIndexes: boolean;
++  version: 1;
++};
++
++export type RunPolicyDecision =
++  { allowed: true } | { allowed: false; reason: string };
++
++const permissionSchema = z.enum(["read", "write", "list"]);
++const mountSchema = z.strictObject({
++  id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
++  path: z.string().min(1),
++  permissions: z.array(permissionSchema).min(1),
++});
++const policySchema = z.strictObject({
++  disableConnectors: z.boolean(),
++  mounts: z.array(mountSchema).min(1),
++  rootDir: z.string().min(1),
++  synchronizeWikiIndexes: z.boolean().default(true),
++  version: z.literal(1),
++});
++
++export function loadOpenWikiRunPolicy(
++  policyPath: string,
++  rootDir: string,
++): LoadedOpenWikiRunPolicy {
++  const resolvedPolicyPath = assertAbsolutePath(policyPath, "policy file");
++  const canonicalRoot = canonicalDirectory(rootDir, "backend root");
++
++  assertNoLinkAncestors(resolvedPolicyPath, "policy file");
++  const canonicalPolicyPath = realpathSync.native(resolvedPolicyPath);
++  if (isPathWithin(canonicalRoot, canonicalPolicyPath)) {
++    throw new Error(
++      "OpenWiki run policy file must stay outside the model-visible backend root.",
++    );
++  }
++
++  const stablePolicy = readStablePolicyFile(canonicalPolicyPath);
++  const policyBytes = stablePolicy.bytes;
++  let parsedJson: unknown;
++  try {
++    parsedJson = JSON.parse(policyBytes.toString("utf8"));
++  } catch {
++    throw new Error("OpenWiki run policy is not valid JSON.");
++  }
++
++  const parsed = policySchema.safeParse(parsedJson);
++  if (!parsed.success) {
++    throw new Error("OpenWiki run policy does not match the strict schema.");
++  }
++
++  const configuredRoot = canonicalDirectory(
++    parsed.data.rootDir,
++    "policy rootDir",
++  );
++  if (!pathsEqual(configuredRoot, canonicalRoot)) {
++    throw new Error("OpenWiki run policy rootDir does not match backend root.");
++  }
++
++  const ids = new Set<string>();
++  const mounts: LoadedMount[] = parsed.data.mounts.map((mount) => {
++    if (ids.has(mount.id)) {
++      throw new Error(
++        `OpenWiki run policy has duplicate mount id: ${mount.id}`,
++      );
++    }
++    ids.add(mount.id);
++
++    if (new Set(mount.permissions).size !== mount.permissions.length) {
++      throw new Error(
++        `OpenWiki run policy mount ${mount.id} has duplicate permissions.`,
++      );
++    }
++
++    const canonicalMount = canonicalDirectory(mount.path, `mount ${mount.id}`);
++    if (!isPathWithin(canonicalRoot, canonicalMount)) {
++      throw new Error(
++        `OpenWiki run policy mount ${mount.id} must stay inside backend root.`,
++      );
++    }
++    assertNoLinkBetween(canonicalRoot, canonicalMount, `mount ${mount.id}`);
++
++    return {
++      id: mount.id,
++      path: canonicalMount,
++      permissions: new Set(mount.permissions),
++    };
++  });
++
++  for (let left = 0; left < mounts.length; left += 1) {
++    for (let right = left + 1; right < mounts.length; right += 1) {
++      const first = mounts[left];
++      const second = mounts[right];
++      if (
++        isPathWithin(first.path, second.path) ||
++        isPathWithin(second.path, first.path)
++      ) {
++        throw new Error(
++          `OpenWiki run policy mounts overlap: ${first.id} and ${second.id}.`,
++        );
++      }
++    }
++  }
++
++  return {
++    disableConnectors: parsed.data.disableConnectors,
++    mounts,
++    policyHash: hashBytes(policyBytes),
++    policyIdentity: stablePolicy.identity,
++    policyPath: canonicalPolicyPath,
++    rootDir: canonicalRoot,
++    synchronizeWikiIndexes: parsed.data.synchronizeWikiIndexes,
++    version: 1,
++  };
++}
++
++export function assertOpenWikiRunPolicyCurrent(
++  policy: LoadedOpenWikiRunPolicy,
++): void {
++  if (!policyFileMatches(policy)) {
++    throw new Error("OpenWiki run policy changed after startup.");
++  }
++}
++
++export function scopeOpenWikiRunPolicy(
++  policy: LoadedOpenWikiRunPolicy,
++  mountId: string,
++  expectedRoot: string,
++): LoadedOpenWikiRunPolicy {
++  assertOpenWikiRunPolicyCurrent(policy);
++  const mount = policy.mounts.find((entry) => entry.id === mountId);
++  if (!mount) {
++    throw new Error(`OpenWiki run policy is missing mount: ${mountId}`);
++  }
++
++  const canonicalExpectedRoot = canonicalDirectory(
++    expectedRoot,
++    `mounted backend ${mountId}`,
++  );
++  if (!pathsEqual(mount.path, canonicalExpectedRoot)) {
++    throw new Error(
++      `OpenWiki run policy mount ${mountId} does not match its backend root.`,
++    );
++  }
++
++  return {
++    ...policy,
++    mounts: [mount],
++    rootDir: mount.path,
++  };
++}
++
++export function checkOpenWikiRunPolicy(
++  policy: LoadedOpenWikiRunPolicy,
++  virtualPath: string,
++  permission: OpenWikiRunPermission,
++): RunPolicyDecision {
++  if (!policyFileMatches(policy)) {
++    return {
++      allowed: false,
++      reason: "OpenWiki run policy changed after startup; refusing access.",
++    };
++  }
++
++  const candidate = resolveVirtualPath(policy.rootDir, virtualPath);
++  if (candidate === null) {
++    return denied(virtualPath);
++  }
++
++  const mount = policy.mounts.find((entry) =>
++    isPathWithin(entry.path, candidate),
++  );
++  if (!mount || !mount.permissions.has(permission)) {
++    return denied(virtualPath);
++  }
++
++  try {
++    assertNoLinkBetween(policy.rootDir, candidate, "requested path");
++    const canonicalCandidate = canonicalizeWithMissingTail(candidate);
++    if (!isPathWithin(mount.path, canonicalCandidate)) {
++      return denied(virtualPath);
++    }
++  } catch {
++    return denied(virtualPath);
++  }
++
++  return { allowed: true };
++}
++
++function denied(virtualPath: string): RunPolicyDecision {
++  return {
++    allowed: false,
++    reason: `Path is denied by OpenWiki run policy: ${virtualPath}`,
++  };
++}
++
++function policyFileMatches(policy: LoadedOpenWikiRunPolicy): boolean {
++  try {
++    const current = readStablePolicyFile(policy.policyPath);
++    return (
++      identitiesEqual(current.identity, policy.policyIdentity) &&
++      hashBytes(current.bytes) === policy.policyHash
++    );
++  } catch {
++    return false;
++  }
++}
++
++function readStablePolicyFile(policyPath: string): {
++  bytes: Buffer;
++  identity: FileIdentity;
++} {
++  const pathStatBefore = lstatSync(policyPath, { bigint: true });
++  if (!pathStatBefore.isFile() || pathStatBefore.isSymbolicLink()) {
++    throw new Error("OpenWiki run policy must be a regular non-link file.");
++  }
++
++  const fileDescriptor = openSync(policyPath, "r");
++  try {
++    const handleStatBefore = fstatSync(fileDescriptor, { bigint: true });
++    if (!handleStatBefore.isFile()) {
++      throw new Error("OpenWiki run policy handle is not a regular file.");
++    }
++    const bytes = readFileSync(fileDescriptor);
++    const handleStatAfter = fstatSync(fileDescriptor, { bigint: true });
++    const pathStatAfter = lstatSync(policyPath, { bigint: true });
++    const identity = identityFromStat(handleStatBefore);
++
++    if (
++      !identitiesEqual(identity, identityFromStat(handleStatAfter)) ||
++      !identitiesEqual(identity, identityFromStat(pathStatBefore)) ||
++      !identitiesEqual(identity, identityFromStat(pathStatAfter))
++    ) {
++      throw new Error("OpenWiki run policy changed while it was read.");
++    }
++
++    return { bytes, identity };
++  } finally {
++    closeSync(fileDescriptor);
++  }
++}
++
++function identityFromStat(stat: {
++  dev: bigint;
++  ino: bigint;
++  mtimeNs: bigint;
++  size: bigint;
++}): FileIdentity {
++  return {
++    dev: stat.dev.toString(),
++    ino: stat.ino.toString(),
++    mtimeNs: stat.mtimeNs.toString(),
++    size: stat.size.toString(),
++  };
++}
++
++function identitiesEqual(left: FileIdentity, right: FileIdentity): boolean {
++  return (
++    left.dev === right.dev &&
++    left.ino === right.ino &&
++    left.mtimeNs === right.mtimeNs &&
++    left.size === right.size
++  );
++}
++
++export function checkOpenWikiRunPolicyTree(
++  policy: LoadedOpenWikiRunPolicy,
++  virtualRoot: string,
++  permissions: readonly OpenWikiRunPermission[],
++): RunPolicyDecision {
++  for (const permission of permissions) {
++    const decision = checkOpenWikiRunPolicy(policy, virtualRoot, permission);
++    if (!decision.allowed) {
++      return decision;
++    }
++  }
++
++  const candidate = resolveVirtualPath(policy.rootDir, virtualRoot);
++  if (candidate === null || !existsSync(candidate)) {
++    return denied(virtualRoot);
++  }
++
++  try {
++    assertTreeContainsNoLinks(candidate);
++  } catch {
++    return denied(virtualRoot);
++  }
++
++  return { allowed: true };
++}
++
++export function isOpenWikiRunPolicyDiscoveryResultAllowed(
++  policy: LoadedOpenWikiRunPolicy,
++  resultPath: string,
++  searchRoot: string,
++  permission: OpenWikiRunPermission,
++): boolean {
++  if (checkOpenWikiRunPolicy(policy, resultPath, permission).allowed) {
++    return true;
++  }
++
++  const normalized = resultPath.replace(/\\/gu, "/");
++  if (
++    normalized.startsWith("//") ||
++    /^(?:\/?[a-z]:|\/?\?|\/?\.)/iu.test(normalized)
++  ) {
++    return false;
++  }
++
++  const relative = normalized.replace(/^\//, "");
++  const segments = relative.split("/");
++  if (
++    relative.length === 0 ||
++    segments.some(
++      (segment) => segment === "" || segment === "." || segment === "..",
++    )
++  ) {
++    return false;
++  }
++
++  const rootedResult = path.posix.join(
++    searchRoot.replace(/\\/gu, "/"),
++    relative,
++  );
++  const searchCandidate = resolveVirtualPath(policy.rootDir, searchRoot);
++  const resultCandidate = resolveVirtualPath(policy.rootDir, rootedResult);
++  if (
++    searchCandidate === null ||
++    resultCandidate === null ||
++    !existsSync(resultCandidate)
++  ) {
++    return false;
++  }
++
++  const searchMount = findMount(policy, searchCandidate);
++  const resultMount = findMount(policy, resultCandidate);
++  return (
++    searchMount !== undefined &&
++    searchMount === resultMount &&
++    checkOpenWikiRunPolicy(policy, rootedResult, permission).allowed
++  );
++}
++
++function resolveVirtualPath(
++  rootDir: string,
++  virtualPath: string,
++): string | null {
++  if (
++    virtualPath.length === 0 ||
++    virtualPath.includes("\0") ||
++    /^(?:[a-z]:|\\\\|\/\/|\\\?\\|\\\.\\)/iu.test(virtualPath)
++  ) {
++    return null;
++  }
++
++  const relativePath = virtualPath.replace(/\\/gu, "/").replace(/^\/+/, "");
++  const candidate = path.resolve(rootDir, ...relativePath.split("/"));
++  return isPathWithin(rootDir, candidate) ? candidate : null;
++}
++
++function findMount(
++  policy: LoadedOpenWikiRunPolicy,
++  candidate: string,
++): LoadedMount | undefined {
++  return policy.mounts.find((entry) => isPathWithin(entry.path, candidate));
++}
++
++function assertTreeContainsNoLinks(root: string): void {
++  const pending = [root];
++  let visited = 0;
++
++  while (pending.length > 0) {
++    const current = pending.pop();
++    if (!current) {
++      continue;
++    }
++    visited += 1;
++    if (visited > 100_000) {
++      throw new Error("OpenWiki run-policy tree is too large to validate.");
++    }
++
++    const stat = lstatSync(current);
++    if (stat.isSymbolicLink()) {
++      throw new Error("OpenWiki run-policy tree contains a link or junction.");
++    }
++    if (!stat.isDirectory()) {
++      continue;
++    }
++
++    for (const entry of readdirSync(current, { withFileTypes: true })) {
++      pending.push(path.join(current, entry.name));
++    }
++  }
++}
++
++function canonicalizeWithMissingTail(candidate: string): string {
++  const missing: string[] = [];
++  let existing = candidate;
++
++  while (!existsSync(existing)) {
++    const parent = path.dirname(existing);
++    if (pathsEqual(parent, existing)) {
++      throw new Error("No existing ancestor for run-policy path.");
++    }
++    missing.unshift(path.basename(existing));
++    existing = parent;
++  }
++
++  return path.resolve(realpathSync.native(existing), ...missing);
++}
++
++function assertNoLinkBetween(
++  rootDir: string,
++  candidate: string,
++  label: string,
++): void {
++  if (!isPathWithin(rootDir, candidate)) {
++    throw new Error(`${label} escapes the backend root.`);
++  }
++
++  const relative = path.relative(rootDir, candidate);
++  let current = rootDir;
++  for (const segment of relative.split(path.sep).filter(Boolean)) {
++    current = path.join(current, segment);
++    if (!existsSync(current)) {
++      break;
++    }
++    if (lstatSync(current).isSymbolicLink()) {
++      throw new Error(`${label} contains a symbolic link or junction.`);
++    }
++  }
++}
++
++function canonicalDirectory(value: string, label: string): string {
++  const resolved = assertAbsolutePath(value, label);
++  let linkStat;
++  let stat;
++  try {
++    linkStat = lstatSync(resolved);
++    stat = statSync(resolved);
++  } catch {
++    throw new Error(`${label} must be an existing directory.`);
++  }
++  if (linkStat.isSymbolicLink()) {
++    throw new Error(`${label} cannot be a symbolic link or junction.`);
++  }
++  if (!stat.isDirectory()) {
++    throw new Error(`${label} must be an existing directory.`);
++  }
++  assertNoLinkAncestors(resolved, label);
++  const canonical = realpathSync.native(resolved);
++  assertNoLinkBetween(canonical, canonical, label);
++  return canonical;
++}
++
++function assertNoLinkAncestors(candidate: string, label: string): void {
++  const parsed = path.parse(path.resolve(candidate));
++  let current = parsed.root;
++  const relative = path.relative(parsed.root, candidate);
++
++  for (const segment of relative.split(path.sep).filter(Boolean)) {
++    current = path.join(current, segment);
++    if (lstatSync(current).isSymbolicLink()) {
++      throw new Error(`${label} contains a symbolic link or junction.`);
++    }
++  }
++}
++
++function assertAbsolutePath(value: string, label: string): string {
++  if (!path.isAbsolute(value)) {
++    throw new Error(`${label} must be an absolute path.`);
++  }
++  return path.resolve(value);
++}
++
++function isPathWithin(rootDir: string, candidate: string): boolean {
++  const root = normalizeForComparison(rootDir);
++  const value = normalizeForComparison(candidate);
++  return value === root || value.startsWith(`${root}${path.sep}`);
++}
++
++function pathsEqual(left: string, right: string): boolean {
++  return normalizeForComparison(left) === normalizeForComparison(right);
++}
++
++function normalizeForComparison(value: string): string {
++  const normalized = path.resolve(value).replace(/[\\/]+$/u, "");
++  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
++}
++
++function hashBytes(bytes: Uint8Array): string {
++  return createHash("sha256").update(bytes).digest("hex");
++}
+diff --git a/src/cli/runners.ts b/src/cli/runners.ts
+index b26e5c7..927d23f 100644
+--- a/src/cli/runners.ts
++++ b/src/cli/runners.ts
+@@ -8,10 +8,14 @@ import { startNgrokTunnel } from "../auth/ngrok.js";
+ import { formatAuthProviderList, runOAuthAuth } from "../auth/oauth.js";
+ import { createOpenWikiThreadId, runOpenWikiAgent } from "../agent/index.js";
+ import type { OpenWikiRunEvent, OpenWikiRunOptions } from "../agent/types.js";
+-import { resolveConfiguredProvider } from "../config/constants.js";
++import {
++  OPENWIKI_RUN_POLICY_FILE_ENV_KEY,
++  resolveConfiguredProvider,
++} from "../config/constants.js";
+ import {
+   ensureCodeModeRepoSetup,
+   runCodeModeConnectors,
++  shouldRunCodeModeConnectors,
+ } from "../ingestion/code-mode.js";
+ import { runOpenWikiIngestion } from "../ingestion/ingestion.js";
+ import { getErrorMessage } from "../platform/diagnostics.js";
+@@ -292,7 +296,11 @@ export async function runPrintCommand(
+         // the agent message before the run, so --print behaves exactly like
+         // interactive.
+         const userMessage =
+-          command.mode === "code" && command.command !== "chat"
++          command.mode === "code" &&
++          command.command !== "chat" &&
++          shouldRunCodeModeConnectors(
++            process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY],
++          )
+             ? await runCodeModeConnectors(
+                 runtimeCwd,
+                 command.userMessage ?? undefined,
+diff --git a/src/config/constants.ts b/src/config/constants.ts
+index bb6ce2d..509192b 100644
+--- a/src/config/constants.ts
++++ b/src/config/constants.ts
+@@ -53,6 +53,9 @@ export const GOOGLE_APPLICATION_CREDENTIALS_ENV_KEY =
+ export const DEFAULT_VERTEX_LOCATION = "global";
+ export const OPENWIKI_PROVIDER_ENV_KEY = "OPENWIKI_PROVIDER";
+ export const OPENWIKI_MODEL_ID_ENV_KEY = "OPENWIKI_MODEL_ID";
++export const OPENWIKI_REASONING_EFFORT_ENV_KEY = "OPENWIKI_REASONING_EFFORT";
++export const OPENWIKI_SHELL_MODE_ENV_KEY = "OPENWIKI_SHELL_MODE";
++export const OPENWIKI_RUN_POLICY_FILE_ENV_KEY = "OPENWIKI_RUN_POLICY_FILE";
+ export const NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/";
+ export const OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY =
+   "OPENWIKI_PROVIDER_RETRY_ATTEMPTS";
+@@ -122,6 +125,46 @@ export type ExternalCliAuthAdapter = "github-cli";
+ 
+ export type SelectableOpenWikiProvider = OpenWikiProvider;
+ 
++export const OPENWIKI_REASONING_EFFORTS = [
++  "low",
++  "medium",
++  "high",
++  "xhigh",
++  "max",
++  "ultra",
++] as const;
++
++export type OpenWikiReasoningEffort =
++  (typeof OPENWIKI_REASONING_EFFORTS)[number];
++
++export type OpenWikiShellMode = "restricted";
++
++export function resolveReasoningEffort(
++  env: NodeJS.ProcessEnv = process.env,
++): OpenWikiReasoningEffort | undefined {
++  const value = env[OPENWIKI_REASONING_EFFORT_ENV_KEY];
++  if (value === undefined) return undefined;
++  if (!OPENWIKI_REASONING_EFFORTS.includes(value as OpenWikiReasoningEffort)) {
++    throw new Error(
++      `${OPENWIKI_REASONING_EFFORT_ENV_KEY} must be one of: ${OPENWIKI_REASONING_EFFORTS.join(", ")}.`,
++    );
++  }
++  return value as OpenWikiReasoningEffort;
++}
++
++export function resolveOpenWikiShellMode(
++  env: NodeJS.ProcessEnv = process.env,
++): OpenWikiShellMode | undefined {
++  const value = env[OPENWIKI_SHELL_MODE_ENV_KEY];
++  if (value === undefined) return undefined;
++  if (value !== "restricted") {
++    throw new Error(
++      `Invalid ${OPENWIKI_SHELL_MODE_ENV_KEY}. Expected "restricted" when set.`,
++    );
++  }
++  return value;
++}
++
+ export type ProviderModelOption = {
+   id: string;
+   label: string;
+diff --git a/src/config/env.ts b/src/config/env.ts
+index 582ce64..845e09d 100644
+--- a/src/config/env.ts
++++ b/src/config/env.ts
+@@ -1,6 +1,5 @@
+ import { mkdir, readFile, writeFile, chmod, rename } from "node:fs/promises";
+ import { randomUUID } from "node:crypto";
+-import os from "node:os";
+ import path from "node:path";
+ import {
+   ANTHROPIC_API_KEY_ENV_KEY,
+@@ -60,12 +59,18 @@ import {
+   OPENWIKI_MODEL_ID_ENV_KEY,
+   OPENWIKI_PROVIDER_ENV_KEY,
+   OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY,
++  OPENWIKI_REASONING_EFFORT_ENV_KEY,
++  OPENWIKI_RUN_POLICY_FILE_ENV_KEY,
++  OPENWIKI_SHELL_MODE_ENV_KEY,
++  resolveOpenWikiShellMode,
++  resolveReasoningEffort,
+   resolveProviderRetryAttempts,
+ } from "./constants.js";
+ import { isFileNotFoundError } from "../platform/fs-errors.js";
++import { openWikiHomeDir } from "./openwiki-home.js";
+ import { restrictDirToCurrentUser } from "../platform/windows-acl.js";
+ 
+-export const openWikiEnvDir = path.join(os.homedir(), ".openwiki");
++export const openWikiEnvDir = openWikiHomeDir;
+ export const openWikiEnvPath = path.join(openWikiEnvDir, ".env");
+ 
+ type EnvMap = Record<string, string>;
+@@ -125,6 +130,8 @@ export const MANAGED_ENV_KEYS = [
+   BEDROCK_AWS_REGION_ENV_KEY,
+   OPENWIKI_PROVIDER_ENV_KEY,
+   OPENWIKI_MODEL_ID_ENV_KEY,
++  OPENWIKI_REASONING_EFFORT_ENV_KEY,
++  OPENWIKI_SHELL_MODE_ENV_KEY,
+   OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY,
+   OPENWIKI_NOTION_TOKEN_ENV_KEY,
+   OPENWIKI_NOTION_MCP_CLIENT_ID_ENV_KEY,
+@@ -180,6 +187,7 @@ export const CREDENTIAL_DIAGNOSTIC_ENV_KEYS: readonly string[] = [
+  */
+ export const DEBUG_ENV_KEYS: readonly string[] = [
+   ...MANAGED_ENV_KEYS,
++  OPENWIKI_RUN_POLICY_FILE_ENV_KEY,
+   "LANGCHAIN_ENDPOINT",
+ ];
+ 
+@@ -386,12 +394,16 @@ function createCredentialDiagnostic(
+         ? getModelWarnings(value)
+         : key === OPENWIKI_PROVIDER_ENV_KEY
+           ? getProviderWarnings(value)
+-          : key === OPENAI_COMPATIBLE_USE_RESPONSES_API_ENV_KEY
+-            ? getBooleanWarnings(value)
+-            : key === OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY
+-              ? getRetryAttemptsWarnings(value)
+-              : (getBaseUrlDiagnosticWarnings(key, value) ??
+-                getCredentialWarnings(value)),
++          : key === OPENWIKI_REASONING_EFFORT_ENV_KEY
++            ? getReasoningEffortWarnings(value)
++            : key === OPENWIKI_SHELL_MODE_ENV_KEY
++              ? getShellModeWarnings(value)
++              : key === OPENAI_COMPATIBLE_USE_RESPONSES_API_ENV_KEY
++                ? getBooleanWarnings(value)
++                : key === OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY
++                  ? getRetryAttemptsWarnings(value)
++                  : (getBaseUrlDiagnosticWarnings(key, value) ??
++                    getCredentialWarnings(value)),
+   };
+ }
+ 
+@@ -449,6 +461,8 @@ function isNonSecretDiagnosticKey(key: string): boolean {
+   return (
+     key === OPENWIKI_MODEL_ID_ENV_KEY ||
+     key === OPENWIKI_PROVIDER_ENV_KEY ||
++    key === OPENWIKI_REASONING_EFFORT_ENV_KEY ||
++    key === OPENWIKI_SHELL_MODE_ENV_KEY ||
+     key === OPENWIKI_PROVIDER_RETRY_ATTEMPTS_ENV_KEY ||
+     key === OPENWIKI_OPENROUTER_MAX_TOKENS_ENV_KEY ||
+     key === OPENWIKI_OPENROUTER_PROVIDER_ONLY_ENV_KEY ||
+@@ -505,6 +519,24 @@ function getProviderWarnings(value: string): string[] {
+   return normalizeProvider(value) === null ? ["invalid provider"] : [];
+ }
+ 
++function getReasoningEffortWarnings(value: string): string[] {
++  try {
++    resolveReasoningEffort({ [OPENWIKI_REASONING_EFFORT_ENV_KEY]: value });
++    return [];
++  } catch {
++    return ["invalid reasoning effort"];
++  }
++}
++
++function getShellModeWarnings(value: string): string[] {
++  try {
++    resolveOpenWikiShellMode({ [OPENWIKI_SHELL_MODE_ENV_KEY]: value });
++    return [];
++  } catch {
++    return ["invalid shell mode"];
++  }
++}
++
+ function getBooleanWarnings(value: string): string[] {
+   return booleanDiagnosticValues.has(value.trim().toLowerCase())
+     ? []
+diff --git a/src/config/openwiki-home.ts b/src/config/openwiki-home.ts
+index 7d3a320..3796c57 100644
+--- a/src/config/openwiki-home.ts
++++ b/src/config/openwiki-home.ts
+@@ -3,7 +3,13 @@ import os from "node:os";
+ import path from "node:path";
+ import { restrictDirToCurrentUser } from "../platform/windows-acl.js";
+ 
+-export const openWikiHomeDir = path.join(os.homedir(), ".openwiki");
++export const OPENWIKI_HOME_ENV_KEY = "OPENWIKI_HOME";
++
++const configuredOpenWikiHome = process.env[OPENWIKI_HOME_ENV_KEY];
++
++export const openWikiHomeDir = configuredOpenWikiHome
++  ? path.resolve(configuredOpenWikiHome)
++  : path.join(os.homedir(), ".openwiki");
+ export const openWikiConnectorsDir = path.join(openWikiHomeDir, "connectors");
+ export const openWikiConversationHistoryDir = path.join(
+   openWikiHomeDir,
+diff --git a/src/ingestion/code-mode.ts b/src/ingestion/code-mode.ts
+index 09723e0..ae3e356 100644
+--- a/src/ingestion/code-mode.ts
++++ b/src/ingestion/code-mode.ts
+@@ -40,6 +40,16 @@ export interface CodeModeRepoSetupOptions {
+   env?: NodeJS.ProcessEnv;
+ }
+ 
++/**
++ * CLI connector ingestion runs before the policy-aware backend exists. A
++ * configured run policy disables that pre-agent path unconditionally.
++ */
++export function shouldRunCodeModeConnectors(
++  runPolicyPath: string | undefined,
++): boolean {
++  return runPolicyPath === undefined;
++}
++
+ /**
+  * Ensure the repo is set up for code mode: refresh the managed agent-instruction
+  * snippets, and, when `options.createWorkflow` is set, create the scheduled-update
+diff --git a/test/agent/reasoning-effort-selfopenwiki.test.ts b/test/agent/reasoning-effort-selfopenwiki.test.ts
+new file mode 100644
+index 0000000..7b1a298
+--- /dev/null
++++ b/test/agent/reasoning-effort-selfopenwiki.test.ts
+@@ -0,0 +1,149 @@
++import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++import { createModel } from "../../src/agent/index.ts";
++
++const REASONING_EFFORT_KEY = "OPENWIKI_REASONING_EFFORT";
++const OPENAI_API_KEY = "OPENAI_API_KEY";
++const CHATGPT_ACCESS_TOKEN = "OPENAI_CHATGPT_ACCESS_TOKEN";
++const CHATGPT_REFRESH_TOKEN = "OPENAI_CHATGPT_REFRESH_TOKEN";
++const CHATGPT_ACCOUNT_ID = "OPENAI_CHATGPT_ACCOUNT_ID";
++const CHATGPT_EXPIRES_AT = "OPENAI_CHATGPT_EXPIRES_AT";
++const ENV_KEYS = [
++  REASONING_EFFORT_KEY,
++  OPENAI_API_KEY,
++  CHATGPT_ACCESS_TOKEN,
++  CHATGPT_REFRESH_TOKEN,
++  CHATGPT_ACCOUNT_ID,
++  CHATGPT_EXPIRES_AT,
++] as const;
++
++type OpenAIModelForTest = {
++  clientConfig?: { fetch?: typeof fetch };
++  invocationParams(options: Record<string, never>): Record<string, unknown>;
++};
++
++let savedEnv: Record<(typeof ENV_KEYS)[number], string | undefined>;
++
++beforeEach(() => {
++  savedEnv = Object.fromEntries(
++    ENV_KEYS.map((key) => [key, process.env[key]]),
++  ) as typeof savedEnv;
++
++  delete process.env[REASONING_EFFORT_KEY];
++  process.env[OPENAI_API_KEY] = "sk-test-openai-key";
++  process.env[CHATGPT_ACCESS_TOKEN] = "test-access-token";
++  process.env[CHATGPT_REFRESH_TOKEN] = "test-refresh-token";
++  process.env[CHATGPT_ACCOUNT_ID] = "test-account-id";
++  process.env[CHATGPT_EXPIRES_AT] = String(Date.now() + 60_000);
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++
++  for (const key of ENV_KEYS) {
++    restoreEnv(key, savedEnv[key]);
++  }
++});
++
++describe("OPENWIKI_REASONING_EFFORT", () => {
++  test.each(["low", "medium", "high", "xhigh", "max", "ultra"])(
++    "forwards supported effort %s to OpenAI Responses requests",
++    (effort) => {
++      process.env[REASONING_EFFORT_KEY] = effort;
++
++      const model = createModel("openai", "gpt-5.5", 0) as OpenAIModelForTest;
++
++      expect(model.invocationParams({}).reasoning).toEqual({ effort });
++    },
++  );
++
++  test.each(["", "unknown-canary-effort"])(
++    "rejects invalid effort %j locally without echoing configured values",
++    (effort) => {
++      process.env[REASONING_EFFORT_KEY] = effort;
++
++      let thrown: unknown;
++      try {
++        createModel("openai", "gpt-5.5", 0);
++      } catch (error) {
++        thrown = error;
++      }
++
++      expect(thrown).toBeInstanceOf(Error);
++      const message = (thrown as Error).message;
++      expect(message).toContain(REASONING_EFFORT_KEY);
++      expect(message).not.toContain("sk-test-openai-key");
++      if (effort.length > 0) {
++        expect(message).not.toContain(effort);
++      }
++    },
++  );
++
++  test("preserves upstream OpenAI request parameters when unset", () => {
++    const model = createModel("openai", "gpt-5.5", 0) as OpenAIModelForTest;
++
++    expect(model.invocationParams({}).reasoning).toBeUndefined();
++  });
++
++  test("does not forward effort to a non-OpenAI Responses provider", () => {
++    process.env[REASONING_EFFORT_KEY] = "xhigh";
++
++    const model = createModel("copilot", "gpt-5.5", 0) as OpenAIModelForTest;
++
++    expect(model.invocationParams({}).reasoning).toBeUndefined();
++  });
++
++  test("sends the configured OpenAI effort in the final Responses HTTP body", async () => {
++    process.env[REASONING_EFFORT_KEY] = "xhigh";
++    const fetchMock = vi.fn(() =>
++      Promise.reject(new Error("stop after capturing OpenAI request")),
++    );
++    vi.stubGlobal("fetch", fetchMock);
++
++    const model = createModel("openai", "gpt-5.5", 0);
++
++    await expect(model.invoke("Capture this request.")).rejects.toThrow();
++
++    expect(fetchMock).toHaveBeenCalledOnce();
++    const [input, init] = fetchMock.mock.calls[0] as [
++      string | URL | Request,
++      RequestInit,
++    ];
++    const requestUrl = input instanceof Request ? input.url : String(input);
++    expect(new URL(requestUrl).pathname.endsWith("/responses")).toBe(true);
++    expect(JSON.parse(String(init.body)).reasoning).toEqual({
++      effort: "xhigh",
++    });
++  });
++
++  test("injects the configured ChatGPT effort at the final fetch boundary", async () => {
++    process.env[REASONING_EFFORT_KEY] = "xhigh";
++    const fetchMock = vi.fn(() => Promise.resolve(new Response()));
++    vi.stubGlobal("fetch", fetchMock);
++
++    const model = createModel(
++      "openai-chatgpt",
++      "gpt-5.6-sol",
++      0,
++    ) as OpenAIModelForTest;
++    const configuredFetch = model.clientConfig?.fetch;
++
++    expect(configuredFetch).toBeTypeOf("function");
++    await configuredFetch?.("https://chatgpt.com/backend-api/codex/responses", {
++      body: JSON.stringify({ input: [] }),
++      method: "POST",
++    });
++
++    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
++    expect(JSON.parse(String(init.body)).reasoning).toEqual({
++      effort: "xhigh",
++    });
++  });
++});
++
++function restoreEnv(key: string, value: string | undefined): void {
++  if (value === undefined) {
++    delete process.env[key];
++  } else {
++    process.env[key] = value;
++  }
++}
+diff --git a/test/agent/run-policy-selfopenwiki.test.ts b/test/agent/run-policy-selfopenwiki.test.ts
+new file mode 100644
+index 0000000..2002902
+--- /dev/null
++++ b/test/agent/run-policy-selfopenwiki.test.ts
+@@ -0,0 +1,455 @@
++import {
++  mkdir,
++  mkdtemp,
++  readFile,
++  rename,
++  rm,
++  symlink,
++  writeFile,
++} from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { createFilesystemMiddleware, LocalShellBackend } from "deepagents";
++import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++import {
++  OPENWIKI_RUN_POLICY_FILE_ENV_KEY,
++  OPENWIKI_SHELL_MODE_ENV_KEY,
++} from "../../src/config/constants.ts";
++import { OpenWikiLocalShellBackend } from "../../src/agent/docs-only-backend.ts";
++import {
++  AGENT_FILESYSTEM_PERMISSIONS,
++  createAgentBackend,
++  shouldRegisterConnectorTools,
++} from "../../src/agent/index.ts";
++import { loadOpenWikiRunPolicy } from "../../src/agent/run-policy.ts";
++
++type Permission = "read" | "write" | "list";
++
++type PolicyFixture = {
++  controlDir: string;
++  policyPath: string;
++  rootDir: string;
++  skillsDir: string;
++  sourceDir: string;
++  tempDir: string;
++  wikiDir: string;
++};
++
++const tempDirs: string[] = [];
++let savedRunPolicyFile: string | undefined;
++let savedShellMode: string | undefined;
++
++beforeEach(() => {
++  savedRunPolicyFile = process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY];
++  savedShellMode = process.env[OPENWIKI_SHELL_MODE_ENV_KEY];
++  delete process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY];
++  delete process.env[OPENWIKI_SHELL_MODE_ENV_KEY];
++});
++
++afterEach(async () => {
++  vi.restoreAllMocks();
++  restoreEnv(OPENWIKI_RUN_POLICY_FILE_ENV_KEY, savedRunPolicyFile);
++  restoreEnv(OPENWIKI_SHELL_MODE_ENV_KEY, savedShellMode);
++  await Promise.all(
++    tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
++  );
++});
++
++describe("OPENWIKI_RUN_POLICY_FILE", () => {
++  test("keeps upstream behavior when no policy is configured", async () => {
++    const fixture = await createPolicyFixture();
++    const backend = OpenWikiLocalShellBackend.fromEnvironment({
++      rootDir: fixture.rootDir,
++      virtualMode: true,
++    });
++
++    expect(backend.connectorsDisabled).toBe(false);
++    expect(shouldRegisterConnectorTools(backend)).toBe(true);
++    await expect(backend.read("/unmanaged.txt")).resolves.toEqual(
++      expect.objectContaining({
++        content: expect.stringContaining("unmanaged"),
++      }),
++    );
++  });
++
++  test("strictly rejects malformed, mismatched, overlapping, and in-root policies", async () => {
++    const fixture = await createPolicyFixture();
++
++    expect(() =>
++      loadOpenWikiRunPolicy("relative-policy.json", fixture.rootDir),
++    ).toThrow(/absolute/iu);
++
++    await writePolicy(fixture, { extra: true });
++    expect(() =>
++      loadOpenWikiRunPolicy(fixture.policyPath, fixture.rootDir),
++    ).toThrow(/policy/iu);
++
++    await writePolicy(fixture, {
++      rootDir: path.join(fixture.tempDir, "other"),
++    });
++    expect(() =>
++      loadOpenWikiRunPolicy(fixture.policyPath, fixture.rootDir),
++    ).toThrow(/root/iu);
++
++    await writePolicy(fixture, {
++      mounts: [
++        mount("wiki", fixture.wikiDir, ["read", "list"]),
++        mount("nested", path.join(fixture.wikiDir, "nested"), ["read"]),
++      ],
++    });
++    await mkdir(path.join(fixture.wikiDir, "nested"));
++    expect(() =>
++      loadOpenWikiRunPolicy(fixture.policyPath, fixture.rootDir),
++    ).toThrow(/overlap/iu);
++
++    const inRootPolicy = path.join(fixture.rootDir, "policy.json");
++    await writeFile(
++      inRootPolicy,
++      JSON.stringify(createPolicy(fixture), null, 2),
++      "utf8",
++    );
++    expect(() => loadOpenWikiRunPolicy(inRootPolicy, fixture.rootDir)).toThrow(
++      /outside|visible/iu,
++    );
++  });
++
++  test("defaults Wiki index synchronization on and accepts only an explicit boolean override", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++
++    expect(
++      loadOpenWikiRunPolicy(fixture.policyPath, fixture.rootDir)
++        .synchronizeWikiIndexes,
++    ).toBe(true);
++
++    await writePolicy(fixture, { synchronizeWikiIndexes: false });
++    expect(
++      loadOpenWikiRunPolicy(fixture.policyPath, fixture.rootDir)
++        .synchronizeWikiIndexes,
++    ).toBe(false);
++
++    await writePolicy(fixture, { synchronizeWikiIndexes: "false" });
++    expect(() =>
++      loadOpenWikiRunPolicy(fixture.policyPath, fixture.rootDir),
++    ).toThrow(/strict schema|policy/iu);
++  });
++
++  test("enforces read, write, and discovery permissions with unknown paths denied", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++    const backend = await createPolicyBackend(fixture);
++
++    const wikiRead = await backend.read("/wiki/page.md");
++    expect(wikiRead.error).toBeUndefined();
++    expect(wikiRead.content).toContain("wiki");
++
++    const rawRead = await backend.readRaw("/wiki/page.md");
++    expect(rawRead.error).toBeUndefined();
++
++    const wikiWrite = await backend.write("/wiki/changed.md", "blocked");
++    expect(wikiWrite.error).toContain("run policy");
++
++    const wikiEdit = await backend.edit("/wiki/page.md", "wiki", "blocked");
++    expect(wikiEdit.error).toContain("run policy");
++
++    const sourceRead = await backend.read("/sources/code.cpp");
++    expect(sourceRead.error).toBeUndefined();
++
++    const sourceWrite = await backend.write("/sources/code.cpp", "blocked");
++    expect(sourceWrite.error).toContain("run policy");
++
++    const controlWrite = await backend.write("/control/result.json", "{}");
++    expect(controlWrite.error).toBeUndefined();
++
++    const controlEdit = await backend.edit(
++      "/control/result.json",
++      "{}",
++      '{"ok":true}',
++    );
++    expect(controlEdit.error).toBeUndefined();
++
++    const wikiLs = await backend.ls("/wiki");
++    expect(wikiLs.error).toBeUndefined();
++    expect(wikiLs.files?.some((file) => file.path.endsWith("page.md"))).toBe(
++      true,
++    );
++
++    const wikiGlob = await backend.glob("*.md", "/wiki");
++    expect(wikiGlob.files?.some((file) => file.path.endsWith("page.md"))).toBe(
++      true,
++    );
++
++    const wikiGrep = await backend.grep("wiki", "/wiki", "*.md");
++    expect(
++      wikiGrep.matches?.some((match) => match.path.endsWith("page.md")),
++    ).toBe(true);
++
++    const downloads = await backend.downloadFiles([
++      "/sources/code.cpp",
++      "/unmanaged.txt",
++    ]);
++    expect(downloads[0]?.error).toBeNull();
++    expect(downloads[1]?.error).toBe("permission_denied");
++
++    const uploads = await backend.uploadFiles([
++      ["/control/upload.json", new TextEncoder().encode("{}")],
++      ["/wiki/upload.md", new TextEncoder().encode("blocked")],
++    ]);
++    expect(uploads[0]?.error).toBeNull();
++    expect(uploads[1]?.error).toBe("permission_denied");
++
++    const unknownRead = await backend.read("/unmanaged.txt");
++    expect(unknownRead.error).toContain("run policy");
++
++    const traversal = await backend.read("/wiki/../../unmanaged.txt");
++    expect(traversal.error).toContain("run policy");
++
++    const backslashTraversal = await backend.read("\\wiki\\..\\unmanaged.txt");
++    expect(backslashTraversal.error).toBeDefined();
++
++    if (process.platform === "win32") {
++      const caseAlias = await backend.read("/WIKI/page.md");
++      expect(caseAlias.error).toBeUndefined();
++    }
++  });
++
++  test("fails closed after the policy file changes", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++    const backend = await createPolicyBackend(fixture);
++
++    await writePolicy(fixture, { disableConnectors: false });
++
++    const result = await backend.read("/wiki/page.md");
++    expect(result.error).toContain("changed");
++  });
++
++  test("binds the policy file identity and rejects an atomic replacement", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++    const backend = await createPolicyBackend(fixture);
++    const replacement = `${fixture.policyPath}.replacement`;
++
++    await writeFile(
++      replacement,
++      await readFile(fixture.policyPath, "utf8"),
++      "utf8",
++    );
++    await rename(replacement, fixture.policyPath);
++
++    const result = await backend.read("/wiki/page.md");
++    expect(result.error).toContain("changed");
++    expect(() => backend.connectorsDisabled).toThrow(/changed/iu);
++  });
++
++  test("rejects a junction escape even when its target exists", async () => {
++    const fixture = await createPolicyFixture();
++    const outsideDir = path.join(fixture.tempDir, "outside");
++    await mkdir(outsideDir);
++    await writeFile(path.join(outsideDir, "secret.txt"), "secret", "utf8");
++    await symlink(outsideDir, path.join(fixture.wikiDir, "escape"), "junction");
++    await writePolicy(fixture);
++    const backend = await createPolicyBackend(fixture);
++
++    const result = await backend.read("/wiki/escape/secret.txt");
++    expect(result.error).toContain("run policy");
++
++    const discovery = await backend.glob("**/*", "/wiki");
++    expect(discovery.error).toContain("run policy");
++    expect(discovery.files).toEqual([]);
++  });
++
++  test("never rebases host-absolute discovery results into an allowed mount", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++    const backend = await createPolicyBackend(fixture);
++    vi.spyOn(LocalShellBackend.prototype, "glob").mockResolvedValue({
++      files: [
++        { is_dir: false, path: "\\\\server\\share\\secret.md" },
++        { is_dir: false, path: "C:\\outside\\secret.md" },
++        { is_dir: false, path: "/page.md" },
++      ],
++    });
++
++    const result = await backend.glob("*.md", "/wiki");
++
++    expect(result.error).toBeUndefined();
++    expect(result.files).toEqual([{ is_dir: false, path: "/page.md" }]);
++  });
++
++  test("keeps policy enforcement across composite skills and history paths", async () => {
++    const fixture = await createPolicyFixture();
++    const historyDir = path.join(fixture.tempDir, "history");
++    await mkdir(historyDir);
++    await writeFile(path.join(historyDir, "secret.md"), "secret", "utf8");
++    await writePolicy(fixture);
++    const wikiBackend = await createPolicyBackend(fixture);
++    const backend = createAgentBackend(wikiBackend, {
++      historyDir,
++      skillsDir: fixture.skillsDir,
++    });
++
++    const skillRead = await backend.read("/skills/SKILL.md");
++    expect(skillRead.error).toBeUndefined();
++    expect(skillRead.content).toContain("skill");
++
++    const skillWrite = await backend.write("/skills/changed.md", "blocked");
++    expect(skillWrite.error).toContain("run policy");
++
++    const historyRead = await backend.read("/conversation_history/secret.md");
++    expect(historyRead.error).toContain("run policy");
++  });
++
++  test("routes a policy-declared history mount so filesystem permissions remain valid", async () => {
++    const fixture = await createPolicyFixture();
++    const historyDir = path.join(fixture.rootDir, "conversation_history");
++    await mkdir(historyDir);
++    const policy = createPolicy(fixture) as {
++      mounts: Record<string, unknown>[];
++    };
++    await writePolicy(fixture, {
++      mounts: [
++        ...policy.mounts,
++        mount("conversation-history", historyDir, ["read", "write", "list"]),
++      ],
++    });
++    const wikiBackend = await createPolicyBackend(fixture);
++    const backend = createAgentBackend(wikiBackend, {
++      historyDir,
++      skillsDir: fixture.skillsDir,
++    });
++
++    expect(backend.routePrefixes).toContain("/conversation_history/");
++    expect(() =>
++      createFilesystemMiddleware({
++        backend,
++        permissions: AGENT_FILESYSTEM_PERMISSIONS,
++      }),
++    ).not.toThrow();
++  });
++
++  test("disables connectors and composes with restricted shell", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++    process.env[OPENWIKI_SHELL_MODE_ENV_KEY] = "restricted";
++    const backend = await createPolicyBackend(fixture);
++
++    expect(backend.connectorsDisabled).toBe(true);
++    expect(shouldRegisterConnectorTools(backend)).toBe(false);
++
++    const execute = await backend.execute("pwd");
++    expect(execute.exitCode).toBe(1);
++    expect(execute.output).toContain("restricted");
++  });
++
++  test("refuses to activate a run policy without restricted shell mode", async () => {
++    const fixture = await createPolicyFixture();
++    await writePolicy(fixture);
++    process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY] = fixture.policyPath;
++
++    expect(() =>
++      OpenWikiLocalShellBackend.fromEnvironment({
++        rootDir: fixture.rootDir,
++        virtualMode: true,
++      }),
++    ).toThrow(/restricted/iu);
++  });
++
++  test("fails closed when the policy environment variable is present but empty", async () => {
++    const fixture = await createPolicyFixture();
++    process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY] = "";
++    process.env[OPENWIKI_SHELL_MODE_ENV_KEY] = "restricted";
++
++    expect(() =>
++      OpenWikiLocalShellBackend.fromEnvironment({
++        rootDir: fixture.rootDir,
++        virtualMode: true,
++      }),
++    ).toThrow(/absolute|policy/iu);
++  });
++});
++
++async function createPolicyFixture(): Promise<PolicyFixture> {
++  const tempDir = await mkdtemp(path.join(os.tmpdir(), "openwiki-policy-"));
++  tempDirs.push(tempDir);
++  const rootDir = path.join(tempDir, "agent-root");
++  const wikiDir = path.join(rootDir, "wiki");
++  const sourceDir = path.join(rootDir, "sources");
++  const skillsDir = path.join(rootDir, "skills");
++  const controlDir = path.join(rootDir, "control");
++  const policyPath = path.join(tempDir, "run-policy.json");
++
++  await Promise.all(
++    [rootDir, wikiDir, sourceDir, skillsDir, controlDir].map((dir) =>
++      mkdir(dir, { recursive: true }),
++    ),
++  );
++  await Promise.all([
++    writeFile(path.join(rootDir, "unmanaged.txt"), "unmanaged", "utf8"),
++    writeFile(path.join(wikiDir, "page.md"), "wiki", "utf8"),
++    writeFile(path.join(sourceDir, "code.cpp"), "source", "utf8"),
++    writeFile(path.join(skillsDir, "SKILL.md"), "skill", "utf8"),
++  ]);
++
++  return {
++    controlDir,
++    policyPath,
++    rootDir,
++    skillsDir,
++    sourceDir,
++    tempDir,
++    wikiDir,
++  };
++}
++
++async function createPolicyBackend(
++  fixture: PolicyFixture,
++): Promise<OpenWikiLocalShellBackend> {
++  process.env[OPENWIKI_RUN_POLICY_FILE_ENV_KEY] = fixture.policyPath;
++  process.env[OPENWIKI_SHELL_MODE_ENV_KEY] = "restricted";
++  return OpenWikiLocalShellBackend.fromEnvironment({
++    rootDir: fixture.rootDir,
++    virtualMode: true,
++  });
++}
++
++function createPolicy(fixture: PolicyFixture): Record<string, unknown> {
++  return {
++    disableConnectors: true,
++    mounts: [
++      mount("wiki", fixture.wikiDir, ["read", "list"]),
++      mount("sources", fixture.sourceDir, ["read", "list"]),
++      mount("skills", fixture.skillsDir, ["read", "list"]),
++      mount("control", fixture.controlDir, ["read", "write", "list"]),
++    ],
++    rootDir: fixture.rootDir,
++    version: 1,
++  };
++}
++
++async function writePolicy(
++  fixture: PolicyFixture,
++  overrides: Record<string, unknown> = {},
++): Promise<void> {
++  await writeFile(
++    fixture.policyPath,
++    JSON.stringify({ ...createPolicy(fixture), ...overrides }, null, 2),
++    "utf8",
++  );
++}
++
++function mount(
++  id: string,
++  mountPath: string,
++  permissions: Permission[],
++): Record<string, unknown> {
++  return { id, path: mountPath, permissions };
++}
++
++function restoreEnv(key: string, value: string | undefined): void {
++  if (value === undefined) {
++    delete process.env[key];
++  } else {
++    process.env[key] = value;
++  }
++}
+diff --git a/test/agent/shell-mode-selfopenwiki.test.ts b/test/agent/shell-mode-selfopenwiki.test.ts
+new file mode 100644
+index 0000000..ff0c815
+--- /dev/null
++++ b/test/agent/shell-mode-selfopenwiki.test.ts
+@@ -0,0 +1,214 @@
++import { mkdtemp, rm, writeFile } from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { LocalShellBackend } from "deepagents";
++import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++import {
++  OPENWIKI_SHELL_MODE_ENV_KEY,
++  resolveOpenWikiShellMode,
++} from "../../src/config/constants.ts";
++import { OpenWikiLocalShellBackend } from "../../src/agent/docs-only-backend.ts";
++import { OpenWikiIgnore } from "../../src/agent/openwiki-ignore.ts";
++
++const tempDirs: string[] = [];
++let originalShellMode: string | undefined;
++
++beforeEach(() => {
++  originalShellMode = process.env[OPENWIKI_SHELL_MODE_ENV_KEY];
++  delete process.env[OPENWIKI_SHELL_MODE_ENV_KEY];
++});
++
++afterEach(async () => {
++  vi.restoreAllMocks();
++
++  if (originalShellMode === undefined) {
++    delete process.env[OPENWIKI_SHELL_MODE_ENV_KEY];
++  } else {
++    process.env[OPENWIKI_SHELL_MODE_ENV_KEY] = originalShellMode;
++  }
++
++  await Promise.all(
++    tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })),
++  );
++});
++
++describe("OPENWIKI_SHELL_MODE", () => {
++  test("parses restricted mode and preserves the unset default", () => {
++    expect(resolveOpenWikiShellMode({})).toBeUndefined();
++    expect(
++      resolveOpenWikiShellMode({
++        [OPENWIKI_SHELL_MODE_ENV_KEY]: "restricted",
++      }),
++    ).toBe("restricted");
++  });
++
++  test.each(["", "unrestricted", "RESTRICTED", "secret-canary-mode"])(
++    "rejects invalid mode %j without echoing it",
++    (mode) => {
++      let thrown: unknown;
++
++      try {
++        resolveOpenWikiShellMode({ [OPENWIKI_SHELL_MODE_ENV_KEY]: mode });
++      } catch (error) {
++        thrown = error;
++      }
++
++      expect(thrown).toBeInstanceOf(Error);
++      const message = (thrown as Error).message;
++      expect(message).toContain(OPENWIKI_SHELL_MODE_ENV_KEY);
++      if (mode.length > 0) {
++        expect(message).not.toContain(mode);
++      }
++    },
++  );
++
++  test.each([
++    "pwd",
++    "git --no-pager rev-parse HEAD",
++    "rg secret .",
++    "powershell -NoProfile -Command Get-Content .env",
++    "cmd /c type .env",
++    "node -e \"process.stdout.write('x')\"",
++    "pwd && type .env",
++    "C:\\Windows\\System32\\cmd.exe /c dir",
++  ])(
++    "rejects every execute command in restricted mode: %s",
++    async (command) => {
++      const execute = vi
++        .spyOn(LocalShellBackend.prototype, "execute")
++        .mockResolvedValue({
++          exitCode: 0,
++          output: "unexpected",
++          truncated: false,
++        });
++      const backend = await createBackend({ shellMode: "restricted" });
++
++      await expect(backend.execute(command)).resolves.toEqual({
++        exitCode: 1,
++        output: expect.stringContaining("restricted"),
++        truncated: false,
++      });
++      expect(execute).not.toHaveBeenCalled();
++    },
++  );
++
++  test("keeps upstream execute behavior when mode is unset", async () => {
++    const execute = vi
++      .spyOn(LocalShellBackend.prototype, "execute")
++      .mockResolvedValue({ exitCode: 0, output: "upstream", truncated: false });
++    const backend = await createBackend();
++
++    await expect(backend.execute("any upstream command")).resolves.toEqual({
++      exitCode: 0,
++      output: "upstream",
++      truncated: false,
++    });
++    expect(execute).toHaveBeenCalledOnce();
++  });
++
++  test("applies the environment mode through the production backend factory", async () => {
++    process.env[OPENWIKI_SHELL_MODE_ENV_KEY] = "restricted";
++    const execute = vi
++      .spyOn(LocalShellBackend.prototype, "execute")
++      .mockResolvedValue({
++        exitCode: 0,
++        output: "unexpected",
++        truncated: false,
++      });
++    const backend = await createBackend({}, true);
++
++    const result = await backend.execute("pwd");
++
++    expect(result.exitCode).toBe(1);
++    expect(result.output).toContain("restricted");
++    expect(execute).not.toHaveBeenCalled();
++  });
++
++  test("keeps controlled filesystem tools available in restricted mode", async () => {
++    const backend = await createBackend({ shellMode: "restricted" });
++
++    const write = await backend.write("/notes.md", "before");
++    expect(write.error).toBeUndefined();
++
++    const edit = await backend.edit("/notes.md", "before", "after");
++    expect(edit.error).toBeUndefined();
++
++    const read = await backend.read("/notes.md");
++    expect(read.error).toBeUndefined();
++    expect(read.content).toContain("after");
++
++    const readRaw = await backend.readRaw("/notes.md");
++    expect(readRaw.error).toBeUndefined();
++
++    const ls = await backend.ls("/");
++    expect(ls.error).toBeUndefined();
++    expect(ls.files?.some((file) => file.path.endsWith("notes.md"))).toBe(true);
++
++    const glob = await backend.glob("**/*.md", "/");
++    expect(glob.error).toBeUndefined();
++    expect(glob.files?.some((file) => file.path.endsWith("notes.md"))).toBe(
++      true,
++    );
++
++    const grep = await backend.grep("after", "/", "*.md");
++    expect(grep.error).toBeUndefined();
++    expect(grep.matches?.some((match) => match.path.endsWith("notes.md"))).toBe(
++      true,
++    );
++  });
++
++  test("composes restricted shell with ignore and docs-only rules", async () => {
++    const rootDir = await createTempDir();
++    await writeFile(path.join(rootDir, "secret.txt"), "hidden", "utf8");
++    const backend = new OpenWikiLocalShellBackend({
++      docsOnly: true,
++      openWikiIgnore: OpenWikiIgnore.parse("secret.txt\n"),
++      rootDir,
++      shellMode: "restricted",
++      virtualMode: true,
++    });
++
++    const execute = await backend.execute("pwd");
++    expect(execute.exitCode).toBe(1);
++    expect(execute.output).toContain("restricted");
++
++    const ignoredRead = await backend.read("/secret.txt");
++    expect(ignoredRead.error).toContain(".openwikiignore");
++
++    const allowedWrite = await backend.write("/openwiki/notes.md", "ok");
++    expect(allowedWrite.error).toBeUndefined();
++
++    const blockedWrite = await backend.write("/outside.md", "bad");
++    expect(blockedWrite.error).toContain("may only write under");
++  });
++});
++
++async function createBackend(
++  options: Omit<
++    ConstructorParameters<typeof OpenWikiLocalShellBackend>[0],
++    "rootDir" | "virtualMode"
++  > = {},
++  fromEnvironment = false,
++): Promise<OpenWikiLocalShellBackend> {
++  const rootDir = await createTempDir();
++
++  if (fromEnvironment) {
++    return OpenWikiLocalShellBackend.fromEnvironment({
++      ...options,
++      rootDir,
++      virtualMode: true,
++    });
++  }
++
++  return new OpenWikiLocalShellBackend({
++    ...options,
++    rootDir,
++    virtualMode: true,
++  });
++}
++
++async function createTempDir(): Promise<string> {
++  const rootDir = await mkdtemp(path.join(os.tmpdir(), "openwiki-shell-mode-"));
++  tempDirs.push(rootDir);
++  return rootDir;
++}
+diff --git a/test/cli/runners.test.ts b/test/cli/runners.test.ts
+index 52c7d11..d0a6a13 100644
+--- a/test/cli/runners.test.ts
++++ b/test/cli/runners.test.ts
+@@ -31,6 +31,9 @@ vi.mock("../../src/agent/index.ts", () => ({
+ vi.mock("../../src/ingestion/code-mode.ts", () => ({
+   ensureCodeModeRepoSetup: vi.fn(),
+   runCodeModeConnectors: vi.fn(),
++  shouldRunCodeModeConnectors: vi.fn(
++    (runPolicyPath: string | undefined) => runPolicyPath === undefined,
++  ),
+ }));
+ vi.mock("../../src/ingestion/ingestion.ts", () => ({
+   runOpenWikiIngestion: vi.fn(),
+@@ -71,6 +74,7 @@ import { runOpenWikiAgent } from "../../src/agent/index.ts";
+ import {
+   ensureCodeModeRepoSetup,
+   runCodeModeConnectors,
++  shouldRunCodeModeConnectors,
+ } from "../../src/ingestion/code-mode.ts";
+ import { runOpenWikiIngestion } from "../../src/ingestion/ingestion.ts";
+ import {
+@@ -545,6 +549,33 @@ describe("runPrintCommand", () => {
+     expect(process.exitCode).toBe(0);
+   });
+ 
++  test("does not run pre-agent connectors when a run policy is configured", async () => {
++    process.env.OPENWIKI_RUN_POLICY_FILE = "D:\\control\\run-policy.json";
++    vi.mocked(runOpenWikiAgent).mockResolvedValue(undefined as never);
++
++    await runPrintCommand(
++      makeCommand("run", {
++        command: "init",
++        dryRun: false,
++        language: null,
++        languageWarning: null,
++        mode: "code",
++        modeSource: "option",
++        modelId: null,
++        print: true,
++        shouldStart: true,
++        userMessage: null,
++        telemetryFile: null,
++      }),
++    );
++
++    expect(shouldRunCodeModeConnectors).toHaveBeenCalledWith(
++      "D:\\control\\run-policy.json",
++    );
++    expect(runCodeModeConnectors).not.toHaveBeenCalled();
++    expect(process.exitCode).toBe(0);
++  });
++
+   test("prints the how-to-fix panel on an auth failure and exits 1", async () => {
+     process.env.OPENWIKI_PROVIDER = "anthropic";
+     process.env.ANTHROPIC_API_KEY = FAKE_SECRET;
+diff --git a/test/config/openwiki-home-selfopenwiki.test.ts b/test/config/openwiki-home-selfopenwiki.test.ts
+new file mode 100644
+index 0000000..ff54e8f
+--- /dev/null
++++ b/test/config/openwiki-home-selfopenwiki.test.ts
+@@ -0,0 +1,56 @@
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++
++const OPENWIKI_HOME_ENV_KEY = "OPENWIKI_HOME";
++
++let mockedHome: string;
++
++beforeEach(() => {
++  mockedHome = path.resolve("mock-user-home");
++  delete process.env[OPENWIKI_HOME_ENV_KEY];
++  vi.resetModules();
++  vi.doMock("node:os", async () => {
++    const actual = await vi.importActual<typeof import("node:os")>("node:os");
++    const homedir = (): string => mockedHome;
++    return {
++      ...actual,
++      homedir,
++      default: { ...(actual.default as typeof import("node:os")), homedir },
++    };
++  });
++});
++
++afterEach(() => {
++  delete process.env[OPENWIKI_HOME_ENV_KEY];
++  vi.doUnmock("node:os");
++  vi.resetModules();
++});
++
++describe("OpenWiki home paths", () => {
++  test("resolves every home-derived directory from OPENWIKI_HOME", async () => {
++    const configuredHome = path.join(mockedHome, "self-openwiki", "..", "runtime");
++    process.env[OPENWIKI_HOME_ENV_KEY] = configuredHome;
++
++    const home = await import("../../src/config/openwiki-home.ts");
++    const expectedHome = path.resolve(configuredHome);
++
++    expect(home.openWikiHomeDir).toBe(expectedHome);
++    expect(home.openWikiConnectorsDir).toBe(
++      path.join(expectedHome, "connectors"),
++    );
++    expect(home.openWikiConversationHistoryDir).toBe(
++      path.join(expectedHome, "conversation_history"),
++    );
++    expect(home.openWikiLocalWikiDir).toBe(path.join(expectedHome, "wiki"));
++    expect(home.openWikiSkillsDir).toBe(path.join(expectedHome, "skills"));
++    expect(home.getConnectorDir("git-repo")).toBe(
++      path.join(expectedHome, "connectors", "git-repo"),
++    );
++  });
++
++  test("keeps the legacy user-home default when OPENWIKI_HOME is unset", async () => {
++    const home = await import("../../src/config/openwiki-home.ts");
++
++    expect(home.openWikiHomeDir).toBe(path.join(mockedHome, ".openwiki"));
++  });
++});

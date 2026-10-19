@@ -1,0 +1,5 @@
+# Only machine-local transaction state; formal knowledge remains versioned.
+/.selfopenwiki/
+/.selfworkflow/
+*.tmp
+*.temp

@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: implement-spec
-sourceHash: sha256:f6d87cff0d17380bb474eea65ee308dd22288486161899fa4bb80e19fe2ebe7d
+sourceHash: sha256:d961a0a811325510e32491f99a40365f825d7b77e2f108f5e4ec5408c93094c5
 stage: implemented
 slot: implement.spec
 selectionMode: static

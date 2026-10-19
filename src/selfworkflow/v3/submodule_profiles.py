@@ -19,6 +19,10 @@ _NORMAL_PATHS = (
     "dependencies/upstream/ui-ux-pro-max", "dependencies/upstream/composio-skills",
     "dependencies/upstream/obsidian-skills",
 )
+_WIKI_PATHS = (
+    "extensions/knowledge/selfopenwiki/upstream/openwiki",
+    "extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer",
+)
 
 
 class SubmoduleProfileError(RuntimeError):
@@ -27,12 +31,20 @@ class SubmoduleProfileError(RuntimeError):
         super().__init__(reason)
 
 
-def commands_for_profile(profile: str) -> tuple[tuple[str, ...], ...]:
+def _paths_for_profile(profile: str, runtime_profile: str) -> tuple[str, ...]:
     if profile != "normal":
         raise SubmoduleProfileError("submodule-profile-invalid")
+    if runtime_profile not in {"core", "knowledge", "maintainer"}:
+        raise SubmoduleProfileError("runtime-profile-invalid")
+    return _NORMAL_PATHS + (_WIKI_PATHS if runtime_profile == "knowledge" else ())
+
+
+def commands_for_profile(
+    profile: str, *, runtime_profile: str = "core"
+) -> tuple[tuple[str, ...], ...]:
     return tuple(
         command
-        for path in _NORMAL_PATHS
+        for path in _paths_for_profile(profile, runtime_profile)
         for command in (
             ("git", "submodule", "sync", "--", path),
             ("git", "submodule", "update", "--init", "--", path),
@@ -81,16 +93,18 @@ def apply_submodule_profile(
     repository: str | Path,
     profile: str = "normal",
     *,
+    runtime_profile: str = "core",
     runner: Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]] = _native,
 ) -> dict[str, object]:
     """Sync and initialize only allowlisted paths, restoring the old HEAD on failure."""
 
-    commands = commands_for_profile(profile)
+    commands = commands_for_profile(profile, runtime_profile=runtime_profile)
+    paths = _paths_for_profile(profile, runtime_profile)
     root = Path(repository).resolve()
     if not root.is_dir() or not (root / ".git").exists():
         raise SubmoduleProfileError("submodule-repository-invalid")
     states: dict[str, tuple[str, str | None, str | None, str | None]] = {}
-    for submodule_path in _NORMAL_PATHS:
+    for submodule_path in paths:
         listing = runner(
             ("git", "ls-files", "--stage", "--", submodule_path), root
         )
@@ -166,7 +180,8 @@ def apply_submodule_profile(
     return {
         "status": "ready",
         "profile": profile,
-        "paths": list(_NORMAL_PATHS),
+        "paths": list(paths),
+        "runtimeProfile": runtime_profile,
         "commit": commits[_TEA_PATH],
         "commits": commits,
     }
@@ -267,9 +282,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repository", required=True)
     parser.add_argument("--profile", choices=("normal",), default="normal")
+    parser.add_argument("--runtime-profile", choices=("core", "knowledge", "maintainer"), default="core")
     arguments = parser.parse_args(argv)
     try:
-        result = apply_submodule_profile(arguments.repository, arguments.profile)
+        result = apply_submodule_profile(
+            arguments.repository, arguments.profile, runtime_profile=arguments.runtime_profile
+        )
     except SubmoduleProfileError as error:
         print(json.dumps({"status": "failed", "reason": error.reason}, sort_keys=True))
         return 1

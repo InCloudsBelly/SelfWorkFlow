@@ -1,5 +1,24 @@
 # SelfWorkFlow
 
+## 可选 Wiki 模块
+
+SelfOpenWiki 的自有 MCP、配置、个人覆写 Skill 与构建逻辑位于
+`extensions/knowledge/selfopenwiki/`。OpenWiki 和 Viewer 是根 `.gitmodules`
+直接管理的固定版本依赖；`knowledge` 安装 profile 才准备这两个子模块。
+
+```text
+Manage_SelfWorkFlow_Wiki.bat inspect
+Manage_SelfWorkFlow_Wiki.bat setup --with-mcp
+Manage_SelfWorkFlow_Wiki.bat visualize --wiki-root "<absolute-wiki-git-root>"
+selfworkflow wiki inspect --repository "<absolute-selfworkflow-source-root>"
+```
+
+静态 Agent snapshot 保留规则和受控源码，实际工具在显式源仓库的模块目录构建。
+`source-ready` 只说明源码区具备新鲜构建/能力证据，不表示宿主已切换 MCP。
+Wiki 的正文、长期 `.claims` 与可分享来源保存在独立 Wiki Git 仓库；阅读及重新
+绑定不需要携带旧运行区。目录与导入规范见
+[WIKI_LAYOUT.md](extensions/knowledge/selfopenwiki/WIKI_LAYOUT.md)。
+
 SelfWorkFlow is a code-first, vendor-neutral Agent workflow. Its default product is
 a compact operational core, not the repository's complete maintenance and release
 machinery.
@@ -16,9 +35,8 @@ Install_SelfWorkFlow.bat -Profile knowledge
 The installer checks or prepares the repository Python environment, initializes
 the pinned Git Submodules, installs the pinned CodeGraph runtime with Node >=20, and packages only the curated Matt Pocock Skills
 listed in `dependencies/locks/matt-pocock-skills.lock.yaml`. The upstream
-`grilling` and `grill-me` are installed with that curated set. Full automatically
-routes to `grilling`; Deep routes to `grill-me`, whose upstream workflow runs the
-deeper `grilling` frontier. Light remains explicit-only.
+`grilling` and `grill-me` are installed with that curated set. Both are available
+only on explicit user request in every mode; Full/Deep do not enable them.
 SelfWorkflow does not require, install, or default-route to Superpowers.
 
 The installer verifies the pinned CodeGraph runtime and never scans disks for
@@ -58,9 +76,12 @@ For unattended sandboxing or diagnostics, inspect all parameters first:
 The default is an instruction-based `agent-policy`, not a conforming Host.
 Full/Deep describe task depth; they do not activate contract APIs. Ordinary
 tasks reuse explicit authorization within unchanged scope and fresh evidence
-within unchanged inputs. Read-only analysis uses one independent reviewer;
-Full/Deep changes retain the pre-implementation review and post-change
-Standards/Spec pair. Contract-only dispatch, runner, receipts and cleanup
+within unchanged inputs. Full/Deep read-only analysis uses one independent reviewer;
+Full/Deep changes use one post-change independent reviewer covering both
+Standards and Spec. Intermediate plans are self-reviewed; a pre-implementation
+independent gate is reserved for material architecture, security, persistence,
+irreversible risk or explicit request. TEA and full Grilling are explicit-only.
+Contract-only dispatch, runner, receipts and cleanup
 attestation apply only to explicit contract-managed work or tasks accepted by a conforming Host under its contract. Host capability alone does not switch the task mode.
 Unavailable contract capability stops that mode; it is never silently downgraded.
 Instructions do not provide OS-level isolation or replace host permissions.
@@ -105,12 +126,12 @@ needed for the current stage:
 ```text
 classify briefly
 -> locate the owning layer
--> Light: bounded core Design; Full: Matt grilling; Deep: Matt grill-me with a deeper frontier
--> SelfWorkflow Plan; Full/Deep behavior changes require TEA test design, and modifying Full/Deep tasks require pre-implementation Review
+-> bounded core Design/Plan in every mode; TEA and full Grilling only on explicit user request
+-> pre-implementation independent Review only for material architecture/security/persistence/irreversible risk or explicit request
 -> Matt TDD RED/GREEN for behavior changes; diagnosing-bugs may compose with it
 -> implement only the approved smallest safe change
--> review the complete task package; Full/Deep use independent Standards + Spec axes
--> execute package-bound verification and rebuild the package before Complete
+-> review the complete task package; Full/Deep use one independent reviewer covering Standards + Spec
+-> verify the affected behavior before Complete; explicit contract tasks additionally require Host-bound receipts and package-bound verification
 ```
 
 The conceptual sequence is `Discover -> Capability Check -> Classify -> Design ->
@@ -150,8 +171,8 @@ Projects may opt into additional Review expertise with a checked-in
 project-relative Skill files. A missing profile is harmless and is not replaced
 by directory scanning. A Host is given the project root and conversation ID;
 on the first matching Full/Deep code Review it creates the bound session and
-passes the same ordered manifest and verified Skill bytes to both independent
-Standards and Spec reviewers;
+passes the ordered manifest and verified Skill bytes to one independent
+reviewer covering Standards and Spec;
 the Host code route uses an explicit `independent-code-review` payload and receipt
 contract, while the Grill design route remains `independent-design-review`;
 required Skill drift or an unavailable independent context is `unverified` and
@@ -160,18 +181,14 @@ workflow rules. The schema and read-only validator are in
 `schemas/project-review-profile.schema.json` and `selfworkflow project-review
 validate --project-root <project-root>`.
 
-Review models are configured per Agent in the machine-local
-`%LOCALAPPDATA%\SelfWorkFlow\config\review-models.local.yaml` file. Missing
-Agent entries pause Review for user configuration; no model alias or reasoning
-level is inferred. Use `selfworkflow review-model status --agent <id>` to
-inspect a selection and `selfworkflow review-model set --agent <id> --model
-<model> --reasoning-effort <effort> --confirm` to save a confirmed default.
-One-time overrides remain in the current Review dispatch only; they are never a
-generic SubAgent default and are not propagated to other SubAgents. The selected value is
-payload-bound, and the Host must return the same value in its dispatch
-observation; a mismatch fails closed. Model execution is still host-attested
-and must not be claimed from configuration alone. The file is machine-local
-and must not be committed.
+Reviewers inherit the current parent model and reasoning settings. There is no
+Review-specific model configuration or `review-model` CLI; legacy local files
+are left untouched and are not read. Explicit model overrides are rejected.
+Context independence is preserved without importing the author's history.
+Legacy receipt fields remain null for format compatibility, not model proof.
+Reuse unchanged evidence and the existing reviewer for affected rechecks;
+avoid redundant calls, but never stop unfinished work because of a token or
+call-count budget. Same-model dispatch does not guarantee a cache hit.
 
 Runtime profiles are closed and deterministic:
 
