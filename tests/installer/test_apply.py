@@ -13,10 +13,13 @@ from selfworkflow.adapters import build_runtime
 from selfworkflow.installer import (
     InstallerError,
     apply_install_plan,
+    apply_rollback_plan,
     create_install_plan,
+    create_rollback_plan,
+    doctor,
     verify_install,
 )
-from tests.installer.support import create_artifact
+from tests.installer.support import create_artifact, write_adapter
 
 
 @contextmanager
@@ -43,6 +46,69 @@ def _hold_file_without_delete_sharing(path):
 
 
 class InstallApplyTests(unittest.TestCase):
+    def test_missing_shared_policy_is_not_mistaken_for_a_legacy_codex_artifact(self):
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            write_adapter(artifact, "codex", "Host note.\n")
+            (artifact / "adapters/shared/policy.md").unlink()
+            agents, codex, state = (root / name for name in ("agents", "codex", "state"))
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            self.assertEqual(plan["status"], "paused")
+            self.assertIn("codex-adapter-missing", plan["issues"])
+            plan["status"] = "ready"
+            plan.pop("planHash")
+            plan["planHash"] = installer._canonical_hash(plan)
+            with self.assertRaisesRegex(InstallerError, "codex-adapter-missing"):
+                apply_install_plan(plan, plan["planHash"])
+            self.assertFalse(agents.exists())
+            self.assertFalse(codex.exists())
+            self.assertFalse(state.exists())
+
+    def test_legacy_standalone_codex_artifacts_still_install_the_generic_bootstrap(self):
+        for include_schema in (False, True):
+            with self.subTest(include_schema=include_schema), tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+                root = Path(temporary)
+                artifact = create_artifact(root)
+                repository = Path(__file__).resolve().parents[2]
+                legacy = artifact / "adapters/codex"
+                legacy.mkdir(parents=True)
+                (legacy / "adapter.yaml").write_bytes((repository / "adapters/codex/adapter.yaml").read_bytes())
+                (legacy / "AGENTS.managed.md").write_text("Legacy standalone policy.\n", encoding="utf-8")
+                if include_schema:
+                    schema = artifact / "schemas/adapter.schema.json"
+                    schema.parent.mkdir()
+                    schema.write_bytes((repository / "schemas/adapter.schema.json").read_bytes())
+                agents, codex, state = (root / name for name in ("agents", "codex", "state"))
+                plan = create_install_plan(artifact, agents, codex, state, "0.1.0")
+                self.assertEqual(plan["status"], "ready")
+                result = apply_install_plan(plan, plan["planHash"])
+                self.assertEqual(verify_install(result["manifestPath"])["status"], "verified")
+                installed = (codex / "AGENTS.md").read_text(encoding="utf-8")
+                self.assertIn("# Installed workflow", installed)
+                self.assertNotIn("## 宿主适配", installed)
+
+    def test_codex_and_dsh_install_the_shared_policy_with_only_their_own_notes(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            write_adapter(artifact, "codex", "Codex-specific note.\n")
+            write_adapter(artifact, "dsh", "DSH-specific note.\n")
+            agents, codex, dsh, state = (root / name for name in ("agents", "codex", "dsh", "state"))
+            plan = create_install_plan(artifact, agents, codex, state, "0.1.0", dsh_root=dsh)
+            self.assertEqual(plan["status"], "ready")
+            result = apply_install_plan(plan, plan["planHash"])
+            self.assertEqual(verify_install(result["manifestPath"])["status"], "verified")
+            for host, own, other in ((codex, "Codex-specific", "DSH-specific"), (dsh, "DSH-specific", "Codex-specific")):
+                content = (host / "AGENTS.md").read_text(encoding="utf-8")
+                self.assertIn("## 宿主适配", content)
+                self.assertIn("agent-policy", content)
+                self.assertIn(own, content)
+                self.assertNotIn(other, content)
+                self.assertNotIn("{support-claim}", content)
+
     @unittest.skipUnless(os.name == "nt", "Windows file sharing")
     def test_unchanged_write_preserves_a_delete_locked_file(self):
         from selfworkflow import installer
@@ -178,7 +244,7 @@ class InstallApplyTests(unittest.TestCase):
                 "当前",
                 "剩余",
                 "预计",
-                "粗略进度区间",
+                "粗略进度",
                 "独立 SubAgent",
                 "所有模式禁止双 Reviewer",
                 "侵入预算",
@@ -585,6 +651,189 @@ class InstallApplyTests(unittest.TestCase):
             self.assertEqual(transaction["state"], "rolled-back")
             self.assertGreaterEqual(len(transaction["operations"]), 1)
             self.assertFalse((agents / "skills/sample-skill/SKILL.md").exists())
+
+    def test_dsh_instruction_root_is_managed_alongside_codex(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            write_adapter(
+                artifact, "dsh",
+                (Path(__file__).resolve().parents[2] / "adapters/dsh/AGENTS.managed.md")
+                .read_text(encoding="utf-8"),
+            )
+            agents, codex, dsh, state = (
+                root / "agents", root / "codex", root / "dsh", root / "state"
+            )
+            dsh.mkdir()
+            dsh_file = dsh / "AGENTS.md"
+            dsh_file.write_text("dsh-user-content\n", encoding="utf-8")
+
+            plan = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(plan["status"], "ready")
+            self.assertEqual(Path(plan["dshRoot"]), dsh.resolve())
+            self.assertIn("dshRoot", plan["baselineHashes"])
+            Draft202012Validator(
+                json.loads(
+                    (Path(__file__).resolve().parents[2] / "schemas/install-plan.schema.json")
+                    .read_text(encoding="utf-8")
+                )
+            ).validate(plan)
+
+            applied = apply_install_plan(plan, plan["planHash"])
+            self.assertEqual(applied["status"], "applied")
+            self.assertTrue(dsh_file.read_text(encoding="utf-8").startswith("dsh-user-content\n"))
+            dsh_text = dsh_file.read_text(encoding="utf-8")
+            self.assertEqual(dsh_text.count("<!-- selfworkflow:begin -->"), 1)
+            self.assertIn(plan["artifactHash"], dsh_text)
+            self.assertIn("普通任务", dsh_text)
+            self.assertIn("send_message", dsh_text)
+            self.assertIn("mcp__codegraph__", dsh_text)
+            self.assertTrue((codex / "AGENTS.md").is_file())
+            self.assertEqual(verify_install(Path(applied["manifestPath"]))["status"], "verified")
+
+            manifest = json.loads(Path(applied["manifestPath"]).read_text(encoding="utf-8"))
+            self.assertEqual(Path(manifest["dshRoot"]), dsh.resolve())
+            Draft202012Validator(
+                json.loads(
+                    (Path(__file__).resolve().parents[2] / "schemas/install-manifest.schema.json")
+                    .read_text(encoding="utf-8")
+                )
+            ).validate(manifest)
+
+            transaction = json.loads(Path(applied["transactionPath"]).read_text(encoding="utf-8"))
+            self.assertEqual(Path(transaction["dshRoot"]), dsh.resolve())
+            self.assertTrue(any(
+                Path(operation["target"]).resolve() == (dsh / "AGENTS.md").resolve()
+                for operation in transaction["operations"]
+            ))
+
+            again = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(again["status"], "already-installed")
+            self.assertEqual(
+                apply_install_plan(again, again["planHash"])["status"],
+                "already-installed",
+            )
+            changed_root = create_install_plan(
+                artifact, agents, codex, state, "0.1.0",
+                dsh_root=root / "dsh-other",
+            )
+            self.assertEqual(changed_root["status"], "paused")
+            self.assertIn("dsh-root-binding-change", changed_root["issues"])
+            missing_binding = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            self.assertEqual(missing_binding["status"], "paused")
+            self.assertIn("dsh-root-binding-required", missing_binding["issues"])
+            report = doctor(agents, codex, state, dsh)
+            self.assertEqual(report["dshRoot"]["status"], "present")
+            self.assertRegex(report["dshRoot"]["treeHash"], r"^sha256:[0-9a-f]{64}$")
+
+            rollback = create_rollback_plan(applied["transactionPath"])
+            self.assertEqual(apply_rollback_plan(rollback, rollback["planHash"])["status"], "rolled-back")
+            self.assertEqual(dsh_file.read_text(encoding="utf-8"), "dsh-user-content\n")
+            self.assertFalse((codex / "AGENTS.md").exists())
+
+    def test_dsh_adapter_payload_and_root_overlap_fail_closed(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, dsh, state = (
+                root / "agents", root / "codex", root / "dsh", root / "state"
+            )
+            no_adapter = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(no_adapter["status"], "paused")
+            self.assertIn("dsh-adapter-missing", no_adapter["issues"])
+
+            adapter = write_adapter(artifact, "dsh", "")
+            empty_adapter = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(empty_adapter["status"], "paused")
+            self.assertIn("dsh-adapter-missing", empty_adapter["issues"])
+            adapter.write_text(" \n\t", encoding="utf-8")
+            whitespace_adapter = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(whitespace_adapter["status"], "paused")
+            self.assertIn("dsh-adapter-missing", whitespace_adapter["issues"])
+            adapter.write_bytes(b"\xff\xfe")
+            invalid_adapter = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(invalid_adapter["status"], "paused")
+            self.assertIn("dsh-adapter-missing", invalid_adapter["issues"])
+
+            adapter.write_text("DSH adapter mapping\n", encoding="utf-8")
+            dsh.mkdir()
+            (dsh / "AGENTS.md").write_text(
+                "<!-- selfworkflow:begin -->\nbroken\n", encoding="utf-8",
+            )
+            damaged = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(damaged["status"], "paused")
+            self.assertIn("dsh-managed-block-invalid", damaged["issues"])
+
+            with self.assertRaises(InstallerError):
+                create_install_plan(
+                    artifact, agents, codex, state, "0.1.0",
+                    dsh_root=agents / "nested",
+                )
+
+    def test_apply_rejects_forged_ready_plans_with_missing_dsh_preconditions(self):
+        from selfworkflow import installer
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            agents, codex, dsh, state = (
+                root / "agents", root / "codex", root / "dsh", root / "state"
+            )
+
+            def forge(plan):
+                plan["status"] = "ready"
+                plan.pop("planHash", None)
+                plan["planHash"] = installer._canonical_hash(plan)
+                return plan
+
+            missing_adapter = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertIn("dsh-adapter-missing", missing_adapter["issues"])
+            with self.assertRaisesRegex(InstallerError, "dsh-adapter-missing"):
+                apply_install_plan(forge(missing_adapter), missing_adapter["planHash"])
+
+            adapter = write_adapter(artifact, "dsh", " \n\t")
+            whitespace_adapter = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertIn("dsh-adapter-missing", whitespace_adapter["issues"])
+            with self.assertRaisesRegex(InstallerError, "dsh-adapter-missing"):
+                apply_install_plan(forge(whitespace_adapter), whitespace_adapter["planHash"])
+
+            adapter.write_text("DSH adapter mapping\n", encoding="utf-8")
+            valid = create_install_plan(
+                artifact, agents, codex, state, "0.1.0", dsh_root=dsh,
+            )
+            self.assertEqual(valid["status"], "ready")
+            apply_install_plan(valid, valid["planHash"])
+
+            missing_binding = create_install_plan(artifact, agents, codex, state, "0.1.0")
+            self.assertIn("dsh-root-binding-required", missing_binding["issues"])
+            with self.assertRaisesRegex(InstallerError, "dsh-root-binding-required"):
+                apply_install_plan(forge(missing_binding), missing_binding["planHash"])
+
+            changed_root = create_install_plan(
+                artifact, agents, codex, state, "0.1.0",
+                dsh_root=root / "dsh-other",
+            )
+            self.assertIn("dsh-root-binding-change", changed_root["issues"])
+            with self.assertRaisesRegex(InstallerError, "dsh-root-binding-change"):
+                apply_install_plan(forge(changed_root), changed_root["planHash"])
 
 
 if __name__ == "__main__":

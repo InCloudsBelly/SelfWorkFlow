@@ -10,7 +10,7 @@ import unittest
 
 import yaml
 
-from selfworkflow.adapters import AdapterError, _copy_matt_skills
+from selfworkflow.adapters import AdapterError, _copy_matt_skills, build_runtime
 from selfworkflow.implement_spec import ticket_dag_hash
 
 
@@ -196,6 +196,34 @@ class MattSkillsFoundationTests(unittest.TestCase):
             # published native entry is replaced, not its pinned checkout.
             self.assertTrue((runtime / "skills/matt-pocock/LICENSE").is_file())
 
+    def test_runtime_publishes_scoped_diagnosing_entry_with_locked_method(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            runtime = Path(temporary) / "runtime"
+            build_runtime(self.ROOT, runtime, "0.1.0.test")
+            entry = runtime / "skills/matt-pocock/diagnosing-bugs/SKILL.md"
+            self.assertEqual(
+                entry.read_bytes(),
+                (self.ROOT / "workflow/skills/diagnosing-bugs/SKILL.md").read_bytes(),
+            )
+            self.assertEqual(list(entry.parent.rglob("SKILL.md")), [entry])
+            reference = entry.parent / "references/upstream/guide.md"
+            expected = next(
+                skill["hash"] for skill in self._lock()["selectedSkills"]
+                if skill["id"] == "diagnosing-bugs"
+            )
+            self.assertEqual(
+                "sha256:" + hashlib.sha256(reference.read_bytes()).hexdigest(),
+                expected,
+            )
+            self.assertTrue((reference.parent / "scripts/hitl-loop.template.sh").is_file())
+            manifest = json.loads((runtime / "artifact-manifest.json").read_text(encoding="utf-8"))
+            bound = {item["path"]: item["sha256"] for item in manifest["files"]}
+            for path in (entry, reference):
+                self.assertEqual(
+                    bound[path.relative_to(runtime).as_posix()],
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+
     def test_runtime_rejects_dirty_unlocked_matt_skill_support_files(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             source = Path(temporary) / "source"
@@ -278,8 +306,10 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertNotIn("只读取当前阶段需要的 Superpowers Skill", workflow)
 
         active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        self.assertIn("代码/C++/UE/跨层行为", active_workflow)
-        self.assertIn("codegraph-read.md", active_workflow)
+        self.assertIn("modules/code.md", active_workflow)
+        self.assertIn("Ponytail、C++、项目 Review Skill 按实际命中加载", active_workflow)
+        code_module = (self.ROOT / "workflow/modules/code.md").read_text(encoding="utf-8")
+        self.assertIn("codegraph-read.md", code_module)
         cpp_skill = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(
             encoding="utf-8"
         )

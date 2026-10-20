@@ -75,25 +75,24 @@ class WorkflowCompressionTests(unittest.TestCase):
                 self.assertTrue((ROOT / relative).is_file())
         full = (ROOT / "workflow/modes/full.md").read_text(encoding="utf-8")
         deep = (ROOT / "workflow/modes/deep.md").read_text(encoding="utf-8")
-        for phrase in (
-            "不自动 Grilling 或 TEA",
-            "plan-integrated-review",
-            "一个独立 Reviewer",
-            "implement-tdd",
-        ):
-            self.assertIn(phrase, full)
-        self.assertIn("grilling", deep.casefold())
-        self.assertIn("用户显式点名", deep)
-        self.assertIn("一个独立 Reviewer", deep)
+        for text in (full, deep):
+            self.assertIn("modules/review.md", text)
+            self.assertIn("testing-review-quality", text)
+        self.assertIn("implement-tdd", full)
+        self.assertIn("本模式不要求再读 Full", deep)
+        review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
+        self.assertIn("plan-integrated-review", review)
+        self.assertIn("一个独立 SubAgent 同时检查 Standards/Spec", review)
 
     def test_route_order_and_optional_tea_are_explicit(self):
         full = (ROOT / "workflow/modes/full.md").read_text(encoding="utf-8")
         deep = (ROOT / "workflow/modes/deep.md").read_text(encoding="utf-8")
-        for text in (full, deep):
+        bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        for mode in (full, deep):
+            text = f"{bootstrap}\n{mode}"
             self.assertIn("显式", text)
             self.assertIn("TEA", text)
             self.assertIn("grilling", text.casefold())
-            self.assertIn("plan-integrated-review", text)
         self.assertIn("tdd", full.casefold())
         self.assertIn("tdd", deep.casefold())
 
@@ -120,7 +119,7 @@ class WorkflowCompressionTests(unittest.TestCase):
             "普通设计/计划/测试设计合并",
             "一个独立 SubAgent 同时检查 Standards/Spec",
             "两个轴不是两个上下文",
-            "不接收完整主历史、Wiki 或无关材料",
+            "不接收完整主历史、整库 Wiki 或无关材料",
             "修复后只复核未关闭问题及影响项",
             "不设“超预算中止”",
             "TEA 仅显式启用",
@@ -139,6 +138,89 @@ class WorkflowCompressionTests(unittest.TestCase):
         ):
             with self.subTest(boundary=phrase):
                 self.assertIn(phrase, text)
+
+    def test_representative_rule_route_stays_compact_without_duplicating_review(self):
+        # Character budget for regression protection, not a measured token count.
+        paths = (
+            "WORKFLOW.md", "workflow/modes/full.md", "workflow/modules/code.md",
+            "workflow/modules/codegraph-read.md", "workflow/modules/review.md",
+            "skills/code-quality/SKILL.md", "skills/workflow-quality/SKILL.md",
+            "skills/testing-review-quality/SKILL.md",
+        )
+        self.assertLessEqual(sum(len((ROOT / path).read_text(encoding="utf-8")) for path in paths), 10_000)
+        for relative in (
+            "workflow/modes/full.md", "workflow/modes/deep.md",
+            "skills/testing-review-quality/SKILL.md",
+        ):
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            with self.subTest(path=relative):
+                self.assertIn("modules/review.md", text)
+                self.assertNotIn("model/reasoning_effort", text)
+                self.assertNotIn("不接收完整主历史", text)
+
+    def test_review_followup_selects_available_tools_and_lifecycle(self):
+        text = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
+        for phrase in ("本会话实际工具", "运行中与空闲", "send_message", "followup_task", "send_input"):
+            self.assertIn(phrase, text)
+        self.assertNotIn("Codex `send_input`", text)
+        self.assertNotIn("DSH `send_message`", text)
+
+    def test_cli_query_includes_the_read_boundary_check(self):
+        text = (ROOT / "workflow/modules/codegraph-read.md").read_text(encoding="utf-8")
+        self.assertIn("CLI 路径", text)
+        self.assertIn("它已包含核对，不先另跑 preflight", text)
+        self.assertIn("成功核对且 fresh 后才查询", text)
+        self.assertIn("独立 CLI 调用不共享阶段缓存", text)
+        code = (ROOT / "workflow/modules/code.md").read_text(encoding="utf-8")
+        self.assertNotIn("`provider preflight`", code)
+
+    def test_projection_and_resume_preserve_only_bound_task_state(self):
+        text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        for phrase in (
+            "在工具内解析", "version/profile/runtimeHash", "path/sha256",
+            "不先输出全清单再截断", "仅需跨压缩/交接时", "规则路径/hash与正文是否仍在",
+            "有效证据及其输入", "待办/运行任务/Reviewer 标识",
+            "压缩本身不撤销授权或使未变证据失效", "不为短任务新增记录",
+        ):
+            self.assertIn(phrase, text)
+
+    def test_module_restrictions_are_scoped_to_their_operations_and_artifacts(self):
+        expected = {
+            "WORKFLOW.md": ("命中的操作、产物和角色", "不传播为无关模块的前置条件"),
+            "workflow/modules/knowledge.md": ("不适用于普通代码", "本次 Wiki 操作首调"),
+            "workflow/modules/artifacts.md": ("不强制普通任务新建", "不自动触发知识发布"),
+            "workflow/modules/optional-integrations.md": ("只约束对应增强模块", "不阻塞无关模块"),
+            "skills/kg-selfopenwiki/SKILL.md": ("不约束其他模块或 SelfWorkflow 源 Git",),
+            "workflow/modules/review.md": ("知识 Review 可读绑定候选与必要来源",),
+        }
+        for relative, phrases in expected.items():
+            text = (ROOT / relative).read_text(encoding="utf-8")
+            with self.subTest(path=relative):
+                for phrase in phrases:
+                    self.assertIn(phrase, text)
+
+    def test_unavailable_knowledge_capabilities_do_not_block_other_owners(self):
+        catalog = compile_catalog(ROOT / "catalog").content
+        cases = (
+            ("implement", "Full", True, "implement.tdd", "exactly-one", "implement-tdd"),
+            ("review", "Full", False, "review.independent", "zero-or-one", "review-code-review"),
+            ("document", "Light", True, "implement.method", "zero-or-one", "implement-documentation"),
+        )
+        for knowledge_state in ("unsupported", "unverified"):
+            for operation, strength, write, slot, cardinality, expected in cases:
+                result = route_modules(catalog, ModuleRouteRequest(
+                    slot_id=slot, cardinality=cardinality, operation_type=operation,
+                    strength=strength, write_task=write,
+                    capability_states={
+                        "skill-discovery": "supported", "filesystem-read": "supported",
+                        "filesystem-write": "supported", "test-execution": "supported",
+                        "independent-context": "supported", "user-confirmation": "supported",
+                        "knowledge-read": knowledge_state, "knowledge-write": knowledge_state,
+                    },
+                ))
+                with self.subTest(operation=operation, knowledge=knowledge_state):
+                    self.assertEqual(result.status, "routed")
+                    self.assertEqual(result.selected_modules, (expected,))
 
     def test_catalog_routes_match_the_split_mode_contract(self):
         catalog = compile_catalog(ROOT / "catalog").content
@@ -328,63 +410,72 @@ class WorkflowCompressionTests(unittest.TestCase):
 
     def test_deep_read_only_plan_skips_write_gates_without_blocking(self):
         catalog = compile_catalog(ROOT / "catalog").content
-        result = resolve_task(
-            catalog,
-            {
-                "schemaVersion": 2,
-                "operationType": "analyze",
-                "complexity": "C3",
-                "risk": "R1",
-                "writeTask": False,
-                "ambiguity": False,
-                "explicitModuleIds": [],
-                "projectDefaultModuleIds": [],
-                "projectMinimums": {"strength": "Deep"},
-                "capabilityEvidenceSnapshot": {
-                    "schemaVersion": 1,
-                    "capturedAt": "2020-01-01T00:00:00Z",
-                    "evidence": [
-                        {
-                            "name": "skill-discovery",
-                            "provider": "compression-test",
-                            "subject": {
-                                "kind": "test",
-                                "id": "compression-read",
-                                "version": "1",
-                                "build": "1",
-                                "sourceLock": "sha256:" + "2" * 64,
-                            },
-                            "state": "supported",
-                            "observedAt": "2020-01-01T00:00:00Z",
-                            "validUntil": "2099-01-01T00:00:00Z",
-                            "evidenceRef": "compression:skill-discovery",
-                            "evidenceHash": "sha256:" + "2" * 64,
+        request = {
+            "schemaVersion": 2,
+            "operationType": "analyze",
+            "complexity": "C3",
+            "risk": "R1",
+            "writeTask": False,
+            "ambiguity": False,
+            "explicitModuleIds": [],
+            "projectDefaultModuleIds": [],
+            "projectMinimums": {"strength": "Deep"},
+            "capabilityEvidenceSnapshot": {
+                "schemaVersion": 1,
+                "capturedAt": "2020-01-01T00:00:00Z",
+                "evidence": [
+                    {
+                        "name": "skill-discovery",
+                        "provider": "compression-test",
+                        "subject": {
+                            "kind": "test",
+                            "id": "compression-read",
+                            "version": "1",
+                            "build": "1",
+                            "sourceLock": "sha256:" + "2" * 64,
                         },
-                        {
-                            "name": "filesystem-read",
-                            "provider": "compression-test",
-                            "subject": {
-                                "kind": "test",
-                                "id": "compression-read",
-                                "version": "1",
-                                "build": "1",
-                                "sourceLock": "sha256:" + "3" * 64,
-                            },
-                            "state": "supported",
-                            "observedAt": "2020-01-01T00:00:00Z",
-                            "validUntil": "2099-01-01T00:00:00Z",
-                            "evidenceRef": "compression:filesystem-read",
-                            "evidenceHash": "sha256:" + "3" * 64,
-                        }
-                    ],
-                },
+                        "state": "supported",
+                        "observedAt": "2020-01-01T00:00:00Z",
+                        "validUntil": "2099-01-01T00:00:00Z",
+                        "evidenceRef": "compression:skill-discovery",
+                        "evidenceHash": "sha256:" + "2" * 64,
+                    },
+                    {
+                        "name": "filesystem-read",
+                        "provider": "compression-test",
+                        "subject": {
+                            "kind": "test",
+                            "id": "compression-read",
+                            "version": "1",
+                            "build": "1",
+                            "sourceLock": "sha256:" + "3" * 64,
+                        },
+                        "state": "supported",
+                        "observedAt": "2020-01-01T00:00:00Z",
+                        "validUntil": "2099-01-01T00:00:00Z",
+                        "evidenceRef": "compression:filesystem-read",
+                        "evidenceHash": "sha256:" + "3" * 64,
+                    }
+                ],
             },
-        )
+        }
+        evidence = request["capabilityEvidenceSnapshot"]["evidence"]
+        evidence.append({
+            **evidence[-1],
+            "name": "independent-context",
+            "evidenceRef": "compression:independent-context",
+        })
+        result = resolve_task(catalog, request)
         self.assertEqual(result["status"], "active")
         for stage in result["planGraph"]["stages"]:
             for slot in stage["slots"]:
                 if slot["slotId"] in {"design.specialists", "plan.gate"}:
                     self.assertEqual(slot["selectedModules"], [])
+
+        evidence.pop()
+        blocked = resolve_task(catalog, request)
+        self.assertEqual(blocked["status"], "paused")
+        self.assertIn("required-capability-unavailable", blocked["reasonCodes"])
 
     def test_read_only_keeps_write_protection_and_codegraph_is_bounded(self):
         text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")

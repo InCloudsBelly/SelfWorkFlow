@@ -5,6 +5,7 @@
 ## 路径与输入
 
 - `{skill-root}` 是本次选中的 `references/bmad-testarch-<workflow>`。
+- 公共文档模式的 ATDD 以当前 `tea-quality` 目录为基准，先读 `references/bmad-testarch-atdd/METHOD.md`，再将 `{skill-root}` 固定为同版 sibling `references/bmad-testarch-automate`，只选 red 流程。其 canonical `METHOD.md`、路由、run-and-heal 与 red 步骤均由维护者随包发布；本契约继续覆盖上游 activation、hooks、菜单、自动修复和命令执行。缺文档报告 `unverified`，不要求消费者运行 npx 或安装原生 Skill。
 - `{tea-knowledge}` 是当前 `tea-quality` 目录下的 `references/bmod-tea/knowledge`；`knowledgeIndex` 是其 `tea-index.csv`。禁止从项目 `_bmad` 或别的安装版本补文件。
 - `{project-root}` 只供读取用户批准的上下文。所有相对输入路径以此为基准；缺具体文件清单时不能猜测故事、PRD 或整个仓库的范围。
 - 唯一报告输出为调用者指定的 `outputRelative`（项目内安全相对路径）。`output_file_override` 绑定此路径；`test_artifacts` 仅表示其父目录，不授权创建其他文件。

@@ -27,7 +27,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
 
         return CommandResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
 
-    def _status(self, *, initialized=True, pending=None, state="complete", reindex=False):
+    def _status(self, *, initialized=True, pending=None, state="complete", reindex=False, pending_refs=0):
         return json.dumps({
             "initialized": initialized,
             "projectPath": str(self.project),
@@ -41,7 +41,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
             "index": {
                 "state": state,
                 "reindexRecommended": reindex,
-                "pendingRefs": 0,
+                "pendingRefs": pending_refs,
             },
         })
 
@@ -72,25 +72,60 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         self.assertEqual(result["actions"], ["initialize"])
         self.assertEqual(port.calls[1]["argv"], ("codegraph", "init", str(self.project).replace("\\", "/")))
 
-    def test_stale_index_syncs_then_rebuilds_when_codegraph_requests_full_reindex(self):
+    def test_stale_index_is_preserved_without_automatic_rebuild_at_every_boundary(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        database = self.project / ".codegraph" / "codegraph.db"
+        database.parent.mkdir()
+        database.write_bytes(b"existing index must survive")
+        states = (
+            self._status(reindex=True),
+            self._status(state="partial"),
+            self._status(state="failed"),
+            self._status(pending_refs=3),
+            self._status(pending={"added": 0, "modified": 1, "removed": 0}),
+        )
+        for boundary in ("ensure", "preflight", "sync", "query"):
+            for status in states:
+                with self.subTest(boundary=boundary, status=status):
+                    port = FakeCommandPort(
+                        self._result(stdout=self._status()),
+                        self._result(stdout="synced"),
+                        self._result(stdout=status),
+                        self._result(stdout="indexed"),
+                        self._result(stdout=self._status()),
+                        self._result(stdout=self._status()),
+                        self._result(stdout="query result"),
+                    )
+                    lifecycle, _ = self._lifecycle(port)
+                    arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+
+                    with self.assertRaises(CodeGraphProjectError) as caught:
+                        getattr(lifecycle, boundary)(*arguments)
+
+                    self.assertEqual(caught.exception.reason, "codegraph-index-not-fresh")
+                    self.assertEqual(database.read_bytes(), b"existing index must survive")
+                    self.assertEqual([call["argv"][1] for call in port.calls], ["status", "sync", "status"])
+
+    def test_existing_database_is_never_reinitialized_when_status_reports_missing(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        database = self.project / ".codegraph" / "codegraph.db"
+        database.parent.mkdir()
+        database.write_bytes(b"existing incompatible index")
         port = FakeCommandPort(
-            self._result(stdout=self._status(pending={"added": 1, "modified": 0, "removed": 0})),
-            self._result(stdout="synced"),
-            self._result(stdout=self._status(reindex=True)),
-            self._result(stdout="indexed"),
+            self._result(stdout=self._status(initialized=False)),
+            self._result(stdout="initialized"),
             self._result(stdout=self._status()),
         )
         lifecycle, _ = self._lifecycle(port)
 
-        result = lifecycle.ensure(str(self.project))
+        with self.assertRaises(CodeGraphProjectError) as caught:
+            lifecycle.preflight(str(self.project))
 
-        self.assertEqual(result["actions"], ["sync", "rebuild"])
-        self.assertEqual(result["freshness"], "fresh")
-        self.assertEqual(port.calls[1]["argv"], ("codegraph", "sync", str(self.project).replace("\\", "/")))
-        self.assertEqual(
-            port.calls[3]["argv"],
-            ("codegraph", "index", str(self.project).replace("\\", "/"), "--force"),
-        )
+        self.assertEqual(caught.exception.reason, "codegraph-existing-index-not-initialized")
+        self.assertEqual(database.read_bytes(), b"existing incompatible index")
+        self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
 
     def test_agent_write_sync_updates_once_without_a_topic_queue_or_deep_context(self):
         port = FakeCommandPort(
@@ -168,10 +203,6 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         cases = (
             (self._status(initialized=False), (), "init"),
             (self._status(state="partial"), (), "sync"),
-            (self._status(state="failed"), (
-                self._result(stdout="synced"),
-                self._result(stdout=self._status(reindex=True)),
-            ), "index"),
         )
         for initial, before_last, last in cases:
             with self.subTest(action=last):

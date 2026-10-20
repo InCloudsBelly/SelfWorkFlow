@@ -10,8 +10,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+from typing import Callable
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, SchemaError, ValidationError
 import yaml
 
 from selfworkflow.catalog import compile_catalog
@@ -70,6 +71,7 @@ _CORE_PATHS = (
     "schemas/resolve-result.schema.json",
     "schemas/install-plan.schema.json",
     "schemas/install-manifest.schema.json",
+    "schemas/adapter.schema.json",
     "schemas/rollback-plan.schema.json",
     "schemas/git-policy.schema.json",
     "schemas/project-review-profile.schema.json",
@@ -140,13 +142,73 @@ def load_adapters(adapter_root: str | Path, schema_path: str | Path) -> list[dic
     for path in sorted(root.glob("*/adapter.yaml")):
         value = yaml.safe_load(path.read_text(encoding="utf-8"))
         validator.validate(value)
+        if value["id"] != path.parent.name:
+            raise AdapterError("adapter-id-mismatch")
         entry = path.parent / value["entryFile"]
         if not entry.is_file() or entry.is_symlink():
             raise AdapterError("adapter-entry-invalid")
         result.append(value)
-    if len(result) != 6 or len({item["id"] for item in result}) != 6:
+    if not result or len({item["id"] for item in result}) != len(result):
         raise AdapterError("adapter-set-invalid")
     return sorted(result, key=lambda item: item["id"])
+
+
+_SUPPORT_CLAIMS = {
+    "experimental-unverified": (
+        "This adapter is `agent-policy`, not proof of a conforming Host; "
+        "report unsupported capabilities as unverified."
+    ),
+    "instructions-only": (
+        "This instructions layer is `agent-policy` only and cannot claim conforming "
+        "execution, independent Review, tests, or side effects."
+    ),
+    "bootstrap-only": (
+        "This bootstrap is `agent-policy`, not conforming-Host proof; "
+        "never invent verification."
+    ),
+}
+
+
+def compose_adapter_policy(
+    adapter_root: str | Path,
+    adapter_id: str,
+    *,
+    read: Callable[[Path], str] | None = None,
+) -> str:
+    """Shared portable policy plus this host's declared claim and host-only notes.
+
+    Returns "" for missing or invalid inputs, so callers fail closed.
+    """
+    root = Path(adapter_root)
+    if not isinstance(adapter_id, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", adapter_id) is None:
+        return ""
+    if read is None:
+        def read(path: Path) -> str:
+            return path.read_text(encoding="utf-8")
+    try:
+        schema = json.loads(read(root.parent / "schemas/adapter.schema.json"))
+        Draft202012Validator.check_schema(schema)
+        value = yaml.safe_load(read(root / adapter_id / "adapter.yaml"))
+        Draft202012Validator(schema).validate(value)
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError, SchemaError, ValidationError):
+        return ""
+    if value["id"] != adapter_id:
+        return ""
+    claim = _SUPPORT_CLAIMS.get(value.get("supportStatus"))
+    if claim is None or not value.get("entryFile"):
+        return ""
+    try:
+        shared = read(root / "shared" / "policy.md")
+        notes = read(root / adapter_id / str(value["entryFile"]))
+    except (OSError, UnicodeError):
+        return ""
+    if "{support-claim}" not in shared or not notes.strip():
+        return ""
+    return "\n\n".join(
+        part
+        for part in (shared.replace("{support-claim}", claim).strip(), notes.strip())
+        if part
+    )
 
 
 def _copy_tree(source: Path, destination: Path, *, excluded_roots: tuple[Path, ...] = ()) -> None:
@@ -282,14 +344,15 @@ def _copy_matt_skills(
             raise AdapterError("matt-skills-source-invalid")
         locked_entry = locked_text_bytes(entry.read_bytes(), expected_hash, "matt-skills-source-drift")
         target = destination / "skills" / "matt-pocock" / skill_id
-        if skill_id == "code-review":
-            # Keep the pinned source checks above, but publish the workflow-owned
-            # single-review entry for native discovery as well as catalog routing.
-            local_entry = source / "workflow/skills/code-review/SKILL.md"
+        if skill_id in {"code-review", "diagnosing-bugs"}:
+            # Publish workflow-owned entries while retaining pinned source checks.
+            local_entry = source / "workflow/skills" / skill_id / "SKILL.md"
             if not local_entry.is_file() or local_entry.is_symlink():
                 raise AdapterError("runtime-source-invalid")
             _copy_tree(local_entry.parent, target)
-            continue
+            if skill_id == "code-review":
+                continue
+            target = target / "references/upstream"
         _copy_tree(skill_root, target)
         for published in target.rglob("*"):
             if published.is_file() and published.suffix in {".md", ".sh", ".yaml"}:
@@ -298,6 +361,8 @@ def _copy_matt_skills(
                 if canonical != content:
                     published.write_bytes(canonical)
         (target / "SKILL.md").write_bytes(locked_entry)
+        if skill_id == "diagnosing-bugs":
+            (target / "SKILL.md").rename(target / "guide.md")
 
     license_path = upstream / "LICENSE"
     license_lock = lock["license"]

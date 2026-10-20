@@ -248,6 +248,8 @@ $preserveSource = $false
 $runtimeRoot = $Root
 $AgentsRoot = Join-Path $Root "agents"
 $CodexRoot = Join-Path $Root "codex"
+$DshRoot = ""
+$DshArguments = @()
 $StateRoot = Join-Path $Root "state"
 $scriptPath = Join-Path $Root "runtime.js"
 [IO.File]::WriteAllText($scriptPath, "fixture")
@@ -810,6 +812,17 @@ function Invoke-SelfWorkflow($Arguments,$OutputPath) {
                     self.assertEqual(summary["stage"], "preflight")
                     self.assertIn("superpowers-external-only", summary["reason"])
                     self.assertFalse((root / "codex/AGENTS.md").exists())
+
+    def test_one_click_forwards_dsh_root_to_doctor_and_plan(self):
+        source = (Path(__file__).resolve().parents[2] / "scripts/install-selfworkflow.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('[string]$DshRoot = ""', source)
+        self.assertIn('@("--dsh-root", $DshRoot)', source)
+        self.assertIn('$doctorBeforeArguments = @("doctor"', source)
+        self.assertIn('$planArguments = @("install", "plan"', source)
+        self.assertIn('+ $DshArguments', source)
+        self.assertIn("repeat it on upgrades", source)
 
     def test_default_install_is_idempotent_and_doctor_matches_published_tree(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

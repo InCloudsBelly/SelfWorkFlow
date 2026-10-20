@@ -15,6 +15,7 @@ import unicodedata
 from selfworkflow import __version__
 from selfworkflow.catalog import compile_catalog
 from selfworkflow.adapters import build_runtime
+from selfworkflow.documents import DocumentError, publish_documents, document_binding, render_document_instruction
 from selfworkflow.installer import (
     InstallerError,
     apply_install_plan,
@@ -487,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser = commands.add_parser("doctor")
     doctor_parser.add_argument("--agents-root", required=True)
     doctor_parser.add_argument("--codex-root", required=True)
+    doctor_parser.add_argument("--dsh-root")
     doctor_parser.add_argument("--state-root", required=True)
     build_parser = commands.add_parser("build")
     build_parser.add_argument("--repository", default=str(Path.cwd()))
@@ -498,6 +500,14 @@ def main(argv: list[str] | None = None) -> int:
         default="core",
     )
     build_parser.add_argument("--without-grill-me", action="store_true")
+    documents = commands.add_parser("documents", help="Publish or inspect portable workflow documents (maintainer only).")
+    document_commands = documents.add_subparsers(dest="document_command", required=True)
+    document_publish = document_commands.add_parser("publish")
+    document_publish.add_argument("--repository", default=str(Path.cwd()))
+    document_publish.add_argument("--output", required=True)
+    for action in ("check", "snippet"):
+        document_action = document_commands.add_parser(action)
+        document_action.add_argument("--root", required=True)
     resolve_parser = commands.add_parser("resolve")
     resolve_parser.add_argument("--catalog", required=True)
     resolve_parser.add_argument("--request", required=True)
@@ -612,6 +622,8 @@ def main(argv: list[str] | None = None) -> int:
     install_plan.add_argument("--artifact", required=True)
     install_plan.add_argument("--agents-root", required=True)
     install_plan.add_argument("--codex-root", required=True)
+    install_plan.add_argument("--dsh-root")
+    install_plan.add_argument("--document-root", help="Link the stable public document entry and retire managed native Skill copies.")
     install_plan.add_argument("--state-root", required=True)
     install_plan.add_argument("--version", required=True)
     install_plan.add_argument("--output", required=True)
@@ -986,8 +998,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if arguments.command == "doctor":
             result = doctor(
-                arguments.agents_root, arguments.codex_root, arguments.state_root
+                arguments.agents_root, arguments.codex_root, arguments.state_root,
+                arguments.dsh_root,
             )
+        elif arguments.command == "documents":
+            if arguments.document_command == "publish":
+                result = publish_documents(arguments.repository, arguments.output)
+            else:
+                result = document_binding(arguments.root)
+                if arguments.document_command == "snippet":
+                    print(render_document_instruction(arguments.root))
+                    return 0
         elif arguments.command == "build":
             result = build_runtime(
                 arguments.repository,
@@ -1003,6 +1024,8 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.codex_root,
                 arguments.state_root,
                 arguments.version,
+                dsh_root=arguments.dsh_root,
+                document_root=arguments.document_root,
                 host_launcher=arguments.host_launcher,
                 host_python=arguments.host_python,
             )
@@ -1021,7 +1044,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             return 0
-    except InstallerError as error:
+    except (InstallerError, DocumentError) as error:
         print(f"SelfWorkFlow: install-operation-failed:{error}", file=sys.stderr)
         return 40
     except Exception:

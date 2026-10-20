@@ -12,6 +12,8 @@ param(
     [string]$CodeGraphPath,
     [string]$AgentsRoot = (Join-Path $env:USERPROFILE ".agents"),
     [string]$CodexRoot = (Join-Path $env:USERPROFILE ".codex"),
+    [string]$DshRoot = "",
+    [string]$DocumentRoot = "",
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\state"),
     [string]$ProviderConfigFile = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\config\providers.local.yaml"),
     [string]$DependencyRoot = (Join-Path $env:LOCALAPPDATA "SelfWorkFlow\dependencies"),
@@ -26,9 +28,17 @@ if ($Help) {
 SelfWorkFlow Windows one-click installer
 
 Usage:
-  Install_SelfWorkFlow.bat [-Profile core|knowledge|maintainer]
+  Install_SelfWorkFlow.bat [-Profile core|knowledge|maintainer] [-DshRoot <dsh-home>]
   Install_SelfWorkFlow.bat -CodeGraphMcpLauncherOnly -ConfirmApply
   Install_SelfWorkFlow.bat -CodeGraphPath <local-codegraph-root> -ConfirmApply
+
+An explicit -DshRoot writes the same managed bootstrap plus the DSH adapter
+ section to <DshRoot>\AGENTS.md for DeepSeek Harness. Without it, the DSH
+ instruction root is left untouched; after a DSH install, repeat it on upgrades.
+
+Optional -DocumentRoot <public-root> performs a one-time migration to the stable
+ public document entry and retires owned native Skill copies with drift checks.
+ Ordinary document consumers do not need to run this installer.
 
 The pinned Matt Pocock Skills foundation and the path-limited TEA, Ponytail and
 other workflow submodules are prepared from the repository locks. Superpowers is external-only
@@ -564,6 +574,9 @@ function Remove-LegacyState {
 
 $AgentsRoot = Resolve-FullPath $AgentsRoot
 $CodexRoot = Resolve-FullPath $CodexRoot
+$DshRoot = if ([string]::IsNullOrWhiteSpace($DshRoot)) { "" } else { Resolve-FullPath $DshRoot }
+$DshArguments = if ($DshRoot) { @("--dsh-root", $DshRoot) } else { @() }
+$DocumentArguments = if ([string]::IsNullOrWhiteSpace($DocumentRoot)) { @() } else { @("--document-root", (Resolve-FullPath $DocumentRoot)) }
 $StateRoot = Resolve-FullPath $StateRoot
 $ProviderConfigFile = Resolve-FullPath $ProviderConfigFile
 $DependencyRoot = Resolve-FullPath $DependencyRoot
@@ -658,12 +671,14 @@ try {
 
     Set-InstallStage "plan" 40
     $doctorBefore = Join-Path $script:LogDirectory "doctor-before.json"
-    Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) $doctorBefore | Out-Null
+    $doctorBeforeArguments = @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) + $DshArguments
+    Invoke-SelfWorkflow $doctorBeforeArguments $doctorBefore | Out-Null
     $runtime = Join-Path $script:LogDirectory "runtime"
     $runtimeManifest = Join-Path $script:LogDirectory "runtime-manifest.json"
     Invoke-SelfWorkflow @("build", "--repository", $RepositoryRoot, "--output", $runtime, "--version", $Version, "--profile", $Profile) $runtimeManifest | Out-Null
     $planPath = Join-Path $script:LogDirectory "install-plan.json"
-    Invoke-SelfWorkflow @("install", "plan", "--artifact", $runtime, "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot, "--version", $Version, "--host-launcher", $HostLauncherPath, "--host-python", $script:PythonExecutable, "--output", $planPath) $null | Out-Null
+    $planArguments = @("install", "plan", "--artifact", $runtime, "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot, "--version", $Version, "--host-launcher", $HostLauncherPath, "--host-python", $script:PythonExecutable, "--output", $planPath) + $DshArguments
+    Invoke-SelfWorkflow ($planArguments + $DocumentArguments) $null | Out-Null
     $plan = Get-Content -Raw -LiteralPath $planPath | ConvertFrom-Json
     if ($plan.status -eq "paused") { Stop-Install "plan" 40 ("install-plan-paused:" + ($plan.issues -join ",")) }
     Write-InstallLog ("Plan status: {0}; planHash: {1}" -f $plan.status, $plan.planHash)
@@ -671,7 +686,7 @@ try {
     Write-InstallLog ("Ponytail commit: {0}; lock: {1}" -f $ponytailReport.gitlinkCommit, $ponytailReport.lockHash)
     Write-JsonFile (Join-Path $script:LogDirectory "confirmation-summary.json") ([ordered]@{
         planHash = $plan.planHash; profile = $plan.profile; artifactFiles = $plan.artifactFiles
-        agentsRoot = $AgentsRoot; codexRoot = $CodexRoot; stateRoot = $StateRoot
+        agentsRoot = $AgentsRoot; codexRoot = $CodexRoot; dshRoot = $DshRoot; stateRoot = $StateRoot
         codegraph = $runtimeReport; codegraphLock = $codeGraphVerification
         ponytail = $ponytailReport; superpowers = "external-only"
     })
@@ -699,7 +714,8 @@ try {
     Set-InstallStage "codegraph-mcp" 75
     $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath $runtimeReport.commandPrefix
     $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath
-    Invoke-SelfWorkflow @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) (Join-Path $script:LogDirectory "doctor-after.json") | Out-Null
+    $doctorAfterArguments = @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) + $DshArguments
+    Invoke-SelfWorkflow $doctorAfterArguments (Join-Path $script:LogDirectory "doctor-after.json") | Out-Null
 
     $wikiReport = [ordered]@{ status = "not-selected" }
     if ($Profile -eq "knowledge") {

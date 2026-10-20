@@ -13,6 +13,8 @@
     "artifactHash": {"type": "string"},
     "agentsRoot": {"type": "string"},
     "codexRoot": {"type": "string"},
+    "dshRoot": {"type": "string"},
+    "documentRoot": {"type": "string"},
     "stateRoot": {"type": "string"},
     "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
     "securityStatus": {"enum": ["verified", "unverified"]},
@@ -33,7 +35,7 @@
       "required": ["target", "beforeExists", "beforeHash", "afterHash", "backupPath"],
       "properties": {
         "target": {"type": "string"}, "beforeExists": {"type": "boolean"},
-        "beforeHash": {"type": ["string", "null"]}, "afterHash": {"type": "string"},
+        "beforeHash": {"type": ["string", "null"]}, "afterHash": {"type": ["string", "null"]},
         "backupPath": {"type": ["string", "null"]}
       }
     }

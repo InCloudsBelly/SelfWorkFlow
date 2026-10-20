@@ -1,5 +1,31 @@
 # SelfWorkFlow
 
+## 文档直接使用（默认）
+
+普通 Agent 只需读取 [公共工作流入口](public/WORKFLOW.md)，再按该入口绑定的版本加载规则和方法；消费者无需安装 SelfWorkflow、Python/Node 或原生 Skill。工具能力仍按实际需要独立检查，缺少能力不能伪造通过。
+
+新 Agent 按公共入口中的“新 Agent 快速接入”链接完成首次核对；维护源见 [接入指南](workflow/onboarding.md) 和 [可选宿主说明模板](workflow/templates/AGENT_ADAPTER.md)。一个固定入口即可开始，宿主差异只记录实际工具接线。
+
+首次接入时，把固定入口引用放入宿主指令；此后工作流更新不改各宿主配置：
+
+```text
+每个用户顶层任务实际读取 D:/SelfWorkFlow/public/WORKFLOW.md。
+子任务、独立 Reviewer 和上下文续接继承主任务的 revision 与 documentRoot。
+只按需读取当前版本，不使用历史安装的规则/方法副本。
+```
+
+维护者修改唯一规则源后运行 `Publish_SelfWorkFlow_Documents.bat`，或使用维护环境：
+
+```powershell
+.venv\Scripts\python.exe -m selfworkflow.cli documents publish --repository D:\SelfWorkFlow --output D:\SelfWorkFlow\public
+```
+
+发布器整理固定来源的方法、检查引用闭合，先发布完整的不可变文档版本，再切换公共入口。发布失败保持上版；旧任务及其子任务继续使用原版，新顶层任务读取新版。公共版本只包含文档与必要静态资料，不含消费者需执行的程序。
+
+现有受管安装的一次迁移可在 `install plan` 追加 `--document-root <public-root>`；或在兼容安装脚本传 `-DocumentRoot <public-root>`。先审查计划再按原有 planHash 应用：受管 Skill 按所有权和内容 hash 退役，用户修改会使计划暂停，原事务可回滚。当前安装的工具桥接快照可以保留。后续规则更新只运行文档发布，不再执行安装。
+
+`documents check --root <public-root>` 是维护者校验；`documents snippet --root <public-root>` 输出固定引用。两者均不是 Agent 读取文档的前置条件。离线或只能一次性导入内容的宿主仍需重新分发，不承诺自动刷新。
+
 ## 可选 Wiki 模块
 
 SelfOpenWiki 的自有 MCP、配置、个人覆写 Skill 与构建逻辑位于
@@ -23,14 +49,26 @@ SelfWorkFlow is a code-first, vendor-neutral Agent workflow. Its default product
 a compact operational core, not the repository's complete maintenance and release
 machinery.
 
-## Windows one-click installation
+## 可选工具部署与旧安装兼容
 
 After cloning the repository, run this from Explorer or a terminal:
 
 ```bat
 Install_SelfWorkFlow.bat
 Install_SelfWorkFlow.bat -Profile knowledge
+Install_SelfWorkFlow.bat -Profile knowledge -DshRoot "%USERPROFILE%\.dsh"
 ```
+
+`-DshRoot` is optional and explicit. It adds a separate managed block at
+`<DshRoot>\AGENTS.md` for DeepSeek Harness; Codex's own managed block remains
+managed as before. It manages the instruction root only; DSH profile MCP entries
+such as CodeGraph remain explicit profile configuration. Once installed with
+`-DshRoot`, repeat it on upgrades: omitting it pauses the plan instead of
+silently dropping the DSH binding. Changing the DSH root is also paused. To
+unbind or migrate, first roll back any later install transactions in LIFO order,
+then run `selfworkflow install rollback-plan` and
+`selfworkflow install rollback` on the transaction that introduced the DSH root.
+This increment has no automatic root migration.
 
 The installer checks or prepares the repository Python environment, initializes
 the pinned Git Submodules, installs the pinned CodeGraph runtime with Node >=20, and packages only the curated Matt Pocock Skills
@@ -41,8 +79,9 @@ SelfWorkflow does not require, install, or default-route to Superpowers.
 
 The installer verifies the pinned CodeGraph runtime and never scans disks for
 another code graph or binds an alternate provider. The project `.codegraph/`
-index is initialized automatically on the first code task and is synchronized
-after edits; a full rebuild is used only when the status requires it.
+index is initialized only when its database is missing and is synchronized
+after edits. An existing index that remains not-fresh is preserved and reported;
+automatic rebuilds or cache deletion are not part of the workflow.
 
 The Matt Skills source is the repository's fixed
 `dependencies/upstream/matt-pocock-skills` Gitlink. Upgrades are explicit source
@@ -55,7 +94,8 @@ verification step fails. Detailed diagnostics and machine-readable artifacts are
 environment dump or credential values.
 
 Codex receives a hash-bound copy of only the selected Matt Skill directories plus
-the source lock. A pre-existing user-level Superpowers installation remains
+the source lock. When `-DshRoot` is supplied, DSH receives the same hash-bound
+bootstrap plus its `## 宿主适配` section under its own instruction root. A pre-existing user-level Superpowers installation remains
 untouched and unmanaged; it is used only when the user explicitly asks for it.
 Doctor and install plans hash only SelfWorkFlow's exact managed targets, so
 unrelated Codex sessions, databases, executables, logs, caches, large files and
@@ -271,9 +311,18 @@ replaced with `rg` as structural evidence.
   result, Markdown summary, and cleanup evidence. Fake-port tests do not prove
   native support; each vendor Host must still provide fresh capability and
   model-execution evidence before being marked supported.
-- Codex CLI/Desktop, Claude Code, Cursor, and OpenCode remain
-  `experimental-unverified`; Copilot is `instructions-only` and unknown Agents use
-  `adapters/unknown/BOOTSTRAP.md`.
+- Codex CLI/Desktop, Claude Code, Cursor, OpenCode, and DeepSeek Harness (DSH)
+  remain `experimental-unverified`; Copilot is `instructions-only` and unknown
+  Agents use the generic bootstrap and the composed `unknown` adapter described
+  in [Agent integration boundaries](adapters/README.md). The portable text lives once in
+  `adapters/shared/policy.md`; each `adapters/<id>/` entry holds only that host's
+  delta plus its `adapter.yaml` declaration. A new policy adapter is data, not
+  code; automatic installation and MCP configuration remain separate integrations.
+  Hosts without genuine differences can reuse the unknown bootstrap. See
+  [Agent integration boundaries](adapters/README.md). Codex and DSH both receive
+  the composed shared policy and their own notes from the installer. DSH
+  is `agent-policy` only: it has a managed `AGENTS.md` root and async `subagent`
+  Review mapping, not a conforming Host contract or a managed MCP profile writer.
 - The generic knowledge lifecycle and optional SelfOpenWiki adapter are packaged.
   Backend capability evidence and current-host activation remain unverified until
   exercised against the selected backend.

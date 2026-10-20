@@ -1,4 +1,4 @@
-"""Project-scoped CodeGraph lifecycle with automatic full generation and sync."""
+"""Project-scoped CodeGraph lifecycle with non-destructive incremental sync."""
 
 from __future__ import annotations
 
@@ -90,6 +90,8 @@ class CodeGraphProjectLifecycle:
         if current.get("indexState") == "indexing":
             raise CodeGraphProjectError("codegraph-project-busy")
         if current.get("initialized") is not True:
+            if (root / ".codegraph" / "codegraph.db").exists():
+                raise CodeGraphProjectError("codegraph-existing-index-not-initialized")
             self._maintain("initialize", root)
             actions.append("initialize")
             current = self.status(str(root))
@@ -98,13 +100,6 @@ class CodeGraphProjectLifecycle:
             # The official sync reconciles disk and skips unchanged source files.
             self._maintain("sync", root)
             actions.append("sync")
-            current = self.status(str(root))
-
-        if current.get("indexState") == "indexing":
-            raise CodeGraphProjectError("codegraph-project-busy")
-        if current.get("freshness") != "fresh":
-            self._maintain("rebuild", root)
-            actions.append("rebuild")
             current = self.status(str(root))
 
         if current.get("indexState") == "indexing":

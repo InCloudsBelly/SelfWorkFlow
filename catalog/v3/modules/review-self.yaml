@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: review-self
-sourceHash: sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08
+sourceHash: sha256:8d3bc1657814c3b9a23fff851d2a6adb613b3e2972ddd9322681edfc06da215d
 stage: reviewed
 slot: review.self
 selectionMode: static

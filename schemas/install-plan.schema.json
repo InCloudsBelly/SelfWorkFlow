@@ -11,6 +11,8 @@
     "artifactRoot": {"type": "string", "minLength": 1},
     "agentsRoot": {"type": "string", "minLength": 1},
     "codexRoot": {"type": "string", "minLength": 1},
+    "dshRoot": {"type": "string", "minLength": 1},
+    "documentRoot": {"type": "string", "minLength": 1},
     "stateRoot": {"type": "string", "minLength": 1},
     "artifactHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "artifactFiles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
@@ -18,7 +20,7 @@
     "baselineHashes": {
       "type": "object", "additionalProperties": false,
       "required": ["agentsRoot", "codexRoot", "stateRoot"],
-      "properties": {"agentsRoot": {"type": "string"}, "codexRoot": {"type": "string"}, "stateRoot": {"type": "string"}}
+      "properties": {"agentsRoot": {"type": "string"}, "codexRoot": {"type": "string"}, "dshRoot": {"type": "string"}, "stateRoot": {"type": "string"}}
     },
     "status": {"enum": ["ready", "paused", "already-installed"]},
     "issues": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},

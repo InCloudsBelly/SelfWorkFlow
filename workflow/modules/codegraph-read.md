@@ -1,14 +1,22 @@
 # CodeGraph 读取模块
 
-- Windows 安装后的公共入口是 `$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd`，PowerShell 用 `& "$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd" provider preflight --project-root <repo>`。先检查该文件存在；仓库维护入口为 `Manage_SelfWorkFlow_Providers.bat`。不要猜 `python -m selfworkflow`，内部模块实际为 `selfworkflow.cli`，系统 Python 不一定含其依赖。入口缺失按安装问题报告，不扫描磁盘找替代 provider。
-- 主 Agent 自动执行本模块，不等待用户提醒。代码任务首次进入结构化阅读、进入新的读取阶段或切换项目根目录时，以当前项目绝对根目录调用一次 `provider preflight --project-root <repo>`。同阶段、同根目录且无漂移信号时复用有效证据，不逐文件或逐行检查。
-- 观察到目标仓库分支/HEAD 切换（checkout、reset、rebase、merge）、外部手动编辑、Git dirty/未跟踪变化，或 CodeGraph 的 worktree/stale/pending/degraded 通知时，立即失效相关旧图证据；下一次结构化查询前自动重新 preflight。文件内容变化即适用，不依赖用户提交或 `git add`。重新 fresh 后复查受影响的代码结论和实施计划，不能仅刷新图就继续旧计划。
-- `preflight` 统一核对当前工作区：缺少 `.codegraph/` 时执行 CodeGraph `init`；已有索引在本次读取/漂移边界执行一次官方 `sync`，再检查状态。不能仅凭 `status` 的表面 fresh 跳过核对：其 Git 快速路径可能漏掉 clean checkout 后的已提交差异，官方 `sync` 才比较文件系统与索引，跳过未变文件的解析。成功完成后仍 stale/partial/failed/pending 或要求重建才执行一次 `index --force`；命令失败立即保留错误，不继续重建掩盖失败。成功核对且 fresh 才允许结构化查询。
-- `indexState=indexing`、官方 MCP 明确 `busy` 或明确的锁占用都是忙碌信号，不是损坏证据；不启动竞争的 init/sync/rebuild。由主 Agent 用宿主可中断等待，间隔 5 秒、15 秒最多追加两次重试。相同根目录、阶段的 preflight/查询/写后维护共用该预算，不相互重置；每次重试先重查状态。耗尽后报告 `busy/unverified` 和待重试动作，不删除缓存或声称 fresh。图 fresh 也不能证明本次查询成功。
-- 查询优先用已暴露的官方 CodeGraph MCP，明确 `projectPath` 和具体文件/符号，按需限制 `maxFiles`；CLI `provider query --provider-id codegraph --project-root <repo> --query <text>` 是另一入口，同一问题不调用两遍。CodeGraph 的项目级 `.codegraph/` 是唯一全局 CodeMap；不读取 conversation、Topic、Deep 或跨仓库图。
-- 主 Agent 负责复用已返回的完整源码与依赖证据、合并同一问题的文件/符号，不再次查询相同内容；截断只补缺失片段。生命周期没有阶段缓存；独立 CLI `provider query` 每次仍自动核对，不与同问题的 MCP 查询重复执行。宽泛查询命中上游依赖时先收窄目标；明确 `busy` 只按共享预算处理，不叠加其他重试；其他可恢复失败最多一次有依据的重试，仍失败标 unverified，不循环消耗上下文。配置、文档、日志直接读精确路径，无需代码图。
-- 官方 watcher/daemon 负责底层索引进程、锁和并发。官方 MCP 默认项目有 watcher；通过 `projectPath` 打开的其他项目不能假定有 watcher，默认根或监听健康状态未验证时也按无 watcher 处理。这类项目每次新的结构化查询前自动 preflight；复用已返回证据不产生新查询。连接关闭、watcher 不可用或降级时，在下一次工作流读取/写后边界自动补齐索引；不承诺无连接时持续监听。SelfWorkflow 不创建第二套 watcher、supervisor、定时轮询或缓存协议。
-- 人为同时恢复文件原 size/mtime 是官方增量核对的已知特殊盲点；有此线索时使用现有 `index --force` 后重新验证，不宣称普通增量检查已覆盖。普通编辑/checkout 沿用上述自动路径，不要求用户定期手动维护。
-- 支持的源码、未跟踪文件、ignore 与扩展名由官方 CodeGraph 的实际扫描配置决定，不在工作流复制白名单；忽略文件不自动扩大为输入。目标仓库代码/Git 差异走上述自动维护；CodeGraph 工具自身 `provider-source-identity-drift` 是不同边界，须 inspect、审查并在已有明确授权内重绑，不能自动替换 bindingHash。
-- 状态、初始化或查询失败必须保留真实失败并标为 `unverified`；不得用旧索引、手工解析或 `rg` 结果冒充新鲜结构证据。简单文本定位可以单独使用 `rg`，但不替代 CodeGraph 证据。
-- 只读阶段不得修改 `.codegraph/` 以外的项目文件；CodeGraph 的初始化和同步属于已授权的项目索引维护副作用。
+仅行为源码的结构化阅读使用；配置、文档、日志直接读精确路径，无需代码图。主 Agent 自动维护当前项目级 `.codegraph/`，这是唯一 CodeMap；不读取 conversation、Topic、Deep 或跨仓库图。
+
+## 入口与核对边界
+
+- 按当前会话实际提供、已绑定项目且获授权的 CodeGraph MCP/CLI 能力执行核对与查询，检查真实工具协议，不按 Agent 名称猜测方法。已有 Windows 桥接入口 `$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd` 可继续使用：`provider preflight --project-root <repo>`。该程序不是工作流文档的启动前提；未提供等价的必要核对/查询能力时，仅该结构化操作保持 `unverified`，不扫描替代入口、不猜系统 Python、不伪造 fresh。工具安装与配置是独立操作，维护入口为 `Manage_SelfWorkFlow_Providers.bat`。
+- MCP 路径：首次/新阶段/换项目的结构化读取前，以绝对项目根做一次 `preflight`；同阶段、同根且无漂移复用核对证据。优先官方 MCP，明确 `projectPath`、具体文件/符号与适当的 `maxFiles`。
+- CLI 路径：直接用 `provider query --provider-id codegraph --project-root <repo> --query <text>`；它已包含核对，不先另跑 preflight。成功核对且 fresh 后才查询；该次成功满足此读取边界，不另调用 MCP 回答同一问题。独立 CLI 调用不共享阶段缓存，每次仍核对。
+- 分支/HEAD、外部编辑、dirty/未跟踪漂移或 worktree/stale/pending/degraded 通知，立即失效相关旧证据；下一次新查询按所选路径重新核对。fresh 后复查受影响结论/计划，不能只刷新图；不依赖提交或 `git add`。
+
+## Freshness 与失败
+
+- `preflight`：仅数据库文件不存在时官方 `init`；数据库存在但无法识别时报告错误并保留原库。已有索引先官方 `sync` 再查状态。不能仅信 `status`，其 Git 快速路径可能漏掉 clean checkout；`sync` 核对文件系统并跳过未变解析。成功后仍 stale/partial/failed/pending 或要求重建时，保留原库并报告 `not-fresh/unverified`；禁止自动执行 `index`、`index --force`、`recreate` 或删除旧库。全量重建须另有用户明确授权，并保留可恢复旧库直到新库验证完成；命令失败保留错误，不重建掩盖。核对成功且 fresh 才允许结构化查询，图 fresh 不等于查询成功。
+- indexing、MCP 明确 busy 或锁占用只表示忙碌，不并发 init/sync/rebuild。宿主可中断等待 5 秒、15 秒，最多追加两次，每次先重查状态；同根/阶段的 preflight、查询、写后维护共享预算。耗尽报 `busy/unverified` 及待办，不删除缓存。其他可恢复失败最多一次有依据重试。
+- 状态/初始化/查询失败如实 `unverified`，不将旧索引、手工解析或 `rg` 冒充新鲜结构证据；`rg` 仅作文本定位。已返回完整证据复用，截断只补缺段；宽泛查询命中上游时收窄，不重复全文。
+
+## Watcher 与范围
+
+- 官方 watcher/daemon 管进程、锁和并发。仅已验证的默认项目 watcher 可复用阶段核对；其他项目、默认根/监听健康未验证时，MCP 每次新查询前 preflight，CLI 使用自身核对。断连/降级在下个读取/写后边界补齐，不承诺离线持续监听，不另建 watcher/supervisor/轮询协议。
+- 原 size/mtime 被人为恢复是增量检查盲点，有此线索时报告缺口并提出保留旧库的重验方案，不自动全量重建；普通编辑/checkout 沿增量路径。扫描范围、未跟踪/ignore/扩展名遵循官方配置，不复制白名单或扩大忽略输入。
+- `provider-source-identity-drift` 须 inspect、审查并在已有授权内重绑，不自动换 bindingHash。只读阶段仅允许 `.codegraph/` 索引维护副作用，不改其他项目文件。

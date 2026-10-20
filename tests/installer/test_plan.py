@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator
 
 from selfworkflow.installer import InstallerError, create_install_plan
 from selfworkflow.cli import main
-from tests.installer.support import create_artifact
+from tests.installer.support import create_artifact, write_adapter
 
 
 class InstallPlanTests(unittest.TestCase):
@@ -99,6 +99,28 @@ class InstallPlanTests(unittest.TestCase):
             with mock.patch("sys.stdout"):
                 self.assertEqual(main(arguments), 0)
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["status"], "ready")
+
+    def test_cli_plan_can_bind_a_dsh_instruction_root(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            write_adapter(artifact, "dsh", "DSH adapter mapping\n")
+            output = root / "plan.json"
+            dsh = root / "dsh"
+            arguments = [
+                "install", "plan", "--artifact", str(artifact),
+                "--agents-root", str(root / "agents"),
+                "--codex-root", str(root / "codex"),
+                "--dsh-root", str(dsh),
+                "--state-root", str(root / "state"),
+                "--version", "0.1.0", "--output", str(output),
+            ]
+            with mock.patch("sys.stdout"):
+                self.assertEqual(main(arguments), 0)
+            plan = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(plan["status"], "ready")
+            self.assertEqual(Path(plan["dshRoot"]), dsh.resolve())
+            self.assertIn("dshRoot", plan["baselineHashes"])
 
     def test_plan_ignores_unmanaged_large_file_and_reparse_subtree(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

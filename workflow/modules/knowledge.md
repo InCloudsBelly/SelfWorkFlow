@@ -1,15 +1,17 @@
 # 知识模块
 
+仅约束 `knowledge.read/propose/update` 和对应 Wiki 产物。发布确认、CAS、后端 readiness 与文章规范不适用于普通代码、Markdown、方案留痕或其他模块；它们继续按各自 owner 和通用安全规则执行。
+
 知识沉淀是可选扩展，不是普通代码任务的阻塞条件。接口语义固定为：
 
 ```text
 knowledge.read → knowledge.propose → knowledge.update
 ```
 
-- 只在用户明确维护知识库，或任务完成后形成稳定、可复用结论时启用；后者每个任务只提示一次。
+- 用户明确维护知识库时启用；任务完成后形成稳定、可复用结论时每个任务只提示一次。已明确选择 `selfopenwiki`（包括当前 `knowledge` profile 的默认后端）且命中下述预览排障场景时，可选只读查询已有知识；不创建候选或发布事务。
 - `read` 只读；`propose` 只生成候选，不发布；`update` 需要用户明确确认、来源/版本校验和可恢复发布。
 - 后端必须是显式 adapter，声明能力、失败语义和 Skill；不得猜测模型、数据库、OAuth 或路径，不把私人推理写入知识库。
-- 工程文档、知识正文和来源说明使用中文。凭据、token、临时事务、完整原始敏感材料和无效结论不写入正式知识。
+- 知识正文和来源说明使用中文。凭据、token、临时事务、完整原始敏感材料和无效结论不写入正式知识。
 - 后端缺失、能力不明或证据漂移时标记 `unverified`；普通代码交付可继续，并记录待同步事项。
 
 ## `knowledge` profile 默认路由
@@ -18,10 +20,12 @@ knowledge.read → knowledge.propose → knowledge.update
 该入口仅加载当前操作的一个引用；不要同时加载模块内部 Writer Skill 或完整 MCP 契约。
 仅 profile 含知识能力不触发 Wiki；用户明确另选后端时服从其选择。
 
-当当前 SelfWorkflow artifact 的 profile 为 `knowledge`，且用户提到“打开/可视化 Wiki”、
+文档入口模式使用明确提供的个人偏好；没有个人文件时，用户明确要求个人 Wiki 且未另选后端，公共默认后端为 `selfopenwiki`。不要求 artifact/profile 才能读取本模块，不从磁盘猜个人配置。工具和 Wiki 根仍以该次实际 status 为准。
+
+安装兼容入口当当前 SelfWorkflow artifact 的 profile 为 `knowledge`，且用户提到“打开/可视化 Wiki”、
 “总结/整理 Wiki”或“更新/沉淀到 Wiki”时，默认 backend 固定为 `selfopenwiki`：
 
-1. 第一调用永远是 `openwiki_status`。
+1. 本次 Wiki 操作首调 `openwiki_status`，不约束其他模块的工具顺序。
 2. Wiki root 只接受 status 返回的 `paths.wikiRoot`；不读取 Agent 自己的 Wiki Markdown，
    不猜测其他 Wiki 目录。
 3. 可视化使用 SelfOpenWiki status 中声明的新版 Viewer contract；旧 OpenWiki CLI 不
@@ -29,6 +33,11 @@ knowledge.read → knowledge.propose → knowledge.update
 4. `knowledge.read` 使用 verified 的 `openwiki_read`：先取得目录/revision，再读取选中页面。
    缺能力时报告 `unverified`，不切换 `legacy_provider`。读取不启动发布事务。
 5. 写入仍必须经过 SelfWiki personal lifecycle、用户确认、Review 和 CAS 发布。
+
+经 WheelMaker/Relay、反向代理或 iframe 的开发预览持续加载、空白或静态脚本 403 时，
+可按 `kg-selfopenwiki` 的 `references/preview-troubleshooting.md` 只读查询已有排障知识。
+普通网页慢、模型失败或任意 API 403 不命中；另选知识后端时遵循该选择。知识工具、
+readiness 或条目不可用时记录该知识证据缺口并继续原诊断，不能成为 UI/代码修复的前置门禁。
 
 ## 知识文章质量规范
 
@@ -58,9 +67,21 @@ knowledge.read → knowledge.propose → knowledge.update
 
 ### 图像用于建立直觉
 
+- 技术机制配图默认优先使用 Agent 直接编写、可编辑并可版本管理的 SVG 概念示意图，
+  精确控制几何形状、中文标签、配色和布局；保留可维护图源，不只交付栅格截图。
+  沿用已有清晰图形的视觉语言，但不要求无收益地重绘现有合格图，也不绑定专用绘图 Skill。
 - 空间、视锥、覆盖、缓存布局、分层和生命周期等内容优先考虑直观示意：俯视/截面、区域
   叠加、分层布局、前后对照、时间轴或设计图；真实顺序与依赖才适合流程图。图像选型服务于
   理解，不为装饰配图，也不把所有关系强行画成流程图。
+- 用空间布局、包围区域、分组与小规模具体例子解释机制，例如“一个组跨多个存储页、一个页
+  容纳多个组的部分”。关系、映射与容纳关系不能仅用串行方框和箭头代替；例子必须说明
+  对应概念及抽象边界，不能暗示虚构的分配算法、真实容量或运行结果。
+- 简单的真实流程、依赖图可继续使用 Mermaid；照片、艺术性插图等确需位图时才使用
+  imagegen，数据图表按相应绘图方法处理。不能以自动流程排版或生成式位图替代需要精确
+  标签与布局的技术概念图，也不因优先 SVG 而把其他合适图形一律改写。
+- SVG 保持文字可读、缩放不失真，提供 `viewBox`、`title`/`desc` 或等效可访问说明；
+  不包含脚本、事件属性、`foreignObject` 或外部资源依赖。独立图源与正文内联副本同时
+  存在时须保持一致；在正文实际阅读宽度检查标签、图例、边界与留白。
 - 图前说明要回答的问题，图后解释读图结论；提供图例/文字说明，标明示意、非比例、坐标、
   单位与抽象边界（按需）。符号、色彩和箭头含义应一致，不能只依赖颜色传达信息。
 - 图文与来源结论相互核对，不能把抽象图当真实算法、精确比例或已验证运行结果。检查

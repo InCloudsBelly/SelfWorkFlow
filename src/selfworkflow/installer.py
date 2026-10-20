@@ -10,6 +10,7 @@ import re
 import tempfile
 from uuid import uuid4
 
+from selfworkflow.adapters import compose_adapter_policy
 from selfworkflow.managed_blocks import ManagedBlockError, render_managed_block
 from selfworkflow.host_runtime import legacy_host_launcher, render_host_launcher
 from selfworkflow.transactions import (
@@ -154,7 +155,7 @@ def _path_relative_to(path: Path, root: Path) -> str | None:
 
 def _plan_managed_surfaces(
     *, version: str, artifact_hash: str, artifact_files: list[str],
-    retired_skill_files: list[str] | None = None,
+    retired_skill_files: list[str] | None = None, include_dsh: bool = False,
 ) -> dict[str, list[str]]:
     snapshot_prefix = PurePosixPath(
         "selfworkflow", "versions", version, artifact_hash.removeprefix("sha256:")
@@ -168,25 +169,31 @@ def _plan_managed_surfaces(
     )
     agents.extend(retired_skill_files or [])
     agents.append("selfworkflow/current.json")
-    return {
+    surfaces = {
         "agentsRoot": agents,
         "codexRoot": ["AGENTS.md"],
         "stateRoot": ["current-manifest.json"],
     }
+    if include_dsh:
+        surfaces["dshRoot"] = ["AGENTS.md"]
+    return surfaces
 
 
 def _doctor_surfaces(
-    agents: Path, codex: Path, state: Path
+    agents: Path, codex: Path, state: Path, dsh: Path | None = None,
 ) -> dict[str, list[str]]:
     surfaces = {
         "agentsRoot": ["selfworkflow/current.json"],
         "codexRoot": ["AGENTS.md"],
         "stateRoot": ["current-manifest.json"],
     }
+    roots = [("agentsRoot", agents), ("codexRoot", codex), ("stateRoot", state)]
+    if dsh is not None:
+        surfaces["dshRoot"] = ["AGENTS.md"]
+        roots.append(("dshRoot", dsh))
     manifest = _load_current_manifest(state)
     if not manifest:
         return surfaces
-    roots = (("agentsRoot", agents), ("codexRoot", codex), ("stateRoot", state))
     for operation in manifest.get("operations", []):
         if not isinstance(operation, dict) or not isinstance(operation.get("target"), str):
             continue
@@ -215,12 +222,14 @@ def doctor(
     agents_root: str | Path,
     codex_root: str | Path,
     state_root: str | Path,
+    dsh_root: str | Path | None = None,
 ) -> dict[str, object]:
     agents = _safe_root(agents_root)
     codex = _safe_root(codex_root)
     state = _safe_root(state_root)
-    surfaces = _doctor_surfaces(agents, codex, state)
-    return {
+    dsh = _safe_root(dsh_root) if dsh_root is not None else None
+    surfaces = _doctor_surfaces(agents, codex, state, dsh)
+    report = {
         "schemaVersion": 1,
         "agentsRoot": _root_report(agents, surfaces["agentsRoot"]),
         "codexRoot": _root_report(codex, surfaces["codexRoot"]),
@@ -228,6 +237,9 @@ def doctor(
         "incompleteTransactions": recover_transactions(state),
         "securityStatus": "unverified",
     }
+    if dsh is not None:
+        report["dshRoot"] = _root_report(dsh, surfaces["dshRoot"])
+    return report
 
 
 def _read_text(path: Path) -> str:
@@ -282,6 +294,16 @@ def _artifact_profile(artifact: Path) -> str:
     return profile
 
 
+def _adapter_text(artifact: Path, adapter_id: str) -> str:
+    """Compose an adapter payload; unusable metadata or encoding is unavailable."""
+    try:
+        return compose_adapter_policy(
+            artifact / "adapters", adapter_id, read=_read_text,
+        )
+    except (InstallerError, UnicodeError):
+        return ""
+
+
 def _managed_instruction(
     snapshot: Path,
     workflow_text: str,
@@ -289,7 +311,12 @@ def _managed_instruction(
     profile: str,
     artifact_hash: str,
     existing_text: str = "",
+    adapter_text: str = "",
+    document_root: str | Path | None = None,
 ) -> str:
+    if document_root is not None:
+        from selfworkflow.documents import render_document_instruction
+        return render_document_instruction(document_root)
     # Only elide our duplicate, never edit user-owned text or infer equivalence.
     # Any fence/HTML context is ambiguous: keep the rule instead of parsing it.
     outside = re.split(
@@ -305,7 +332,7 @@ def _managed_instruction(
             lambda match: "" if match.group().strip() in existing_sections else match.group(),
             workflow_text.replace("\r\n", "\n"),
         )
-    return (
+    body = (
         "## SelfWorkflow bootstrap\n\n"
         "SelfWorkflow 已从安装后的 hash-bound artifact 加载。\n\n"
         f"- profile: `{profile}`\n"
@@ -321,6 +348,9 @@ def _managed_instruction(
         "### 内嵌轻量策略\n\n"
         f"{workflow_text.strip()}"
     )
+    if adapter_text.strip():
+        body += "\n\n## 宿主适配\n\n" + adapter_text.strip()
+    return body
 
 
 def _snapshot_root(
@@ -346,7 +376,9 @@ def _same_install_identity(
     agents: Path,
     codex: Path,
     state: Path,
+    dsh: Path | None = None,
     host_launcher: dict[str, object] | None = None,
+    document_root: str | Path | None = None,
 ) -> bool:
     return all(
         (
@@ -356,7 +388,9 @@ def _same_install_identity(
             manifest.get("agentsRoot") == str(agents),
             manifest.get("codexRoot") == str(codex),
             manifest.get("stateRoot") == str(state),
+            manifest.get("dshRoot") == (str(dsh) if dsh is not None else None),
             manifest.get("hostLauncher") == _host_identity(host_launcher),
+            manifest.get("documentRoot") == (str(document_root) if document_root is not None else None),
         )
     )
 
@@ -458,7 +492,9 @@ def create_install_plan(
     codex_root: str | Path,
     state_root: str | Path,
     version: str,
-    *, host_launcher: str | Path | None = None, host_python: str | Path | None = None,
+    *, dsh_root: str | Path | None = None,
+    host_launcher: str | Path | None = None, host_python: str | Path | None = None,
+    document_root: str | Path | None = None,
 ) -> dict[str, object]:
     if not isinstance(version, str) or not _VERSION.fullmatch(version):
         raise InstallerError("version-invalid")
@@ -466,7 +502,15 @@ def create_install_plan(
     agents = _safe_root(agents_root)
     codex = _safe_root(codex_root)
     state = _safe_root(state_root)
+    dsh = _safe_root(dsh_root) if dsh_root is not None else None
     roots = (artifact, agents, codex, state)
+    if dsh is not None:
+        roots = roots + (dsh,)
+    if document_root is not None:
+        from selfworkflow.documents import document_binding
+        document_root = _safe_root(document_root, allow_missing=False)
+        document_binding(document_root)
+        roots = roots + (document_root,)
     _validate_disjoint_roots(roots)
     files = _manifest(artifact)
     if not files or not (artifact / "WORKFLOW.md").is_file():
@@ -474,44 +518,91 @@ def create_install_plan(
     artifact_hash = _canonical_hash(files)
     profile = _artifact_profile(artifact)
     current_manifest = _load_current_manifest(state)
+    if document_root is None and current_manifest and current_manifest.get("documentRoot"):
+        from selfworkflow.documents import document_binding
+        document_root = _safe_root(current_manifest["documentRoot"], allow_missing=False)
+        document_binding(document_root)
+        _validate_disjoint_roots(roots + (document_root,))
     retired_skill_files, retirement_issues = _retired_skill_files(
         current_manifest,
         agents,
-        {item["path"] for item in files if item["path"].startswith("skills/")},
+        {item["path"] for item in files if item["path"].startswith("skills/")} if document_root is None else set(),
     )
+    include_dsh = dsh is not None
     surfaces = _plan_managed_surfaces(
         version=version,
         artifact_hash=artifact_hash,
         artifact_files=[item["path"] for item in files],
         retired_skill_files=retired_skill_files,
+        include_dsh=include_dsh,
     )
     baseline_hashes = {
         "agentsRoot": _managed_surface_hash(agents, surfaces["agentsRoot"]),
         "codexRoot": _managed_surface_hash(codex, surfaces["codexRoot"]),
         "stateRoot": _managed_surface_hash(state, surfaces["stateRoot"]),
     }
+    if include_dsh:
+        baseline_hashes["dshRoot"] = _managed_surface_hash(dsh, surfaces["dshRoot"])
     issues: list[str] = list(retirement_issues)
+    if current_manifest and current_manifest.get("documentRoot"):
+        if document_root != Path(current_manifest["documentRoot"]).resolve(strict=False):
+            issues.append("document-root-binding-change")
+    codex_adapter_text = _adapter_text(artifact, "codex")
+    if (
+        (artifact / "adapters/shared").exists()
+        and (artifact / "adapters/codex").exists()
+        and not codex_adapter_text and document_root is None
+    ):
+        issues.append("codex-adapter-missing")
+    dsh_adapter_text = _adapter_text(artifact, "dsh") if include_dsh else ""
+    if include_dsh and not dsh_adapter_text.strip() and document_root is None:
+        issues.append("dsh-adapter-missing")
+    if current_manifest and current_manifest.get("dshRoot"):
+        current_dsh = Path(current_manifest["dshRoot"]).resolve(strict=False)
+        if not include_dsh:
+            issues.append("dsh-root-binding-required")
+        elif dsh is not None and current_dsh != dsh.resolve(strict=False):
+            issues.append("dsh-root-binding-change")
     if (host_launcher is None) != (host_python is None):
         raise InstallerError("host-launcher-options-incomplete")
     host_binding = None
     if host_launcher is not None:
         host_binding, host_issues = _host_launcher_plan(artifact, agents, host_launcher, host_python, current_manifest)
         issues.extend(host_issues)
-    agents_file = codex / "AGENTS.md"
     snapshot = _snapshot_root(agents, version, artifact_hash)
+    codex_file = codex / "AGENTS.md"
     try:
         render_managed_block(
-            _read_text(agents_file),
+            _read_text(codex_file),
             _managed_instruction(
                 snapshot,
                 _read_text(artifact / "WORKFLOW.md"),
                 profile=profile,
                 artifact_hash=artifact_hash,
-                existing_text=_read_text(agents_file),
+                existing_text=_read_text(codex_file),
+                adapter_text=codex_adapter_text,
+                document_root=document_root,
             ),
         )
     except (ManagedBlockError, UnicodeError):
         issues.append("managed-block-invalid")
+    if include_dsh:
+        dsh_file = dsh / "AGENTS.md"
+        try:
+            render_managed_block(
+                _read_text(dsh_file),
+                _managed_instruction(
+                    snapshot,
+                    _read_text(artifact / "WORKFLOW.md"),
+                    profile=profile,
+                    artifact_hash=artifact_hash,
+                    existing_text=_read_text(dsh_file),
+                    adapter_text=dsh_adapter_text,
+                    document_root=document_root,
+                ),
+            )
+        except (ManagedBlockError, UnicodeError):
+            issues.append("dsh-managed-block-invalid")
     managed_targets = {
         item["target"] for item in current_manifest.get("operations", [])
     } if current_manifest else set()
@@ -520,7 +611,7 @@ def create_install_plan(
         snapshot_target = snapshot / relative
         if snapshot_target.exists() and str(snapshot_target) not in managed_targets:
             issues.append(f"unmanaged-snapshot-conflict:{relative}")
-        if relative.startswith("skills/"):
+        if relative.startswith("skills/") and document_root is None:
             target = agents / relative
             if target.exists() and str(target) not in managed_targets:
                 issues.append(f"unmanaged-skill-conflict:{relative}")
@@ -533,7 +624,9 @@ def create_install_plan(
         agents=agents,
         codex=codex,
         state=state,
+        dsh=dsh,
         host_launcher=host_binding,
+        document_root=document_root,
     ):
         try:
             if verify_install(Path(current_manifest["manifestPath"]))["status"] == "verified":
@@ -557,6 +650,10 @@ def create_install_plan(
         "issues": sorted(set(issues)),
         "securityStatus": "unverified",
     }
+    if include_dsh:
+        plan["dshRoot"] = str(dsh)
+    if document_root is not None:
+        plan["documentRoot"] = str(document_root)
     if host_binding is not None:
         plan["hostLauncher"] = host_binding
     plan["planHash"] = _canonical_hash(plan)
@@ -718,8 +815,13 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
             "securityStatus", "planHash",
         },
     }.get(plan.get("operation"))
-    if expected is not None and plan.get("operation") == "install" and "hostLauncher" in plan:
-        expected = expected | {"hostLauncher"}
+    if expected is not None and plan.get("operation") == "install":
+        if "hostLauncher" in plan:
+            expected = expected | {"hostLauncher"}
+        if "dshRoot" in plan:
+            expected = expected | {"dshRoot"}
+        if "documentRoot" in plan:
+            expected = expected | {"documentRoot"}
     if expected is None or set(plan) != expected or plan.get("schemaVersion") != 1:
         raise InstallerError("plan-invalid")
     supplied = dict(plan)
@@ -730,6 +832,7 @@ def _validate_plan_hash(plan: dict[str, object], confirmed_hash: str) -> None:
 
 def _validate_ready_plan_baseline(
     plan: dict[str, object], artifact: Path, agents: Path, codex: Path, state: Path,
+    dsh: Path | None = None,
 ) -> None:
     manifest = _manifest(artifact)
     if (
@@ -737,12 +840,45 @@ def _validate_ready_plan_baseline(
         or [item["path"] for item in manifest] != plan["artifactFiles"]
     ):
         raise InstallerError("artifact-drift")
+    include_dsh = "dshRoot" in plan
+    if "documentRoot" in plan:
+        from selfworkflow.documents import document_binding
+        document_binding(_safe_root(plan["documentRoot"], allow_missing=False))
+    if (
+        (artifact / "adapters/shared").exists()
+        and (artifact / "adapters/codex").exists()
+        and not _adapter_text(artifact, "codex") and "documentRoot" not in plan
+    ):
+        raise InstallerError("codex-adapter-missing")
     surfaces = _plan_managed_surfaces(
         version=plan["version"],
         artifact_hash=plan["artifactHash"],
         artifact_files=plan["artifactFiles"],
         retired_skill_files=plan["retiredSkillFiles"],
+        include_dsh=include_dsh,
     )
+    if include_dsh and dsh is None:
+        raise InstallerError("target-drift")
+    if include_dsh and not _adapter_text(artifact, "dsh").strip() and "documentRoot" not in plan:
+        raise InstallerError("dsh-adapter-missing")
+    current_manifest = _load_current_manifest(state)
+    if current_manifest and current_manifest.get("documentRoot"):
+        if "documentRoot" not in plan:
+            raise InstallerError("document-root-binding-required")
+        if Path(plan["documentRoot"]).resolve(strict=False) != Path(current_manifest["documentRoot"]).resolve(strict=False):
+            raise InstallerError("document-root-binding-change")
+    retired, issues = _retired_skill_files(
+        current_manifest, agents,
+        {item["path"] for item in manifest if item["path"].startswith("skills/")} if "documentRoot" not in plan else set(),
+    )
+    if issues or retired != plan["retiredSkillFiles"]:
+        raise InstallerError("skill-retirement-drift")
+    if current_manifest and current_manifest.get("dshRoot"):
+        current_dsh = Path(current_manifest["dshRoot"]).resolve(strict=False)
+        if not include_dsh:
+            raise InstallerError("dsh-root-binding-required")
+        if dsh is not None and current_dsh != dsh.resolve(strict=False):
+            raise InstallerError("dsh-root-binding-change")
     if (
         _managed_surface_hash(agents, surfaces["agentsRoot"])
         != plan["baselineHashes"]["agentsRoot"]
@@ -750,6 +886,8 @@ def _validate_ready_plan_baseline(
         != plan["baselineHashes"]["codexRoot"]
         or _managed_surface_hash(state, surfaces["stateRoot"])
         != plan["baselineHashes"]["stateRoot"]
+        or (include_dsh and _managed_surface_hash(dsh, surfaces["dshRoot"])
+            != plan["baselineHashes"].get("dshRoot"))
     ):
         raise InstallerError("target-drift")
     if "hostLauncher" in plan:
@@ -771,6 +909,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
             raise InstallerError("installer-locked")
         agents = _safe_root(plan["agentsRoot"], allow_missing=False)
         codex = _safe_root(plan["codexRoot"], allow_missing=False)
+        dsh = _safe_root(plan["dshRoot"], allow_missing=False) if "dshRoot" in plan else None
         manifest = _load_current_manifest(state)
         if (
             manifest is None
@@ -782,7 +921,9 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 agents=agents,
                 codex=codex,
                 state=state,
+                dsh=dsh,
                 host_launcher=plan.get("hostLauncher"),
+                document_root=plan.get("documentRoot"),
             )
         ):
             raise InstallerError("installed-state-drift")
@@ -799,7 +940,8 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     agents = _safe_root(plan["agentsRoot"])
     codex = _safe_root(plan["codexRoot"])
     state = _safe_root(plan["stateRoot"])
-    _validate_ready_plan_baseline(plan, artifact, agents, codex, state)
+    dsh = _safe_root(plan["dshRoot"]) if "dshRoot" in plan else None
+    _validate_ready_plan_baseline(plan, artifact, agents, codex, state, dsh)
     transaction_id = uuid4().hex
     transaction_path = state / "transactions" / f"{transaction_id}.json"
     backup_root = state / "backups" / transaction_id
@@ -809,7 +951,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     cleanup_pending: list[str] = []
     try:
         with exclusive_install_lock(state):
-            _validate_ready_plan_baseline(plan, artifact, agents, codex, state)
+            _validate_ready_plan_baseline(plan, artifact, agents, codex, state, dsh)
             transaction = {
                 "schemaVersion": 1,
                 "transactionId": transaction_id,
@@ -821,6 +963,8 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 "stateRoot": str(state),
                 "operations": operations,
             }
+            if dsh is not None:
+                transaction["dshRoot"] = str(dsh)
             try:
                 write_json_atomic(transaction_path, transaction)
 
@@ -854,7 +998,7 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                 for relative in plan["retiredSkillFiles"]:
                     record_delete(agents / Path(*PurePosixPath(relative).parts))
                 for item in _manifest(artifact):
-                    if item["path"].startswith("skills/"):
+                    if item["path"].startswith("skills/") and "documentRoot" not in plan:
                         source = artifact / Path(*PurePosixPath(item["path"]).parts)
                         record(agents / item["path"], source.read_bytes())
                 agents_path = codex / "AGENTS.md"
@@ -866,9 +1010,29 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                         profile=plan["profile"],
                         artifact_hash=plan["artifactHash"],
                         existing_text=_read_text(agents_path),
+                        adapter_text=_adapter_text(artifact, "codex"),
+                        document_root=plan.get("documentRoot"),
                     ),
                 ).encode("utf-8")
                 record(agents_path, agents_content)
+                if dsh is not None:
+                    dsh_adapter_text = _adapter_text(artifact, "dsh")
+                    if not dsh_adapter_text.strip() and "documentRoot" not in plan:
+                        raise InstallerError("dsh-adapter-missing")
+                    dsh_path = dsh / "AGENTS.md"
+                    dsh_content = render_managed_block(
+                        _read_text(dsh_path),
+                        _managed_instruction(
+                            snapshot,
+                            _read_text(artifact / "WORKFLOW.md"),
+                            profile=plan["profile"],
+                            artifact_hash=plan["artifactHash"],
+                            existing_text=_read_text(dsh_path),
+                            adapter_text=dsh_adapter_text,
+                            document_root=plan.get("documentRoot"),
+                        ),
+                    ).encode("utf-8")
+                    record(dsh_path, dsh_content)
                 pointer = (json.dumps(
                     {
                         "version": plan["version"],
@@ -909,6 +1073,10 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
                     "operations": [_manifest_operation(item) for item in operations],
                     "securityStatus": "unverified",
                 }
+                if dsh is not None:
+                    manifest["dshRoot"] = str(dsh)
+                if "documentRoot" in plan:
+                    manifest["documentRoot"] = plan["documentRoot"]
                 if host_binding is not None:
                     manifest["hostLauncher"] = _host_identity(host_binding)
                 write_json_atomic(manifest_path, manifest)
