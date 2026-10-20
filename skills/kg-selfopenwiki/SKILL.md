@@ -1,6 +1,6 @@
 ---
 name: kg-selfopenwiki
-description: 在 SelfWorkflow knowledge profile 下读取、总结、更新、恢复、绑定或可视化个人 Wiki 时使用；明确另选知识后端时服从该选择。普通代码任务、普通 Markdown 编辑、仅生成 Obsidian 产物不触发；改造 Skill/工作流由 workflow-skill-maintenance 负责。
+description: 在 SelfWorkflow knowledge profile 下读取、总结、更新、恢复、绑定或可视化个人 Wiki 时使用；也用于开发预览经 WheelMaker/Relay、反向代理或 iframe 后持续加载、空白，或静态脚本 403 时查询相关排障知识。明确另选知识后端时服从该选择。其他普通代码任务、普通 Markdown 编辑、仅生成 Obsidian 产物不触发；改造 Skill/工作流由 workflow-skill-maintenance 负责。
 ---
 
 # SelfOpenWiki 后端入口
@@ -15,6 +15,7 @@ SelfWorkflow 管模式、阶段、授权、Review 和验证；本 Skill 只路�
 | 生成更新候选或已确认知识写入 | [update.md](references/update.md) |
 | 诊断、恢复、已确认中止事务 | [recovery.md](references/recovery.md) |
 | 打开或可视化 Wiki | [visualize.md](references/visualize.md) |
+| 开发预览经 Relay/反向代理持续加载、空白或静态脚本 403：查询排障知识 | [preview-troubleshooting.md](references/preview-troubleshooting.md) |
 | 安装、重绑、检查接入 | [setup.md](references/setup.md) |
 | 明确选择旧 external 或 legacy_provider 协议 | [compatibility.md](references/compatibility.md) |
 

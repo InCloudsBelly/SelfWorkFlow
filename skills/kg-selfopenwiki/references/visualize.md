@@ -1,5 +1,9 @@
 # 可视化
 
+开发预览经 WheelMaker/Relay、反向代理或 iframe 后持续加载、空白，或静态脚本 403 时，
+按 [预览故障提示](preview-troubleshooting.md) 查询已记录的来源白名单问题；HTML 200 不代表正文可用。
+仅提示可能原因并核对资源，不因此放宽来源、认证或网络边界。
+
 只在打开或可视化时加载。先调用 `openwiki_status`；唯一 Wiki root 为 `paths.wikiRoot`，launcher 使用返回的绝对路径。
 
 确认 `visualizer.id=selfopenwiki.zxh_wiki_viewer`、`loopbackOnly=true`、`autoOpen=false`、`wikiRootInput.flag=--wiki-root` 和 `http://127.0.0.1:{port}/wiki/local` URL 模板。adapter 经模块 `Visualize.bat --wiki-root <root>` 启动并返回 loopback URL；打开仅限该 URL。Viewer 不改 Markdown taxonomy，不执行 Git commit/push。
