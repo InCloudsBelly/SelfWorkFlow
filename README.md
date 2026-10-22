@@ -4,6 +4,8 @@
 
 仓库提供统一入口 [`skills/selfworkflow/SKILL.md`](skills/selfworkflow/SKILL.md)。在支持 GitHub Skill 来源的宿主（例如 WheelMaker）中添加 `InCloudsBelly/SelfWorkFlow`，选择并安装 **selfworkflow**；添加来源本身不等于安装。其他 `skills/` 目录是专业方法，不需要为启用主流程全部安装。
 
+WheelMaker 当前只接受仓库地址，不接受带分支的 GitHub tree URL，因此仓库默认分支应为 `main`。Windows 上完整文档路径较长；遇到 `Filename too long` 时，在宿主的这个来源缓存仓库启用 `git -C <来源缓存目录> config core.longpaths true` 后重试更新。若检出已部分失败，应先确认缓存中的改动均来自本次失败检出再恢复；不要重置用户的工作仓库。
+
 入口 Skill 优先读取用户或宿主全局指令配置的公共入口；没有配置时，读取随包的 `skills/selfworkflow/references/public/WORKFLOW.md`，随后绑定其不可变文档版本。安装完成后读取随包规则无需联网，也不依赖维护者本机的 `D:` 盘。明确配置的入口不可用时报告缺口，不静默切换来源。私有 GitHub 仓库的获取权限仍由安装宿主处理，不在 Skill 中保存凭据。
 
 发布 Skill 时，从仓库根使用现有文档发布器生成随包文档，再一并提交 Skill 和完整的 `references/public/`：
