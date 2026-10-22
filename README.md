@@ -1,5 +1,19 @@
 # SelfWorkFlow
 
+## 通过 GitHub 安装入口 Skill
+
+仓库提供统一入口 [`skills/selfworkflow/SKILL.md`](skills/selfworkflow/SKILL.md)。在支持 GitHub Skill 来源的宿主（例如 WheelMaker）中添加 `InCloudsBelly/SelfWorkFlow`，选择并安装 **selfworkflow**；添加来源本身不等于安装。其他 `skills/` 目录是专业方法，不需要为启用主流程全部安装。
+
+入口 Skill 优先读取用户或宿主全局指令配置的公共入口；没有配置时，读取 GitHub `main` 上的原始 [`public/WORKFLOW.md`](https://raw.githubusercontent.com/InCloudsBelly/SelfWorkFlow/main/public/WORKFLOW.md)，随后绑定其不可变文档版本。发布时必须同时提交入口和它引用的完整 `public/releases/<revision>/`，不能只推送入口。GitHub 安装的 Skill 不依赖维护者本机的 `D:` 盘；未配置本地入口时需要可读取这些 HTTPS 文档的能力。明确配置的入口不可用时报告缺口，不静默切换来源。
+
+若希望默认启用，在宿主支持的全局指令中写入：
+
+```text
+默认工程流程使用 selfworkflow Skill；每个用户顶层工程任务实际读取其固定公共入口，子任务和续接继承主任务的 revision 与 documentRoot。
+```
+
+已有下文的公共入口全局指令时可以直接沿用，无需重复配置。安装只证明文件已分发；Codex 和 DeepSeek Harness 的发现、调用、文档读取与版本绑定仍需在各自新会话中验证。本 Skill 不安装 MCP 或执行旧安装器；普通文档接入不依赖这些能力。
+
 ## 文档直接使用（默认）
 
 普通 Agent 只需读取 [公共工作流入口](public/WORKFLOW.md)，再按该入口绑定的版本加载规则和方法；消费者无需安装 SelfWorkflow、Python/Node 或原生 Skill。工具能力仍按实际需要独立检查，缺少能力不能伪造通过。
