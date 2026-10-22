@@ -624,7 +624,7 @@ class ProviderManager:
                 raise ProviderManagerError("provider-config-commit-failed") from None
         return {"status": "committed"}
 
-    def _assert_source_identity(self, provider: Mapping[str, Any]) -> None:
+    def _assert_source_identity(self, provider: Mapping[str, Any]) -> Mapping[str, Any]:
         try:
             observation = self._source_identity_resolver(provider["sourcePath"])
             if not isinstance(observation, Mapping):
@@ -652,6 +652,7 @@ class ProviderManager:
                     "expectedSourceHash": expected["sourceHash"], "observedSourceHash": report["sourceHash"],
                     "recovery": "inspect-and-review-rebinding",
                 })
+            return report
         except ProviderManagerError:
             raise
         except Exception as error:
@@ -678,19 +679,27 @@ class ProviderManager:
             raise ProviderManagerError("provider-disabled")
         if "bindingHash" not in provider:
             raise ProviderManagerError("provider-adapter-unavailable")
-        self._assert_source_identity(provider)
+        source_report = self._assert_source_identity(provider)
         if (
             not fresh_session
             and self._adapter_cache is not None
             and self._adapter_cache[0] == provider["bindingHash"]
         ):
             return self._adapter_cache[1]
+        def validate_source() -> None:
+            self._assert_source_identity(provider)
+
         try:
             adapter = CodeGraphAdapter(
                 command_port=self._command_port,
                 command_prefix=tuple(provider["commandPrefix"]),
                 ownership=provider["ownership"],
-                pre_dispatch_validator=lambda: self._assert_source_identity(provider),
+                pre_dispatch_validator=validate_source,
+                allow_metadata_only_status=(
+                    provider["ownership"] == "selfworkflow-managed"
+                    and provider["source"]["kind"] == "managed-submodule"
+                    and source_report.get("sourceType") == "managed-submodule"
+                ),
             )
         except CodeGraphAdapterError:
             raise ProviderManagerError("provider-adapter-invalid") from None

@@ -108,6 +108,8 @@ def _validate_prefix(value: object) -> tuple[str, ...]:
 
 
 def _status_freshness(value: Mapping[str, Any]) -> str:
+    if value.get("workingTreeChecked") is False:
+        return "unknown"
     if value.get("initialized") is not True:
         return "missing"
     indexing_config = value.get("indexingConfig")
@@ -121,7 +123,15 @@ def _status_freshness(value: Mapping[str, Any]) -> str:
             return "stale"
         if type(index.get("pendingRefs")) is int and index["pendingRefs"] > 0:
             return "stale"
+    environment = value.get("cppIncludeEnvironment")
+    if "cppIncludeEnvironment" in value:
+        if not isinstance(environment, Mapping) or environment.get("observed") is not True or environment.get("complete") is not True:
+            return "unknown"
+        if environment.get("changed") is not False:
+            return "stale"
     pending = value.get("pendingChanges")
+    if "pendingChanges" in value and pending is None:
+        return "unknown"
     if isinstance(pending, Mapping) and any(
         type(pending.get(key)) is int and pending[key] > 0
         for key in ("added", "modified", "removed")
@@ -142,6 +152,7 @@ class CodeGraphAdapter:
         command_prefix: Sequence[str],
         ownership: str,
         pre_dispatch_validator: Callable[[], None] | None = None,
+        allow_metadata_only_status: bool = False,
     ) -> None:
         if not callable(getattr(command_port, "run", None)):
             raise CodeGraphAdapterError("codegraph-command-port-invalid")
@@ -149,10 +160,13 @@ class CodeGraphAdapter:
             raise CodeGraphAdapterError("codegraph-ownership-invalid")
         if pre_dispatch_validator is not None and not callable(pre_dispatch_validator):
             raise CodeGraphAdapterError("codegraph-source-validator-invalid")
+        if type(allow_metadata_only_status) is not bool:
+            raise CodeGraphAdapterError("codegraph-metadata-capability-invalid")
         self._port = command_port
         self._prefix = _validate_prefix(command_prefix)
         self._ownership = ownership
         self._pre_dispatch_validator = pre_dispatch_validator
+        self._allow_metadata_only_status = allow_metadata_only_status
         self._issued_maintenance_plans: set[str] = set()
         self._consumed_maintenance_plans: set[str] = set()
 
@@ -194,13 +208,45 @@ class CodeGraphAdapter:
         return result
 
     def status(self, project_root: str) -> dict[str, Any]:
+        return self._status(project_root, metadata_only=False)
+
+    def maintenance_status(self, project_root: str) -> dict[str, Any]:
         root = _validate_project_root(project_root)
-        output = self._run(("status", root, "--json")).stdout
+        if not self._allow_metadata_only_status:
+            return self.status(root)
+        declaration = self._run(("status", "--help")).stdout
+        if not declaration.strip():
+            raise CodeGraphAdapterError("codegraph-metadata-capability-invalid")
+        supported = re.search(r"^\s+--metadata-only(?:\s|$)", declaration, re.MULTILINE) is not None
+        return self._status(root, metadata_only=supported)
+
+    def _status(self, project_root: str, *, metadata_only: bool) -> dict[str, Any]:
+        root = _validate_project_root(project_root)
+        arguments = ("status", root, "--json") + (("--metadata-only",) if metadata_only else ())
+        output = self._run(arguments).stdout
         try:
             value = json.loads(output)
         except (TypeError, ValueError):
             raise CodeGraphAdapterError("codegraph-status-invalid") from None
         if not isinstance(value, dict) or type(value.get("initialized")) is not bool:
+            raise CodeGraphAdapterError("codegraph-status-invalid")
+        if metadata_only and (
+            value.get("workingTreeChecked") is not False
+            or "pendingChanges" not in value or value["pendingChanges"] is not None
+        ):
+            raise CodeGraphAdapterError("codegraph-metadata-status-invalid")
+        environment = value.get("cppIncludeEnvironment")
+        if environment is not None and (
+            not isinstance(environment, Mapping)
+            or any(type(environment.get(key)) is not bool for key in ("observed", "complete", "changed"))
+            or ("affectedFileCount" in environment and not (
+                type(environment["affectedFileCount"]) is int and environment["affectedFileCount"] >= 0
+            ))
+            or not (
+                type(environment.get("affectedFileCount")) is int and environment["affectedFileCount"] >= 0
+                or isinstance(environment.get("affectedFiles"), list)
+            )
+        ):
             raise CodeGraphAdapterError("codegraph-status-invalid")
         result = {
             "providerId": "codegraph",
@@ -211,6 +257,13 @@ class CodeGraphAdapter:
             "freshness": _status_freshness(value),
             "projectRootHash": _hash({"projectRoot": root.casefold()}),
         }
+        if "cppIncludeEnvironment" in value:
+            result["cppIncludeEnvironment"] = None if environment is None else {
+                key: environment[key] for key in ("observed", "complete", "changed")
+            } | {"affectedFileCount": (
+                environment["affectedFileCount"] if type(environment.get("affectedFileCount")) is int
+                else len(environment["affectedFiles"])
+            )}
         indexing_config = value.get("indexingConfig")
         if isinstance(indexing_config, Mapping) and indexing_config.get("error") is not None:
             result["indexingConfigInvalid"] = True
@@ -223,6 +276,10 @@ class CodeGraphAdapter:
             if type(index.get("pendingRefs")) is int and index["pendingRefs"] >= 0:
                 result["pendingRefs"] = index["pendingRefs"]
         pending = value.get("pendingChanges")
+        if "pendingChanges" in value and pending is None:
+            result["pendingChanges"] = None
+        if type(value.get("workingTreeChecked")) is bool:
+            result["workingTreeChecked"] = value["workingTreeChecked"]
         if isinstance(pending, Mapping):
             result["pendingChanges"] = {
                 key: pending[key]

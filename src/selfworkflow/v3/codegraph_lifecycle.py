@@ -82,6 +82,12 @@ class CodeGraphProjectLifecycle:
         except CodeGraphAdapterError as error:
             raise CodeGraphProjectError(error.reason) from None
 
+    def _initial_status(self, root: Path) -> dict[str, Any]:
+        try:
+            return self._adapter.maintenance_status(str(root))
+        except CodeGraphAdapterError as error:
+            raise CodeGraphProjectError(error.reason) from None
+
     def _ensure_from_status(
         self, root: Path, initial: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -124,7 +130,7 @@ class CodeGraphProjectLifecycle:
 
     def ensure(self, project_root: str) -> dict[str, Any]:
         root = _safe_project_root(project_root)
-        initial = self.status(str(root))
+        initial = self._initial_status(root)
         return self._ensure_from_status(root, initial)
 
     def sync(
@@ -132,7 +138,7 @@ class CodeGraphProjectLifecycle:
     ) -> dict[str, Any]:
         root = _safe_project_root(project_root)
         count = _changed_path_count(changed_paths)
-        initial = self.status(str(root))
+        initial = self._initial_status(root)
         result = self._ensure_from_status(root, initial)
         result["changedPathCount"] = count
         return result
@@ -141,7 +147,7 @@ class CodeGraphProjectLifecycle:
         self, project_root: str, query: str, *, query_kind: str = "ask",
     ) -> dict[str, Any]:
         root = _safe_project_root(project_root)
-        ensured = self._ensure_from_status(root, self.status(str(root)))
+        ensured = self._ensure_from_status(root, self._initial_status(root))
         try:
             result = self._adapter.query(
                 str(root), query, query_kind=query_kind,

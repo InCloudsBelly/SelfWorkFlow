@@ -1,4 +1,5 @@
 import copy
+import json
 import unittest
 
 
@@ -63,6 +64,89 @@ class CodeGraphAdapterTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.reason, "codegraph-command-failed")
         self.assertNotIn("do-not-log", str(caught.exception))
+
+    def test_unchecked_metadata_and_explicit_null_pending_changes_are_never_fresh(self):
+        observations = (
+            {"initialized": True, "index": {"state": "complete"}, "pendingChanges": None,
+             "workingTreeChecked": False},
+            {"initialized": True, "index": {"state": "complete"}, "pendingChanges": None},
+            {"initialized": False, "pendingChanges": None, "workingTreeChecked": False},
+        )
+        for value in observations:
+            with self.subTest(value=value):
+                adapter = self._adapter(FakeCommandPort(self._result(stdout=json.dumps(value))))
+                self.assertEqual(adapter.status("C:/work/project")["freshness"], "unknown")
+
+    def test_verified_fork_advertised_metadata_observation_remains_unknown(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
+
+        port = FakeCommandPort(
+            self._result(stdout="Usage: codegraph status\n  --metadata-only  Read metadata without checking files\n"),
+            self._result(stdout=json.dumps({"initialized": True, "pendingChanges": None,
+                                           "workingTreeChecked": False, "index": {"state": "complete"}})),
+            self._result(stdout=json.dumps({"initialized": True, "pendingChanges": {"added": 0, "modified": 0, "removed": 0},
+                                           "index": {"state": "complete"}})),
+        )
+        adapter = CodeGraphAdapter(command_port=port, command_prefix=("codegraph",),
+                                   ownership="selfworkflow-managed", allow_metadata_only_status=True)
+        metadata = adapter.maintenance_status("C:/work/project")
+        self.assertEqual(metadata["freshness"], "unknown")
+        self.assertFalse(metadata["workingTreeChecked"])
+        self.assertIsNone(metadata["pendingChanges"])
+        self.assertEqual(adapter.status("C:/work/project")["freshness"], "fresh")
+        self.assertEqual([call["argv"][1:] for call in port.calls], [
+            ("status", "--help"), ("status", "C:/work/project", "--json", "--metadata-only"),
+            ("status", "C:/work/project", "--json"),
+        ])
+
+    def test_capability_errors_and_invalid_metadata_responses_do_not_fall_back(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapter, CodeGraphAdapterError
+
+        for results, reason in (
+            ([self._result(1, stderr="unknown option")], "codegraph-command-failed"),
+            ([self._result(stdout="")], "codegraph-metadata-capability-invalid"),
+            ([self._result(stdout="  --metadata-only  Read metadata\n"),
+              self._result(stdout='{"initialized":true,"workingTreeChecked":true,"pendingChanges":null}')],
+             "codegraph-metadata-status-invalid"),
+        ):
+            with self.subTest(reason=reason):
+                port = FakeCommandPort(*results)
+                adapter = CodeGraphAdapter(command_port=port, command_prefix=("codegraph",),
+                                           ownership="selfworkflow-managed", allow_metadata_only_status=True)
+                with self.assertRaises(CodeGraphAdapterError) as caught:
+                    adapter.maintenance_status("C:/work/project")
+                self.assertEqual(caught.exception.reason, reason)
+                self.assertEqual(len(port.calls), len(results))
+
+    def test_verified_old_fork_without_the_option_keeps_strict_status(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
+
+        port = FakeCommandPort(
+            self._result(stdout="Usage: codegraph status\n  -j, --json  JSON output\n"),
+            self._result(stdout='{"initialized":true,"version":"1.6.2","pendingChanges":{"added":0,"modified":1,"removed":0}}'),
+        )
+        adapter = CodeGraphAdapter(command_port=port, command_prefix=("codegraph",),
+                                   ownership="selfworkflow-managed", allow_metadata_only_status=True)
+        self.assertEqual(adapter.maintenance_status("C:/work/project")["freshness"], "stale")
+        self.assertEqual(port.calls[-1]["argv"], ("codegraph", "status", "C:/work/project", "--json"))
+
+    def test_strict_cpp_environment_must_be_observed_complete_and_unchanged_to_be_fresh(self):
+        for environment, expected in (
+            (None, "unknown"),
+            ({"observed": False, "complete": False, "changed": True, "affectedFiles": []}, "unknown"),
+            ({"observed": True, "complete": False, "changed": False, "affectedFiles": []}, "unknown"),
+            ({"observed": True, "complete": True, "changed": True, "affectedFiles": ["private/Actor.cpp"]}, "stale"),
+            ({"observed": True, "complete": True, "changed": False, "affectedFiles": []}, "fresh"),
+            ({"observed": True, "complete": True, "changed": False, "affectedFileCount": 0}, "fresh"),
+            ({"observed": True, "complete": True, "changed": True, "affectedFileCount": 90000}, "stale"),
+        ):
+            with self.subTest(environment=environment):
+                value = {"initialized": True, "index": {"state": "complete"},
+                         "pendingChanges": {"added": 0, "modified": 0, "removed": 0},
+                         "cppIncludeEnvironment": environment}
+                result = self._adapter(FakeCommandPort(self._result(stdout=json.dumps(value)))).status("C:/work/project")
+                self.assertEqual(result["freshness"], expected)
+                self.assertNotIn("private/Actor.cpp", str(result))
 
     def test_official_sync_lock_error_is_busy_for_both_glyphs_and_ansi(self):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError

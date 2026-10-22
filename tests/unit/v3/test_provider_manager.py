@@ -57,7 +57,7 @@ class ProviderManagerTests(unittest.TestCase):
             "worktreeMismatch": None,
         })
 
-    def _manager(self, port=None, logger=None, replace_operation=None):
+    def _manager(self, port=None, logger=None, replace_operation=None, source_type=None):
         from selfworkflow.v3.provider_manager import MachineLocalPaths, ProviderManager
 
         source = self.root / "private" / "codegraph"
@@ -71,6 +71,7 @@ class ProviderManagerTests(unittest.TestCase):
             "source_identity_resolver": lambda source_path: {
                 "source": Path(source_path),
                 "report": {
+                    "sourceType": source_type,
                     "version": "1.6.2-local",
                     "commit": "b" * 40,
                     "sourceHash": "sha256:" + "a" * 64,
@@ -102,6 +103,26 @@ class ProviderManagerTests(unittest.TestCase):
         manager, _ = self._manager()
         self.assertEqual(manager.list_providers(), {"providers": []})
         self.assertFalse((self.root / "machine" / "providers.local.yaml").exists())
+
+    def test_only_a_verified_managed_submodule_can_probe_metadata_status_capability(self):
+        for kind, source_type in ((None, None), ("managed-submodule", None), ("managed-submodule", "managed-submodule")):
+            metadata_allowed = kind == source_type == "managed-submodule"
+            with self.subTest(kind=kind, source_type=source_type):
+                port = FakeCommandPort(
+                    self._result(stdout="  --metadata-only  Read metadata\n") if metadata_allowed else self._result(stdout=self._status()),
+                    *([self._result(stdout=json.dumps({"initialized": True, "pendingChanges": None, "workingTreeChecked": False,
+                                                       "index": {"state": "complete"}}))] if metadata_allowed else []),
+                    self._result(stdout="synced"), self._result(stdout=self._status()),
+                )
+                manager, project = self._manager(port=port, source_type=source_type)
+                manager.configure(
+                    provider_id="codegraph", source_path=str(project), command_prefix=("node", "cli.js"),
+                    ownership="selfworkflow-managed", source_version="1.6.2", source_commit="b" * 40,
+                    source_hash="sha256:" + "a" * 64, dirty=True, source_kind=kind,
+                    replace_existing=True,
+                )
+                self.assertEqual(manager.ensure(str(project))["freshness"], "fresh")
+                self.assertEqual(port.calls[0]["argv"][-2:], ("status", "--help") if metadata_allowed else (str(project).replace("\\", "/"), "--json"))
 
     def test_configure_is_machine_local_atomic_and_sanitized(self):
         manager, _ = self._manager()

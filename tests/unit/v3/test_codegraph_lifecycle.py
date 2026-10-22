@@ -45,7 +45,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
             },
         })
 
-    def _lifecycle(self, port):
+    def _lifecycle(self, port, *, metadata_capability=False):
         from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectLifecycle
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapter
 
@@ -53,8 +53,133 @@ class CodeGraphLifecycleTests(unittest.TestCase):
             command_port=port,
             command_prefix=("codegraph",),
             ownership="selfworkflow-managed",
+            allow_metadata_only_status=metadata_capability,
         )
         return CodeGraphProjectLifecycle(adapter), adapter
+
+    def test_metadata_gate_is_unknown_until_sync_and_strict_status_succeed(self):
+        metadata = json.loads(self._status())
+        metadata.update({"pendingChanges": None, "workingTreeChecked": False})
+        port = FakeCommandPort(
+            self._result(stdout="  --metadata-only  Read index metadata\n"),
+            self._result(stdout=json.dumps(metadata)),
+            self._result(stdout="synced"),
+            self._result(stdout=self._status()),
+        )
+        lifecycle, _ = self._lifecycle(port, metadata_capability=True)
+        result = lifecycle.ensure(str(self.project))
+        self.assertEqual(result["freshness"], "fresh")
+        self.assertEqual(result["actions"], ["sync"])
+        self.assertEqual([call["argv"][1:] for call in port.calls], [
+            ("status", "--help"), ("status", str(self.project).replace("\\", "/"), "--json", "--metadata-only"),
+            ("sync", str(self.project).replace("\\", "/")), ("status", str(self.project).replace("\\", "/"), "--json"),
+        ])
+
+    def test_metadata_then_sync_cannot_hide_a_same_stat_edit_reported_by_strict_status(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        metadata = json.loads(self._status())
+        metadata.update(pendingChanges=None, workingTreeChecked=False)
+        database = self.project / ".codegraph/codegraph.db"
+        database.parent.mkdir()
+        database.write_bytes(b"preserve the unsynced index")
+        for boundary in ("ensure", "preflight", "sync", "query"):
+            with self.subTest(boundary=boundary):
+                port = FakeCommandPort(
+                    self._result(stdout="  --metadata-only  Read index metadata\n"),
+                    self._result(stdout=json.dumps(metadata)),
+                    self._result(stdout="synced"),
+                    self._result(stdout=self._status(pending={"added": 0, "modified": 1, "removed": 0})),
+                )
+                lifecycle, _ = self._lifecycle(port, metadata_capability=True)
+                arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                with self.assertRaises(CodeGraphProjectError) as caught:
+                    getattr(lifecycle, boundary)(*arguments)
+                self.assertEqual(caught.exception.reason, "codegraph-index-not-fresh")
+                self.assertEqual([call["argv"][1] for call in port.calls], ["status", "status", "sync", "status"])
+                self.assertEqual(database.read_bytes(), b"preserve the unsynced index")
+
+    def test_metadata_config_version_and_busy_gates_preserve_the_database_without_writers(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        database = self.project / ".codegraph/codegraph.db"
+        database.parent.mkdir()
+        database.write_bytes(b"last good index")
+        cases = (
+            ({"indexingConfig": {"error": "invalid JSON"}}, "codegraph-indexing-config-invalid"),
+            ({"index": {"state": "indexing"}}, "codegraph-project-busy"),
+            ({"index": {"state": "complete", "reindexRecommended": True}}, "codegraph-rebuild-required-preserving-existing-index"),
+        )
+        for boundary in ("ensure", "preflight", "sync", "query"):
+            for fields, reason in cases:
+                with self.subTest(boundary=boundary, reason=reason):
+                    value = json.loads(self._status())
+                    value.update(fields, pendingChanges=None, workingTreeChecked=False)
+                    port = FakeCommandPort(self._result(stdout="  --metadata-only  Read metadata\n"),
+                                           self._result(stdout=json.dumps(value)))
+                    lifecycle, _ = self._lifecycle(port, metadata_capability=True)
+                    arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                    with self.assertRaises(CodeGraphProjectError) as caught:
+                        getattr(lifecycle, boundary)(*arguments)
+                    self.assertEqual(caught.exception.reason, reason)
+                    self.assertEqual(len(port.calls), 2)
+                    self.assertEqual(database.read_bytes(), b"last good index")
+
+    def test_metadata_pending_refs_are_repaired_only_when_strict_post_sync_is_fresh(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        for remaining in (0, 3):
+            with self.subTest(remaining=remaining):
+                metadata = json.loads(self._status(pending_refs=3))
+                metadata.update(pendingChanges=None, workingTreeChecked=False)
+                port = FakeCommandPort(self._result(stdout="  --metadata-only  Read metadata\n"),
+                                       self._result(stdout=json.dumps(metadata)), self._result(stdout="synced"),
+                                       self._result(stdout=self._status(pending_refs=remaining)))
+                lifecycle, _ = self._lifecycle(port, metadata_capability=True)
+                if remaining:
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-index-not-fresh"):
+                        lifecycle.ensure(str(self.project))
+                else:
+                    self.assertEqual(lifecycle.ensure(str(self.project))["freshness"], "fresh")
+                self.assertEqual(port.calls[-1]["argv"][-1], "--json")
+                self.assertEqual(len(port.calls), 4)
+
+    def test_failed_or_locked_sync_after_metadata_does_not_run_a_fallback_status_or_rebuild(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        lock_error = ("[ERR] Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
+                      "CodeGraph database is locked by another process (PID 42). If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock")
+        for stderr, reason in (("sync failed", "codegraph-command-failed"), (lock_error, "codegraph-project-busy")):
+            with self.subTest(reason=reason):
+                metadata = json.loads(self._status())
+                metadata.update(pendingChanges=None, workingTreeChecked=False)
+                port = FakeCommandPort(self._result(stdout="  --metadata-only  Read metadata\n"),
+                                       self._result(stdout=json.dumps(metadata)), self._result(1, stderr=stderr))
+                lifecycle, _ = self._lifecycle(port, metadata_capability=True)
+                with self.assertRaises(CodeGraphProjectError) as caught:
+                    lifecycle.ensure(str(self.project))
+                self.assertEqual(caught.exception.reason, reason)
+                self.assertEqual(len(port.calls), 3)
+
+    def test_strict_cpp_environment_failure_after_sync_cannot_be_reported_fresh(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        for environment in (None,
+                            {"observed": False, "complete": False, "changed": True, "affectedFiles": []},
+                            {"observed": True, "complete": False, "changed": False, "affectedFiles": []},
+                            {"observed": True, "complete": True, "changed": True, "affectedFiles": ["Actor.cpp"]}):
+            with self.subTest(environment=environment):
+                metadata = json.loads(self._status())
+                metadata.update(pendingChanges=None, workingTreeChecked=False, cppIncludeEnvironment=None)
+                final = json.loads(self._status())
+                final["cppIncludeEnvironment"] = environment
+                port = FakeCommandPort(self._result(stdout="  --metadata-only  Read metadata\n"),
+                                       self._result(stdout=json.dumps(metadata)), self._result(stdout="synced"),
+                                       self._result(stdout=json.dumps(final)))
+                lifecycle, _ = self._lifecycle(port, metadata_capability=True)
+                with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-index-not-fresh"):
+                    lifecycle.ensure(str(self.project))
+                self.assertEqual(len(port.calls), 4)
 
     def test_missing_project_is_fully_initialized_before_it_is_reported_fresh(self):
         port = FakeCommandPort(
