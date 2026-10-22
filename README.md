@@ -4,7 +4,15 @@
 
 仓库提供统一入口 [`skills/selfworkflow/SKILL.md`](skills/selfworkflow/SKILL.md)。在支持 GitHub Skill 来源的宿主（例如 WheelMaker）中添加 `InCloudsBelly/SelfWorkFlow`，选择并安装 **selfworkflow**；添加来源本身不等于安装。其他 `skills/` 目录是专业方法，不需要为启用主流程全部安装。
 
-入口 Skill 优先读取用户或宿主全局指令配置的公共入口；没有配置时，读取 GitHub `main` 上的原始 [`public/WORKFLOW.md`](https://raw.githubusercontent.com/InCloudsBelly/SelfWorkFlow/main/public/WORKFLOW.md)，随后绑定其不可变文档版本。发布时必须同时提交入口和它引用的完整 `public/releases/<revision>/`，不能只推送入口。GitHub 安装的 Skill 不依赖维护者本机的 `D:` 盘；未配置本地入口时需要可读取这些 HTTPS 文档的能力。明确配置的入口不可用时报告缺口，不静默切换来源。
+入口 Skill 优先读取用户或宿主全局指令配置的公共入口；没有配置时，读取随包的 `skills/selfworkflow/references/public/WORKFLOW.md`，随后绑定其不可变文档版本。安装完成后读取随包规则无需联网，也不依赖维护者本机的 `D:` 盘。明确配置的入口不可用时报告缺口，不静默切换来源。私有 GitHub 仓库的获取权限仍由安装宿主处理，不在 Skill 中保存凭据。
+
+发布 Skill 时，从仓库根使用现有文档发布器生成随包文档，再一并提交 Skill 和完整的 `references/public/`：
+
+```powershell
+.venv\Scripts\python.exe -m selfworkflow.cli documents publish --repository . --output skills/selfworkflow/references/public
+```
+
+已安装的随包文档通过宿主的 Skill 来源更新操作刷新；单独推送仓库不会自动更新已安装副本。维护者另行发布根 `public/` 时，也必须同时提交入口与其引用的完整 `public/releases/<revision>/`。
 
 若希望默认启用，在宿主支持的全局指令中写入：
 

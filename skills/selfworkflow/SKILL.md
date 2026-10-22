@@ -5,14 +5,12 @@ description: 按 SelfWorkflow 执行工程任务的方案、实施、审查与�
 
 # SelfWorkflow
 
-这是工作流的接入入口；规则与专业方法由公共文档按需提供。本 Skill 适用于 Codex、DeepSeek Harness 等能读取 Markdown 文件或 HTTPS 文档的宿主，不预设工具名称或已安装能力。
+这是工作流的接入入口；规则与专业方法由随包公共文档按需提供。本 Skill 适用于 Codex、DeepSeek Harness 等能读取 Markdown 文件的宿主，不预设工具名称或已安装能力。
 
 ## 读取与绑定
 
 1. 已有主任务的 `revision` 与 `documentRoot` 时，继承同一绑定；子任务、独立 Reviewer、阶段切换和上下文续接不重新读取 latest。
-2. 新的用户顶层任务，优先实际读取用户或宿主全局指令明确配置的 SelfWorkflow 公共入口。没有配置时，读取以下固定地址的原文：
-
-   <https://raw.githubusercontent.com/InCloudsBelly/SelfWorkFlow/main/public/WORKFLOW.md>
+2. 新的用户顶层任务，优先实际读取用户或宿主全局指令明确配置的 SelfWorkflow 公共入口。没有配置时，实际读取随包的 [公共入口](references/public/WORKFLOW.md)。该路径相对于本 `SKILL.md`，不依赖当前项目工作目录、维护者盘符或联网读取。
 
 3. 跟随入口中的“读取本任务规则”链接，实际读取该版本的 `WORKFLOW.md`，按其要求读取文档使用约定、任务模式与必要方法。入口给出的 `revision` 和目标 `WORKFLOW.md` 所在目录分别是本任务的版本与 `documentRoot`。
 4. 相对链接从声明它的文件解析。使用 HTTPS 入口时，保持原始文档 URL 形式，并将相对链接解析为对应 URL；不能把远程路径当作本机盘符。后续仅按需读取已绑定版本的文档，不复制整套规则到上下文。
@@ -27,4 +25,4 @@ description: 按 SelfWorkflow 执行工程任务的方案、实施、审查与�
 
 安装为全局 Skill 只提供发现与调用。要让每个工程任务都使用它，应在宿主支持的全局指令中配置：“默认工程流程使用 selfworkflow Skill；每个用户顶层工程任务实际读取其固定公共入口，子任务和续接继承主任务的 revision 与 documentRoot。”
 
-已有直接读取公共入口的全局指令时沿用即可，同一顶层任务不重复启动。Skill 更新由宿主的来源更新操作完成；新顶层任务读取公共入口的当前版本，进行中的任务继续使用已绑定版本。
+已有直接读取公共入口的全局指令时沿用即可，同一顶层任务不重复启动。Skill 与随包文档更新由宿主的来源更新操作完成；新顶层任务读取已安装公共入口的版本，进行中的任务继续使用已绑定版本。独立配置的公共入口更新由其维护者负责；仓库变更不会自动刷新已安装的离线副本。
