@@ -508,6 +508,11 @@ function Ensure-CodeGraphMcpLauncher {
         Stop-Install "codegraph-mcp" 28 "codegraph-mcp-entry-missing"
     }
     $prefix = (@($CommandPrefix | ForEach-Object { '"' + $_.Replace('%', '%%').Replace('"', '""') + '"' }) -join " ")
+    $directMode = ""
+    if ($RuntimeRoot.Replace('/', '\').TrimEnd('\').EndsWith('\extensions\codegraph\codegraph_ue', [StringComparison]::OrdinalIgnoreCase)) {
+        # shortcut: shared package versions cannot identify fork daemons; retire when the daemon handshake binds builds.
+        $directMode = 'set "CODEGRAPH_NO_DAEMON=1"'
+    }
     $parent = Split-Path -Parent $TargetPath
     [IO.Directory]::CreateDirectory($parent) | Out-Null
     $content = @"
@@ -515,6 +520,7 @@ function Ensure-CodeGraphMcpLauncher {
 setlocal DisableDelayedExpansion
 for /f "tokens=2 delims=:" %%p in ('chcp') do set "SELFWORKFLOW_CODEGRAPH_CODEPAGE=%%p"
 chcp 65001 >nul
+$directMode
 $prefix %*
 set "SELFWORKFLOW_CODEGRAPH_EXIT=%ERRORLEVEL%"
 if defined SELFWORKFLOW_CODEGRAPH_CODEPAGE chcp %SELFWORKFLOW_CODEGRAPH_CODEPAGE% >nul

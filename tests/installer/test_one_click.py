@@ -640,6 +640,37 @@ catch {
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ue-build-failure-preserved", result.stdout)
 
+    @unittest.skipUnless(os.name == "nt", "Windows MCP launcher boundary")
+    def test_ue_mcp_launcher_cannot_reuse_an_official_daemon_with_the_same_version(self):
+        source = (self.ROOT / "scripts/install-selfworkflow.ps1").read_text(encoding="utf-8")
+        body = source[source.index("function Ensure-CodeGraphMcpLauncher {"):source.index("function Ensure-CodexCodeGraphMcp {")]
+        harness = r'''
+param([string]$Root, [string]$Node)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+function Get-McpFileState($Path) { return $Path }
+function Set-McpFileBytes($State, [byte[]]$Bytes) { [IO.File]::WriteAllBytes($State, $Bytes) }
+function Stop-Install($Stage,$Code,$Reason) { throw $Reason }
+''' + body + r'''
+$entry = Join-Path $Root "fixture.js"
+$target = Join-Path $Root "launcher.cmd"
+$runtime = Join-Path $Root "extensions/codegraph/codegraph_ue"
+Ensure-CodeGraphMcpLauncher $runtime $target @($Node, $entry) | Out-Null
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "fixture.js").write_text("console.log(JSON.stringify({dedicated:process.env.CODEGRAPH_NO_DAEMON==='1'}));\n", encoding="utf-8")
+            script = root / "launcher.ps1"
+            script.write_text(harness, encoding="utf-8")
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-File", str(script), "-Root", str(root),
+                                     "-Node", shutil.which("node.exe") or shutil.which("node")], capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            environment = dict(os.environ)
+            environment.pop("CODEGRAPH_NO_DAEMON", None)
+            launched = subprocess.run([str(root / "launcher.cmd")], env=environment, capture_output=True, text=True, check=False)
+        self.assertEqual(launched.returncode, 0, launched.stderr)
+        self.assertTrue(json.loads(launched.stdout)["dedicated"])
+
     def _fake_runtime(self, root):
         codegraph = root / "codegraph-runtime"
         (codegraph / "bin").mkdir(parents=True, exist_ok=True)

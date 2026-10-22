@@ -160,11 +160,33 @@ def verify_codegraph_ue_build(source: Path, runtime: dict[str, object]) -> dict[
             or receipt["tree"] != lock["sourceTree"]
             or receipt["lockHash"] != _hash((root / LOCK_PATH).read_bytes())
             or receipt["runtimeHash"] != _hash(_json_bytes(runtime))
+            or ("nodePath" in receipt and receipt["nodePath"] != runtime["nodePath"])
         ):
             raise ValueError
     except (OSError, UnicodeError, ValueError, KeyError, TypeError):
         raise ValueError("codegraph-ue-build-unverified") from None
     return receipt
+
+
+def codegraph_ue_node(source: Path) -> Path | None:
+    """Read the pinned executable; the caller must verify its runtime hash."""
+    root = source.parents[2]
+    receipt_path = root / RECEIPT_PATH
+    _reject_links(receipt_path, root)
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if "nodePath" not in receipt:
+            return None  # Legacy receipts are upgraded only after full verification.
+        value = receipt["nodePath"]
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            raise ValueError
+        node = Path(value)
+        _reject_links(node, Path(node.anchor))
+        if not node.is_file():
+            raise ValueError
+        return node
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        raise ValueError("codegraph-ue-build-unverified") from None
 
 
 def _npm(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -189,14 +211,18 @@ def prepare_codegraph_ue(
         _git(root, "-c", "protocol.file.allow=never", "-c", f"submodule.{SOURCE_PATH}.url={SOURCE_URL}", "submodule", "update", "--init", "--", SOURCE_PATH)
     lock = verify_codegraph_ue_checkout(root)
     lock_hash = _hash((root / LOCK_PATH).read_bytes())
-    node_value = shutil.which("node.exe") or shutil.which("node")
+    receipt_path = root / RECEIPT_PATH
+    _reject_links(receipt_path, root)
+    try:
+        pinned_node = codegraph_ue_node(source) if receipt_path.exists() else None
+    except ValueError:
+        raise ValueError("codegraph-ue-build-identity-drift") from None
+    node_value = pinned_node or shutil.which("node.exe") or shutil.which("node")
     npm_value = shutil.which("npm.cmd") if os.name == "nt" else shutil.which("npm")
     if not node_value or not npm_value:
         raise ValueError("codegraph-ue-node-npm-required")
     node = Path(node_value).resolve(strict=True)
-    node_runtime = _node_runtime_probe(node)
-    receipt_path = root / RECEIPT_PATH
-    _reject_links(receipt_path, root)
+    node_runtime = None if receipt_path.exists() else _node_runtime_probe(node)
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     gate = receipt_path.with_suffix(".lock")
     try:
@@ -214,10 +240,14 @@ def prepare_codegraph_ue(
                 runtime = _codegraph_runtime_material(source, node, codegraph_ue_runtime_trees(source))
                 runtime["commandPrefix"] = (str(node), str(source / "dist/bin/codegraph.js"))
                 verified = verify_codegraph_ue_build(source, runtime)
+                node_runtime = _node_runtime_probe(node)
                 if verified["nodeRuntime"] != node_runtime:
                     raise ValueError
             except (OSError, ValueError):
                 raise ValueError("codegraph-ue-build-identity-drift") from None
+            if "nodePath" not in verified:
+                verified = dict(verified, nodePath=str(node))
+                receipt_path.write_bytes(_json_bytes(verified) + b"\n")
             return dict(verified, reused=True)
         started_build = True
         receipt_path.write_bytes(_json_bytes(receipt) + b"\n")
@@ -238,6 +268,7 @@ def prepare_codegraph_ue(
             "version": lock["package"]["version"], "lockHash": lock_hash,
             "runtimeHash": _hash(_json_bytes(runtime)),
             "nodeRuntime": node_runtime,
+            "nodePath": str(node),
             "commands": [["npm", "ci"], ["npm", "run", "build"]],
         }
         receipt_path.write_bytes(_json_bytes(receipt) + b"\n")

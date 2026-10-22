@@ -141,6 +141,74 @@ class CodeGraphUESourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "gitlink-mismatch"):
             prepare_codegraph_ue(self.root, npm_runner=forbidden)
 
+    def test_verified_source_inspection_keeps_its_build_node_when_path_changes(self):
+        from selfworkflow.codegraph_ue import prepare_codegraph_ue
+        from selfworkflow import cli
+
+        def npm(command, cwd):
+            if command[1:] == ["run", "build"]:
+                entry = cwd / "dist/bin/codegraph.js"
+                entry.parent.mkdir(parents=True)
+                entry.write_text("console.log('fixture');\n", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        original_node = Path(shutil.which("node.exe") or shutil.which("node")).resolve()
+        prepare_codegraph_ue(self.root, npm_runner=npm)
+        alternate_node = self.root / original_node.name
+        shutil.copyfile(original_node, alternate_node)
+        real_which = shutil.which
+
+        def changed_path(name):
+            return str(alternate_node) if name in {"node", "node.exe"} else real_which(name)
+
+        output, errors = io.StringIO(), io.StringIO()
+        with mock.patch("shutil.which", side_effect=changed_path), contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            result = cli.main(["provider", "inspect", "--codegraph-path", str(self.source)])
+        self.assertEqual(result, 0, errors.getvalue())
+        observed = json.loads(output.getvalue())
+        self.assertEqual(Path(observed["commandPrefix"][0]), original_node)
+        self.assertEqual(observed["sourceType"], "managed-submodule")
+
+        with mock.patch("shutil.which", side_effect=changed_path):
+            reused = prepare_codegraph_ue(self.root, npm_runner=lambda *_args: self.fail("verified build must be reused"))
+        self.assertTrue(reused["reused"])
+        self.assertEqual(Path(reused["nodePath"]), original_node)
+
+    def test_legacy_node_receipt_is_upgraded_only_after_verification_and_redirection_is_rejected(self):
+        from selfworkflow.codegraph_ue import prepare_codegraph_ue, RECEIPT_PATH
+        from selfworkflow import cli
+
+        def npm(command, cwd):
+            if command[1:] == ["run", "build"]:
+                entry = cwd / "dist/bin/codegraph.js"
+                entry.parent.mkdir(parents=True)
+                entry.write_text("console.log('fixture');\n", encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        original = prepare_codegraph_ue(self.root, npm_runner=npm)
+        receipt_path = self.root / RECEIPT_PATH
+        legacy = dict(original)
+        legacy.pop("nodePath")
+        receipt_path.write_text(json.dumps(legacy), encoding="utf-8")
+        reused = prepare_codegraph_ue(self.root, npm_runner=lambda *_args: self.fail("legacy build must be reused"))
+        self.assertTrue(reused["reused"])
+        self.assertEqual(reused["nodePath"], original["nodePath"])
+        self.assertEqual(reused["runtimeHash"], original["runtimeHash"])
+
+        alternate_node = self.root / Path(original["nodePath"]).name
+        shutil.copyfile(original["nodePath"], alternate_node)
+        redirected = json.loads(receipt_path.read_text(encoding="utf-8"))
+        redirected["nodePath"] = str(alternate_node)
+        receipt_path.write_text(json.dumps(redirected), encoding="utf-8")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["provider", "inspect", "--codegraph-path", str(self.source)]), 70)
+        self.assertIn("provider-source-inspection-failed", errors.getvalue())
+        with mock.patch("selfworkflow.codegraph_ue._node_runtime_probe") as probe:
+            with self.assertRaisesRegex(ValueError, "build-identity-drift"):
+                prepare_codegraph_ue(self.root, npm_runner=lambda *_args: self.fail("redirected build must not run npm"))
+        probe.assert_not_called()
+
     def test_failed_build_does_not_publish_an_artifact_or_fall_back(self):
         from selfworkflow.codegraph_ue import prepare_codegraph_ue, RECEIPT_PATH
 

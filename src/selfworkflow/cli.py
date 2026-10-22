@@ -191,7 +191,10 @@ def _codegraph_runtime_material(source: Path, node: Path, trees: tuple[Path, ...
 
 def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
     """Hash a CodeGraph checkout or managed runtime without executing it."""
+    from selfworkflow.codegraph_ue import SOURCE_PATH, codegraph_ue_node, codegraph_ue_runtime_trees, verify_codegraph_ue_build
+
     source = _absolute_path(source_value).resolve(strict=True)
+    managed_submodule = source.as_posix().endswith("/" + SOURCE_PATH)
     local_script = source / "dist" / "bin" / "codegraph.js"
     managed_script = source / "lib" / "dist" / "bin" / "codegraph.js"
     if managed_script.is_file():
@@ -204,7 +207,8 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
         source_type = "local-git"
         script = local_script
         path_chain = (source, source / "dist", source / "dist" / "bin", script)
-        node_value = shutil.which("node.exe") or shutil.which("node")
+        node_value = codegraph_ue_node(source) if managed_submodule else None
+        node_value = node_value or shutil.which("node.exe") or shutil.which("node")
         if node_value is None:
             raise ValueError("codegraph-source-invalid")
         node = Path(node_value).resolve(strict=True)
@@ -272,9 +276,6 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
             raise _SourceInspectionError("output-limit", arguments[0])
         return result.stdout
 
-    from selfworkflow.codegraph_ue import SOURCE_PATH, codegraph_ue_runtime_trees, verify_codegraph_ue_build
-
-    managed_submodule = source.as_posix().endswith("/" + SOURCE_PATH)
     runtime = _codegraph_runtime_material(
         source, node,
         ((source / "lib",) if source_type == "managed-runtime" else
