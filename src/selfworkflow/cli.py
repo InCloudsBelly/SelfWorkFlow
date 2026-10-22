@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -271,9 +272,13 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
             raise _SourceInspectionError("output-limit", arguments[0])
         return result.stdout
 
+    from selfworkflow.codegraph_ue import SOURCE_PATH, codegraph_ue_runtime_trees, verify_codegraph_ue_build
+
+    managed_submodule = source.as_posix().endswith("/" + SOURCE_PATH)
     runtime = _codegraph_runtime_material(
         source, node,
-        (source / "lib",) if source_type == "managed-runtime" else (source / "dist", source / "node_modules"),
+        ((source / "lib",) if source_type == "managed-runtime" else
+         codegraph_ue_runtime_trees(source) if managed_submodule else (source / "dist", source / "node_modules")),
     )
     runtime["commandPrefix"] = command_prefix
     if source_type == "local-git":
@@ -305,6 +310,9 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
     source_hash = "sha256:" + hashlib.sha256(
         json.dumps(source_material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    if managed_submodule:
+        verify_codegraph_ue_build(source, runtime)
+        source_type = "managed-submodule"
     return {
         "source": source,
         "script": script,
@@ -346,12 +354,13 @@ def _configure_codegraph(
         command_prefix=tuple(report["commandPrefix"]),
         ownership=(
             "selfworkflow-managed"
-            if report.get("sourceType") == "managed-runtime" else "user-local"
+            if report.get("sourceType") in {"managed-runtime", "managed-submodule"} else "user-local"
         ),
         source_version=str(report["version"]),
         source_commit=str(report["commit"]),
         source_hash=str(report["sourceHash"]),
         dirty=bool(report["dirty"]),
+        source_kind=("managed-submodule" if report.get("sourceType") == "managed-submodule" else None),
         replace_existing=replace_existing,
         rollback_token=rollback_token,
     )
@@ -557,6 +566,8 @@ def main(argv: list[str] | None = None) -> int:
     source_remove.add_argument("--expected-inventory-hash", required=True)
     source_ponytail = source_commands.add_parser("ponytail-verify")
     source_ponytail.add_argument("--repository", required=True)
+    source_codegraph_ue = source_commands.add_parser("codegraph-ue-prepare")
+    source_codegraph_ue.add_argument("--repository", required=True)
     provider_parser = commands.add_parser("provider")
     provider_commands = provider_parser.add_subparsers(
         dest="provider_command", required=True,
@@ -945,6 +956,22 @@ def main(argv: list[str] | None = None) -> int:
                 f"SelfWorkFlow: ponytail-source-verification-failed:{error}",
                 file=sys.stderr,
             )
+            return 63
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return 0
+    if arguments.command == "source" and arguments.source_command == "codegraph-ue-prepare":
+        from selfworkflow.codegraph_ue import prepare_codegraph_ue
+
+        try:
+            result = prepare_codegraph_ue(arguments.repository)
+        except ValueError as error:
+            reason = str(error)
+            if re.fullmatch(r"codegraph-ue-[a-z-]+", reason) is None:
+                reason = "codegraph-ue-prepare-failed"
+            print(f"SelfWorkFlow: {reason}", file=sys.stderr)
+            return 63
+        except (OSError, subprocess.SubprocessError):
+            print("SelfWorkFlow: codegraph-ue-prepare-failed", file=sys.stderr)
             return 63
         print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return 0

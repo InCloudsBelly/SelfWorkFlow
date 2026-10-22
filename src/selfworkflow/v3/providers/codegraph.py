@@ -110,6 +110,9 @@ def _validate_prefix(value: object) -> tuple[str, ...]:
 def _status_freshness(value: Mapping[str, Any]) -> str:
     if value.get("initialized") is not True:
         return "missing"
+    indexing_config = value.get("indexingConfig")
+    if isinstance(indexing_config, Mapping) and indexing_config.get("error") is not None:
+        return "stale"
     index = value.get("index")
     if isinstance(index, Mapping):
         if index.get("state") in {"indexing", "partial", "failed"}:
@@ -208,6 +211,9 @@ class CodeGraphAdapter:
             "freshness": _status_freshness(value),
             "projectRootHash": _hash({"projectRoot": root.casefold()}),
         }
+        indexing_config = value.get("indexingConfig")
+        if isinstance(indexing_config, Mapping) and indexing_config.get("error") is not None:
+            result["indexingConfigInvalid"] = True
         index = value.get("index")
         if isinstance(index, Mapping):
             if isinstance(index.get("state"), str) and index["state"]:

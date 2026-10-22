@@ -12,8 +12,9 @@ Manage_SelfWorkFlow_Providers.bat preflight --project-root D:\project
 ```
 
 SelfWorkFlow 在读取和写后边界自动检查状态，不等待用户提醒。缺少索引时执行 `codegraph init`，
-已有索引在本次边界执行一次官方 `sync` 核对文件系统，完成后仍不 fresh 时执行一次
-`index --force`。不能仅凭 status fresh 跳过核对；indexing/busy 不发起竞争维护。只有成功核对且 fresh
+已有索引在本次边界执行一次 `sync` 核对文件系统。要求 reindex 时保留旧库并停止自动维护；
+同步后仍不 fresh 时报告失败，不自动执行 `index --force`。不能仅凭 status fresh 跳过核对；
+indexing/busy 不发起竞争维护。只有成功核对且 fresh
 状态才允许结构化查询：
 
 ```bat
@@ -52,9 +53,19 @@ CodeGraph 的输入。
 
 ## 运行时与生命周期
 
-安装器默认部署锁定的 CodeGraph `@colbymchenry/codegraph` `v1.6.2` 运行时，
-并注册官方 `codegraph serve --mcp`。官方 watcher/daemon 负责索引进程、锁和并发；
+安装器默认使用个人维护的 [CodeGraph UE 子模块](../../extensions/codegraph/README.md)，
+由父仓库 gitlink 和 `dependencies/locks/codegraph-ue.lock.yaml` 固定真实源码。
+`-CodeGraphBackend official` 显式选择原有锁定的官方
+`@colbymchenry/codegraph` `v1.6.2` 发布运行时；构建或身份验证失败不自动回退。
+两种后端都注册 `codegraph serve --mcp`。CodeGraph watcher/daemon 负责索引进程、锁和并发；
 SelfWorkFlow 不创建第二个 supervisor，也不重复实现图数据库。
+
+UE 后端先实际探测 Node 的内建 SQLite，拒绝 Node 25 或不可用的运行时；
+首次使用固定源码执行 `npm ci` 和 `npm run build`。回执绑定真实 Node、
+dist、node_modules 和 UI workspace 内容，相同源码、Node 与运行内容全部通过校验时复用构建。
+已有构建回执但身份漂移时停止，不原地覆盖可能正在使用的后端；受控停止旧后端后，
+归档旧回执，再显式 prepare 和注册。具体命令见子模块说明。
+已有个人 `-CodeGraphPath` 绑定继续保留；切换它需显式传入 `-ReplaceCodeGraphOverride`。
 
 官方 MCP 默认项目有 watcher；通过 `projectPath` 打开的其他项目不能假定持续监听，
 默认根/监听健康状态未验证时也按无 watcher 处理，每次新的结构化查询前由工作流自动 preflight。连接关闭或 watcher 降级时，下一次
@@ -68,7 +79,8 @@ complete，却保留旧分支节点；官方 sync 使用文件系统与索引比
 同一问题重复调用 CLI 和 MCP。未承诺免 CLI 启动或目录枚举成本。
 
 人为同时恢复文件原 size/mtime 是官方增量核对的特殊盲点；有此线索时由主 Agent
-使用现有 `index --force` 后验证，不要求用户周期性执行维护。大型 UE 项目耗时尚未实测。
+在独立候选库中重建、验证后安全切换，不直接覆盖旧库，也不要求用户周期性执行维护。
+大型 UE 项目耗时尚未实测。
 
 用户可以显式绑定一个本地 CodeGraph checkout：
 
@@ -91,15 +103,18 @@ Provider 调用前重新验证源身份。配置文件位于机器本地，不�
 但不能替代需要结构关系的新鲜 CodeGraph 结果。Reviewer 只消费主 Agent 绑定的
 CodeGraph evidence，不调用 Provider 或维护命令。
 
-维护命令失败立即停止，不通过重建掩盖错误。只有命令成功但实际状态仍为
-stale/partial/failed/pending 或要求 reindex 时才升级为一次重建；indexing 始终按
-忙碌处理。读取与写后维护的完整执行规则分别在
+status 返回 `indexingConfig.error` 时，Adapter 将索引视为 stale，自动边界以
+`codegraph-indexing-config-invalid` 停止，不发起初始化、同步或重建，保留原数据库。
+
+维护命令失败立即停止，不通过重建掩盖错误。命令成功但实际状态仍为
+stale/partial/failed/pending 时保留真实状态并报告 `unverified`；要求 reindex 时在同步前停止，
+不自动重建；indexing 始终按忙碌处理。读取与写后维护的规则分别在
 `workflow/modules/codegraph-read.md`、`workflow/modules/codegraph-update.md`。
 
-CLI `sync` 启用 SDK 的 `throwOnLockFailure` 可选项，锁获取失败必须退出非零，
-不能将 SDK 默认的跳过结果称为同步成功。Adapter 仅将官方锁占用错误行映射为
+CLI `sync` 在锁获取失败时必须退出非零，不能将未完成的同步称为成功。
+Adapter 仅将 CodeGraph 的受限锁占用错误行映射为
 `codegraph-project-busy`，由主 Agent 使用同一有界预算恢复；其他错误保持失败关闭。
-SDK 未传该选项的既有 watcher 调用保留默认兼容行为。
+watcher 的重试与锁恢复由 CodeGraph 管理。
 
 ## 检查命令
 

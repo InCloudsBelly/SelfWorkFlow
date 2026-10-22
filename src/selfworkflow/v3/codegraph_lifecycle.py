@@ -87,6 +87,8 @@ class CodeGraphProjectLifecycle:
     ) -> dict[str, Any]:
         actions: list[str] = []
         current = dict(initial)
+        if current.get("indexingConfigInvalid") is True:
+            raise CodeGraphProjectError("codegraph-indexing-config-invalid")
         if current.get("indexState") == "indexing":
             raise CodeGraphProjectError("codegraph-project-busy")
         if current.get("initialized") is not True:
@@ -96,6 +98,9 @@ class CodeGraphProjectLifecycle:
             actions.append("initialize")
             current = self.status(str(root))
         else:
+            # An extraction-version upgrade needs a separately verified candidate.
+            if current.get("reindexRecommended") is True:
+                raise CodeGraphProjectError("codegraph-rebuild-required-preserving-existing-index")
             # Git status can be clean after checkout while the index is stale.
             # The official sync reconciles disk and skips unchanged source files.
             self._maintain("sync", root)

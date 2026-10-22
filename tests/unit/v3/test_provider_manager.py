@@ -151,7 +151,9 @@ class ProviderManagerTests(unittest.TestCase):
         )
         self.assertIn("init", port.calls[1]["argv"])
 
-    def test_sync_runs_once_and_rebuilds_when_status_requires_it(self):
+    def test_sync_reports_rebuild_requirement_without_rebuilding(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
         port = FakeCommandPort(
             self._result(stdout=self._status()),
             self._result(stdout="synced"),
@@ -161,12 +163,11 @@ class ProviderManagerTests(unittest.TestCase):
         )
         manager, project = self._manager(port=port)
         self._configure(manager)
-        result = manager.sync(str(project), ("src/main.cpp", "src/main.cpp", "src/helper.cpp"))
-        self.assertEqual(result["changedPathCount"], 2)
-        self.assertEqual(result["actions"], ["sync", "rebuild"])
+        with self.assertRaisesRegex(ProviderManagerError, "codegraph-index-not-fresh"):
+            manager.sync(str(project), ("src/main.cpp", "src/main.cpp", "src/helper.cpp"))
         self.assertEqual(
             [call["argv"][2] for call in port.calls],
-            ["status", "sync", "status", "index", "status"],
+            ["status", "sync", "status"],
         )
 
     def test_query_ensures_fresh_index_and_returns_codegraph_data(self):

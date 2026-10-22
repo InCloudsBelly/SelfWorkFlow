@@ -10,6 +10,8 @@ param(
     [switch]$CodeGraphMcpLauncherOnly,
     [switch]$ReplaceCodeGraphOverride,
     [string]$CodeGraphPath,
+    [ValidateSet("ue", "official")]
+    [string]$CodeGraphBackend = "ue",
     [string]$AgentsRoot = (Join-Path $env:USERPROFILE ".agents"),
     [string]$CodexRoot = (Join-Path $env:USERPROFILE ".codex"),
     [string]$DshRoot = "",
@@ -31,6 +33,7 @@ Usage:
   Install_SelfWorkFlow.bat [-Profile core|knowledge|maintainer] [-DshRoot <dsh-home>]
   Install_SelfWorkFlow.bat -CodeGraphMcpLauncherOnly -ConfirmApply
   Install_SelfWorkFlow.bat -CodeGraphPath <local-codegraph-root> -ConfirmApply
+  Install_SelfWorkFlow.bat -CodeGraphBackend ue|official -ReplaceCodeGraphOverride -ConfirmApply
 
 An explicit -DshRoot writes the same managed bootstrap plus the DSH adapter
  section to <DshRoot>\AGENTS.md for DeepSeek Harness. Without it, the DSH
@@ -44,8 +47,10 @@ The pinned Matt Pocock Skills foundation and the path-limited TEA, Ponytail and
 other workflow submodules are prepared from the repository locks. Superpowers is external-only
 and is never installed or enabled by this script.
 
-The default CodeGraph runtime is @colbymchenry/codegraph v1.6.2. Its official
-serve --mcp entry is registered with Codex. CodeGraph owns its watcher, daemon,
+The default CodeGraph backend is the pinned personal UE-enhanced submodule.
+It is built with npm ci and npm run build; build or identity failures stop installation.
+-CodeGraphBackend official explicitly selects @colbymchenry/codegraph v1.6.2.
+The CodeGraph serve --mcp entry is registered with Codex. CodeGraph owns its watcher, daemon,
 graph storage and process lifecycle; SelfWorkFlow owns project routing and
 post-write synchronization only.
 
@@ -271,6 +276,14 @@ function Ensure-CodeGraphRuntime {
             return $explicit
         }
         Stop-Install "codegraph-runtime" 27 "codegraph-runtime-entry-missing"
+    }
+
+    if ($CodeGraphBackend -eq "ue") {
+        $build = Invoke-SelfWorkflow @("source", "codegraph-ue-prepare", "--repository", $RepositoryRoot) (Join-Path $script:LogDirectory "codegraph-ue-build.json")
+        if ($build.status -ne "built-and-verified" -or -not $build.sourcePath) {
+            Stop-Install "codegraph-runtime" 27 "codegraph-ue-build-unverified"
+        }
+        return (Resolve-FullPath $build.sourcePath)
     }
 
     $installBase = Join-Path $DependencyRoot "codegraph\1.6.2"
@@ -627,6 +640,9 @@ try {
             path = $runtimeRoot
             lock = "not-applied-to-user-override"
         }
+    }
+    elseif (-not $preserveSource -and $CodeGraphBackend -eq "ue") {
+        $codeGraphVerification = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $script:LogDirectory "codegraph-ue-build.json") | ConvertFrom-Json
     }
     elseif (-not $preserveSource) {
         $codeGraphVerification = Assert-CodeGraphRuntime $runtimeRoot $codeGraphLock

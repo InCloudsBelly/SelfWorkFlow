@@ -127,6 +127,51 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         self.assertEqual(database.read_bytes(), b"existing incompatible index")
         self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
 
+    def test_reindex_advisory_stops_automatic_sync_before_existing_database_is_touched(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        database = self.project / ".codegraph" / "codegraph.db"
+        database.parent.mkdir()
+        database.write_bytes(b"last good index")
+        for boundary in ("ensure", "preflight", "sync", "query"):
+            with self.subTest(boundary=boundary):
+                port = FakeCommandPort(
+                    self._result(stdout=self._status(reindex=True)),
+                    self._result(stdout="synced"),
+                    self._result(stdout=self._status()),
+                )
+                lifecycle, _ = self._lifecycle(port)
+                arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                with self.assertRaises(CodeGraphProjectError) as caught:
+                    getattr(lifecycle, boundary)(*arguments)
+                self.assertEqual(caught.exception.reason, "codegraph-rebuild-required-preserving-existing-index")
+                self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
+                self.assertEqual(database.read_bytes(), b"last good index")
+
+    def test_invalid_indexing_config_is_reported_stale_without_starting_a_writer(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        database = self.project / ".codegraph" / "codegraph.db"
+        database.parent.mkdir()
+        database.write_bytes(b"last good index")
+        status = json.loads(self._status())
+        status["pendingChanges"] = None
+        status["indexingConfig"] = {"error": "invalid include type"}
+        status_lifecycle, _ = self._lifecycle(FakeCommandPort(self._result(stdout=json.dumps(status))))
+        observation = status_lifecycle.status(str(self.project))
+        self.assertEqual(observation["freshness"], "stale")
+        self.assertTrue(observation["indexingConfigInvalid"])
+        for boundary in ("ensure", "preflight", "sync", "query"):
+            with self.subTest(boundary=boundary):
+                port = FakeCommandPort(self._result(stdout=json.dumps(status)))
+                lifecycle, _ = self._lifecycle(port)
+                arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                with self.assertRaises(CodeGraphProjectError) as caught:
+                    getattr(lifecycle, boundary)(*arguments)
+                self.assertEqual(caught.exception.reason, "codegraph-indexing-config-invalid")
+                self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
+                self.assertEqual(database.read_bytes(), b"last good index")
+
     def test_agent_write_sync_updates_once_without_a_topic_queue_or_deep_context(self):
         port = FakeCommandPort(
             self._result(stdout=self._status(pending={"added": 0, "modified": 1, "removed": 0})),

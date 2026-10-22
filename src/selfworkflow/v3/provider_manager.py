@@ -476,6 +476,7 @@ class ProviderManager:
         source_commit: str,
         source_hash: str,
         dirty: bool,
+        source_kind: str | None = None,
         replace_existing: bool = False,
         rollback_token: str | None = None,
     ) -> dict[str, Any]:
@@ -483,6 +484,8 @@ class ProviderManager:
             raise ProviderManagerError("provider-not-supported")
         if ownership not in {"user-local", "selfworkflow-managed"}:
             raise ProviderManagerError("provider-ownership-invalid")
+        if source_kind not in {None, "managed-submodule"} or (source_kind == "managed-submodule" and ownership != "selfworkflow-managed"):
+            raise ProviderManagerError("provider-source-kind-invalid")
         prefix = _validate_command_prefix(command_prefix)
         version = _clean_text(source_version, "provider-source-version-invalid")
         commit = _clean_text(source_commit, "provider-source-commit-invalid")
@@ -493,7 +496,7 @@ class ProviderManager:
         if type(dirty) is not bool:
             raise ProviderManagerError("provider-source-dirty-invalid")
         source = {
-            "kind": "managed-runtime" if ownership == "selfworkflow-managed" else "local-override",
+            "kind": source_kind or ("managed-runtime" if ownership == "selfworkflow-managed" else "local-override"),
             "version": version,
             "commit": commit,
             "sourceHash": source_hash,

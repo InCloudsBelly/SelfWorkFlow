@@ -1,0 +1,11 @@
+schemaVersion: 1
+sourceId: codegraph-ue
+canonicalUrl: https://github.com/InCloudsBelly/codegraph_ue.git
+path: extensions/codegraph/codegraph_ue
+gitlinkCommit: 9b8025c890c36243da5dcfc631e8be817f646413
+sourceTree: 89924e6ef194c6d822d7c6ae7fb507ed7871359e
+package:
+  name: '@colbymchenry/codegraph'
+  version: '1.6.2'
+  packageJsonHash: sha256:021e998806b6e6ac9b375677e83e89befc4fc41ea48ee9d5f9dbb1e4ec61181a
+  packageLockHash: sha256:760794971c66603d16700b43170def70863ae2de2c39e15f239c2701ea19694b

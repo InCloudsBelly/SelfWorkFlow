@@ -608,6 +608,38 @@ try {
         self.assertRegex(lock, r"entrysha256:\s*sha256:[0-9a-f]{64}")
         self.assertNotIn("/main/", lock)
 
+    @unittest.skipUnless(os.name == "nt", "Windows installer boundary")
+    def test_ue_backend_build_failure_stops_without_downloading_official_runtime(self):
+        source = (self.ROOT / "scripts/install-selfworkflow.ps1").read_text(encoding="utf-8")
+        body = source[source.index("function Ensure-CodeGraphRuntime {"):source.index("function Assert-CodeGraphRuntime {")]
+        harness = r'''
+param([string]$Root)
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$CodeGraphPath = ""
+$CodeGraphBackend = "ue"
+$RepositoryRoot = $Root
+$DependencyRoot = $Root
+$script:LogDirectory = $Root
+function Invoke-SelfWorkflow { throw "fixture-ue-build-failed" }
+function Download-AndVerifyFile { throw "unexpected-official-fallback" }
+function Stop-Install($Stage,$Code,$Reason) { throw $Reason }
+''' + body + r'''
+try { Ensure-CodeGraphRuntime $null; exit 2 }
+catch {
+    if ($_.Exception.Message -ne "fixture-ue-build-failed") { throw }
+    Write-Output "ue-build-failure-preserved"
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "select-backend.ps1"
+            script.write_text(harness, encoding="utf-8")
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-File", str(script), "-Root", str(root)],
+                                    capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("ue-build-failure-preserved", result.stdout)
+
     def _fake_runtime(self, root):
         codegraph = root / "codegraph-runtime"
         (codegraph / "bin").mkdir(parents=True, exist_ok=True)
