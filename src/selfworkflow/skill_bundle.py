@@ -18,6 +18,21 @@ from selfworkflow.installer import _atomic_write
 
 
 _ROUTE = "skills/selfworkflow/references/public/WORKFLOW.md"
+_VERSION = re.compile(r"(?m)^规则版本：[^\r\n]*(?:\r?\n|$)")
+
+
+def _versioned_entry(raw: bytes, revision: str) -> bytes:
+    text = raw.decode("utf-8")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    version = f"规则版本：`{revision[:12]}`{newline}"
+    matches = list(_VERSION.finditer(text))
+    if len(matches) > 1:
+        raise DocumentError("skill-version-invalid")
+    if matches:
+        text = _VERSION.sub(lambda _: version, text)
+    else:
+        text = text.rstrip("\r\n") + newline * 2 + version
+    return text.encode("utf-8")
 
 
 def _entries(source: Path) -> tuple[bytes, bytes]:
@@ -43,7 +58,7 @@ def _source_files(source: Path) -> dict:
 
 def check_skill(repository_root: str | Path) -> dict:
     source = _safe(Path(repository_root).absolute())
-    _, portable = _entries(source)
+    root_entry, portable = _entries(source)
     target = _safe(source / "skills/selfworkflow/SKILL.md")
     if not target.is_file() or target.read_bytes() != portable:
         raise DocumentError("skill-entry-drift")
@@ -53,6 +68,8 @@ def check_skill(repository_root: str | Path) -> dict:
         raise DocumentError("skill-bundle-stale")
     if document_binding(source / "public")["revision"] != expected:
         raise DocumentError("skill-public-entry-stale")
+    if _versioned_entry(root_entry, expected) != root_entry:
+        raise DocumentError("skill-version-stale")
     for release in Path(binding["documentRoot"]).parent.iterdir():
         if release.is_dir() and re.fullmatch(r"[0-9a-f]{64}", release.name) and release.name != expected:
             if _revision(_read_release(release)) != release.name:
@@ -74,11 +91,17 @@ def sync_skill(repository_root: str | Path) -> dict:
         target = _safe(source / "skills/selfworkflow/SKILL.md")
         before = target.read_bytes() if target.exists() else None
         files = _source_files(source)
+        revision = _revision(files)
+        versioned = _versioned_entry(root_entry, revision)
+        portable = _versioned_entry(portable, revision)
         result = _publish_documents(source, outputs[0], files=files, _already_locked=True)
         # Both entry points receive one collected snapshot, never two source reads.
         _publish_documents(source, outputs[1], files=files, _already_locked=True)
         if (source / "SKILL.md").read_bytes() != root_entry:
             raise DocumentError("skill-source-entry-drift")
+        _atomic_write(source / "SKILL.md", versioned, expected_state=(
+            True, "sha256:" + hashlib.sha256(root_entry).hexdigest(),
+        ))
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(target, portable, expected_state=(
             before is not None,

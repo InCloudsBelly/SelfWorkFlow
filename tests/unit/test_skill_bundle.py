@@ -67,6 +67,39 @@ class SkillBundleTests(unittest.TestCase):
             self.assertNotIn("(skills/selfworkflow/", portable)
             self.assertEqual(invoke("skill", "check", "--repository", str(source))[0], 0)
 
+    def test_sync_refreshes_the_visible_version_in_both_skill_entries(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = repository(folder)
+            first = self.sync(source)
+            entries = (source / "SKILL.md", source / "skills/selfworkflow/SKILL.md")
+            for entry in entries:
+                text = entry.read_text(encoding="utf-8")
+                self.assertIn(f"规则版本：`{first['revision'][:12]}`", text)
+                self.assertEqual(text.count("规则版本："), 1)
+            (source / "skills/example/details.md").write_text("Updated rule\n", encoding="utf-8")
+            second = self.sync(source)
+            self.assertNotEqual(first["revision"], second["revision"])
+            for entry in entries:
+                text = entry.read_text(encoding="utf-8")
+                self.assertIn(f"规则版本：`{second['revision'][:12]}`", text)
+                self.assertNotIn(first["revision"][:12], text)
+                self.assertEqual(text.count("规则版本："), 1)
+            before = [entry.read_bytes() for entry in entries]
+            self.sync(source)
+            self.assertEqual([entry.read_bytes() for entry in entries], before)
+
+    def test_check_rejects_a_stale_visible_version_even_when_both_copies_match(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = repository(folder)
+            result = self.sync(source)
+            for relative in ("SKILL.md", "skills/selfworkflow/SKILL.md"):
+                entry = source / relative
+                text = entry.read_text(encoding="utf-8")
+                entry.write_text(text.replace(result["revision"][:12], "0" * 12), encoding="utf-8")
+            code, output = invoke("skill", "check", "--repository", str(source))
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("skill-version-stale", output)
+
     def test_check_rejects_stale_delivery_even_when_its_internal_hash_is_valid(self):
         with tempfile.TemporaryDirectory() as folder:
             source = repository(folder)
