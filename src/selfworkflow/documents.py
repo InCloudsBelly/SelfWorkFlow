@@ -33,6 +33,10 @@ def _safe(path: Path) -> Path:
 
 
 def _entry(revision: str) -> str:
+    return f"{_MARKER}\n[读取本任务规则](releases/{revision}/WORKFLOW.md)\n"
+
+
+def _legacy_entry(revision: str) -> str:
     return (
         f"{_MARKER}\n# SelfWorkflow 公共入口\n\n"
         "用户顶层任务实际读取本入口一次，选择下方版本；子任务、独立 Reviewer、阶段切换和上下文续接"
@@ -66,7 +70,7 @@ def _bound_release(public_root: str | Path) -> dict:
     try:
         text = path.read_text(encoding="utf-8")
         match = _ENTRY.search(text)
-        if match is None or text != _entry(match[1].split("/")[1]):
+        if match is None or text not in (_entry(match[1].split("/")[1]), _legacy_entry(match[1].split("/")[1])):
             raise DocumentError("document-entry-invalid")
         release = _safe(root / match[1]).parent
         if not (release / "WORKFLOW.md").is_file():
@@ -297,8 +301,7 @@ def _collect(source: Path, staging: Path) -> dict[str, str | bytes]:
         "严格 Host 仍须独立提供并验证 runtime/package/receipt，不能以读到文档作为通过。\n"
     )
     files["WORKFLOW.md"] = (
-        "文档入口模式：本任务 documentRoot 为本文件所在的 releases/<revision> 目录；继承入口绑定。"
-        "方法仅提供专业补充，不另起流程或执行上游安装、hooks、菜单；不读取历史宿主副本。\n\n"
+        "documentRoot 为本文件目录，revision 为目录名。\n\n"
         + files["WORKFLOW.md"]
     )
     return files

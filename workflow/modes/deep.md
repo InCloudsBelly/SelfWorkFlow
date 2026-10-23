@@ -1,8 +1,5 @@
-# Deep 模式
+# Deep
 
-适用：高复杂度、高风险、边界不清或要求深度分析。
+本模式不要求再读 Full。先给紧凑方案/实施边界，只加与实际风险有关的边界、恢复、并发、安全或性能分析；不自动扩大文档、Agent 或测试架构。
 
-- 用启动入口的紧凑 Design/Plan、实施边界和证据复用规则；本模式不要求再读 Full。
-- 只增加与实际风险有关的边界、恢复、并发、安全或性能分析，不自动扩大文档、Agent 或测试架构。
-- 行为 TDD 用 [testing-review-quality](../../skills/testing-review-quality/SKILL.md)；Review 调度、隔离与复审只读 [review](../modules/review.md)。纯分析不套实施流程和测试方法，机械文档仅窄校验。
-- 完整 grilling 和 TEA 仅用户显式点名启用，不因模式、测试等级或项目默认加载。
+代码实施契约由代码方法管理；行为变更按 [TDD](../../skills/testing-review-quality/SKILL.md)，纯分析/机械文档不触发。交付前一个独立 Reviewer；到阶段读[审查规则](../modules/review.md)，重大架构/安全/持久化/不可逆风险或显式要求才前置。相关 Critical/Important 必须关闭，不因 Token/次数预算中止。
