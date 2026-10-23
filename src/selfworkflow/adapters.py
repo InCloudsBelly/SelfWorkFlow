@@ -53,6 +53,8 @@ _CORE_PATHS = (
     "workflow/modes/light.md",
     "workflow/modes/full.md",
     "workflow/modes/deep.md",
+    "workflow/legacy-host.md",
+    "workflow/modules/build.md",
     "workflow/modules/code.md",
     "workflow/modules/optional-integrations.md",
     "workflow/modules/codegraph-read.md",

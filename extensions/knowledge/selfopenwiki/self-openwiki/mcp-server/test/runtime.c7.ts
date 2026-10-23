@@ -719,6 +719,11 @@ describe("C7 production runtime recovery gates", () => {
         path.join(runtimeRoot, "task7-bootstrap-"),
       );
       tempDirs.push(runtimeDir);
+      const evidencePath = path.join(
+        runtimeDir,
+        "fixture-capability-evidence.json",
+      );
+      await writeFile(evidencePath, '{"fixture":"verified"}\n');
       const openWikiRoot = await mkdtemp(
         path.join(os.tmpdir(), "openwiki-task7-"),
       );
@@ -766,17 +771,25 @@ describe("C7 production runtime recovery gates", () => {
         path.join(openWikiRoot, "dist", "agent", "openai-chatgpt-oauth.js"),
         "export {};\n",
       );
+      const fingerprint = await capabilitiesModule.computeCapabilityFingerprint(
+        {
+          openWikiRoot,
+          repositoryRoot,
+        },
+      );
       const verifiedSet = new Set<string>(verified);
       vi.spyOn(
         capabilitiesModule,
         "loadRuntimeCapabilityGate",
       ).mockResolvedValue({
         failureReason: "setup is unverified",
+        fingerprint,
         isToolVerified: (name: string) => verifiedSet.has(name),
         records: () => [],
       } as unknown as RuntimeCapabilityGate);
 
       const bootstrapped = await bootstrapC7Runtime({
+        evidencePath,
         openWikiRoot,
         repositoryRoot,
         runtimeDir,
@@ -800,6 +813,7 @@ describe("C7 production runtime recovery gates", () => {
         expect(begin.error?.code).toBe("capability_unverified");
       }
     },
+    20_000,
   );
 
   test("reports semantic attention, allows a confirmed correction, and blocks technical review debt", async () => {

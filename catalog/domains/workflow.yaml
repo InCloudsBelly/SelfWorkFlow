@@ -72,8 +72,8 @@ entries:
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:bc42775b08f01ce667a5db1208b088babde67bbe
-      contentHash: sha256:2b6e66826ea31fab6648d72bab9ab1eca8b38ec8220121bc6fe96abc3b64430d
+      revision: git:625d60297a6b30ecce0a1b03cac94ad04e7491cd
+      contentHash: sha256:ed898816a3ec453543eab1f64c23422a46258c43a2bb26163e4bf02aac73f858
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -116,17 +116,17 @@ entries:
     source:
       kind: skill
       path: skills/workflow-quality/SKILL.md
-      revision: git:2c295dd12c1c4e96741625fdd19c6b4a849a54ed
-      contentHash: sha256:a2b95b0550ecbf0e503d932b718cb8d77142f7b60d592708d1d4917549fbfcb2
+      revision: git:625d60297a6b30ecce0a1b03cac94ad04e7491cd
+      contentHash: sha256:8caa2056c02037d452b9a639375aeed410ec0bcf5315db2e0c3ee4d8eeefdc72
     aliases:
       - name: quality-guardrails
         target: workflow-quality
-    triggers: [file change, side effect, review evidence, verification evidence]
+    triggers: [file change, side effect, persisted change validation]
     exclusions: [pure read-only lookup]
     selectors:
       fileExtensions: []
-      operationTypes: [implement, debug, review, verify, install, publish]
-      semanticTerms: [file change, side effect, review evidence, verification evidence]
+      operationTypes: [install, publish]
+      semanticTerms: [file change, side effect, persisted change validation]
     stages: [implemented, reviewed, verified]
     requiredCapabilities: [filesystem-read]
     dependencies: [workflow-core]
@@ -152,12 +152,12 @@ entries:
     aliases:
       - name: testing-review-gate
         target: testing-review-quality
-    triggers: [behavior change, test design, independent review, completion evidence]
+    triggers: [behavior change, tdd, test design, test evidence validation]
     exclusions: [pure read-only lookup]
     selectors:
       fileExtensions: []
-      operationTypes: [implement, debug, review, verify]
-      semanticTerms: [tdd, test design, independent review, completion evidence]
+      operationTypes: []
+      semanticTerms: [behavior change, tdd, test design, test evidence validation]
     stages: [planned, implemented, reviewed, verified, completed]
     requiredCapabilities: [filesystem-read, test-execution]
     dependencies: [workflow-core]

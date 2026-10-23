@@ -1,12 +1,42 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   PersonalSkillAdapter,
   PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT,
 } from "../src/personal-skill-adapter.js";
+import { computeSkillPackage } from "../src/skills.js";
 
 describe("personal Skill adaptation", () => {
+  test("does not bind a changed base Skill into an existing verified run", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "wiki-personal-base-"));
+    try {
+      const personal = path.join(root, "agent-skills", "self-openwiki");
+      const base = path.join(root, "openwiki-skills", "kg-c7-project-wiki");
+      await mkdir(personal, { recursive: true });
+      await mkdir(base, { recursive: true });
+      await writeFile(path.join(personal, "SKILL.md"), "# Personal rules\n");
+      await writeFile(path.join(base, "SKILL.md"), "# Verified base\n");
+      const expectedBasePackageHash = (await computeSkillPackage(base))
+        .packageHash;
+      const adapter = new PersonalSkillAdapter({
+        skillPath: path.join(personal, "SKILL.md"),
+        upstreamCommit: PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT,
+        expectedBasePackageHash,
+      });
+      await expect(adapter.resolve([])).resolves.toMatchObject({
+        skillIds: ["kg-c7-project-wiki", "self-openwiki"],
+      });
+      await writeFile(path.join(base, "SKILL.md"), "# Unverified base\n");
+      await expect(adapter.resolve([])).rejects.toMatchObject({
+        code: "skill_untrusted",
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   test("documents the adapted six-stage lifecycle and external Wiki boundary", async () => {
     const skill = await readFile(
       path.resolve(

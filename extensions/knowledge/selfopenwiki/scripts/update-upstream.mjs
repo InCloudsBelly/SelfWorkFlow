@@ -27,7 +27,7 @@ import {
   verifyGeneratedRoot,
   validateManifest,
 } from "./materialize-openwiki.mjs";
-import { computeParentSourceManifestSync } from "./parent-source-manifest.mjs";
+import { computeModuleSourceManifestSync } from "./parent-source-manifest.mjs";
 
 const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/u;
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
@@ -299,10 +299,11 @@ function readUpdateJournal(filePath) {
     !/^\.work\/\.selfopenwiki-upstream-update-[^/]+$/u.test(
       parsed.transactionRelative,
     ) ||
-    parsed.generatedBackupRelative !==
-      `${parsed.transactionRelative}/generated`
+    parsed.generatedBackupRelative !== `${parsed.transactionRelative}/generated`
   ) {
-    throw new Error("The interrupted upstream update journal paths are invalid.");
+    throw new Error(
+      "The interrupted upstream update journal paths are invalid.",
+    );
   }
   const seen = new Set();
   for (const entry of parsed.files) {
@@ -313,7 +314,9 @@ function readUpdateJournal(filePath) {
       !COMPATIBILITY_PATHS.includes(entry.path) ||
       seen.has(entry.path) ||
       typeof entry.bytes !== "string" ||
-      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(entry.bytes) ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+        entry.bytes,
+      ) ||
       !Number.isSafeInteger(entry.mode) ||
       entry.mode < 0 ||
       entry.mode > 0o777 ||
@@ -322,7 +325,9 @@ function readUpdateJournal(filePath) {
       typeof entry.byteHash !== "string" ||
       entry.byteHash !== sha256(Buffer.from(entry.bytes, "base64"))
     ) {
-      throw new Error("The interrupted upstream update journal file entry is invalid.");
+      throw new Error(
+        "The interrupted upstream update journal file entry is invalid.",
+      );
     }
     seen.add(entry.path);
   }
@@ -351,7 +356,9 @@ function restoreJournalFiles(repositoryRoot, journal) {
         "The interrupted upstream update journal escapes the repository.",
       );
     }
-    assertNoReparsePath(repositoryRoot, absolutePath, { allowMissingLeaf: true });
+    assertNoReparsePath(repositoryRoot, absolutePath, {
+      allowMissingLeaf: true,
+    });
     atomicWriteFile(
       absolutePath,
       Buffer.from(entry.bytes, "base64"),
@@ -439,7 +446,9 @@ function recoverInterruptedUpdate(repositoryRoot) {
     if (existsSync(generatedBackup)) {
       removeGeneratedUpdateArtifacts(generatedRoot);
       assertNoReparsePath(repositoryRoot, generatedBackup);
-      assertNoReparsePath(repositoryRoot, generatedRoot, { allowMissingLeaf: true });
+      assertNoReparsePath(repositoryRoot, generatedRoot, {
+        allowMissingLeaf: true,
+      });
       renameSync(generatedBackup, generatedRoot);
     }
   } else {
@@ -543,9 +552,10 @@ function runGit(cwd, args, { allowFailure = false } = {}) {
 }
 
 function runCommand(command, args, cwd) {
-  const windowsCorepack = process.platform === "win32" && command === "corepack";
+  const windowsCorepack =
+    process.platform === "win32" && command === "corepack";
   const executable = windowsCorepack
-    ? process.env.ComSpec ?? "cmd.exe"
+    ? (process.env.ComSpec ?? "cmd.exe")
     : command;
   const executableArgs = windowsCorepack
     ? ["/d", "/s", "/c", "corepack.cmd", ...args]
@@ -567,9 +577,10 @@ function runCommand(command, args, cwd) {
 }
 
 function runCommandOutput(command, args, cwd) {
-  const windowsCorepack = process.platform === "win32" && command === "corepack";
+  const windowsCorepack =
+    process.platform === "win32" && command === "corepack";
   const executable = windowsCorepack
-    ? process.env.ComSpec ?? "cmd.exe"
+    ? (process.env.ComSpec ?? "cmd.exe")
     : command;
   const executableArgs = windowsCorepack
     ? ["/d", "/s", "/c", "corepack.cmd", ...args]
@@ -591,7 +602,11 @@ function runCommandOutput(command, args, cwd) {
   return result.stdout ?? "";
 }
 
-export function updateCompatibilityManifest(repositoryRoot, generatedRoot, commit) {
+export function updateCompatibilityManifest(
+  repositoryRoot,
+  generatedRoot,
+  commit,
+) {
   const compatibilityPath = join(
     repositoryRoot,
     "self-openwiki",
@@ -623,13 +638,18 @@ export function updateCompatibilityManifest(repositoryRoot, generatedRoot, commi
     "rev-parse",
     "HEAD",
   ]).stdout;
-  manifest.build.parentSourceManifestHash = computeParentSourceManifestSync(
-    repositoryRoot,
-  ).hash;
+  manifest.build.parentSourceManifestHash =
+    computeModuleSourceManifestSync(repositoryRoot).hash;
   if (manifest.toolBindings !== undefined) {
     runCommand(
       "corepack",
-      ["pnpm@10.33.2", "--dir", join(repositoryRoot, "self-openwiki", "mcp-server"), "run", "build"],
+      [
+        "pnpm@10.33.2",
+        "--dir",
+        join(repositoryRoot, "self-openwiki", "mcp-server"),
+        "run",
+        "build",
+      ],
       join(repositoryRoot, "self-openwiki", "mcp-server"),
     );
     const bindingsOutput = runCommandOutput(
@@ -652,7 +672,9 @@ export function updateCompatibilityManifest(repositoryRoot, generatedRoot, commi
       Array.isArray(toolBindings) ||
       Object.keys(toolBindings).length !== 6
     ) {
-      throw new Error("The personal tool binding generator returned invalid data.");
+      throw new Error(
+        "The personal tool binding generator returned invalid data.",
+      );
     }
     manifest.toolBindings = toolBindings;
   }
@@ -686,7 +708,8 @@ function computeSkillPackageHashSync(skillRoot) {
 }
 
 function collectSkillFilesSync(root, relativeDirectory, files) {
-  const directory = relativeDirectory === "" ? root : join(root, relativeDirectory);
+  const directory =
+    relativeDirectory === "" ? root : join(root, relativeDirectory);
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const relativePath = relativeDirectory
       ? join(relativeDirectory, entry.name)
@@ -702,9 +725,14 @@ function collectSkillFilesSync(root, relativeDirectory, files) {
       continue;
     }
     if (!entry.isFile() || !stats.isFile()) {
-      throw new Error(`Skill packages can contain only regular files: ${normalizedPath}`);
+      throw new Error(
+        `Skill packages can contain only regular files: ${normalizedPath}`,
+      );
     }
-    files.push({ bytes: readFileSync(absolutePath), relativePath: normalizedPath });
+    files.push({
+      bytes: readFileSync(absolutePath),
+      relativePath: normalizedPath,
+    });
   }
 }
 
@@ -834,7 +862,14 @@ function defaultVerify(generatedRoot) {
   const mcpRoot = join(repositoryRoot, "self-openwiki", "mcp-server");
   runCommand(
     "corepack",
-    ["pnpm@10.33.2", "--dir", mcpRoot, "install", "--frozen-lockfile", "--ignore-scripts"],
+    [
+      "pnpm@10.33.2",
+      "--dir",
+      mcpRoot,
+      "install",
+      "--frozen-lockfile",
+      "--ignore-scripts",
+    ],
     mcpRoot,
   );
   runCommand(
@@ -844,7 +879,15 @@ function defaultVerify(generatedRoot) {
   );
   runCommand(
     "corepack",
-    ["pnpm@10.33.2", "--dir", mcpRoot, "exec", "vitest", "run", "--maxWorkers=1"],
+    [
+      "pnpm@10.33.2",
+      "--dir",
+      mcpRoot,
+      "exec",
+      "vitest",
+      "run",
+      "--maxWorkers=1",
+    ],
     mcpRoot,
   );
   runCommand(
@@ -854,7 +897,16 @@ function defaultVerify(generatedRoot) {
   );
   runCommand(
     process.execPath,
-    [join(repositoryRoot, "self-openwiki", "agent-skills", "self-openwiki", "evals", "run-eval.mjs")],
+    [
+      join(
+        repositoryRoot,
+        "self-openwiki",
+        "agent-skills",
+        "self-openwiki",
+        "evals",
+        "run-eval.mjs",
+      ),
+    ],
     repositoryRoot,
   );
 }

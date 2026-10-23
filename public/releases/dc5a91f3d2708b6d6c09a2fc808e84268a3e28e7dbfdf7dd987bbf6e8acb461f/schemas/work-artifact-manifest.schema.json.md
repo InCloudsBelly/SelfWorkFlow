@@ -1,0 +1,41 @@
+# 只读参考：work-artifact-manifest.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "taskId", "projectIdentityHash", "contentGeneration", "stateRevision", "status", "packageHash", "artifacts", "review", "knowledge", "attention", "manifestHash"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "taskId": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "projectIdentityHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "contentGeneration": {"type": "integer", "minimum": 1},
+    "stateRevision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["active", "local-final", "knowledge-published", "completed", "aborted"]},
+    "packageHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifacts": {"type": "array", "minItems": 1, "maxItems": 16, "items": {"$ref": "#/$defs/artifact"}},
+    "review": {"type": "object", "additionalProperties": true},
+    "knowledge": {"type": "object", "additionalProperties": true},
+    "attention": {"type": "array", "maxItems": 64, "items": {"type": "object"}},
+    "manifestHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["artifactId", "kind", "path", "contentHash", "status"],
+      "properties": {
+        "artifactId": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "kind": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "status": {"enum": ["candidate", "current", "local-final", "published", "superseded", "rejected", "invalidated"]}
+      }
+    }
+  }
+}
+
+````

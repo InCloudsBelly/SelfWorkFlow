@@ -3,7 +3,7 @@
   "baseSkill": {
     "description": "C7 本地代码、技术文档、性能证据、工作报告与会话知识沉淀基础规则。",
     "id": "kg-c7-project-wiki",
-    "packageHash": "sha256:4ceb69372f4caadcb1b41c16738d09c5c29dae06f6f0fa8d8ee5211d1ee2c8ba",
+    "packageHash": "sha256:6d8a3287f6f0d55e6f549a4aeabf50e81fa9320755cfb6e81fb5a40c7aeadd06",
     "path": "kg-c7-project-wiki",
     "title": "KG_C7_Project_Wiki"
   },

@@ -38,6 +38,88 @@ const DERIVED_PATHS = new Set([
   "self-openwiki/config/personal-openwiki-compatibility.json",
 ]);
 
+// Runtime verification follows the module bytes that execute. Git's three-layer
+// manifest below remains available for provenance, but staging is not deployment.
+export function computeModuleSourceManifestSync(repositoryRoot) {
+  const root = resolve(repositoryRoot);
+  const index = readIndex(root);
+  const head = readHead(root);
+  const gitlinkPaths = new Set(
+    [...head, ...index].flatMap(([name, records]) =>
+      (Array.isArray(records) ? records : [records]).some(
+        (record) => record.mode === "160000",
+      )
+        ? [name]
+        : [],
+    ),
+  );
+  const records = [];
+  const paths = [
+    ...new Set([
+      ...readWorktreePaths(root, gitlinkPaths),
+      ...[...head.keys()].filter(
+        (name) =>
+          ![...gitlinkPaths].some((gitlink) => name.startsWith(`${gitlink}/`)),
+      ),
+      ...gitlinkPaths,
+    ]),
+  ].filter((name) => !DERIVED_PATHS.has(name));
+  paths.sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
+  for (const sourcePath of paths) {
+    const isGitlink = gitlinkPaths.has(sourcePath);
+    const record = readWorktreeRecord(
+      root,
+      sourcePath,
+      isGitlink ? "160000" : null,
+    );
+    if (record.kind === "absent") continue;
+    const { layer, stage, worktreeDirty, ...content } = record;
+    if (record.kind === "gitlink") {
+      const nestedRoot = resolve(root, sourcePath);
+      const nestedPaths = [
+        ...new Set([
+          ...git(nestedRoot, [
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+            "--",
+            ".",
+          ]),
+          ...git(nestedRoot, ["ls-tree", "-r", "-z", "HEAD", "--", "."]).map(
+            (entry) => {
+              const tab = entry.indexOf("\t");
+              if (tab < 0)
+                throw new Error("The nested HEAD tree entry is invalid.");
+              return entry.slice(tab + 1);
+            },
+          ),
+        ]),
+      ];
+      nestedPaths.sort((left, right) =>
+        Buffer.from(left).compare(Buffer.from(right)),
+      );
+      const nested = nestedPaths
+        .map((name) => readWorktreeRecord(nestedRoot, name, null))
+        .filter((entry) => entry.kind !== "absent");
+      content.byteHash = sha256(Buffer.from(canonicalJson(nested)));
+    }
+    records.push(content);
+  }
+  const manifest = {
+    version: 1,
+    scope: "selfopenwiki-module-content",
+    records,
+  };
+  return {
+    hash: sha256(
+      Buffer.from(`selfopenwiki-module-content-v1\0${canonicalJson(manifest)}`),
+    ),
+    manifest,
+  };
+}
+
 export function computeParentSourceManifestSync(repositoryRoot) {
   const root = resolve(repositoryRoot);
   const head = readHead(root);
@@ -45,9 +127,11 @@ export function computeParentSourceManifestSync(repositoryRoot) {
   hydrateBlobRecords(root, [...head.values(), ...index.values()].flat());
   const worktreePaths = readWorktreePaths(root);
   const paths = new Set([...head.keys(), ...index.keys(), ...worktreePaths]);
-  const sortedPaths = [...paths].filter((sourcePath) => !DERIVED_PATHS.has(sourcePath)).sort((left, right) =>
-    Buffer.from(left, "utf8").compare(Buffer.from(right, "utf8")),
-  );
+  const sortedPaths = [...paths]
+    .filter((sourcePath) => !DERIVED_PATHS.has(sourcePath))
+    .sort((left, right) =>
+      Buffer.from(left, "utf8").compare(Buffer.from(right, "utf8")),
+    );
   const records = [];
   for (const sourcePath of sortedPaths) {
     const headRecord = head.get(sourcePath);
@@ -60,7 +144,7 @@ export function computeParentSourceManifestSync(repositoryRoot) {
     }
     const indexMode = indexRecords?.some((record) => record.mode === "160000")
       ? "160000"
-      : indexRecords?.[0]?.mode ?? null;
+      : (indexRecords?.[0]?.mode ?? null);
     records.push(readWorktreeRecord(root, sourcePath, indexMode));
   }
   const manifest = { version: 1, records };
@@ -86,12 +170,19 @@ function readHead(root) {
     const tab = entry.indexOf("\t");
     if (tab < 0) throw new Error("The parent HEAD tree entry is invalid.");
     const [mode, type, object] = entry.slice(0, tab).split(" ");
-    const sourcePath = entry.slice(tab + 1).replaceAll("\\", "/").normalize("NFC");
+    const sourcePath = entry
+      .slice(tab + 1)
+      .replaceAll("\\", "/")
+      .normalize("NFC");
     if (isOperationalPath(sourcePath)) continue;
     validateAllowedPath(sourcePath);
     validateAllowedPath(sourcePath);
-    if (result.has(sourcePath)) throw new Error("Duplicate parent source path.");
-    result.set(sourcePath, gitRecord(sourcePath, "head", 0, mode, type, object));
+    if (result.has(sourcePath))
+      throw new Error("Duplicate parent source path.");
+    result.set(
+      sourcePath,
+      gitRecord(sourcePath, "head", 0, mode, type, object),
+    );
   }
   return result;
 }
@@ -103,7 +194,10 @@ function readIndex(root) {
     if (tab < 0) throw new Error("The parent index entry is invalid.");
     const [mode, object, stageText] = entry.slice(0, tab).split(" ");
     const stage = Number(stageText);
-    const sourcePath = entry.slice(tab + 1).replaceAll("\\", "/").normalize("NFC");
+    const sourcePath = entry
+      .slice(tab + 1)
+      .replaceAll("\\", "/")
+      .normalize("NFC");
     if (isOperationalPath(sourcePath)) continue;
     validateAllowedPath(sourcePath);
     validateAllowedPath(sourcePath);
@@ -130,16 +224,30 @@ function readIndex(root) {
   return result;
 }
 
-function readWorktreePaths(root) {
+function readWorktreePaths(root, gitlinkPaths = new Set()) {
   return new Set(
-    git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "."]).map(
-      (value) => {
+    git(root, [
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "-z",
+      "--",
+      ".",
+    ])
+      .map((value) => {
         const sourcePath = value.replaceAll("\\", "/").normalize("NFC");
         if (isOperationalPath(sourcePath)) return null;
+        if (
+          [...gitlinkPaths].some((gitlink) =>
+            sourcePath.startsWith(`${gitlink}/`),
+          )
+        )
+          return null;
         validateAllowedPath(sourcePath);
         return sourcePath;
-      },
-    ).filter((value) => value !== null),
+      })
+      .filter((value) => value !== null),
   );
 }
 
@@ -157,7 +265,8 @@ function isOperationalPath(sourcePath) {
 
 function readWorktreeRecord(root, sourcePath, indexMode) {
   const absolute = resolve(root, ...sourcePath.split("/"));
-  if (!isWithin(root, absolute)) throw new Error("The parent source path escapes the repository.");
+  if (!isWithin(root, absolute))
+    throw new Error("The parent source path escapes the repository.");
   let stats;
   try {
     stats = lstatSync(absolute);
@@ -168,16 +277,25 @@ function readWorktreeRecord(root, sourcePath, indexMode) {
   assertNoReparsePath(root, absolute);
   if (indexMode === "160000") {
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
-      throw new Error(`The parent gitlink is not a real directory: ${sourcePath}.`);
+      throw new Error(
+        `The parent gitlink is not a real directory: ${sourcePath}.`,
+      );
     }
   } else if (stats.isSymbolicLink() || stats.isDirectory()) {
-    throw new Error(`The parent source path is not a regular file: ${sourcePath}.`);
+    throw new Error(
+      `The parent source path is not a regular file: ${sourcePath}.`,
+    );
   }
   if (indexMode === "160000") {
     const nestedRoot = absolute;
     const commit = gitText(nestedRoot, ["rev-parse", "HEAD"]);
-    if (!COMMIT.test(commit)) throw new Error("The nested Submodule commit is invalid.");
-    const status = gitText(nestedRoot, ["status", "--porcelain", "--untracked-files=all"]);
+    if (!COMMIT.test(commit))
+      throw new Error("The nested Submodule commit is invalid.");
+    const status = gitText(nestedRoot, [
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+    ]);
     return {
       byteHash: null,
       byteLength: 0,
@@ -225,7 +343,8 @@ function gitRecord(sourcePath, layer, stage, mode, type, object) {
       worktreeDirty: false,
     };
   }
-  if (type !== "blob") throw new Error(`The parent source entry is not a blob: ${sourcePath}.`);
+  if (type !== "blob")
+    throw new Error(`The parent source entry is not a blob: ${sourcePath}.`);
   return {
     byteHash: null,
     byteLength: 0,
@@ -247,7 +366,8 @@ function hydrateBlobRecords(root, records) {
   for (const record of blobRecords) {
     const object = record.gitObject;
     const bytes = blobs.get(object);
-    if (bytes === undefined) throw new Error(`The parent blob is missing: ${object}.`);
+    if (bytes === undefined)
+      throw new Error(`The parent blob is missing: ${object}.`);
     record.byteHash = sha256(bytes);
     record.byteLength = bytes.byteLength;
     delete record.gitObject;
@@ -272,13 +392,16 @@ function readGitBlobs(root, objects) {
   let offset = 0;
   for (const requested of objects) {
     const headerEnd = output.indexOf(0x0a, offset);
-    if (headerEnd < 0) throw new Error("The parent blob batch response is incomplete.");
+    if (headerEnd < 0)
+      throw new Error("The parent blob batch response is incomplete.");
     const [object, type, sizeText] = output
       .subarray(offset, headerEnd)
       .toString("utf8")
       .split(" ");
     if (object !== requested || type !== "blob") {
-      throw new Error(`The parent blob batch response is invalid: ${requested}.`);
+      throw new Error(
+        `The parent blob batch response is invalid: ${requested}.`,
+      );
     }
     const size = Number(sizeText);
     if (!Number.isSafeInteger(size) || size < 0) {
@@ -287,7 +410,9 @@ function readGitBlobs(root, objects) {
     const bodyStart = headerEnd + 1;
     const bodyEnd = bodyStart + size;
     if (bodyEnd >= output.length || output[bodyEnd] !== 0x0a) {
-      throw new Error(`The parent blob batch body is incomplete: ${requested}.`);
+      throw new Error(
+        `The parent blob batch body is incomplete: ${requested}.`,
+      );
     }
     blobs.set(requested, output.subarray(bodyStart, bodyEnd));
     offset = bodyEnd + 1;
@@ -315,7 +440,8 @@ function assertNoReparsePath(root, target) {
   for (const segment of suffix.split(sep).filter(Boolean)) {
     current = resolve(current, segment);
     const stats = lstatSync(current);
-    if (stats.isSymbolicLink()) throw new Error(`The parent source path contains a link: ${target}.`);
+    if (stats.isSymbolicLink())
+      throw new Error(`The parent source path contains a link: ${target}.`);
   }
 }
 
@@ -324,10 +450,20 @@ function validateAllowedPath(sourcePath) {
     sourcePath === "" ||
     sourcePath.startsWith("/") ||
     sourcePath.includes("\\") ||
-    sourcePath.split("/").some((segment) => segment === "" || segment === "." || segment === "..") ||
-    !ALLOWED_ROOTS.some((prefix) => prefix.endsWith("/") ? sourcePath.startsWith(prefix) : sourcePath === prefix)
+    sourcePath
+      .split("/")
+      .some(
+        (segment) => segment === "" || segment === "." || segment === "..",
+      ) ||
+    !ALLOWED_ROOTS.some((prefix) =>
+      prefix.endsWith("/")
+        ? sourcePath.startsWith(prefix)
+        : sourcePath === prefix,
+    )
   ) {
-    throw new Error(`The parent source path is outside the allowed manifest: ${sourcePath}.`);
+    throw new Error(
+      `The parent source path is outside the allowed manifest: ${sourcePath}.`,
+    );
   }
 }
 
@@ -354,7 +490,12 @@ function sha256(bytes) {
 
 function isWithin(root, candidate) {
   const suffix = relative(resolve(root), resolve(candidate));
-  return suffix === "" || (!suffix.startsWith(`..${sep}`) && suffix !== ".." && !suffix.includes(`..${sep}`));
+  return (
+    suffix === "" ||
+    (!suffix.startsWith(`..${sep}`) &&
+      suffix !== ".." &&
+      !suffix.includes(`..${sep}`))
+  );
 }
 
 function git(root, args) {
@@ -392,7 +533,8 @@ function gitEnvironment() {
     "GIT_INDEX_FILE",
     "GIT_OBJECT_DIRECTORY",
     "GIT_WORK_TREE",
-  ]) delete environment[key];
+  ])
+    delete environment[key];
   Object.assign(environment, {
     GIT_CONFIG_COUNT: "0",
     GIT_CONFIG_GLOBAL: nullDevice,
@@ -404,16 +546,31 @@ function gitEnvironment() {
 }
 
 function isMainModule() {
-  return process.argv[1] !== undefined && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+  return (
+    process.argv[1] !== undefined &&
+    pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+  );
 }
 
 if (isMainModule()) {
   try {
     const root = process.argv[2];
-    if (root === undefined || process.argv.length !== 3) throw new Error("Usage: parent-source-manifest.mjs <repository-root>");
-    process.stdout.write(`${JSON.stringify(computeParentSourceManifestSync(root))}\n`);
+    const moduleContent = process.argv[3] === "--module-content";
+    if (
+      root === undefined ||
+      (process.argv.length !== 3 &&
+        !(moduleContent && process.argv.length === 4))
+    )
+      throw new Error(
+        "Usage: parent-source-manifest.mjs <repository-root> [--module-content]",
+      );
+    process.stdout.write(
+      `${JSON.stringify(moduleContent ? computeModuleSourceManifestSync(root) : computeParentSourceManifestSync(root))}\n`,
+    );
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 1;
   }
 }

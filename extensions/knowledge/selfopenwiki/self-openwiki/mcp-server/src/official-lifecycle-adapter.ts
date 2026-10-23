@@ -13,7 +13,8 @@ import type {
   PersonalWikiLifecycle,
 } from "./personal-wiki-lifecycle.js";
 import type { PersonalPagePlan } from "./personal-run-store.js";
-import { snapshotMarkdownTree } from "./snapshot.js";
+import { readMarkdownPages, snapshotMarkdownTree } from "./snapshot.js";
+import { canConnectWikiPlan } from "./validation.js";
 
 export const OFFICIAL_PERSONAL_LIFECYCLE_TOOLS = [
   "openwiki_begin",
@@ -66,6 +67,7 @@ type ExternalUpdatePort = {
   begin(input: unknown): Promise<unknown>;
   finalize(input: unknown): Promise<unknown>;
   recoverStartup?(): Promise<unknown>;
+  status?(): Promise<{ readonly transactionId: string } | null>;
 };
 
 export class C7PersonalGateway implements PersonalC7Gateway {
@@ -113,6 +115,10 @@ export class C7PersonalGateway implements PersonalC7Gateway {
       `${input.wikiRoot}.selfopenwiki`,
     );
     await recoverPersonalExternalService(service);
+    // A resumed transaction keeps its original snapshot and reviewed scope.
+    if ((await service.status?.()) == null) {
+      await assertPersonalPlanNavigation(input);
+    }
     const output = await service.begin({
       action: "start",
       confirmedByUser: input.confirmedByUser,
@@ -296,22 +302,30 @@ export class C7PersonalGateway implements PersonalC7Gateway {
     readonly runtimeRoot: string;
     readonly wikiRoot: string;
   }): Promise<Extract<PersonalReviewSubmissionResult, { kind: "complete" }>> {
-    const service = this.serviceFor(input.runId, input.wikiRoot, input.runtimeRoot);
-    const output = input.reviewReceipt === undefined
-      ? await service.begin({
-          action: "resume",
-          bindingHash: input.candidate.candidateBindingHash,
-          transactionId: input.candidate.transactionId,
-        })
-      : await service.finalize({
-          action: "submit_review",
-          bindingHash: input.candidate.candidateBindingHash,
-          transactionId: input.candidate.transactionId,
-          reviewReceipt: input.reviewReceipt,
-        });
+    const service = this.serviceFor(
+      input.runId,
+      input.wikiRoot,
+      input.runtimeRoot,
+    );
+    const output =
+      input.reviewReceipt === undefined
+        ? await service.begin({
+            action: "resume",
+            bindingHash: input.candidate.candidateBindingHash,
+            transactionId: input.candidate.transactionId,
+          })
+        : await service.finalize({
+            action: "submit_review",
+            bindingHash: input.candidate.candidateBindingHash,
+            transactionId: input.candidate.transactionId,
+            reviewReceipt: input.reviewReceipt,
+          });
     if (
-      !isRecord(output) || output.ok !== true || output.published !== true ||
-      (output.status !== "published" && output.status !== "published_with_follow_up") ||
+      !isRecord(output) ||
+      output.ok !== true ||
+      output.published !== true ||
+      (output.status !== "published" &&
+        output.status !== "published_with_follow_up") ||
       output.transactionId !== input.candidate.transactionId ||
       output.generation !== input.candidate.generation ||
       output.bindingHash !== input.candidate.candidateBindingHash ||
@@ -422,6 +436,45 @@ function hashCanonical(value: unknown): string {
   hasher.update("selfopenwiki:personal-c7-receipt-v1\0", "utf8");
   hasher.update(canonicalPersonalJson(value), "utf8");
   return `sha256:${hasher.digest("hex")}`;
+}
+
+async function assertPersonalPlanNavigation(
+  input: Parameters<PersonalC7Gateway["start"]>[0],
+): Promise<void> {
+  const snapshot = await snapshotMarkdownTree(input.wikiRoot);
+  const existingPaths = new Set(
+    snapshot.files.map((file) => file.relativePath),
+  );
+  const plannedPaths = new Set(input.pages.map((page) => page.path));
+  if (![...plannedPaths].some((page) => !existingPaths.has(page))) return;
+  const deletedPaths = new Set(input.deletePages ?? []);
+  const current = await readMarkdownPages(
+    input.wikiRoot,
+    [...existingPaths].filter(
+      (page) => !plannedPaths.has(page) && !deletedPaths.has(page),
+    ),
+    input.markdownWikiRevision ?? input.wikiRevision,
+    { maxFileBytes: 2 * 1024 * 1024, maxTotalBytes: 50 * 1024 * 1024 },
+  );
+  const contents = new Map(
+    current.knowledge.map((page) => [
+      page.sourceId.slice("selfopenwiki:".length),
+      page.content,
+    ]),
+  );
+  if (
+    !canConnectWikiPlan(
+      contents,
+      existingPaths,
+      plannedPaths,
+      input.deletePages ?? [],
+    )
+  ) {
+    throw new C7PersonalGatewayError(
+      "invalid_input",
+      "The new pages cannot be reached from quickstart.md within this plan. Include quickstart.md or a reachable topic index in pages, then resubmit the plan in the same run; no candidate has been created.",
+    );
+  }
 }
 
 class C7PersonalGatewayError extends Error {

@@ -36,14 +36,8 @@ import {
   type SelfOpenWikiVisualizerStatus,
 } from "./runtime.js";
 import type { C7ToolRuntime } from "./server.js";
-import {
-  PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT,
-  PersonalSkillAdapter,
-} from "./personal-skill-adapter.js";
-import {
-  assertPersonalCompatibility,
-  loadPersonalCompatibilityManifest,
-} from "./personal-skill-adapter.js";
+import { createLiveWikiPolicy } from "./live-policy.js";
+import { PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT } from "./personal-skill-adapter.js";
 import { PersonalWikiLifecycle } from "./personal-wiki-lifecycle.js";
 import { FilePersonalClaimsResolver } from "./personal-claims.js";
 import { PersonalWikiRootResolver } from "./personal-wiki-root.js";
@@ -108,7 +102,6 @@ async function readVisualizerStatus(
   };
 }
 import { snapshotMarkdownTree } from "./snapshot.js";
-import { loadC7SkillRegistry } from "./skills.js";
 import { SourceManifestStore } from "./sources.js";
 import { C7TransactionFactory } from "./transaction.js";
 import { recoverAbandonedTransactions } from "./transaction-recovery.js";
@@ -317,10 +310,13 @@ export async function bootstrapC7Runtime(
     policyPath: path.join(repositoryRoot, "config", "sensitive-files.json"),
     runtimeDir,
   });
-  const skills = await loadC7SkillRegistry(
-    path.join(repositoryRoot, "config", "trusted-skills.json"),
-    path.join(repositoryRoot, "openwiki-skills"),
-  );
+  const policy = await createLiveWikiPolicy({
+    repositoryRoot,
+    openWikiRoot,
+    evidencePath,
+    capabilityGate,
+  });
+  const skills = policy.skills;
   const externalTransactions = new ExternalUpdateTransactionOwner({
     formalWikiPath: wikiPath,
     runtimeDir,
@@ -384,14 +380,6 @@ export async function bootstrapC7Runtime(
         }),
     });
   };
-  const personalCompatibility =
-    await loadPersonalCompatibilityManifest(repositoryRoot);
-  await assertPersonalCompatibility(
-    personalCompatibility,
-    PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT,
-    TOOL_NAMES,
-    { openWikiRoot, repositoryRoot },
-  );
   const personalRunStore = new PersonalRunStoreRouter({
     isRunAborted: (run) =>
       new ExternalUpdateTransactionOwner({
@@ -418,24 +406,8 @@ export async function bootstrapC7Runtime(
     rootResolver: new PersonalWikiRootResolver({ repositoryRoot }),
     runStore: personalRunStore,
     claimsResolver: new FilePersonalClaimsResolver(),
-    skillAdapter: new PersonalSkillAdapter({
-      expectedCompatibilityManifestHash: await hashFile(
-        path.join(
-          repositoryRoot,
-          "config",
-          "personal-openwiki-compatibility.json",
-        ),
-      ),
-      expectedPackageHash: personalCompatibility.skill.packageHash,
-      skillPath: path.join(
-        repositoryRoot,
-        "agent-skills",
-        "self-openwiki",
-        "SKILL.md",
-      ),
-      upstreamCommit: personalCompatibility.upstream.commit,
-    }),
-    upstreamCommit: personalCompatibility.upstream.commit,
+    skillAdapter: policy.personalSkill,
+    upstreamCommit: PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT,
   });
   const officialLifecycle = new OfficialLifecycleAdapter(personalLifecycle);
   const reviewer = new OpenWikiReviewService({
@@ -492,7 +464,7 @@ export async function bootstrapC7Runtime(
     transactions,
   };
   const runtime = new C7OpenWikiRuntime({
-    capabilities: capabilityGate,
+    capabilities: policy.capabilities,
     configPath,
     createQuery: (config) => new OpenWikiQueryService({ ...common, config }),
     createUpdate: (config) => {
@@ -540,7 +512,7 @@ export async function bootstrapC7Runtime(
     visualizer,
     wikiPath,
   });
-  return { capabilityGate, runtime };
+  return { capabilityGate, runtime: policy.wrap(runtime) };
 }
 
 class RecoveryTracker {

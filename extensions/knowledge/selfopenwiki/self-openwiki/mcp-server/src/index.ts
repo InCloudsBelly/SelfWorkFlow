@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
-import { bootstrapC7Runtime } from "./bootstrap.js";
+import { bootstrapLiveC7Runtime } from "./live-bootstrap.js";
 import { createC7McpServer } from "./server.js";
 // @ts-expect-error The repository-owned ESM config seam is JavaScript by design.
 import { readStorageConfig } from "../../../scripts/storage-config.mjs";
@@ -17,7 +17,7 @@ try {
       ? { configPath: process.env.SELF_OPENWIKI_CONFIG }
       : {},
   );
-  const bootstrapped = await bootstrapC7Runtime({
+  const bootstrapped = await bootstrapLiveC7Runtime({
     openWikiRoot:
       process.env.SELF_OPENWIKI_OPENWIKI_ROOT ??
       path.join(hostRoot, ".work", "openwiki"),
@@ -25,7 +25,8 @@ try {
     runtimeDir: storage.runtimeRoot,
     wikiRoot: storage.wikiRoot,
     visualizerPath:
-      process.env.SELF_OPENWIKI_VISUALIZER ?? path.join(hostRoot, "Visualize.bat"),
+      process.env.SELF_OPENWIKI_VISUALIZER ??
+      path.join(hostRoot, "Visualize.bat"),
     ...(process.env.SELF_OPENWIKI_EVIDENCE_PATH
       ? { evidencePath: process.env.SELF_OPENWIKI_EVIDENCE_PATH }
       : {}),

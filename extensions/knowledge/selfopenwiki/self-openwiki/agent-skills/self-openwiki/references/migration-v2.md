@@ -19,8 +19,9 @@ SelfOpenWiki，也不会修改 `upstream/openwiki`。
    Wiki 快照，用户可修复后 resume，或使用明确确认的 abort 放弃。
 
 Claim 迁移以页面旁的 `.claims/<page>.json` sidecar 为 authoritative source，并校验
-其中的 `pageVersion` 与页面内容 hash 一致。缺失 sidecar 表示该页暂无 Claim；格式错误、
-链接路径或过期版本会阻止写入。迁移工具只提交针对已读取快照的 sparse decisions，不会
+其中非空集合的 `pageVersion` 与页面内容 hash 一致。缺失 sidecar 表示该页暂无 Claim；格式错误、
+链接路径或非空集合过期版本会阻止写入。合法空集合可只读使用，旧字节仍参与 CAS，
+pageVersion 由正式发布后的 Claims finalization 重绑。迁移工具只提交针对已读取快照的 sparse decisions，不会
 把客户端传入的 Claim 列表当成新的 authoritative source。
 
 ## Git 与运行时

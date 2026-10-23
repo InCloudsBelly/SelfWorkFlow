@@ -24,9 +24,11 @@ SelfWorkflow 管模式、阶段、授权、Review 和验证；本 Skill 只路�
 
 ## 共用边界
 
-- 本次 Wiki 操作的第一次 MCP 调用是 `openwiki_status`，以实时 strict schema、结构化状态和 capability 为准。默认是 schema 2、`external_agent`、`authRequired=false`；缺工具/能力、路径不可验证或证据漂移报告 `unverified`，不猜字段、不切换后端或 legacy fallback。`ready=false` 仍允许恢复诊断，Wiki 普通操作遵守各自 readiness 门禁。
-- 一致性读取、个人发布和写恢复要求 `version.mcpServer >= 0.1.2`。旧版只用于 status/只读诊断；先刷新工具连接再读写，不以安装成功推断当前连接已升级。所有参与读写的 MCP 连接都须满足此版本，无法刷新或排除的旧读者保持 `unverified`。
+- 本次 Wiki 操作的第一次 MCP 调用是 `openwiki_status`，以实时 strict schema、结构化状态和 capability 为准。默认是 schema 2、`external_agent`、`authRequired=false`；只检查本次操作需要的能力，缺工具/能力、路径不可验证或证据漂移时仅对应动作 `unverified`，不猜字段、不切换后端或 legacy fallback。`ready=false` 仍允许恢复诊断，不自动禁止 verified 的安全读取或有效 Viewer；各自遵守一致性与能力门禁。
+- 工作流规则身份绑定本任务的 `documentRoot/revision`；Wiki 运行身份独立绑定当前模块内容及对应能力证据。整仓 dirty、无关规则变动、Git 暂存状态或父仓/公共文档版本变化，不单独阻止已验证模块的 Agent 调用；模块自身、依赖或协议漂移仍按对应能力失效并重新验证。可热加载的规则在模块验证通过后于下一次调用生效；可执行构建变化须重连当前 MCP。
+- 若 `openwiki_status` 或工具的 `recovery.message` 明确要求 `Reconnect this MCP server`，重连当前 MCP 并重新读取 status；不能只按 `recovery.action=retry` 在旧连接上反复调用。
+- 一致性读取、个人发布和写恢复要求 `version.mcpServer >= 0.1.2`。旧版只用于 status/只读诊断；不以安装成功推断当前连接已升级。核对本次实际使用及已知参与同一 Wiki 操作的连接，不为证明“没有旧连接”枚举其他会话/进程。已知不兼容的并发参与者不能安全排除时，仅对应读写保持 `unverified`；诊断和独立工作继续。
 - `paths.wikiRoot` 是唯一 override Wiki root；不读 Agent 自己的 Wiki、不猜其他目录。正式 Markdown、长期 `.claims` 和可分享来源属于独立 Wiki Git；同级 `<wiki-root>.selfopenwiki` 只保存本机事务状态。迁移阅读/导入规范见当前 runtime 根 `extensions/knowledge/selfopenwiki/WIKI_LAYOUT.md`，仅安装/迁移时读取。
 - Wiki 实现属于 SelfWorkflow 源 Git 的 `extensions/knowledge/selfopenwiki/`，上游依赖由根 `.gitmodules` 固定；不依赖独立 SelfOpenWiki 源仓库。snapshot 保存规则与受控源码；实际 MCP/Viewer 构建使用显式 SelfWorkflow 源根，不能从 snapshot 猜 `dist` 或扫描磁盘找源码。
-- `knowledge.read` 只读，`knowledge.propose` 不发布；`knowledge.update` 需确认、版本/来源校验、独立 Review 和 CAS。Writer 只写返回的候选包，Reviewer 只读候选；不直接写正式 Wiki，不虚构来源、hash、receipt、模型验证或发布成功。
+- `knowledge.read` 只读，`knowledge.propose` 不发布；`knowledge.update` 需有效写入授权、版本/来源校验、独立 Review 和 CAS。直接要求总结到 Wiki、更新或发布即覆盖对应范围，不重问同一授权；格式修正与无语义冲突的 revision 刷新只重新核验技术绑定。Writer 只写返回的候选包，Reviewer 只读候选；不直接写正式 Wiki，不虚构来源、hash、receipt、模型验证或发布成功。
 - 发布不自动 commit/push；两者各需明确授权，已有同范围授权复用。个人路径、凭据、私有 receipt 和运行数据不写入 SelfWorkflow 公共 Git。专业规则复用 SelfWorkflow 门禁，不另起完整工作流。

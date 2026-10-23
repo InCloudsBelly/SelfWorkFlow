@@ -23,6 +23,7 @@ const fingerprintSchema = z.strictObject({
   contractsHash: hashSchema,
   dependencyHash: hashSchema,
   matrixHash: hashSchema,
+  moduleHasherHash: hashSchema,
   skillHash: hashSchema,
   testHash: hashSchema,
   verifierHash: hashSchema,
@@ -54,6 +55,10 @@ export type VerifiedCapabilityRecord = {
 };
 
 export class RuntimeCapabilityGate implements C7CapabilityGate {
+  get fingerprint(): Readonly<CapabilityFingerprint> | undefined {
+    return this.evidence?.fingerprint;
+  }
+
   constructor(
     private readonly matrix: z.infer<typeof matrixSchema> | undefined,
     private readonly evidence: z.infer<typeof evidenceSchema> | undefined,
@@ -189,6 +194,14 @@ export async function computeCapabilityFingerprint(options: {
     matrixHash: await hashPathSet(repositoryRoot, [
       "config/capability-matrix.json",
     ]),
+    moduleHasherHash: await hashStandaloneFile(
+      path.resolve(
+        repositoryRoot,
+        "..",
+        "scripts",
+        "parent-source-manifest.mjs",
+      ),
+    ),
     skillHash: await hashPathSet(repositoryRoot, [
       "config/trusted-skills.json",
       "config/personal-openwiki-compatibility.json",
@@ -203,6 +216,15 @@ export async function computeCapabilityFingerprint(options: {
       "scripts/verify-capabilities.mts",
     ]),
   };
+}
+
+async function hashStandaloneFile(filePath: string): Promise<string> {
+  const stats = await lstat(filePath);
+  if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 1024 * 1024)
+    throw new Error("The module hash helper must be a regular bounded file.");
+  return `sha256:${createHash("sha256")
+    .update(await readFile(filePath))
+    .digest("hex")}`;
 }
 
 export async function validateCapabilityMatrix(options: {

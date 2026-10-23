@@ -19,6 +19,9 @@ path 必须是绝对普通文件，`loopbackOnly=true`、`autoOpen=false`，Wiki
 `update.external-agent.begin` 和 `update.external-agent.reviewed-finalize`。缺一项、状态
 不可读或 recovery 未闭环都 fail closed。
 
+上述整组发布要求仅约束更新；安全读取检查 `knowledge.read.safe` 与后端一致性结果，
+Viewer 检查实时 contract，不因发布 capability 缺失或 `externalAgent.ready=false` 自动停止。
+
 ## 十五工具契约
 
 本节是 Personal Wiki（个人 Wiki）适配层的工具契约；Personal Wiki 的资源根目录由调用者显式传入。
@@ -44,10 +47,12 @@ SubmitPage、Finish 能力，但 MCP schema 是 SelfOpenWiki 的适配协议
 身份和 Wiki revision；用户仓库的 commit、branch、remote、push、fetch 和回滚必须由用户
 在外部 Git 工作流中明确执行。
 
-个人 Claim 的 authoritative source 是 `<wikiRoot>/.claims/<page>.json` sidecar，且
+个人 Claim 的 authoritative source 是 `<wikiRoot>/.claims/<page>.json` sidecar；非空集合的
 `pageVersion` 必须匹配页面内容 hash。客户端提交的 `claims`、确认 ID 和撤回 ID 只能
 表达对这份快照的决策，不能替换 authoritative Claim 集；sidecar 缺失表示无 Claim，
-sidecar 格式错误或版本过期则 fail closed。
+sidecar 格式错误或非空集合版本过期则 fail closed。schema、路径和文件身份有效的空集合
+可只读使用，不在读取时改写 pageVersion；原 sidecar 字节仍纳入 revision 与并发检查，
+新绑定仅在独立 Review、C7 发布和 Claims finalization 后写回。
 
 ### 诊断、读取与 C7 兼容工具
 
@@ -56,7 +61,7 @@ sidecar 格式错误或版本过期则 fail closed。
 | `openwiki_status`                   | 最小诊断、revision、恢复和能力 | 永远先调用                                        |
 | `openwiki_read`                     | 正式目录或所选 Markdown 证据  | 需 `knowledge.read.safe`；不启动 provider 或事务    |
 | `openwiki_setup`                    | OAuth 与模型组合验证           | 仅显式 `legacy_provider`                          |
-| `openwiki_prepare_sources`          | 绑定本地文本/源码 manifest     | 展示清单/hash/风险后等用户确认                    |
+| `openwiki_prepare_sources`          | 绑定本地文本/源码 manifest     | 核对既有来源授权；缺失时展示清单/风险并确认         |
 | `openwiki_list_skills`              | 列出受信任基础/专项 Skill      | 基础 Skill 自动第一且唯一                         |
 | `openwiki_query`                    | provider 驱动的 Wiki 查询      | 仅显式 `legacy_provider`；不得虚构 external query |
 | `openwiki_update`                   | 内部模型生成/复审兼容更新      | 仅显式 `legacy_provider`                          |
@@ -72,22 +77,27 @@ model/effort；legacy 模式必须按每个工具实时输入明确携带 exact 
 ## 共同输入不变量
 
 1. 任意本地路径先经 prepare；manifest ID、hash、确认文本和文件 bytes 任一变化都使
-   旧确认失效。
+   旧技术绑定失效。重新 prepare 后核对既有来源/版本授权；超范围才重新询问，敏感或拒绝来源不可旁路。
 2. `materials` 只包含用户已脱敏的短文本，不能旁路敏感文件或来源准备。
 3. `kg-c7-project-wiki` 由个人适配层自动且唯一放在第一位，`self-openwiki` 作为个人补丁
    Skill 紧随其后；专项 Skill 有序、无重复且不可覆盖硬规则。
 4. status/query 返回的 `wikiRevision` 是用户摘要基线；外部 start 或 legacy update 的
    `expectedWikiRevision` 必须原样绑定。`conflict` 返回的 `baseWikiRevision` 只用于
-   刷新、重做摘要和重新确认，不能自动重放。
-5. `confirmedByUser: true` 是本次明确确认的防误操作字段，不是身份认证。
+   刷新并比较影响，不能盲目重放。无语义冲突且未超出授权时，按协议重算候选及受影响 Review；
+   真正内容冲突或越界才重新询问，不改写旧 receipt。
+5. `confirmedByUser: true` 表示存在覆盖该动作的明确用户授权，不要求重复对技术字段作答；
+   不是身份认证，不能用 Agent 自行选择的来源或发布范围替代真实授权。
 6. `openwiki_submit_plan` 至少包含一个页面或删除项；无工作更新由
    `openwiki_begin` 返回 `status: noop` 表示，不通过空计划伪装更新。
+7. 尚无计划、队列、PageJob 或候选的 planning run 可在 begin 锁内刷新当前可信 Skill
+   与兼容清单身份并恢复同一 run；Wiki 版本、来源确认、Skill 选择及其他绑定必须相同。
+   已冻结计划、候选及 C7 事务仍校验原绑定，不借此修改回执。
 
 ## External-agent 状态机
 
 ### Start 与 writer
 
-用户确认最终范围后，调用 begin/start。C7 返回 work package，其中 transaction、
+核对用户直接请求或既有授权覆盖最终范围后，调用 begin/start，不新增同范围确认轮次。C7 返回 work package，其中 transaction、
 generation、binding、before revision、request/source/Skill/rule/scope hashes 以及候选
 路径都是不透明权威。writer 只可写候选，不得直接写正式 Wiki；候选路径之外的写入、
 link、范围、版本或证据漂移必须失败。

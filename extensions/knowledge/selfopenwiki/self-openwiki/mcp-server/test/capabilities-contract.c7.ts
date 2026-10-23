@@ -36,6 +36,7 @@ const fingerprint = Object.fromEntries(
     "contractsHash",
     "dependencyHash",
     "matrixHash",
+    "moduleHasherHash",
     "skillHash",
     "testHash",
     "verifierHash",

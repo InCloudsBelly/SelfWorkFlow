@@ -1,0 +1,39 @@
+# 只读参考：provider-fallback-receipt.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-fallback-receipt.schema.json",
+  "title": "SelfWorkFlow V3 provider fallback receipt",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "registryHash", "capabilityId", "operationId", "candidates", "selectedProviderId", "selectedLayer", "inputSnapshotHash", "receiptHash"],
+  "properties": {
+    "schemaVersion": {"const": 3}, "registryHash": {"$ref": "#/$defs/hash"}, "capabilityId": {"$ref": "#/$defs/id"},
+    "operationId": {"$ref": "#/$defs/id"},
+    "candidates": {"type": "array", "minItems": 2, "maxItems": 1024, "items": {"$ref": "#/$defs/candidate"}},
+    "selectedProviderId": {"$ref": "#/$defs/id"}, "selectedLayer": {"$ref": "#/$defs/layer"},
+    "inputSnapshotHash": {"$ref": "#/$defs/hash"}, "receiptHash": {"$ref": "#/$defs/hash"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableHash": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
+    "layer": {"enum": ["task-explicit", "project", "user-machine", "pinned-public", "reportable-builtin"]},
+    "candidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["providerId", "configurationLayer", "bindingHash", "sourceIdentityHash", "supportMatrixHash", "supportMatrixEntryHash", "outcome"],
+      "properties": {
+        "providerId": {"$ref": "#/$defs/id"}, "configurationLayer": {"$ref": "#/$defs/layer"},
+        "bindingHash": {"$ref": "#/$defs/nullableHash"}, "sourceIdentityHash": {"$ref": "#/$defs/nullableHash"},
+        "supportMatrixHash": {"$ref": "#/$defs/nullableHash"}, "supportMatrixEntryHash": {"$ref": "#/$defs/nullableHash"},
+        "outcome": {"enum": ["selected", "rejected"]},
+        "rejectionReason": {"enum": ["provider-not-found", "descriptor-mismatch", "capability-mismatch", "operation-mismatch", "support-unverified", "support-unsupported", "support-needs-revalidation", "source-mismatch", "adapter-mismatch", "conflict", "lower-priority"]}
+      },
+      "allOf": [{"if": {"properties": {"outcome": {"const": "rejected"}}}, "then": {"required": ["rejectionReason"]}}]
+    }
+  }
+}
+
+````

@@ -1,0 +1,304 @@
+# 只读参考：pipeline.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/pipeline.schema.json",
+  "title": "SelfWorkFlow V3 orchestration pipeline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "stages"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/stage"}
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "slots"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "slots": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/slot"}
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "cardinality", "allowedInvocationKinds", "selectionMode"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "cardinality": {"enum": ["exactly-one", "zero-or-one", "zero-or-many", "gate"]},
+        "allowedInvocationKinds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["agent-native", "skill", "mcp"]}
+        },
+        "selectionMode": {"enum": ["static", "bounded-runtime"]},
+        "condition": {"$ref": "#/$defs/condition"}
+      }
+    },
+    "operationType": {
+      "enum": [
+        "analyze",
+        "design",
+        "plan",
+        "implement",
+        "debug",
+        "review",
+        "verify",
+        "document",
+        "install",
+        "publish",
+        "knowledge-read",
+        "knowledge-write"
+      ]
+    },
+    "taskArchetype": {
+      "enum": [
+        "mechanical-change",
+        "bounded-feature",
+        "bugfix",
+        "behavioral-refactor",
+        "exploratory-design",
+        "architecture-change",
+        "migration",
+        "spec-document",
+        "cross-project"
+      ]
+    },
+    "eqCondition": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [{"enum": ["writeTask", "durableSpec"]}, {"type": "boolean"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "operationType"}, {"$ref": "#/$defs/operationType"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "complexity"}, {"enum": ["C0", "C1", "C2", "C3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "risk"}, {"enum": ["R0", "R1", "R2", "R3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "projectMinimums"}, {"enum": ["Light", "Full", "Deep"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "taskArchetype"}, {"$ref": "#/$defs/taskArchetype"}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "requirementsMaturity"},
+            {"enum": ["exploratory", "defined", "approved"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "scopeShape"},
+            {"enum": ["single-file", "single-module", "cross-module", "cross-project"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "classificationConfidence"},
+            {"type": "number", "minimum": 0, "maximum": 1}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "testLevelFloor"}, {"enum": ["T0", "T1", "T2", "T3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "gteCondition": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [{"const": "complexity"}, {"enum": ["C0", "C1", "C2", "C3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "risk"}, {"enum": ["R0", "R1", "R2", "R3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "projectMinimums"}, {"enum": ["Light", "Full", "Deep"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "requirementsMaturity"},
+            {"enum": ["exploratory", "defined", "approved"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "classificationConfidence"},
+            {"type": "number", "minimum": 0, "maximum": 1}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [{"const": "testLevelFloor"}, {"enum": ["T0", "T1", "T2", "T3"]}],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "containsCondition": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "explicitModuleIds"},
+            {"$ref": "#/$defs/stableId"}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "array",
+          "prefixItems": [
+            {"const": "capabilityStates"},
+            {"enum": ["supported", "unsupported", "unverified"]}
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      ]
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all"],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {"$ref": "#/$defs/condition"}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any"],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {"$ref": "#/$defs/condition"}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["not"],
+          "properties": {"not": {"$ref": "#/$defs/condition"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eq"],
+          "properties": {"eq": {"$ref": "#/$defs/eqCondition"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gte"],
+          "properties": {"gte": {"$ref": "#/$defs/gteCondition"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["contains"],
+          "properties": {"contains": {"$ref": "#/$defs/containsCondition"}}
+        }
+      ]
+    }
+  }
+}
+
+````

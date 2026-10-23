@@ -35,14 +35,6 @@ export async function runCapabilityVerification(): Promise<void> {
     rm(evidencePath, { force: true }),
     rm(temporaryEvidencePath, { force: true }),
     rm(testReportPath, { force: true }),
-    rm(path.join(repositoryRoot, "mcp-server", "dist"), {
-      force: true,
-      recursive: true,
-    }),
-    rm(path.join(repositoryRoot, "win32-helper", "dist"), {
-      force: true,
-      recursive: true,
-    }),
   ]);
 
   try {
@@ -51,7 +43,11 @@ export async function runCapabilityVerification(): Promise<void> {
         "The initial local-path capability verifier requires Windows.",
       );
     }
-    await run("pnpm", ["--config.enable-pre-post-scripts=false", "run", "build"], openWikiRoot);
+    await run(
+      "pnpm",
+      ["--config.enable-pre-post-scripts=false", "run", "build"],
+      openWikiRoot,
+    );
     await run(
       "pnpm",
       ["install", "--frozen-lockfile", "--ignore-scripts"],
@@ -62,6 +58,11 @@ export async function runCapabilityVerification(): Promise<void> {
       "pnpm",
       ["--dir", "mcp-server", "build:win32-helper"],
       repositoryRoot,
+    );
+    await run(
+      "node",
+      ["scripts/refresh-compatibility.mjs"],
+      path.resolve(repositoryRoot, ".."),
     );
     await run(
       "pnpm",

@@ -1,0 +1,37 @@
+# 只读参考：provider-project-lease.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-project-lease.schema.json",
+  "title": "SelfWorkFlow V3 provider project lease",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "leaseHash", "canonicalProjectRootHash", "providerId", "operationId", "operationNonce", "ownerNonce", "storeVersion", "ownerPid", "processStartTime", "userSession", "hostIdentity", "bootIdentity", "heartbeatAt", "issuedAt", "expiresAt"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "leaseHash": {"$ref": "#/$defs/hash"},
+    "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
+    "providerId": {"$ref": "#/$defs/id"},
+    "operationId": {"$ref": "#/$defs/id"},
+    "operationNonce": {"$ref": "#/$defs/id"},
+    "ownerNonce": {"$ref": "#/$defs/id"},
+    "storeVersion": {"type": "integer", "minimum": 1},
+    "ownerPid": {"type": "integer", "minimum": 1},
+    "processStartTime": {"type": "string", "minLength": 1, "maxLength": 256},
+    "userSession": {"type": "string", "minLength": 1, "maxLength": 256},
+    "hostIdentity": {"type": "string", "minLength": 1, "maxLength": 256},
+    "bootIdentity": {"type": "string", "minLength": 1, "maxLength": 256},
+    "heartbeatAt": {"type": "string", "format": "utc-date-time"},
+    "issuedAt": {"type": "string", "format": "utc-date-time"},
+    "expiresAt": {"type": "string", "format": "utc-date-time"}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
+
+````

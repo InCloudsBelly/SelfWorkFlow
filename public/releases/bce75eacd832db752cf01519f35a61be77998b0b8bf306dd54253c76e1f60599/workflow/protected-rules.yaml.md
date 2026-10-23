@@ -1,0 +1,45 @@
+# 只读参考：protected-rules.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 1
+policyVersion: 3.0.0
+mergeOrder:
+  - protected
+  - skill
+  - project
+  - overlay
+ordinaryLayerContractVersion: 1
+ownerModificationGate:
+  versionChange: semver-major
+  confirmationArtifactKind: owner-confirmation
+  reviewArtifactKind: owner-review
+  behavioralTestArtifactKind: behavioral-test
+rules:
+  - id: truthful-capability-review-verification
+    strength: agent-policy
+  - id: no-silent-degradation
+    strength: agent-policy
+  - id: protect-credentials-and-sensitive-data
+    strength: agent-policy
+  - id: authorize-side-effects-and-irreversible-actions
+    strength: agent-policy
+  - id: protect-user-existing-changes
+    strength: agent-policy
+  - id: require-fresh-verification-before-completion
+    strength: enforced
+  - id: require-independent-post-grill-review
+    strength: enforced
+    gate: design.post-grill-review
+    evaluator: post-grill-review-independence-v1
+    reasonCodes:
+      - post-grill-independent-review-required
+      - post-grill-review-input-invalid
+      - post-grill-review-attestation-missing
+      - post-grill-review-user-authorization-required
+      - post-grill-review-changes-required
+      - post-grill-review-authorization-replayed
+      - post-grill-review-attestation-replayed
+
+````

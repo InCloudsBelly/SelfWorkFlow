@@ -24,6 +24,7 @@ import { FilePersonalClaimsResolver } from "../src/personal-claims.js";
 import { FilePersonalRunStore } from "../src/personal-run-store.js";
 import { PersonalWikiLifecycle } from "../src/personal-wiki-lifecycle.js";
 import { snapshotPersonalWiki } from "../src/personal-wiki-snapshot.js";
+import { readMarkdownPages } from "../src/snapshot.js";
 import { WikiPublisher } from "../src/publish.js";
 import {
   aggregateSkillHash,
@@ -39,6 +40,362 @@ afterEach(async () => {
 });
 
 describe("completed personal Wiki runs", () => {
+  test("rejects an unreachable new-page plan before creating a candidate and corrects the same run", async () => {
+    const fixture = await createFixture();
+    const store = new FilePersonalRunStore({
+      runtimeRoot: fixture.runtimeRoot,
+    });
+    const lifecycle = fixture.lifecycle(store);
+    const before = await snapshotPersonalWiki(fixture.wikiRoot);
+    const begun = toolOutputSchemas.openwiki_begin.parse(
+      await lifecycle.begin({
+        wikiRoot: fixture.wikiRoot,
+        mode: "update",
+        force: true,
+      }),
+    );
+    if (!begun.ok || !("runId" in begun))
+      throw new Error("Expected a new run.");
+    const pages = [
+      {
+        path: "rendering-tools/topic.md",
+        title: "Topic",
+        purpose: "Add the new topic.",
+      },
+      {
+        path: "sources/topic.md",
+        title: "Sources",
+        purpose: "Explain the topic sources.",
+      },
+    ];
+    await expect(
+      lifecycle.submitPlan({
+        runId: begun.runId,
+        confirmedByUser: true,
+        pages,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+    expect(await store.read(begun.runId)).toMatchObject({
+      phase: "planning",
+      planHash: null,
+    });
+    expect((await store.read(begun.runId)).candidate).toBeUndefined();
+    expect(await snapshotPersonalWiki(fixture.wikiRoot)).toEqual(before);
+    const corrected = toolOutputSchemas.openwiki_submit_plan.parse(
+      await lifecycle.submitPlan({
+        runId: begun.runId,
+        confirmedByUser: true,
+        pages: [
+          ...pages,
+          {
+            path: "quickstart.md",
+            title: "Quickstart",
+            purpose: "Link the new topic from the existing navigation.",
+          },
+        ],
+      }),
+    );
+    expect(corrected).toMatchObject({
+      ok: true,
+      status: "plan_accepted",
+      pageCount: 3,
+      runId: begun.runId,
+    });
+    if (!corrected.ok) throw new Error("Expected a corrected plan.");
+    const content = new Map([
+      [
+        "rendering-tools/topic.md",
+        page("Topic\n\n[Sources](../sources/topic.md)."),
+      ],
+      ["sources/topic.md", page("Topic sources")],
+      [
+        "quickstart.md",
+        page(
+          "Quickstart\n\n[Home](./index.md).\n\n[Topic](./rendering-tools/topic.md).",
+        ),
+      ],
+    ]);
+    for (let index = 0; index < content.size; index += 1) {
+      const job = toolOutputSchemas.openwiki_next_page.parse(
+        await lifecycle.nextPage({ runId: begun.runId }),
+      );
+      if (!job.ok || job.status !== "page_pending")
+        throw new Error("Expected an assigned page.");
+      const target = path.join(job.candidate.rootPath, job.path);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, content.get(job.path)!);
+      await lifecycle.submitPage({
+        runId: begun.runId,
+        jobId: job.jobId,
+        claims: [],
+      });
+    }
+    const review = toolOutputSchemas.openwiki_finish.parse(
+      await lifecycle.finish({
+        runId: begun.runId,
+        candidateReceipt: {
+          type: "external_candidate_receipt",
+          version: 1,
+          transactionId: corrected.binding.transactionId,
+          generation: corrected.binding.generation,
+          bindingHash: corrected.binding.candidateBindingHash,
+          writerExecutionId: "navigation-writer",
+          classification: "minor",
+          issues: [],
+          questions: [],
+          summary: "Topic, sources and navigation are ready.",
+        },
+      }),
+    );
+    if (
+      !review.ok ||
+      review.status !== "review_required" ||
+      !("reviewPackageHash" in review)
+    )
+      throw new Error("Expected a review package.");
+    const completed = toolOutputSchemas.openwiki_finish.parse(
+      await lifecycle.finish({
+        runId: begun.runId,
+        reviewReceipt: {
+          type: "external_review_receipt",
+          version: 1,
+          transactionId: review.transactionId,
+          generation: review.generation,
+          bindingHash: corrected.binding.candidateBindingHash,
+          candidateRootHash: review.candidateRootHash,
+          candidateReceiptHash: review.candidateReceiptHash,
+          reviewPackageHash: review.reviewPackageHash,
+          reviewerExecutionId: "navigation-reviewer",
+          verdict: "pass",
+          issues: [],
+        },
+      }),
+    );
+    expect(completed).toMatchObject({
+      ok: true,
+      status: "complete",
+      published: true,
+    });
+    for (const [relative, expected] of content)
+      expect(
+        await readFile(path.join(fixture.wikiRoot, relative), "utf8"),
+      ).toBe(expected);
+    expect(
+      await readFile(path.join(fixture.wikiRoot, "index.md"), "utf8"),
+    ).toBe(page("Initial revision"));
+  });
+
+  test.each([
+    ["delete", "oversized", Buffer.alloc(2 * 1024 * 1024 + 1, 65)],
+    ["delete", "invalid UTF-8", Buffer.from([0xc3, 0x28])],
+    ["rewrite", "oversized", Buffer.alloc(2 * 1024 * 1024 + 1, 65)],
+    ["rewrite", "invalid UTF-8", Buffer.from([0xc3, 0x28])],
+  ])(
+    "allows %s of an %s page while planning reachable new pages",
+    async (action, _kind, obsolete) => {
+      const fixture = await createFixture();
+      await writeFile(path.join(fixture.wikiRoot, "legacy.md"), obsolete);
+      const lifecycle = fixture.lifecycle();
+      const begun = toolOutputSchemas.openwiki_begin.parse(
+        await lifecycle.begin({
+          wikiRoot: fixture.wikiRoot,
+          mode: "update",
+          force: true,
+        }),
+      );
+      if (!begun.ok || !("runId" in begun)) throw new Error("Expected a run.");
+      await expect(
+        lifecycle.submitPlan({
+          runId: begun.runId,
+          confirmedByUser: true,
+          pages: [
+            {
+              path: "quickstart.md",
+              title: "Quickstart",
+              purpose: "Connect the replacement topic.",
+            },
+            {
+              path: "topic.md",
+              title: "Topic",
+              purpose: "Replace the obsolete page.",
+            },
+            ...(action === "rewrite"
+              ? [
+                  {
+                    path: "legacy.md",
+                    title: "Repaired page",
+                    purpose: "Replace invalid old bytes.",
+                  },
+                ]
+              : []),
+          ],
+          deletePages: action === "delete" ? ["legacy.md"] : [],
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        status: "plan_accepted",
+        pageCount: action === "delete" ? 2 : 3,
+      });
+      expect(await readFile(path.join(fixture.wikiRoot, "legacy.md"))).toEqual(
+        obsolete,
+      );
+    },
+    30_000,
+  );
+
+  test("allows a reachable topic index and retains the public read limit for large pages", async () => {
+    const fixture = await createFixture();
+    await writeFile(
+      path.join(fixture.wikiRoot, "background.md"),
+      page("Background\n\n" + "Background. ".repeat(25_000)),
+    );
+    await writeFile(
+      path.join(fixture.wikiRoot, "quickstart.md"),
+      page(
+        "Quickstart\n\n[Home](./index.md).\n\n[Background](./background.md).",
+      ),
+    );
+    const lifecycle = fixture.lifecycle();
+    const begun = toolOutputSchemas.openwiki_begin.parse(
+      await lifecycle.begin({
+        wikiRoot: fixture.wikiRoot,
+        mode: "update",
+        force: true,
+      }),
+    );
+    if (!begun.ok || !("runId" in begun)) throw new Error("Expected a run.");
+    const accepted = await lifecycle.submitPlan({
+      runId: begun.runId,
+      confirmedByUser: true,
+      pages: [
+        {
+          path: "index.md",
+          title: "Topic index",
+          purpose: "Connect the topic from the existing index.",
+        },
+        { path: "topic.md", title: "Topic", purpose: "Add a topic." },
+      ],
+    });
+    expect(accepted).toMatchObject({
+      ok: true,
+      status: "plan_accepted",
+      pageCount: 2,
+    });
+    await expect(
+      readMarkdownPages(fixture.wikiRoot, ["background.md"]),
+    ).rejects.toThrow("256 KiB read limit");
+  });
+
+  test("allows a new page that fills an existing navigation link", async () => {
+    const fixture = await createFixture();
+    await writeFile(
+      path.join(fixture.wikiRoot, "index.md"),
+      page("Index\n\n[Future topic](./future.md)."),
+    );
+    const lifecycle = fixture.lifecycle();
+    const begun = toolOutputSchemas.openwiki_begin.parse(
+      await lifecycle.begin({
+        wikiRoot: fixture.wikiRoot,
+        mode: "update",
+        force: true,
+      }),
+    );
+    if (!begun.ok || !("runId" in begun)) throw new Error("Expected a run.");
+    await expect(
+      lifecycle.submitPlan({
+        runId: begun.runId,
+        confirmedByUser: true,
+        pages: [
+          {
+            path: "future.md",
+            title: "Future topic",
+            purpose: "Fill the existing navigation link.",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: "plan_accepted",
+      pageCount: 1,
+    });
+  });
+
+  test("rejects a plan whose deletions cut off its only writable topic index", async () => {
+    const fixture = await createFixture();
+    await writeFile(
+      path.join(fixture.wikiRoot, "quickstart.md"),
+      page("Quickstart\n\n[Home](./index.md).\n\n[Bridge](./bridge.md)."),
+    );
+    await writeFile(
+      path.join(fixture.wikiRoot, "bridge.md"),
+      page("Bridge\n\n[Topic index](./topic-index.md)."),
+    );
+    await writeFile(
+      path.join(fixture.wikiRoot, "topic-index.md"),
+      page("Topic index"),
+    );
+    const lifecycle = fixture.lifecycle();
+    const begun = toolOutputSchemas.openwiki_begin.parse(
+      await lifecycle.begin({
+        wikiRoot: fixture.wikiRoot,
+        mode: "update",
+        force: true,
+      }),
+    );
+    if (!begun.ok || !("runId" in begun)) throw new Error("Expected a run.");
+    await expect(
+      lifecycle.submitPlan({
+        runId: begun.runId,
+        confirmedByUser: true,
+        deletePages: ["bridge.md"],
+        pages: [
+          {
+            path: "topic-index.md",
+            title: "Topic index",
+            purpose: "Connect the new topic.",
+          },
+          { path: "topic.md", title: "Topic", purpose: "Add the new topic." },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_input",
+      message: expect.stringContaining("quickstart.md"),
+    });
+  });
+
+  test("allows an empty Wiki initialization with a planned quickstart", async () => {
+    const fixture = await createFixture();
+    await rm(path.join(fixture.wikiRoot, "index.md"));
+    await rm(path.join(fixture.wikiRoot, "quickstart.md"));
+    const lifecycle = fixture.lifecycle();
+    const begun = toolOutputSchemas.openwiki_begin.parse(
+      await lifecycle.begin({
+        wikiRoot: fixture.wikiRoot,
+        mode: "init",
+        force: true,
+      }),
+    );
+    if (!begun.ok || !("runId" in begun)) throw new Error("Expected a run.");
+    await expect(
+      lifecycle.submitPlan({
+        runId: begun.runId,
+        confirmedByUser: true,
+        pages: [
+          {
+            path: "quickstart.md",
+            title: "Quickstart",
+            purpose: "Introduce the Wiki and connect its first topic.",
+          },
+          { path: "topic.md", title: "Topic", purpose: "Add the first topic." },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: "plan_accepted",
+      pageCount: 2,
+    });
+  });
+
   test("publishes two reviewed runs while a formal directory watcher remains open", async () => {
     const fixture = await createFixture();
     const watched = path.join(fixture.wikiRoot, "rendering");
@@ -383,6 +740,12 @@ describe("completed personal Wiki runs", () => {
 async function bootstrapFixture(
   fixture: Awaited<ReturnType<typeof createFixture>>,
 ) {
+  const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+  const openWikiRoot = path.resolve(repositoryRoot, "../.work/openwiki");
+  const fingerprint = await capabilitiesModule.computeCapabilityFingerprint({
+    openWikiRoot,
+    repositoryRoot,
+  });
   vi.spyOn(capabilitiesModule, "loadRuntimeCapabilityGate").mockResolvedValue({
     isToolVerified: (name: string) =>
       [
@@ -397,11 +760,17 @@ async function bootstrapFixture(
       ].includes(name),
     records: () => [],
     failureReason: null,
+    fingerprint,
   } as unknown as RuntimeCapabilityGate);
-  const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+  const evidencePath = path.join(
+    fixture.runtimeRoot,
+    "fixture-capability-evidence.json",
+  );
+  await writeFile(evidencePath, '{"fixture":"verified"}\n');
   return bootstrapC7Runtime({
+    evidencePath,
     repositoryRoot,
-    openWikiRoot: path.resolve(repositoryRoot, "../.work/openwiki"),
+    openWikiRoot,
     runtimeDir: fixture.runtimeRoot,
     wikiRoot: fixture.wikiRoot,
   });

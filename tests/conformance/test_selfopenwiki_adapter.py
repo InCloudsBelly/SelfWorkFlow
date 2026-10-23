@@ -93,6 +93,14 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             with self.assertRaises(SelfOpenWikiError):
                 validate_external_status(response)
 
+    def test_diagnostics_and_root_lookup_do_not_require_publication(self):
+        status = self.status(capabilities=[], externalAgent={"ready": False, "activeTransaction": None})
+        client = _FakeClient([status, status])
+        adapter = SelfOpenWikiAdapter(client)
+        self.assertEqual(adapter.recovery_status(), status)
+        self.assertEqual(adapter.override_wiki_root(), status["paths"]["wikiRoot"])
+        self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_status", {})])
+
     def test_recovery_abort_remains_accessible_when_publishing_is_not_ready(self):
         status = self.status(externalAgent={"ready": False, "activeTransaction": None})
         result = {"ok": True, "status": "external_update_aborted", "executionMode": "external_agent",
@@ -116,7 +124,7 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         digest = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
         revision = "sha256:" + "b" * 64
         status = self.status(externalAgent={"ready": False, "activeTransaction": None},
-                             capabilities=[{"id": value} for value in sorted(EXTERNAL_CAPABILITIES | {"knowledge.read.safe"})])
+                             capabilities=[{"id": "knowledge.read.safe"}])
         response = {"ok": True, "status": "wiki_read", "recovery": {"action": "none"}, "revision": revision,
                     "pages": [{"path": "intro.md", "size": 11, "contentHash": digest}],
                     "knowledge": [{"content": content, "sourceId": "selfopenwiki:intro.md", "revision": revision,
@@ -126,6 +134,20 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_read", {
             "paths": ["intro.md"], "expectedWikiRevision": revision,
         })])
+
+    def test_safe_read_keeps_its_own_gate_and_backend_recovery_result(self):
+        client = _FakeClient(self.status(capabilities=[]))
+        with self.assertRaisesRegex(SelfOpenWikiError, "wiki-read-capability-missing"):
+            SelfOpenWikiAdapter(client).read()
+        self.assertEqual(client.calls, [("openwiki_status", {})])
+
+        response = {"ok": False, "error": {"code": "restore_required", "message": "Restore the active publication.", "retryable": True},
+                    "recovery": {"action": "restore"}}
+        status = self.status(externalAgent={"ready": False, "activeTransaction": None},
+                             capabilities=[{"id": "knowledge.read.safe"}])
+        client = _FakeClient([status, response])
+        self.assertEqual(SelfOpenWikiAdapter(client).read(), response)
+        self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_read", {})])
 
     def test_safe_read_rejects_unbound_page_metadata(self):
         status = self.status(capabilities=[{"id": value} for value in sorted(EXTERNAL_CAPABILITIES | {"knowledge.read.safe"})])
@@ -205,6 +227,30 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(SelfOpenWikiError, "personal-capability-missing"):
             selfopenwiki.validate_personal_status(missing)
 
+    def test_personal_finish_resumes_without_enabling_new_updates(self):
+        status = self.personal_status()
+        status["externalAgent"] = {"ready": False, "activeTransaction": {
+            "transactionId": "external-12345678", "generation": 1,
+            "state": "publish_pending", "nextAction": "restore",
+        }}
+        pending = {"ok": True, "protocol": "selfopenwiki:personal-openwiki-v1",
+                   "status": "publish_pending", "recovery": {"action": "restore"}}
+        client = _FakeClient([status, pending])
+        arguments = {"runId": "run-12345678"}
+        self.assertEqual(SelfOpenWikiAdapter(client).personal_call("openwiki_finish", arguments), pending)
+        self.assertFalse(status["externalAgent"]["ready"])
+        self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_finish", arguments)])
+
+        client = _FakeClient(status)
+        with self.assertRaisesRegex(SelfOpenWikiError, "external-agent-not-ready"):
+            SelfOpenWikiAdapter(client).personal_call("openwiki_begin", {"mode": "update"})
+        self.assertEqual(client.calls, [("openwiki_status", {})])
+        for capabilities in ([], [{"id": value} for value in EXTERNAL_CAPABILITIES]):
+            client = _FakeClient({**status, "capabilities": capabilities})
+            with self.assertRaises(SelfOpenWikiError):
+                SelfOpenWikiAdapter(client).personal_call("openwiki_finish", arguments)
+            self.assertEqual(client.calls, [("openwiki_status", {})])
+
     def test_personal_call_accepts_only_v2_protocol_and_tool_status(self):
         self.assertTrue(hasattr(SelfOpenWikiAdapter, "personal_call"))
         status = self.status(
@@ -283,7 +329,7 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             )
 
     def test_visualizer_status_requires_the_new_selfopenwiki_contract(self):
-        ready = self.personal_status()
+        ready = self.status(capabilities=[], externalAgent={"ready": False, "activeTransaction": None})
         self.assertEqual(
             validate_visualizer_status(ready)["visualizer"]["id"],
             "selfopenwiki.zxh_wiki_viewer",
@@ -393,7 +439,7 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             wiki.mkdir()
             self.repo(repo)
             wiki.mkdir(exist_ok=True)
-            status = self.personal_status()
+            status = self.status(capabilities=[], externalAgent={"ready": False, "activeTransaction": None})
             status["paths"]["wikiRoot"] = str(wiki.resolve()).replace("\\", "/")
             status["visualizer"]["launcherPath"] = str(
                 (repo / "Visualize.bat").resolve()
@@ -450,6 +496,10 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         )
         self.assertEqual(adapter["personalWiki"]["requiredExternalRoot"], True)
         self.assertEqual(contract["status"]["required"]["version.contractSchema"], 2)
+        self.assertNotIn("externalAgent.ready", contract["status"]["required"])
+        self.assertNotIn("capabilities", contract["status"]["required"])
+        self.assertEqual(set(contract["status"]["publicationRequired"]["capabilities"]), EXTERNAL_CAPABILITIES)
+        self.assertEqual(set(adapter["mcp"]["externalUpdate"]["requiredCapabilities"]), EXTERNAL_CAPABILITIES)
         self.assertEqual(contract["externalUpdate"]["legacyFallback"], False)
         self.assertEqual(
             adapter["mcp"]["personalLifecycle"]["protocol"],

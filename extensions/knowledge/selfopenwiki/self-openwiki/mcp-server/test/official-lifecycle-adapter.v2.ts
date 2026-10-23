@@ -105,7 +105,10 @@ describe("official OpenWiki lifecycle adapter", () => {
       },
     }));
     const gateway = new C7PersonalGateway({
-      externalUpdate: { begin: externalBegin } as never,
+      externalUpdate: {
+        begin: externalBegin,
+        status: async () => ({ transactionId: "external-12345678" }),
+      } as never,
     });
 
     try {
@@ -191,7 +194,10 @@ describe("official OpenWiki lifecycle adapter", () => {
       },
     }));
     const gateway = new C7PersonalGateway({
-      externalUpdate: { begin: externalBegin } as never,
+      externalUpdate: {
+        begin: externalBegin,
+        status: async () => ({ transactionId: "external-12345678" }),
+      } as never,
     });
     try {
       await expect(

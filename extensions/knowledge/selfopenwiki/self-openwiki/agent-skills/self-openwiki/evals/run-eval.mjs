@@ -106,8 +106,9 @@ const scenarios = [
     contains: [
       "openwiki_prepare_sources",
       "文件清单、大小、hash、风险",
-      "等待用户明确确认绑定该清单",
-      "重新 prepare 并重新确认",
+      "完全落在用户已明确批准的来源和版本内",
+      "缺失来源权限才展示有界清单",
+      "固定来源版本变化或数据边界扩大才重新确认",
     ],
   },
   {
@@ -138,7 +139,9 @@ const scenarios = [
       "记录 `wikiRevision`",
       "`expectedWikiRevision`",
       "`conflict`",
-      "重新确认写入",
+      "同范围且无语义冲突时按实时协议重算候选/Review",
+      "不重问授权",
+      "实质冲突才确认",
     ],
   },
   {
@@ -172,7 +175,9 @@ const scenarios = [
       "provisional",
       "blocking",
       "允许保守落地",
-      "恢复 Grill-me",
+      "先自主查证",
+      "确需用户决策时集中提问",
+      "不自动启动 Grill-me",
     ],
   },
   {

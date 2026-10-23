@@ -1,10 +1,5 @@
-# Full 模式
+# Full
 
-适用：中高复杂度/风险。普通 agent-policy 的工作顺序如下，不启动 contract Host。
+紧凑方案合并设计/测试设计/计划，自审后在既有授权内实施。首次代码编辑的实施契约由代码方法管理；行为变更按 [TDD](../../skills/testing-review-quality/SKILL.md)，纯分析/机械文档不触发。
 
-1. 设计/测试设计/计划合成紧凑方案，主 Agent 自审；只问真正未决的范围、风险和授权。
-2. 按启动入口确定实施边界并复用授权。行为变更用 `testing-review-quality` / `implement-tdd`；不自动 Grilling 或 TEA。
-3. Review 阶段读 `workflow/modules/review.md`，由其决定前置审查、独立上下文和复审；此处不重复调度规则。
-4. 主 Agent 核对新鲜验证与实际消费者结果；未执行项如实标记，证据未变则复用。
-
-纯分析仅阅读、Review 和证据核对；机械文档同步只做窄校验。专业能力按启动入口加载。
+交付前一个独立 Reviewer；到阶段读[审查规则](../modules/review.md)，重大架构/安全/持久化/不可逆风险或显式要求才前置。相关 Critical/Important 必须关闭，已验证且未变的结论复用，不因 Token/次数预算中止。

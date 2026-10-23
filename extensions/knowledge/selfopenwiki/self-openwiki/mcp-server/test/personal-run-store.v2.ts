@@ -22,6 +22,121 @@ afterEach(async () => {
 });
 
 describe("durable personal Wiki run store", () => {
+  test("refreshes trusted rule identities before a plan or candidate exists", async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "personal-planning-refresh-"),
+    );
+    const runtimeRoot = `${root}.selfopenwiki`;
+    tempDirs.push(root, runtimeRoot);
+    const input = {
+      mode: "update" as const,
+      requestedSkills: [],
+      skillIds: ["self-openwiki"],
+      skillAggregateHash: hash("b"),
+      compatibilityManifestHash: hash("c"),
+      wikiRevision: hash("a"),
+      wikiRoot: root,
+      runtimeRoot,
+    };
+    const store = new FilePersonalRunStore({ runtimeRoot });
+    const begun = await store.begin(input);
+    if (begun.status !== "planning") throw new Error("expected a new run");
+    const refreshed = {
+      ...input,
+      skillAggregateHash: hash("d"),
+      compatibilityManifestHash: hash("e"),
+    };
+    const rehydrated = new FilePersonalRunStore({ runtimeRoot });
+    await expect(rehydrated.begin(refreshed)).resolves.toEqual({
+      runId: begun.runId,
+      status: "resuming",
+    });
+    await expect(rehydrated.read(begun.runId)).resolves.toMatchObject({
+      ...refreshed,
+      phase: "planning",
+      planHash: null,
+      queueHash: null,
+      jobs: [],
+    });
+    expect((await rehydrated.read(begun.runId)).candidate).toBeUndefined();
+  });
+
+  test.each([
+    "source",
+    "confirmation",
+    "wiki",
+    "markdown",
+    "skill-ids",
+    "requested-skills",
+    "language",
+    "mode",
+    "plan",
+    "candidate",
+  ])("does not refresh changed scope or frozen work: %s", async (scenario) => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "personal-refresh-reject-"),
+    );
+    const runtimeRoot = `${root}.selfopenwiki`;
+    tempDirs.push(root, runtimeRoot);
+    const input = {
+      mode: "update" as const,
+      requestedSkills: [],
+      skillIds: ["self-openwiki"],
+      skillAggregateHash: hash("b"),
+      wikiRevision: hash("a"),
+      sourceManifestId: "source-12345678",
+      sourceConfirmation: "confirm-source:original",
+      wikiRoot: root,
+      runtimeRoot,
+    };
+    const store = new FilePersonalRunStore({ runtimeRoot });
+    const begun = await store.begin(input);
+    if (begun.status !== "planning") throw new Error("expected a new run");
+    if (scenario === "plan") {
+      await store.submitPlan({
+        runId: begun.runId,
+        pages: [
+          { path: "guide.md", title: "Guide", purpose: "Explain the guide." },
+        ],
+      });
+    } else if (scenario === "candidate") {
+      await store.attachCandidate(begun.runId, {
+        transactionId: "external-12345678",
+        generation: 1,
+        candidateBindingHash: hash("c"),
+        candidateRoot: path.join(runtimeRoot, "candidate"),
+        candidateRootHash: hash("d"),
+        wikiRevision: hash("a"),
+      });
+    }
+    const before = await store.read(begun.runId);
+    const changed = {
+      ...input,
+      skillAggregateHash: hash("e"),
+      ...(scenario === "source"
+        ? {
+            sourceManifestId: "source-87654321",
+            sourceConfirmation: "confirm-source:other",
+          }
+        : {}),
+      ...(scenario === "confirmation"
+        ? { sourceConfirmation: "confirm-source:other" }
+        : {}),
+      ...(scenario === "wiki" ? { wikiRevision: hash("f") } : {}),
+      ...(scenario === "markdown" ? { markdownWikiRevision: hash("f") } : {}),
+      ...(scenario === "skill-ids" ? { skillIds: ["another-skill"] } : {}),
+      ...(scenario === "requested-skills"
+        ? { requestedSkills: ["another-skill"] }
+        : {}),
+      ...(scenario === "language" ? { language: "en" } : {}),
+      ...(scenario === "mode" ? { mode: "init" as const } : {}),
+    };
+    await expect(
+      new FilePersonalRunStore({ runtimeRoot }).begin(changed),
+    ).rejects.toMatchObject({ code: "invalid_state" });
+    await expect(store.read(begun.runId)).resolves.toEqual(before);
+  });
+
   test.each(["matching", "wrong-binding", "wrong-generation"])(
     "uses only a matching durable abort after rehydration: %s",
     async (scenario) => {

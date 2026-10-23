@@ -50,16 +50,18 @@ MCP 0.1.2 的默认个人发布保留正式目录与 Git 元数据，按变更�
 外部工具须避免在发布期间同时写入正式文件。仍需原有用户确认、独立 Review 与 CAS，
 更新结束后不自动打开正式文件面板或切换工作目录。
 
-Before invoking `Install.bat`, the Agent must ask the user to confirm:
+Before invoking `Install.bat`, the Agent must verify the following authorization;
+reuse authorization already given for this scope and ask only for missing items:
 
 1. the absolute Wiki-root directory to use;
 2. that the user understands SelfOpenWiki will read and write Markdown there
    and has handled backups/data safety; and
 3. if the directory is a Git repository, that the user has the relevant
-   technical authorization to write/commit that knowledge repository.
+   technical authorization to write that knowledge working tree. This does not
+   authorize commits or pushes.
 
 The Agent then invokes the fail-closed command below. A missing path or
-confirmation stops before setup or storage writes; there is no default Wiki
+authorization pauses setup/storage writes only; there is no default Wiki
 directory and no automatic directory creation.
 
 For a normal local directory:
@@ -98,6 +100,12 @@ They are adapted to the SelfOpenWiki protocol
 sparse decisions, and only C7 review plus CAS publication changes the formal
 Wiki. The user's Wiki Git repository is never committed, pushed, fetched, or
 rewritten by this flow.
+
+For new pages, include any hand-maintained navigation page needed to connect
+them from `quickstart.md`; a reachable topic index is sufficient. A plan with no
+writable navigation entry is rejected before candidate creation and can be
+corrected in the same run. Accepted queues remain immutable, and final link,
+Claims, review, and CAS checks still apply.
 
 The official Submodule is pinned to OpenWiki `0.7.1` at commit
 `d1c7fc75a6a906da258cd94dbcb1602f98516480`. The active materialization
@@ -155,6 +163,20 @@ explicit and fail-closed:
 $env:CI = 'true'
 node self-openwiki/scripts/verify-capabilities.mts
 ```
+
+The verifier refreshes the derived compatibility binding, reuses the existing
+build output directories, and runs the builds, full test suite, Skill checks,
+and built MCP smoke before activating new capability evidence. The binding
+checks the SelfOpenWiki module's current source bytes. Unrelated SelfWorkflow
+changes, Git staging, and parent commits do not invalidate an unchanged module.
+For base or specialized Skill edits, review the changed package and update its
+checked-in trusted package hash first; verification does not auto-trust edits.
+An already connected server loads newly verified Skill rules on its next call.
+Executable or runtime-configuration changes still require an MCP reconnect;
+`openwiki_status` reports that boundary. When a recovery message says
+`Reconnect this MCP server`, reconnect and check status instead of retrying
+the same connection. A missing or stale verification result
+blocks further Wiki operations until the module verifier succeeds.
 
 An external Agent must call `openwiki_status` first, confirm schema 2 external
 mode and both external capability IDs, then use the writer → `prepare_review` →

@@ -78,7 +78,10 @@ export type SelfOpenWikiVisualizerStatus = {
 };
 
 export class C7OpenWikiRuntime implements C7ToolRuntime {
-  private readonly capabilities: RuntimeCapabilityGate;
+  private readonly capabilities: Pick<
+    RuntimeCapabilityGate,
+    "isToolVerified" | "records"
+  >;
   private readonly configPath: string;
   private readonly createQuery: (config: RuntimeConfig) => QueryService;
   private readonly createUpdate: (config: RuntimeConfig) => UpdateService;
@@ -102,7 +105,7 @@ export class C7OpenWikiRuntime implements C7ToolRuntime {
   private readonly wikiPath: string;
 
   constructor(options: {
-    capabilities: RuntimeCapabilityGate;
+    capabilities: Pick<RuntimeCapabilityGate, "isToolVerified" | "records">;
     configPath: string;
     createQuery(config: RuntimeConfig): QueryService;
     createUpdate(config: RuntimeConfig): UpdateService;

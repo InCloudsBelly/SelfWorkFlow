@@ -1,30 +1,45 @@
 # SelfWorkFlow
 
-## 文档直接使用（默认）
+## clone 后直接使用
 
-普通 Agent 只需读取 [公共工作流入口](public/WORKFLOW.md)，再按该入口绑定的版本加载规则和方法；消费者无需安装 SelfWorkflow、Python/Node 或原生 Skill。工具能力仍按实际需要独立检查，缺少能力不能伪造通过。
-
-新 Agent 按公共入口中的“新 Agent 快速接入”链接完成首次核对；维护源见 [接入指南](workflow/onboarding.md) 和 [可选宿主说明模板](workflow/templates/AGENT_ADAPTER.md)。一个固定入口即可开始，宿主差异只记录实际工具接线。
-
-首次接入时，把固定入口引用放入宿主指令；此后工作流更新不改各宿主配置：
+本仓库本身是 **selfworkflow Skill**，直接入口是根 [`SKILL.md`](SKILL.md)。clone 到任意可读取的位置后，在宿主支持的项目或全局指令中引用这份文件，即可按当前版本使用工作流。clone 本身不代表宿主已自动启用。
 
 ```text
-每个用户顶层任务实际读取 D:/SelfWorkFlow/public/WORKFLOW.md。
-子任务、独立 Reviewer 和上下文续接继承主任务的 revision 与 documentRoot。
-只按需读取当前版本，不使用历史安装的规则/方法副本。
+默认工程流程使用 <克隆目录>/SKILL.md。
+新顶层任务从这份 Skill 绑定规则；子任务和续接继承主任务的 revision/documentRoot。
 ```
 
-维护者修改唯一规则源后运行 `Publish_SelfWorkFlow_Documents.bat`，或使用维护环境：
+完整规则、专业方法、引用及 UI 检索脚本和数据已在仓库内，不依赖维护者盘符或旧安装快照。消费规则无需生成步骤、维护者 `.venv` 或初始化 submodule；执行 UI 检索时才需要 Python。CodeGraph、Wiki MCP/Viewer、严格 Host 等外部能力按命中的操作另行核验。
+
+以后对 Agent 说“安装工作流”，默认就是把自包含的 [`skills/selfworkflow/`](skills/selfworkflow/SKILL.md)
+完整安装到当前用户的 `.agents/skills/selfworkflow/`，包括入口、规则、评价标准、全部引用及随包资源。
+Windows 目标为 `%USERPROFILE%\.agents\skills\selfworkflow\`。这是 Skill 文档安装；只有明确点名
+才使用下方旧 Runtime/工具安装流程。更新保护本地定制和在途任务的旧版本，安装后回读核验；
+详细步骤见[接入指南](workflow/onboarding.md)。修改仓库规则不会自动更新已安装副本。
+
+已有 WheelMaker 来源联接时，通过 WheelMaker 更新该来源并核对版本，保留现有联接；
+用户明确要求推送后更新时，先发布已授权的仓库修改，再刷新来源，不改成独立文件副本。
+
+用户也可明确选择完整仓库目录或宿主来源安装。WheelMaker 等宿主添加 GitHub 来源后选择 **selfworkflow** 即可，不用逐个安装专业方法。Windows 的较长路径可用 `git -c core.longpaths=true clone <仓库地址> <目标目录>`；已有来源缓存按宿主实际路径设置该仓库的 `core.longpaths`。
+
+## 修改即交付最终 Skill
+
+维护者修改规则和方法后，按 [AGENTS.md](AGENTS.md) 在同一次任务中同步、检查最终 Skill，再交付全部变更：
 
 ```powershell
-.venv\Scripts\python.exe -m selfworkflow.cli documents publish --repository D:\SelfWorkFlow --output D:\SelfWorkFlow\public
+.venv\Scripts\python.exe -m selfworkflow.cli skill sync --repository .
+.venv\Scripts\python.exe -m selfworkflow.cli skill check --repository .
 ```
 
-发布器整理固定来源的方法、检查引用闭合，先发布完整的不可变文档版本，再切换公共入口。发布失败保持上版；旧任务及其子任务继续使用原版，新顶层任务读取新版。公共版本只包含文档与必要静态资料，不含消费者需执行的程序。
+`Publish_SelfWorkFlow_Documents.bat` 调用同一同步流程；消费者不用运行它。根 `SKILL.md` 是入口文字的唯一维护源；安装副本由它派生。同步从同一份内容快照更新随包规则和兼容 `public`，保留旧版本；检查同时验证源码一致性、入口副本、资源与保留版本，漏同步会失败。测试包含这项仓库交付检查。
 
-现有受管安装的一次迁移可在 `install plan` 追加 `--document-root <public-root>`；或在兼容安装脚本传 `-DocumentRoot <public-root>`。先审查计划再按原有 planHash 应用：受管 Skill 按所有权和内容 hash 退役，用户修改会使计划暂停，原事务可回滚。当前安装的工具桥接快照可以保留。后续规则更新只运行文档发布，不再执行安装。
+源码、根入口、安装副本和完整新版本目录须一起提交。后续 clone/pull 获取到的就是可直接读取的最终 Skill；已安装副本通过宿主的来源更新刷新。`SKILL.md` 正文显示规则版本的前 12 位 hash，由 `skill sync` 自动生成、`skill check` 校验。进行中的任务继续使用保留的旧 revision，不手工删除或改写版本目录。新任务只读 Skill、短版本指针与核心规则；Light 无额外模式文件，Full/Deep 和专业方法按实际操作加载，不遍历全部 Supporting files。
 
-`documents check --root <public-root>` 是维护者校验；`documents snippet --root <public-root>` 输出固定引用。两者均不是 Agent 读取文档的前置条件。离线或只能一次性导入内容的宿主仍需重新分发，不承诺自动刷新。
+## 公共文档兼容入口
+
+已有宿主绑定根 [`public/WORKFLOW.md`](public/WORKFLOW.md) 时可以沿用，统一同步会更新到与 Skill 相同的规则版本。新接入优先引用根 `SKILL.md`。已接通的新会话不重复安装或探测所有服务；仅需要安装、迁移或核对必要能力变化时读取 [接入指南](workflow/onboarding.md)。
+
+`documents publish/check/snippet` 仍用于单个文档目录维护与旧安装兼容；它们不代表整个 Skill 已与源码同步。整套工作流交付使用上面的 `skill sync/check`。
 
 ## 可选 Wiki 模块
 
@@ -698,11 +713,11 @@ normal 依赖初始化只按父仓库 gitlink 同步；runtime 打包同时验�
 
 运行时只发布一个本地维护入口；上游 skill-creator 的完整方法引用和许可证位于
 `references/anthropic-skills/skill-creator`，不进入日常 Skill 发现树。
-安装后的入口按当前对话 bootstrap 的 snapshot 绝对根定位引用。
+通用 Skill 的方法从已绑定的 documentRoot 按需读取；旧安装兼容模式才从 bootstrap snapshot 定位引用。
 上游 Claude CLI/API 和评测脚本按宿主能力与本次授权选择，不自动运行。
 
 本能力支持普通 agent-policy 的维护任务；不新增 V2/V3 契约阶段或调度器。
-源仓库变更经验证后，使用现有安装流程更新个人 snapshot 才会进入新会话。
+源仓库变更经验证并重新生成随包文档后，通过 Skill 来源更新进入新顶层任务；旧安装兼容模式沿用其 snapshot 更新流程。
 不要通过整库安装或覆盖其他 skill-creator 入口重复接入。
 
 ## 文档、界面与 Obsidian 能力
@@ -721,7 +736,7 @@ normal 依赖初始化只按父仓库 gitlink 同步；runtime 打包同时验�
 来源分别为 `dependencies/upstream/ui-ux-pro-max`、`composio-skills`、
 `obsidian-skills`，锁位于 `dependencies/locks/<source-id>.lock.yaml`。
 完整的所选方法与支持文件位于运行时 `references/community-skills/<source-id>/`，
-不进入 Skill 发现树。入口按当前 bootstrap 的 snapshot 定位并校验引用。
+不进入 Skill 发现树。通用 Skill 从已绑定的 documentRoot 按需读取；旧安装兼容模式按 bootstrap snapshot 定位并校验引用。
 UI 搜索使用同目录数据与 Python 标准库；只在需要时执行，不默认持久化设计系统。
 Composio 仅接入 `content-research-writer`，不会安装整库连接器。
 Obsidian 不自动扫描或写入未授权 vault，也不代替知识后端确认流程。
@@ -729,7 +744,7 @@ Obsidian 不自动扫描或写入未授权 vault，也不代替知识后端确�
 UI 与 Obsidian 保留 MIT LICENSE；Composio 所选 writer 无单独 LICENSE，
 保留 README 的 Apache-2.0 声明，并在锁中标记为 `declared`。
 触发描述与正负案例审查不等于真实模型触发率或 Token 节省测量。
-使用现有受管安装流程更新个人 snapshot 后，新会话即可发现这些入口。
+这些方法可由通用 Skill 随包按需读取；只有需要独立发现入口的旧安装兼容模式才更新个人 snapshot。
 
 ## Project-local work-document lifecycle
 

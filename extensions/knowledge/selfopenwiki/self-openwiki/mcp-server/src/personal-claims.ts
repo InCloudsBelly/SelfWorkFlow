@@ -255,7 +255,7 @@ export class FilePersonalClaimsResolver implements PersonalClaimsResolver {
     const pageDirectories = await bindDirectoryChain(
       rootDirectory,
       path.dirname(pageFile),
-      false,
+      true,
     );
     const sidecarDirectories = await bindDirectoryChain(
       rootDirectory,
@@ -323,7 +323,9 @@ export class FilePersonalClaimsResolver implements PersonalClaimsResolver {
     await assertBoundFilePath(sidecar, sidecarStat);
     await assertDirectoryChain(sidecarDirectories);
     const pageHash = hashBytes(pageBytes);
-    if (pageHash !== result.data.pageVersion) {
+    // An empty set carries no old-page facts; its bytes remain in the CAS snapshot.
+    // Reading never rewrites pageVersion. Publication owns the final binding.
+    if (pageHash !== result.data.pageVersion && result.data.claims.length > 0) {
       throw new PersonalClaimsError(
         "validation_failed",
         "The personal Wiki Claim sidecar is stale for the current page.",

@@ -121,6 +121,11 @@ export class FilePersonalRunStore implements PersonalRunStore {
         } else if (sameBinding(state, input)) {
           return { runId: state.runId, status: "resuming" };
         } else {
+          const refreshed = refreshPlanningRules(state, input);
+          if (refreshed !== null) {
+            await this.writeState(refreshed);
+            return { runId: state.runId, status: "resuming" };
+          }
           throw new PersonalRunStoreError(
             "invalid_state",
             "The active personal Wiki run is bound to a different Wiki or Skill revision; its candidate was retained.",
@@ -705,6 +710,32 @@ function assertBeginInput(
       "The personal run root binding is invalid.",
     );
   }
+}
+
+function refreshPlanningRules(
+  state: PersonalRunState,
+  input: PersonalRunBeginInput,
+): PersonalRunState | null {
+  if (
+    state.phase !== "planning" ||
+    state.planHash !== null ||
+    state.queueHash !== null ||
+    state.jobs.length !== 0 ||
+    state.deletePages.length !== 0 ||
+    state.candidate !== undefined
+  ) {
+    return null;
+  }
+  // Lifecycle supplies these identities from the current trusted registry.
+  // No source, Wiki revision, Skill selection or frozen C7 binding can change.
+  const refreshed: PersonalRunState = {
+    ...state,
+    skillAggregateHash: input.skillAggregateHash,
+    ...(input.compatibilityManifestHash === undefined
+      ? {}
+      : { compatibilityManifestHash: input.compatibilityManifestHash }),
+  };
+  return sameBinding(refreshed, input) ? refreshed : null;
 }
 
 function sameBinding(

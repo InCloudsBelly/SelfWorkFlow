@@ -148,6 +148,50 @@ class CodeGraphAdapterTests(unittest.TestCase):
                 self.assertEqual(result["freshness"], expected)
                 self.assertNotIn("private/Actor.cpp", str(result))
 
+    def test_verified_partial_cpp_coverage_is_queryable_with_explicit_limitation(self):
+        environment = {"observed": True, "complete": False, "changed": False,
+                       "inputsVerified": True, "affectedFileCount": 0}
+        value = {"initialized": True, "index": {"state": "complete"},
+                 "workingTreeChecked": True,
+                 "pendingChanges": {"added": 0, "modified": 0, "removed": 0},
+                 "cppIncludeEnvironment": environment}
+        status = self._adapter(FakeCommandPort(self._result(stdout=json.dumps(value)))).status("C:/work/project")
+        self.assertEqual(status["freshness"], "fresh")
+        self.assertEqual(status["cppIncludeEnvironment"], environment)
+        result = self._adapter(FakeCommandPort(
+            self._result(stdout=json.dumps(value)), self._result(stdout="Widget references"),
+        )).query("C:/work/project", "find Widget")
+        self.assertEqual(result["freshness"], "fresh")
+        self.assertEqual(result["analysisWarnings"], ["cpp-include-coverage-incomplete"])
+
+    def test_explicit_cpp_input_verification_is_required_and_fail_closed(self):
+        for verified, changed, complete, expected in (
+            (False, False, False, "unknown"),
+            (False, False, True, "unknown"),
+            (True, True, False, "stale"),
+            (True, False, False, "fresh"),
+        ):
+            with self.subTest(verified=verified, changed=changed, complete=complete):
+                value = {"initialized": True, "index": {"state": "complete"},
+                         "cppIncludeEnvironment": {"observed": True, "complete": complete,
+                                                   "changed": changed, "inputsVerified": verified,
+                                                   "affectedFileCount": 0}}
+                result = self._adapter(FakeCommandPort(self._result(stdout=json.dumps(value)))).status("C:/work/project")
+                self.assertEqual(result["freshness"], expected)
+
+    def test_invalid_cpp_input_verification_is_rejected(self):
+        from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
+
+        for invalid in (None, "true", 1):
+            with self.subTest(invalid=invalid):
+                value = {"initialized": True, "cppIncludeEnvironment": {
+                    "observed": True, "complete": True, "changed": False,
+                    "inputsVerified": invalid, "affectedFileCount": 0,
+                }}
+                with self.assertRaises(CodeGraphAdapterError) as caught:
+                    self._adapter(FakeCommandPort(self._result(stdout=json.dumps(value)))).status("C:/work/project")
+                self.assertEqual(caught.exception.reason, "codegraph-status-invalid")
+
     def test_official_sync_lock_error_is_busy_for_both_glyphs_and_ansi(self):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
 

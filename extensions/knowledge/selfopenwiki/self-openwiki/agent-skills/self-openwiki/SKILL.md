@@ -9,6 +9,8 @@ description: Use when an external Agent needs to query, organize, propose, or up
 
 嵌入 SelfWorkflow 时，模式、Design/Plan、授权、Review 调度和验证由 SelfWorkflow 唯一管理；本 Skill 提供 Wiki 方法与发布检查项，复用已完成的同范围门禁。个人 Wiki 目录遵循模块根 `WIKI_LAYOUT.md`；长期正文、Claims 与可分享来源在 Wiki Git 内，事务运行状态不是分享或重新导入所需的知识。
 
+用户直接要求总结到 Wiki、更新条目或审核后发布，即提供对应主题、目标和明确来源的写入授权；不再要求对同一计划单独说一次“确认写入”。仅生成方案/草稿时不发布。必要来源页、导航和链接同步纳入同一计划；真正越界、来源许可变化或无法安全合并的内容冲突才提问。协议确认字段记录既有授权，不能伪造未批准的来源或发布权限。
+
 SelfWorkflow 只发现根 `kg-selfopenwiki` 路由入口；本 Skill 随更新返回的 Writer/协议包按需读取。普通读取、Viewer 或安装不同时加载本正文和完整 MCP 契约。实现位于 SelfWorkflow Git 的 `extensions/knowledge/selfopenwiki/`，不依赖独立 SelfOpenWiki 源目录。
 
 外部 Agent 是用户界面和默认知识 writer；C7 是来源、规则、候选、事务、正式发布、
@@ -42,11 +44,13 @@ SelfOpenWiki-owned 适配层；它可以为官方能力增加本地规则、Clai
 1. `openwiki_begin`：传入明确的外部 Git 仓库根目录 `wikiRoot`，绑定 Wiki revision、
    upstream revision 和个人 Skill hash，并创建或恢复个人 Run。
 2. `openwiki_submit_plan`：提交页面标题、目的、种子路径、关联页面和指令，生成持久化
-   PageJob 队列。索引和运行元数据不作为 PageJob 内容。
+   PageJob 队列。自动生成的保留索引和运行元数据不作为 PageJob 内容；手工维护的
+   `quickstart.md` 或主题导航页若需修改，必须列为 PageJob。
 3. `openwiki_next_page`：一次只取一个 PageJob，并只使用响应中 candidate package 的
    `rootPath/pagePath/permissions`。Writer 只能在候选目录写被分配的 Markdown 页面。
 4. `openwiki_inspect_page_claims`：在修改或撤回已有 Claim 前读取绑定 Wiki 的
-   `.claims/` sidecar 中、且与当前页面 revision 匹配的完整 Claim 集；不能从自由文本
+   `.claims/` sidecar 中的完整 Claim 集；非空集合须与当前页面 revision 匹配。
+   合法空集合可只读使用，旧 pageVersion 仅在正式发布后重绑；不能从自由文本
    或客户端输入猜测 Claim、证据或 hash。
 5. `openwiki_submit_page`：C7 读取并校验候选中的已分配页面，接收稀疏 Claim 决策；此
    调用不写正式 Wiki，也不执行个人 Wiki 的 Git commit、push、fetch 或 ref 操作。
@@ -58,7 +62,7 @@ SelfOpenWiki-owned 适配层；它可以为官方能力增加本地规则、Clai
 
 六工具是 SelfOpenWiki 的适配协议 `selfopenwiki:personal-openwiki-v1`，不宣称与官方
 schema 字节一致。每轮仍先调用 `openwiki_status`；六工具或其绑定能力未 verified、
-Wiki root 不是独立 Git 仓库、Skill/upstream 漂移、候选或恢复状态不可读时停止。
+Wiki root 不是独立 Git 仓库、Skill/upstream 漂移、候选或恢复状态不可读时暂停对应更新动作，继续独立且获授权的诊断/其他工作；不以更新门禁阻止安全读取或 Viewer。
 
 个人 Wiki 资源可以位于 SelfOpenWiki 之外。`wikiRoot` 必须是已存在的独立 Git 仓库根，
 运行时目录固定为同级 `<wikiRoot>.selfopenwiki`。MCP 只读 Git 身份和内容；个人仓库的
@@ -68,13 +72,13 @@ commit、branch、remote、push 和回滚由用户明确执行。迁移或格式
 ## 不可绕过的护栏
 
 - 第一次 MCP 调用永远是 `openwiki_status`；只传实时 strict schema 中存在的字段。
-- 默认 status 必须返回 `executionMode: external_agent`、`authRequired: false`、
-  schema 2，以及 verified 的 `update.external-agent.begin` 和
-  `update.external-agent.reviewed-finalize` 完整 capability 对。
-- 任一 capability 缺失、恢复未闭环或状态不可读时停止；不得单边调用 begin/finalize。
+- 默认 status 必须返回 `executionMode: external_agent`、`authRequired: false`、schema 2。
+  读取只需 verified 的 `knowledge.read.safe` 与后端一致性检查；Viewer 只需有效 live contract。
+  更新才要求完整发布 capability 和生命周期，不单边调用 begin/finalize。
+- 本次动作所需 capability 缺失、恢复未闭环或状态不可读时暂停该动作；不传播为无关任务门禁。
 - writer 只能写 work package 指定的候选目录；Reviewer 只能读取候选；两者都不得直接写正式 Wiki。
 - 不从自由文本推断成功，不自行补字段、路径、hash、receipt、模型证据或发布事实。
-- 本地路径必须先 prepare 并由用户确认当前 manifest；敏感、变化或拒绝的来源不可旁路。
+- 本地路径必须先 prepare 并把当前 manifest 绑定到有效来源授权；敏感、越出批准版本或拒绝的来源不可旁路。同范围既有授权复用，不把技术标识生成当作再次确认的理由。
 - 不声称 C7 验证了宿主模型、provider 或 reasoning effort；外部 receipt 只是
   `host_attested` 证据。
 - `openwiki_setup`、`openwiki_query`、`openwiki_update` 和
@@ -86,8 +90,8 @@ commit、branch、remote、push 和回滚由用户明确执行。迁移或格式
 
 1. 检查当前会话实际暴露的工具及 schema。
 2. 调用 `openwiki_status`，不附加未知字段。
-3. 核对 schema 2、external mode、OAuth-free 状态、完整 capability 对、
-   `runtime.recoveryState`、`externalAgent.ready`、活动事务和 `wikiRevision`。
+3. 核对 schema 2、external mode、OAuth-free 状态、本次动作所需 capability、
+   `runtime.recoveryState`、活动事务和 `wikiRevision`；更新另核对完整发布能力及 `externalAgent.ready`。
 4. `capability_unverified`、`restore_required`、`busy` 或其他失败只按结构化
    `ok`、`error` 与 `recovery` 处理。
 
@@ -103,10 +107,10 @@ discriminator。验证失败不降级、不换 provider，也不把 legacy 能�
 ### 3. 准备任意本地来源
 
 1. 任意本地绝对路径先调用 `openwiki_prepare_sources`。
-2. 展示文件清单、大小、hash、风险、manifest 标识和确认文本，说明数据边界。
-3. 等待用户明确确认绑定该清单。
+2. 核对文件清单、大小、hash、风险及 manifest 是否完全落在用户已明确批准的来源和版本内。
+3. 已有授权覆盖时记录依据并继续；缺失来源权限才展示有界清单、数据边界与确认文本并等待答复。
 4. start 只使用相互匹配且未变化的 manifest 标识与确认文本。
-5. source changed/invalid/rejected 使旧确认失效；重新 prepare 并重新确认。
+5. source changed/invalid/rejected 先重新 prepare 并核对。新快照不能越出来源授权；固定来源版本变化或数据边界扩大才重新确认，敏感/拒绝来源不旁路。
 
 `materials` 只承载用户已脱敏的短文本，不能旁路来源或敏感文件规则。
 
@@ -135,6 +139,12 @@ discriminator。验证失败不降级、不换 provider，也不把 legacy 能�
 通过返回的 candidate package 和结构化 receipt 进入 C7；不要把个人 Wiki 根目录当成
 候选目录。
 
+新增页面前先读取现有导航，规划从 `quickstart.md` 到新页的完整链接链路。需要改动的
+入口或已可达主题索引须纳入页面计划；已有链接若正好指向新页，可直接补齐目标。
+新页计划没有可写的可达导航入口时，`submit_plan` 在创建候选前拒绝，该次计划未接受，
+可在同一 run 补齐后重交。计划接受后队列冻结；此时发现漏页应按现有恢复与授权流程
+处理，不能追加队列或直接补写正式导航。最终仍须通过实际链接、Claims、Review 和 CAS。
+
 `submit_page` 只提交当前 PageJob 的页面和 sparse Claim decision。重复提交同一绑定的
 payload 必须得到相同接受结果；不同 payload 不能覆盖已经 accepted 的 PageJob。队列为空
 后调用 `finish`，没有 candidate receipt 或 Review receipt 时按返回的 `nextAction` 继续；
@@ -143,17 +153,17 @@ root 必须位于 `<wikiRoot>.selfopenwiki` 且没有链接或 junction 祖先�
 不要把 `review_required` 解释成已发布。
 
 检测到旧页面格式、frontmatter 或 Claim 结构需要迁移时，只在候选目录生成 migration
-candidate。展示 byte/hash/diff 和影响范围，取得用户明确确认后仍按 Review 与 CAS 发布；
+candidate。展示 byte/hash/diff 和影响范围，已有维护授权覆盖且语义未变时直接按 Review 与 CAS 发布；超出授权才确认。
 失败时保留原页面和 `.git` 状态。
 
 ### 7. 旧有 C7 external-agent 更新 Wiki
 
 1. 用 Brainstorming/Design 收敛证据、页面范围、来源、Skill、未知项和排除项。将缺口
    分为 minor、provisional、blocking：minor 自主查证；provisional 允许保守落地并
-   明示 follow-up；blocking 停止发布并恢复 Grill-me。
-2. 展示最终摘要和记录 `wikiRevision`。用户明确“确认写入”后，按实时 schema 调用
+   明示 follow-up；blocking 暂停发布，先自主查证，确需用户决策时集中提问，不自动启动 Grill-me。
+2. 展示最终摘要和记录 `wikiRevision`。核对有效写入授权后，按实时 schema 调用
    `openwiki_begin_external_update` 的 start；把该 revision 原样作为
-   `expectedWikiRevision`。`conflict` 后刷新、重新形成摘要并重新确认写入。
+   `expectedWikiRevision`。`conflict` 后刷新并比较影响；同范围且无语义冲突时按实时协议重算候选/Review，不重问授权，不改写已冻结 receipt。实质冲突才确认。
 3. 将完整 work package 交给隔离 writer。它只能写 package 的 candidate root，并以
    不透明字段原样绑定 transaction、generation、binding、request/rule/source/Skill/
    scope hashes。candidate receipt 的 `writerExecutionId`、classification、issues、
@@ -176,10 +186,10 @@ candidate。展示 byte/hash/diff 和影响范围，取得用户明确确认后�
 
 - `published`：报告 C7 已发布、正式 revision 和 host-attested Review 事实。
 - `published_with_follow_up`：报告已发布并保留 provisional follow-up。
-- `needs_clarification`：明确未发布、候选仍保留。取得关键决策后继续；若用户决定放弃，
+- `needs_clarification`：明确未发布、候选仍保留。先区分技术故障与真正缺失的关键决策；能在批准范围内修复的自主修复，确需用户决策才提问。若用户决定放弃，
   只调用 exact `abort` 并设置 `confirmedByUser: true`。成功 abort 后正式 Wiki 不变。
 - `external_host_failure`：报告阶段和 next action，按返回 binding 执行 begin/resume。
-- `repair_ready`：只由 resume 创建下一代；最多两次 repair successor。
+- `repair_ready`：只由 resume 创建下一代；最多两次 repair successor。上限保护自动重试，不证明缺少用户决策；保留候选和具体失败证据，按协议处理，不能反复盲问或宣称完成。
 - `conflict` 或其他失败：正式 Wiki 未变；按结构化 recovery 处理，不自动重放。
 
 显式 legacy `openwiki_update` 仍可能返回 `review_requires_attention`。
@@ -208,11 +218,11 @@ candidate。展示 byte/hash/diff 和影响范围，取得用户明确确认后�
 
 ## 快速自检
 
-- [ ] 第一项调用是 status，且两个 external capability 都 verified。
+- [ ] 第一项调用是 status，本次动作所需 capability/contract 已核对；更新要求完整发布能力。
 - [ ] 没有把 setup/OAuth/model 作为默认 external 更新前置条件。
 - [ ] 所有本地路径已 prepare，用户确认仍匹配。
 - [ ] 基础 Skill 第一且唯一，专项 Skill 有序无重复。
-- [ ] 用户看过最终范围与 revision 并明确确认写入。
+- [ ] 已有明确写入授权覆盖最终范围与来源，当前 revision 绑定已重新核对；没有重复确认。
 - [ ] writer 只写候选，Reviewer 只读，execution ID 不同。
 - [ ] 所有 package/hash 字段来自实时返回，没有重算或猜测。
 - [ ] failure 走 report/resume；clarification 放弃走 confirmed abort。
@@ -220,7 +230,7 @@ candidate。展示 byte/hash/diff 和影响范围，取得用户明确确认后�
 
 ## 红线
 
-- 未调用 status、capability 只有一半或恢复未闭环就继续。
+- 未调用 status；更新所需发布 capability 对不完整仍 begin/finalize；`restore_required` 时执行要求一致性的读写。诊断和有效 Viewer 不受发布门禁限制。
 - 未确认来源或写入范围就 start。
 - 未用 `wikiRoot` 绑定独立 Git Wiki，或把个人 Wiki 根目录当作 candidate root。
 - 在 `submit_page` 或六阶段工具中执行个人仓库 commit、push、fetch、ref 修改。

@@ -489,6 +489,14 @@ The six request shapes are:
 | `openwiki_submit_page` | `{ runId, jobId, confirmedClaimIds?, claims?, retractedClaimIds? }`; exactly the assigned candidate file is read from the C7 work package. |
 | `openwiki_finish` | `{ runId, candidateReceipt?, reviewReceipt? }`; supplied receipts are untrusted input and are accepted only after C7 validation. The semantic form is exactly neither receipt, candidate-only, or review-only; both receipts are rejected with `invalid_input`. |
 
+Before allocating a new C7 candidate, a plan that adds pages must have a writable
+page reachable from `quickstart.md` in the planned path set, excluding deletions.
+This can be quickstart itself, a reachable topic index, or a new page filling an
+existing link. An impossible scope is rejected with `invalid_input` and the
+unaccepted queue is rolled back, so the same run can submit a corrected plan.
+Existing transactions retain their frozen scope. This feasibility check does not
+replace final validation of actual links and navigation, Claims, Review, or CAS.
+
 The success result shapes are discriminated by `status` and always include
 `protocol`, `runId` where a run exists, and the binding hashes relevant to the
 state. `begin` includes `wikiRoot`, `runtimeRoot`, `wikiRevision`,
@@ -797,9 +805,13 @@ minimum evidence are fixed:
 | `openwiki.personal.c7-review-publish` | Candidate/review receipts are distinct, hash-bound, and publish only through C7 CAS | receipt tests, review/publish failure tests, C7 recovery evidence |
 | `openwiki.personal.wiki-root.external-git` | The explicit Wiki root is an independent Git top-level and Git metadata is preserved | canonical path tests, Git metadata before/after snapshot, external-root smoke |
 
-`parentCommit` binds the parent source commit; `parentSourceManifestHash` binds
-the complete allowed worktree/index source manifest when uncommitted user
-changes are present. `generatedMarkerHash` binds the exact materializer
+`parentCommit` records the parent commit used when producing the compatibility
+manifest; it is provenance, not an equality gate against the current host HEAD.
+`parentSourceManifestHash` now binds the SelfOpenWiki module's allowed worktree
+content, independent of the parent HEAD and index. Git staging or a commit with
+the same effective module files does not invalidate it; changed module bytes do.
+The original three-layer Git manifest remains an audit artifact, not a runtime
+capability gate. `generatedMarkerHash` binds the exact materializer
 marker, and `lockfileHash` binds the package lock used for the build. A
 capability is verified only when every listed predicate and evidence kind is
 fresh for the same tuple.
@@ -853,7 +865,15 @@ field omitted; every other field, including independently recomputed hash
 fields, is an input. Arrays whose order has semantic meaning retain that order;
 all object keys are sorted recursively.
 
-`parentSourceManifestHash` has its own exact canonical record contract. The
+The worktree content binding uses the same allowed module paths, omits the two
+derived manifests below, and hashes current file bytes, modes, and nested
+gitlink source bytes. The domain is `selfopenwiki-module-content-v1\0` followed
+by canonical JSON of `{ "version": 1, "scope": "selfopenwiki-module-content", "records": [...] }`.
+The records are sorted by UTF-8 path bytes and omit Git layer, index stage, and
+worktree dirty flags. This is the runtime value stored in
+`parentSourceManifestHash` for schema compatibility.
+
+The retained three-layer Git audit manifest has its own exact canonical record contract. The
 allowed path set is the union of `.gitmodules`, `AGENTS.md`, `README.md`,
 `docs/`, `patches/openwiki/`, `scripts/`, `self-openwiki/`, and the
 `upstream/openwiki` gitlink itself; `.git/`, runtime siblings, and Submodule

@@ -10,4 +10,6 @@
 
 缺失或不匹配的 live contract 报告 `unverified` 并停止，不猜旧仓库路径、不调用 `.work/openwiki/dist/cli.js` fallback。只浏览无需加载读取正文、更新、安装或 legacy 规则。
 
+启动 Viewer 不要求发布 capability 对、完整个人生命周期或 `externalAgent.ready=true`；只检查当前 status 身份、绑定根、launcher 和 Viewer contract。Viewer 不可用只暂停浏览，不停止其他已授权工作。
+
 0.1.2 个人发布保持正式目录稳定，Viewer/目录监听可以常开。Viewer 和文件面板直接读文件，不参与 MCP 读取锁，提交窗口可能看到文件陆续变化；需要一致版本时，改用新版 MCP 读取或已核对的静态审查副本。只读浏览不会自动发布；不要由浏览任务持有写事务。

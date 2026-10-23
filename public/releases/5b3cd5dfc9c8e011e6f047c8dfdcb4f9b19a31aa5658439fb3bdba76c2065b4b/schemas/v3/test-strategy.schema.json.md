@@ -1,0 +1,136 @@
+# 只读参考：test-strategy.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/test-strategy.schema.json",
+  "title": "SelfWorkFlow V3 test strategy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "planHash", "attemptRef", "createdAt", "basisKind",
+    "testLevel", "testLevelFloor", "source", "grillMeImplementation",
+    "risks", "acceptanceConditions", "dimensions", "techniques", "authorizationRequirements",
+    "coverageObligations", "strategyHash"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "planHash": {"$ref": "#/$defs/sha256"},
+    "attemptRef": {"$ref": "#/$defs/stableId"},
+    "createdAt": {"$ref": "#/$defs/utcTimestamp"},
+    "basisKind": {"enum": ["plan", "diff"]},
+    "finalDiffHash": {"$ref": "#/$defs/sha256"},
+    "diffSignalSetHash": {"$ref": "#/$defs/sha256"},
+    "testLevel": {"$ref": "#/$defs/testLevel"},
+    "testLevelFloor": {"$ref": "#/$defs/testLevel"},
+    "source": {"enum": ["builtin", "tea"]},
+    "grillMeImplementation": {"type": "boolean"},
+    "risks": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/risk"}},
+    "acceptanceConditions": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/acceptanceCondition"}},
+    "dimensions": {"$ref": "#/$defs/dimensions"},
+    "techniques": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/technique"}},
+    "authorizationRequirements": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/authorizationRequirement"}},
+    "coverageObligations": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/obligation"}},
+    "residualUnverified": {"$ref": "#/$defs/idList"},
+    "strategyHash": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"basisKind": {"const": "diff"}}, "required": ["basisKind"]},
+      "then": {"required": ["finalDiffHash", "diffSignalSetHash"]},
+      "else": {
+        "allOf": [
+          {"not": {"required": ["finalDiffHash"]}},
+          {"not": {"required": ["diffSignalSetHash"]}}
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "stableId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "utcTimestamp": {
+      "type": "string", "format": "date-time",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$"
+    },
+    "testLevel": {"enum": ["T0", "T1", "T2", "T3"]},
+    "priority": {"enum": ["P0", "P1", "P2", "P3"]},
+    "idList": {"type": "array", "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/stableId"}},
+    "nonEmptyIdList": {"type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/stableId"}},
+    "risk": {
+      "type": "object", "additionalProperties": false,
+      "required": ["riskId", "priority", "acceptanceConditionIds"],
+      "properties": {
+        "riskId": {"$ref": "#/$defs/stableId"},
+        "priority": {"$ref": "#/$defs/priority"},
+        "probability": {"type": "integer", "minimum": 1, "maximum": 3},
+        "impact": {"type": "integer", "minimum": 1, "maximum": 3},
+        "score": {"type": "integer", "minimum": 1, "maximum": 9},
+        "residualStatus": {"enum": ["verified", "unverified"]},
+        "acceptanceConditionIds": {"$ref": "#/$defs/idList"}
+      }
+    },
+    "acceptanceCondition": {
+      "type": "object", "additionalProperties": false,
+      "required": ["conditionId", "description"],
+      "properties": {"conditionId": {"$ref": "#/$defs/stableId"}, "description": {"type": "string", "minLength": 1, "maxLength": 4096}}
+    },
+    "dimensions": {
+      "type": "array", "minItems": 1, "maxItems": 5,
+      "items": {"$ref": "#/$defs/dimension"}
+    },
+    "dimension": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dimensionId", "obligationIds"],
+      "properties": {
+        "dimensionId": {"enum": ["direct", "failure", "boundary", "state", "nfr"]},
+        "obligationIds": {"$ref": "#/$defs/idList"}
+      }
+    },
+    "technique": {
+      "type": "object", "additionalProperties": false,
+      "required": ["techniqueId", "name", "rationale"],
+      "properties": {
+        "techniqueId": {"$ref": "#/$defs/stableId"},
+        "name": {"$ref": "#/$defs/stableId"},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "authorizationRequirement": {
+      "type": "object", "additionalProperties": false,
+      "required": ["authorizationId", "required", "reason"],
+      "properties": {
+        "authorizationId": {"$ref": "#/$defs/stableId"},
+        "required": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "obligation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["obligationId", "riskId", "dimension", "techniqueIds", "acceptanceConditionIds", "authorizationRequired"],
+      "properties": {
+        "obligationId": {"$ref": "#/$defs/stableId"},
+        "riskId": {"$ref": "#/$defs/stableId"},
+        "dimension": {"enum": ["direct", "failure", "boundary", "state", "nfr"]},
+        "techniqueIds": {"$ref": "#/$defs/nonEmptyIdList"},
+        "acceptanceConditionIds": {"$ref": "#/$defs/nonEmptyIdList"},
+        "authorizationRequired": {"type": "boolean"},
+        "authorizationRequirementIds": {"$ref": "#/$defs/nonEmptyIdList"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"authorizationRequired": {"const": true}},
+            "required": ["authorizationRequired"]
+          },
+          "then": {"required": ["authorizationRequirementIds"]},
+          "else": {"not": {"required": ["authorizationRequirementIds"]}}
+        }
+      ]
+    }
+  }
+}
+
+````

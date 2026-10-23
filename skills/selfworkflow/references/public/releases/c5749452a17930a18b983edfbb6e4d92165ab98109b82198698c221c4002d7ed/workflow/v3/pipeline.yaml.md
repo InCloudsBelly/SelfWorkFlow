@@ -1,0 +1,228 @@
+# 只读参考：pipeline.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 3
+stages:
+  - id: discovered
+    slots:
+      - id: discover.context
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+      - id: knowledge.read
+        cardinality: zero-or-one
+        allowedInvocationKinds: [mcp, skill]
+        selectionMode: bounded-runtime
+  - id: capability-checked
+    slots:
+      - id: capability.check
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: classified
+    slots:
+      - id: classify.task
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+  - id: designed
+    slots:
+      - id: design.precheck
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition: {contains: [explicitModuleIds, design-grilling]}
+      - id: design.deep-grill
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition: {contains: [explicitModuleIds, design-grill-me]}
+      - id: code.reasoning
+        cardinality: zero-or-many
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+      - id: design.specialists
+        cardinality: zero-or-many
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+  - id: planned
+    slots:
+      - id: plan.primary
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native]
+        selectionMode: static
+      - id: plan.assessment
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {contains: [explicitModuleIds, tea-framework]}
+            - any:
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+      - id: test.quality.plan
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - any:
+                - {eq: [operationType, design]}
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+            - {contains: [explicitModuleIds, tea-test-design]}
+      - id: plan.integrated-review
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - any:
+                - {eq: [operationType, design]}
+                - {eq: [operationType, plan]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+            - any:
+                # Coarse R2 includes security/persistence, not just compatibility.
+                - {gte: [risk, R2]}
+                - {eq: [taskArchetype, architecture-change]}
+                - {eq: [taskArchetype, migration]}
+                - {contains: [explicitModuleIds, plan-integrated-review]}
+  - id: implemented
+    slots:
+      - id: implement.orchestrator
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - {eq: [operationType, implement]}
+            - not: {contains: [explicitModuleIds, implement-spec]}
+      - id: implement.spec
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - {eq: [operationType, implement]}
+            - {eq: [durableSpec, true]}
+            - {eq: [requirementsMaturity, approved]}
+            - {contains: [explicitModuleIds, implement-spec]}
+      - id: implement.method
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+      - id: implement.tdd
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - any:
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+                - {eq: [taskArchetype, bounded-feature]}
+                - {eq: [taskArchetype, bugfix]}
+                - {eq: [taskArchetype, behavioral-refactor]}
+                - {eq: [taskArchetype, architecture-change]}
+                - {eq: [taskArchetype, migration]}
+      - id: test.quality.implementation
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+        condition: {contains: [explicitModuleIds, tea-atdd]}
+  - id: reviewed
+    slots:
+      - id: review.debt
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {contains: [explicitModuleIds, ponytail-debt]}
+            - any:
+                - {eq: [operationType, review]}
+                - {eq: [operationType, analyze]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+      - id: review.self
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition: {eq: [writeTask, true]}
+      - id: review.independent
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - any:
+                - {eq: [writeTask, true]}
+                - {eq: [operationType, analyze]}
+                - {eq: [operationType, review]}
+            - any:
+                - {gte: [complexity, C2]}
+                - {gte: [risk, R2]}
+                - {gte: [projectMinimums, Full]}
+      - id: test.quality.review
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {eq: [writeTask, true]}
+            - {contains: [explicitModuleIds, tea-test-review]}
+  - id: verified
+    slots:
+      - id: verify.ci
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+        condition:
+          all:
+            - {contains: [explicitModuleIds, tea-ci]}
+            - any:
+                - {eq: [operationType, verify]}
+                - {eq: [operationType, publish]}
+                - {eq: [operationType, implement]}
+                - {eq: [operationType, debug]}
+      - id: verify.execution
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+      - id: test.quality.verify
+        cardinality: zero-or-many
+        allowedInvocationKinds: [skill]
+        selectionMode: bounded-runtime
+        condition:
+          any:
+            - {contains: [explicitModuleIds, tea-trace]}
+            - {contains: [explicitModuleIds, tea-nfr]}
+      - id: code.verify
+        cardinality: zero-or-one
+        allowedInvocationKinds: [agent-native, skill, mcp]
+        selectionMode: bounded-runtime
+  - id: completed
+    slots:
+      - id: knowledge.propose
+        cardinality: zero-or-one
+        allowedInvocationKinds: [agent-native, mcp, skill]
+        selectionMode: bounded-runtime
+      - id: knowledge.update
+        cardinality: zero-or-one
+        allowedInvocationKinds: [mcp, skill]
+        selectionMode: bounded-runtime
+      - id: complete.gate
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        selectionMode: static
+
+````

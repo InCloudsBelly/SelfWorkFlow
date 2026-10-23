@@ -2520,7 +2520,7 @@ function validateOkfPage(bytes: Uint8Array): void {
   }
   if (
     "status" in record &&
-    !["draft", "stable", "deprecated"].includes(String(record.status))
+    !["draft", "stable", "provisional", "deprecated"].includes(String(record.status))
   ) {
     throw codedPersonalError("validation_failed");
   }

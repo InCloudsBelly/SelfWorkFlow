@@ -477,6 +477,28 @@ function navigationIsComplete(
   availablePaths: ReadonlySet<string>,
 ): boolean {
   if (!availablePaths.has("quickstart.md")) return false;
+  const visited = reachableNavigationPaths(pageContents, availablePaths);
+  return [...availablePaths].every((candidate) => visited.has(candidate));
+}
+
+export function canConnectWikiPlan(
+  pageContents: ReadonlyMap<string, string>,
+  existingPaths: ReadonlySet<string>,
+  plannedPaths: ReadonlySet<string>,
+  deletePages: readonly string[],
+): boolean {
+  const availablePaths = new Set([...existingPaths, ...plannedPaths]);
+  for (const deleted of deletePages) availablePaths.delete(deleted);
+  return [...reachableNavigationPaths(pageContents, availablePaths)].some(
+    (page) => plannedPaths.has(page),
+  );
+}
+
+function reachableNavigationPaths(
+  pageContents: ReadonlyMap<string, string>,
+  availablePaths: ReadonlySet<string>,
+): ReadonlySet<string> {
+  if (!availablePaths.has("quickstart.md")) return new Set();
   const visited = new Set(["quickstart.md"]);
   const queue = ["quickstart.md"];
   while (queue.length > 0) {
@@ -494,7 +516,7 @@ function navigationIsComplete(
       }
     }
   }
-  return [...availablePaths].every((candidate) => visited.has(candidate));
+  return visited;
 }
 
 function markdownTargets(content: string): string[] {

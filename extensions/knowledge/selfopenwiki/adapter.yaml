@@ -48,12 +48,12 @@ mcp:
     contractSchema: 2
     executionMode: external_agent
     authRequired: false
-  requiredCapabilities:
-    - update.external-agent.begin
-    - update.external-agent.reviewed-finalize
   externalUpdate:
     begin: openwiki_begin_external_update
     finalize: openwiki_finalize_external_update
+    requiredCapabilities:
+      - update.external-agent.begin
+      - update.external-agent.reviewed-finalize
     legacyDefault: disabled
   personalLifecycle:
     protocol: selfopenwiki:personal-openwiki-v1

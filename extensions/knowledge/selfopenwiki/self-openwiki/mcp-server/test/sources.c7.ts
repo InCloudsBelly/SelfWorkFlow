@@ -44,7 +44,10 @@ afterEach(async () => {
 
 describe.runIf(process.platform === "win32")(
   "local source manifest preparation",
+  // These correctness tests start real helpers; their budget includes process IO.
+  { timeout: 30_000 },
   () => {
+    // Directory enumeration plus prepare/verify starts multiple real Win32 helpers.
     test("prepares exact supported files, honors .gitignore, and binds confirmation", async () => {
       const fixture = await createFixture();
       await writeFile(
@@ -83,7 +86,7 @@ describe.runIf(process.platform === "win32")(
       });
       expect(snapshot.manifestHash).toBe(prepared.manifestHash);
       await snapshot.cleanup();
-    }, 15_000);
+    }, 30_000);
 
     test("ignores files added outside the confirmed set but invalidates changed files", async () => {
       const fixture = await createFixture();
@@ -205,6 +208,7 @@ describe.runIf(process.platform === "win32")(
       ).rejects.toEqual(expect.objectContaining({ code: "source_rejected" }));
     });
 
+    // Two real Win32 source checks and a copied-byte limit check share this budget.
     test("rejects NUL text and enforces actual copied total bytes", async () => {
       const fixture = await createFixture({ maxTotalBytes: 8 });
       const nulPath = path.join(fixture.sourceDir, "nul.txt");
@@ -260,8 +264,9 @@ describe.runIf(process.platform === "win32")(
       await expect(
         fixture.createStore(copier).prepare([firstPath, secondPath]),
       ).rejects.toEqual(expect.objectContaining({ code: "source_too_large" }));
-    });
+    }, 30_000);
 
+    // Prepare/verify and the bounded Windows cleanup retry window can exceed 5 s.
     test("marks explicitly selected ignored files and retries snapshot cleanup", async () => {
       const fixture = await createFixture();
       const sourcePath = path.join(fixture.sourceDir, "ignored.cpp");
@@ -300,7 +305,7 @@ describe.runIf(process.platform === "win32")(
       });
       await expect(snapshot.cleanup()).resolves.toBeUndefined();
       await expect(access(snapshot.snapshotPath)).rejects.toBeDefined();
-    });
+    }, 30_000);
 
     test("marks a file ignored by an ancestor repository .gitignore", async () => {
       const fixture = await createFixture();

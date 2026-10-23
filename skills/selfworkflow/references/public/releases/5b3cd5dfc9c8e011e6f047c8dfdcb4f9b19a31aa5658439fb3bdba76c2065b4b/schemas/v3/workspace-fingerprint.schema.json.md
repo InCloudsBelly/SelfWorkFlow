@@ -1,0 +1,20 @@
+# 只读参考：workspace-fingerprint.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/workspace-fingerprint.schema.json",
+  "title": "SelfWorkFlow V3 workspace fingerprint",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "fingerprintHash", "gitHeadTreeHash", "gitIndexHash", "files", "indexingConfigHash", "ignoredGeneratedBoundaryHash", "dependencyClosureHash"],
+  "properties": {"schemaVersion": {"const": 3}, "fingerprintHash": {"$ref": "#/$defs/hash"}, "gitHeadTreeHash": {"$ref": "#/$defs/hash"}, "gitIndexHash": {"$ref": "#/$defs/hash"}, "files": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/file"}}, "indexingConfigHash": {"$ref": "#/$defs/hash"}, "ignoredGeneratedBoundaryHash": {"$ref": "#/$defs/hash"}, "dependencyClosureHash": {"$ref": "#/$defs/hash"}},
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "projectPath": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*[ .](?:/|$))[^\\u0000-\\u001f<>:\"|?*]+$"},
+    "file": {"type": "object", "additionalProperties": false, "required": ["path", "status", "size", "contentHash"], "properties": {"path": {"$ref": "#/$defs/projectPath"}, "status": {"enum": ["tracked", "modified", "deleted", "untracked"]}, "size": {"type": "integer", "minimum": 0, "maximum": 1099511627776}, "contentHash": {"$ref": "#/$defs/hash"}, "reparseIdentityHash": {"$ref": "#/$defs/hash"}}}
+  }
+}
+
+````

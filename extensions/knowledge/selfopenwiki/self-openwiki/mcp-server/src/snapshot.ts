@@ -51,7 +51,13 @@ export async function readMarkdownPages(
   root: string,
   paths: readonly string[],
   expectedRevision?: string,
+  limits: {
+    readonly maxFileBytes?: number;
+    readonly maxTotalBytes?: number;
+  } = {},
 ) {
+  const maxFileBytes = limits.maxFileBytes ?? 262_144;
+  const maxTotalBytes = limits.maxTotalBytes ?? 1_048_576;
   const directory = await bindMarkdownRoot(root);
   const capture = async () => {
     const files = await collectMarkdownFiles(directory, "", [directory], true);
@@ -75,12 +81,14 @@ export async function readMarkdownPages(
       throw invalidWiki("Only existing formal Markdown pages can be read.");
     return file;
   });
-  if (selected.some((file) => file.size > 262_144)) {
-    throw invalidWiki("A Wiki page exceeds the 256 KiB read limit.");
-  }
-  if (selected.reduce((total, file) => total + file.size, 0) > 1_048_576) {
+  if (selected.some((file) => file.size > maxFileBytes)) {
     throw invalidWiki(
-      "The requested Wiki content exceeds the 1 MiB read limit.",
+      `A Wiki page exceeds the ${maxFileBytes / 1024} KiB read limit.`,
+    );
+  }
+  if (selected.reduce((total, file) => total + file.size, 0) > maxTotalBytes) {
+    throw invalidWiki(
+      `The requested Wiki content exceeds the ${maxTotalBytes / 1_048_576} MiB read limit.`,
     );
   }
   const knowledge = [];
@@ -88,7 +96,7 @@ export async function readMarkdownPages(
     const bytes = await readBoundMarkdownFile(
       directory,
       file.relativePath,
-      262_144,
+      maxFileBytes,
     );
     if (bytes.byteLength !== file.size || hashBytes(bytes) !== file.hash)
       throw changedWiki();

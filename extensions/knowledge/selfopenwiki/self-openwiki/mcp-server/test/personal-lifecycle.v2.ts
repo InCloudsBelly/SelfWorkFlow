@@ -375,7 +375,15 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
     expect(runStore.inspectClaims).toHaveBeenCalledWith(runId, jobId);
   });
 
-  test("submit_page reads only the assigned candidate page and records sparse Claim decisions", async () => {
+  test.each([
+    { status: undefined, accepted: true },
+    { status: "draft", accepted: true },
+    { status: "stable", accepted: true },
+    { status: "deprecated", accepted: true },
+    { status: "provisional", accepted: true },
+    { status: "not-a-status", accepted: false },
+    { status: "PROVISIONAL", accepted: false },
+  ])("submit_page validates $status", async ({ status, accepted }) => {
     const wikiRoot = path.resolve("personal-wiki");
     const runId = "88888888-8888-4888-8888-888888888888";
     const jobId = "99999999-9999-4999-8999-999999999999";
@@ -388,7 +396,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
     try {
       await writeFile(
         path.join(candidateRoot, "index.md"),
-        "---\ntype: concept\ntitle: Index\ndescription: Index page.\ntags: [index]\n---\n\n# Index\n",
+        `---\ntype: concept\ntitle: Index\ndescription: Index page.\ntags: [index]\n${status === undefined ? "" : `status: ${status}\n`}---\n\n# Index\n`,
         "utf8",
       );
       const candidate = {
@@ -435,11 +443,19 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
         upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
       });
 
-      const result = await lifecycle.submitPage({
+      const submitted = lifecycle.submitPage({
         confirmedClaimIds: ["claim-12345678"],
         jobId,
         runId,
       });
+      if (!accepted) {
+        await expect(submitted).rejects.toMatchObject({
+          code: "validation_failed",
+        });
+        expect(runStore.acceptPage).not.toHaveBeenCalled();
+        return;
+      }
+      const result = await submitted;
       expect(result).toMatchObject({
         binding: expect.objectContaining({ runId }),
         candidateBindingHash: candidate.candidateBindingHash,

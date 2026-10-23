@@ -11,8 +11,15 @@ Install.bat --wiki-root "<absolute wiki-root>" --confirm-data-safety
 Install.bat --wiki-root "<absolute git wiki-root>" --confirm-data-safety --confirm-git-authorization
 ```
 
-Install 前确认绝对 Wiki root、用户理解目录读写并已处理备份/数据安全，Git 目录还需技术写入/提交授权；同范围既有确认复用，缺失才询问。路径或确认缺失时失败关闭，不猜目录、不创建、不迁移、不 commit/push。adapter 仅校验和构造调用，执行由获得授权的宿主负责。
+Install 前核对绝对 Wiki root、数据安全及该目录的技术写入授权；同范围既有确认复用，缺失才询问。允许写入 Git 工作区不等于授权 commit/push。路径或必要授权缺失时仅暂停绑定/写入，不猜目录、不迁移或执行未授权 Git 操作；已绑定的读取和其他独立工作可继续。adapter 仅校验和构造调用，执行由获得授权的宿主负责。
 
 配置保存在 `%LOCALAPPDATA%/SelfOpenWiki`，这是本机配置位置，不是源码 Git。MCP entry 属于集成模块的 `self-openwiki/mcp-server/dist/index.js`；不改 Wiki `.git`。导入现有 Wiki 是绑定独立 Git 根，长期 Markdown、Claims、可分享来源保留，来源在本机重新验证；按当前 runtime 的 WIKI_LAYOUT.md 执行。
 
 实际调用核对本会话已暴露工具；SDK doctor 可证明进程接线和读取，不能冒充当前会话的 native MCP 挂载。已注册但会话无工具时报告此缺口。
+
+仅模块实际身份变化或相应能力证据失效才触发模块重验；工作流公共规则 revision 的变化不自动要求重建、重验或重连 Wiki MCP。规则与 Skill 更改完成模块验证后，运行中的连接于下一次调用读取已验证的新规则；可执行构建改变时需重连以载入新代码。
+若状态或工具的恢复信息明确要求 `Reconnect this MCP server`，应重连后重新检查 status，不在旧连接上反复 retry。
+
+宿主应支持为快照、来源准备和发布等长操作配置调用端等待预算。大型 Wiki 的候选初始化可能超过 60 秒；维护客户端可先采用 300 秒，再依据实际规模和耗时调整。该预算只改变客户端等候，不改变生产限额、来源核验或发布门禁。
+
+调用端超时或断线不证明后端没有推进。重连后先查 status，按原 run 和真实恢复状态继续；不据此另建更新、删除运行区或伪造 abort。未知恢复义务仍保留保护，先诊断其实际阶段。

@@ -6,7 +6,9 @@
     "required": {
       "version.contractSchema": 2,
       "executionMode": "external_agent",
-      "authRequired": false,
+      "authRequired": false
+    },
+    "publicationRequired": {
       "externalAgent.ready": true,
       "capabilities": [
         "update.external-agent.begin",
@@ -26,6 +28,7 @@
     ],
     "legacyFallback": false,
     "clarificationRequiresUserConfirmation": true,
+    "technicalFailuresRequireUserDecision": false,
     "automaticCommit": false,
     "automaticPush": false
   },

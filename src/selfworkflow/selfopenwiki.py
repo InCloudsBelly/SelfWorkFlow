@@ -111,8 +111,8 @@ def _paths_equal(left: str | Path, right: str | Path) -> bool:
     )
 
 
-def validate_external_status(value: object, *, require_ready: bool = True) -> dict[str, object]:
-    """Validate only the frozen external-agent status fields.
+def _validate_status(value: object) -> dict[str, object]:
+    """Validate shared status identity without requiring write capabilities.
 
     The current frozen status places ``contractSchema`` under ``version``.
     Legacy provider information may be present for display, but it is never
@@ -137,13 +137,9 @@ def validate_external_status(value: object, *, require_ready: bool = True) -> di
     ):
         raise SelfOpenWikiError("external-status-invalid")
 
-    capability_ids: list[str] = []
     for item in capabilities:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             raise SelfOpenWikiError("external-status-invalid")
-        capability_ids.append(item["id"])
-    if not EXTERNAL_CAPABILITIES <= set(capability_ids):
-        raise SelfOpenWikiError("external-capability-missing")
 
     active = external["activeTransaction"]
     if active is not None:
@@ -161,8 +157,6 @@ def validate_external_status(value: object, *, require_ready: bool = True) -> di
             or not active["nextAction"]
         ):
             raise SelfOpenWikiError("external-status-invalid")
-    if require_ready and external["ready"] is not True:
-        raise SelfOpenWikiError("external-agent-not-ready")
     paths = value.get("paths")
     if (
         not isinstance(paths, dict)
@@ -174,10 +168,21 @@ def validate_external_status(value: object, *, require_ready: bool = True) -> di
     return dict(value)
 
 
-def validate_personal_status(value: object) -> dict[str, object]:
-    """Require the verified v2 personal lifecycle in addition to external mode."""
+def validate_external_status(value: object, *, require_ready: bool = True) -> dict[str, object]:
+    """Require the external publication pair, including for write recovery."""
 
-    result = validate_external_status(value)
+    result = _validate_status(value)
+    if not EXTERNAL_CAPABILITIES <= {item["id"] for item in result["capabilities"]}:
+        raise SelfOpenWikiError("external-capability-missing")
+    if require_ready and result["externalAgent"]["ready"] is not True:
+        raise SelfOpenWikiError("external-agent-not-ready")
+    return result
+
+
+def _validate_personal_status(value: object, *, require_ready: bool) -> dict[str, object]:
+    """Require the personal capability set, including for finish recovery."""
+
+    result = validate_external_status(value, require_ready=require_ready)
     capabilities = result["capabilities"]
     capability_ids = {
         item["id"]
@@ -189,10 +194,16 @@ def validate_personal_status(value: object) -> dict[str, object]:
     return result
 
 
+def validate_personal_status(value: object) -> dict[str, object]:
+    """Require the verified v2 personal lifecycle and publication readiness."""
+
+    return _validate_personal_status(value, require_ready=True)
+
+
 def validate_visualizer_status(value: object) -> dict[str, object]:
     """Require the live SelfOpenWiki-owned Viewer contract."""
 
-    result = validate_personal_status(value)
+    result = _validate_status(value)
     visualizer = result.get("visualizer")
     if not isinstance(visualizer, dict) or set(visualizer) != {
         "id",
@@ -268,25 +279,24 @@ class SelfOpenWikiAdapter:
     def __init__(self, client: SelfOpenWikiClient):
         self._client = client
 
+    def _status_snapshot(self) -> dict[str, object]:
+        try:
+            value = self._client.call_tool("openwiki_status", {})
+        except Exception:
+            raise SelfOpenWikiError("backend-unavailable") from None
+        return _validate_status(value)
+
     def status(self) -> dict[str, object]:
         """Call ``openwiki_status`` first and require external readiness."""
 
-        try:
-            value = self._client.call_tool("openwiki_status", {})
-        except Exception:
-            raise SelfOpenWikiError("backend-unavailable") from None
-        return validate_external_status(value)
+        return validate_external_status(self._status_snapshot())
 
     def recovery_status(self) -> dict[str, object]:
         """Read the bound recovery state without enabling ordinary publication."""
-        try:
-            value = self._client.call_tool("openwiki_status", {})
-        except Exception:
-            raise SelfOpenWikiError("backend-unavailable") from None
-        return validate_external_status(value, require_ready=False)
+        return self._status_snapshot()
 
     def read(self, paths: list[str] | None = None, *, expected_revision: str | None = None) -> dict[str, object]:
-        status = self.recovery_status()
+        status = self._status_snapshot()
         if "knowledge.read.safe" not in {item["id"] for item in status["capabilities"]}:
             raise SelfOpenWikiError("wiki-read-capability-missing")
         if paths is not None and (
@@ -371,7 +381,7 @@ class SelfOpenWikiAdapter:
             or re.fullmatch(r"sha256:[0-9a-f]{64}", binding_hash) is None
         ):
             raise SelfOpenWikiError("external-abort-input-invalid")
-        self.recovery_status()
+        validate_external_status(self._status_snapshot(), require_ready=False)
         try:
             value = self._client.call_tool("openwiki_finalize_external_update", {
                 "action": "abort", "transactionId": transaction_id,
@@ -394,16 +404,12 @@ class SelfOpenWikiAdapter:
     def personal_status(self) -> dict[str, object]:
         """Call ``openwiki_status`` first and require the v2 personal lifecycle."""
 
-        try:
-            value = self._client.call_tool("openwiki_status", {})
-        except Exception:
-            raise SelfOpenWikiError("backend-unavailable") from None
-        return validate_personal_status(value)
+        return validate_personal_status(self._status_snapshot())
 
     def override_wiki_root(self) -> str:
         """Return the module-owned Wiki root from the live MCP status."""
 
-        status = self.personal_status()
+        status = self._status_snapshot()
         paths = status["paths"]
         assert isinstance(paths, dict)
         wiki_root = paths["wikiRoot"]
@@ -417,7 +423,9 @@ class SelfOpenWikiAdapter:
 
         if tool_name not in PERSONAL_TOOL_NAMES:
             raise SelfOpenWikiError("personal-tool-invalid")
-        status = self.personal_status()
+        status = _validate_personal_status(
+            self._status_snapshot(), require_ready=tool_name != "openwiki_finish"
+        )
         routed_arguments = dict(arguments)
         if tool_name == "openwiki_begin":
             paths = status["paths"]
@@ -476,7 +484,7 @@ class SelfOpenWikiAdapter:
         port: int = 3000,
         wiki_root: str | Path | None = None,
     ) -> dict[str, object]:
-        status = validate_visualizer_status(self.personal_status())
+        status = validate_visualizer_status(self._status_snapshot())
         paths = status["paths"]
         assert isinstance(paths, dict)
         live_wiki = _existing_absolute(

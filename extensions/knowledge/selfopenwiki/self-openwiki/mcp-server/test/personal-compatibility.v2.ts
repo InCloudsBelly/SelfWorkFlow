@@ -1,17 +1,283 @@
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "vitest";
+import { promisify } from "node:util";
+import { afterEach, describe, expect, test } from "vitest";
 import {
   assertPersonalCompatibility,
+  computeAdapterSetHash,
   computePersonalToolBindings,
   loadPersonalCompatibilityManifest,
 } from "../src/personal-skill-adapter.js";
 import { canonicalPersonalJson } from "../src/personal-wiki-lifecycle.js";
 import { TOOL_NAMES } from "../src/contracts.js";
+import { computeSkillPackage } from "../src/skills.js";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
+const fixtureRoots: string[] = [];
+afterEach(async () => {
+  for (const root of fixtureRoots.splice(0)) {
+    if (path.dirname(root) !== (await realpath(os.tmpdir())))
+      throw new Error("Fixture cleanup outside temporary root.");
+    await rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  }
+});
 
 describe("personal OpenWiki compatibility binding", () => {
+  test("uses verified module content independently of parent commits and staging", async () => {
+    const fixtureRoot = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "wiki-compatibility-")),
+    );
+    fixtureRoots.push(fixtureRoot);
+    const parentRoot = path.join(fixtureRoot, "wiki-module");
+    const copiedRepository = path.join(parentRoot, "self-openwiki");
+    const openWikiRoot = path.join(parentRoot, ".work", "openwiki");
+    const execute = promisify(execFile);
+    const git = async (...args: string[]) =>
+      (
+        await execute("git", ["-C", fixtureRoot, ...args], {
+          windowsHide: true,
+        })
+      ).stdout.trim();
+    const commit = () =>
+      git(
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "Fixture change",
+      );
+    const sourceHash = async () =>
+      JSON.parse(
+        (
+          await execute(
+            process.execPath,
+            [
+              path.join(parentRoot, "scripts", "parent-source-manifest.mjs"),
+              parentRoot,
+              "--module-content",
+            ],
+            { windowsHide: true },
+          )
+        ).stdout,
+      ).hash as string;
+    const hash = (bytes: Buffer) =>
+      `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    await mkdir(path.join(parentRoot, "scripts"), { recursive: true });
+    await cp(
+      path.resolve(repositoryRoot, "../scripts/parent-source-manifest.mjs"),
+      path.join(parentRoot, "scripts", "parent-source-manifest.mjs"),
+    );
+    await cp(
+      path.join(repositoryRoot, "mcp-server", "src"),
+      path.join(copiedRepository, "mcp-server", "src"),
+      { recursive: true },
+    );
+    await cp(
+      path.join(repositoryRoot, "agent-skills"),
+      path.join(copiedRepository, "agent-skills"),
+      { recursive: true },
+    );
+    await cp(
+      path.join(repositoryRoot, "mcp-server", "pnpm-lock.yaml"),
+      path.join(copiedRepository, "mcp-server", "pnpm-lock.yaml"),
+    );
+    await mkdir(openWikiRoot, { recursive: true });
+    const manifest = await loadPersonalCompatibilityManifest(repositoryRoot);
+    await writeFile(
+      path.join(openWikiRoot, "package.json"),
+      JSON.stringify({ version: manifest.upstream.packageVersion }),
+    );
+    const marker = Buffer.from("Verified materialization fixture\n");
+    await writeFile(
+      path.join(openWikiRoot, ".selfopenwiki-materialization.json"),
+      marker,
+    );
+    const readme = path.join(parentRoot, "README.md");
+    await writeFile(readme, "Wiki module source\n");
+    await git("init", "--initial-branch=main");
+    await git("config", "core.autocrlf", "false");
+    await git("config", "core.fsmonitor", "false");
+    await git("add", ".");
+    await commit();
+    manifest.build.parentCommit = await git("rev-parse", "HEAD");
+    manifest.build.parentSourceManifestHash = await sourceHash();
+    manifest.build.adapterSetHash =
+      await computeAdapterSetHash(copiedRepository);
+    manifest.build.generatedMarkerHash = hash(marker);
+    manifest.build.lockfileHash = hash(
+      await readFile(
+        path.join(copiedRepository, "mcp-server", "pnpm-lock.yaml"),
+      ),
+    );
+    manifest.skill.packageHash = (
+      await computeSkillPackage(
+        path.join(copiedRepository, "agent-skills", "self-openwiki"),
+      )
+    ).packageHash;
+    const expectedModuleHasherHash = hash(
+      await readFile(
+        path.join(parentRoot, "scripts", "parent-source-manifest.mjs"),
+      ),
+    );
+    const verify = () =>
+      assertPersonalCompatibility(
+        manifest,
+        manifest.upstream.commit,
+        TOOL_NAMES,
+        {
+          expectedModuleHasherHash,
+          openWikiRoot,
+          repositoryRoot: copiedRepository,
+        },
+      );
+    await expect(verify()).resolves.toBeUndefined();
+
+    const helperPath = path.join(
+      parentRoot,
+      "scripts",
+      "parent-source-manifest.mjs",
+    );
+    const trustedHelper = await readFile(helperPath);
+    const executionMarker = path.join(
+      fixtureRoot,
+      "untrusted-helper-executed.txt",
+    );
+    await writeFile(
+      helperPath,
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(executionMarker)}, "unsafe"); process.stdout.write(${JSON.stringify(JSON.stringify({ hash: manifest.build.parentSourceManifestHash }))});`,
+    );
+    await expect(verify()).rejects.toThrow(
+      "The parent source manifest could not be verified.",
+    );
+    await expect(readFile(executionMarker)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await writeFile(helperPath, trustedHelper);
+    await expect(verify()).resolves.toBeUndefined();
+
+    await writeFile(
+      path.join(fixtureRoot, "unrelated-workflow.txt"),
+      "Outside the Wiki module source set\n",
+    );
+    expect(await sourceHash()).toBe(manifest.build.parentSourceManifestHash);
+    await expect(verify()).resolves.toBeUndefined();
+    await git("add", "unrelated-workflow.txt");
+    await commit();
+    expect(await sourceHash()).toBe(manifest.build.parentSourceManifestHash);
+    await expect(verify()).resolves.toBeUndefined();
+
+    await writeFile(readme, "Changed Wiki module source\n");
+    await expect(verify()).rejects.toThrow(
+      "Personal compatibility parent source manifest is stale.",
+    );
+    await git("add", "wiki-module/README.md");
+    await writeFile(readme, "Wiki module source\n");
+    await expect(verify()).resolves.toBeUndefined();
+    await commit();
+    await git("add", "wiki-module/README.md");
+    await expect(verify()).resolves.toBeUndefined();
+
+    await git("rm", "--cached", "wiki-module/README.md");
+    await writeFile(
+      path.join(fixtureRoot, ".gitignore"),
+      "wiki-module/README.md\n",
+    );
+    expect(await sourceHash()).toBe(manifest.build.parentSourceManifestHash);
+    await expect(verify()).resolves.toBeUndefined();
+    await writeFile(readme, "Changed ignored Wiki module source\n");
+    await expect(verify()).rejects.toThrow(
+      "Personal compatibility parent source manifest is stale.",
+    );
+  }, 45_000);
+
+  test("keeps a nested gitlink stable when only its parent index entry is removed", async () => {
+    const fixtureRoot = await realpath(
+      await mkdtemp(path.join(os.tmpdir(), "wiki-gitlink-")),
+    );
+    fixtureRoots.push(fixtureRoot);
+    const moduleRoot = path.join(fixtureRoot, "wiki-module");
+    const nestedRoot = path.join(moduleRoot, "upstream", "openwiki");
+    await mkdir(path.join(moduleRoot, "scripts"), { recursive: true });
+    await mkdir(nestedRoot, { recursive: true });
+    await cp(
+      path.resolve(repositoryRoot, "../scripts/parent-source-manifest.mjs"),
+      path.join(moduleRoot, "scripts", "parent-source-manifest.mjs"),
+    );
+    await writeFile(path.join(nestedRoot, "package.json"), '{"version":"1"}\n');
+    await writeFile(path.join(nestedRoot, ".gitignore"), "package.json\n");
+    const execute = promisify(execFile);
+    const git = async (root: string, ...args: string[]) =>
+      (
+        await execute("git", ["-C", root, ...args], { windowsHide: true })
+      ).stdout.trim();
+    const commit = (root: string) =>
+      git(
+        root,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "Fixture",
+      );
+    await git(nestedRoot, "init", "--initial-branch=main");
+    await git(nestedRoot, "add", ".gitignore");
+    await git(nestedRoot, "add", "-f", "package.json");
+    await commit(nestedRoot);
+    await git(fixtureRoot, "init", "--initial-branch=main");
+    await git(
+      fixtureRoot,
+      "add",
+      "wiki-module/scripts",
+      "wiki-module/upstream/openwiki",
+    );
+    await commit(fixtureRoot);
+    const sourceHash = async () =>
+      JSON.parse(
+        (
+          await execute(
+            process.execPath,
+            [
+              path.join(moduleRoot, "scripts", "parent-source-manifest.mjs"),
+              moduleRoot,
+              "--module-content",
+            ],
+            { windowsHide: true },
+          )
+        ).stdout,
+      ).hash as string;
+    const before = await sourceHash();
+    await git(fixtureRoot, "rm", "--cached", "wiki-module/upstream/openwiki");
+    expect(await sourceHash()).toBe(before);
+    await git(nestedRoot, "rm", "--cached", "package.json");
+    expect(await sourceHash()).toBe(before);
+    await writeFile(path.join(nestedRoot, "package.json"), '{"version":"2"}\n');
+    expect(await sourceHash()).not.toBe(before);
+  }, 30_000);
+
   test("binds the v2 upstream, personal Skill, six tools, and zero-patch policy", async () => {
     const manifest = JSON.parse(
       await readFile(
@@ -132,6 +398,16 @@ describe("personal OpenWiki compatibility binding", () => {
         manifest.upstream.commit,
         TOOL_NAMES,
         {
+          expectedModuleHasherHash: `sha256:${createHash("sha256")
+            .update(
+              await readFile(
+                path.resolve(
+                  repositoryRoot,
+                  "../scripts/parent-source-manifest.mjs",
+                ),
+              ),
+            )
+            .digest("hex")}`,
           openWikiRoot: path.resolve(repositoryRoot, "..", ".work", "openwiki"),
           repositoryRoot,
         },

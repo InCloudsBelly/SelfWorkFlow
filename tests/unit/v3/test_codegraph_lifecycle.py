@@ -181,6 +181,24 @@ class CodeGraphLifecycleTests(unittest.TestCase):
                     lifecycle.ensure(str(self.project))
                 self.assertEqual(len(port.calls), 4)
 
+    def test_verified_partial_cpp_coverage_survives_sync_and_query_with_warning(self):
+        final = json.loads(self._status())
+        final["cppIncludeEnvironment"] = {
+            "observed": True, "complete": False, "changed": False,
+            "inputsVerified": True, "affectedFileCount": 0,
+        }
+        port = FakeCommandPort(
+            self._result(stdout=json.dumps(final)), self._result(stdout="synced"),
+            self._result(stdout=json.dumps(final)), self._result(stdout=json.dumps(final)),
+            self._result(stdout="Widget references"),
+        )
+        lifecycle, _ = self._lifecycle(port)
+        result = lifecycle.query(str(self.project), "find Widget")
+        self.assertEqual(result["freshness"], "fresh")
+        self.assertEqual(result["analysisWarnings"], ["cpp-include-coverage-incomplete"])
+        self.assertEqual(result["maintenanceActions"], ["sync"])
+        self.assertEqual([call["argv"][1] for call in port.calls], ["status", "sync", "status", "status", "explore"])
+
     def test_missing_project_is_fully_initialized_before_it_is_reported_fresh(self):
         port = FakeCommandPort(
             self._result(stdout=self._status(initialized=False)),

@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { TextDecoder } from "node:util";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { computeSkillPackage } from "./skills.js";
 import {
@@ -70,7 +69,6 @@ const compatibilityManifestSchema = z.strictObject({
   }),
 });
 
-const execFileAsync = promisify(execFile);
 const PERSONAL_TOOL_NAMES = [
   "openwiki_begin",
   "openwiki_submit_plan",
@@ -151,7 +149,11 @@ export async function assertPersonalCompatibility(
   manifest: PersonalCompatibilityManifest,
   expectedUpstreamCommit: string,
   toolNames: readonly string[],
-  options: { openWikiRoot: string; repositoryRoot: string },
+  options: {
+    expectedModuleHasherHash: string;
+    openWikiRoot: string;
+    repositoryRoot: string;
+  },
 ): Promise<void> {
   if (manifest.upstream.commit !== expectedUpstreamCommit) {
     throw new Error("Personal compatibility upstream revision is stale.");
@@ -217,20 +219,11 @@ export async function assertPersonalCompatibility(
     throw new Error("Personal compatibility lockfile hash is stale.");
   }
   const parentRoot = path.resolve(options.repositoryRoot, "..");
-  const parentHead = (
-    await execFileAsync("git", ["-C", parentRoot, "rev-parse", "HEAD"], {
-      encoding: "utf8",
-      env: sanitizedGitEnvironment(),
-    })
-  ).stdout.trim();
-  if (!/^[a-f0-9]{40}$/u.test(parentHead)) {
-    throw new Error("Personal compatibility parent commit is invalid.");
-  }
-  if (manifest.build.parentCommit !== parentHead) {
-    throw new Error("Personal compatibility parent commit is stale.", {});
-  }
-  const parentSourceManifestHash =
-    await computeParentSourceManifestHash(parentRoot);
+  // Parent commit and staging are provenance only; runtime binds module content.
+  const parentSourceManifestHash = await computeModuleSourceManifestHash(
+    parentRoot,
+    options.expectedModuleHasherHash,
+  );
   if (manifest.build.parentSourceManifestHash !== parentSourceManifestHash) {
     throw new Error("Personal compatibility parent source manifest is stale.");
   }
@@ -262,8 +255,9 @@ export async function assertPersonalCompatibility(
   }
 }
 
-async function computeParentSourceManifestHash(
+export async function computeModuleSourceManifestHash(
   parentRoot: string,
+  expectedModuleHasherHash: string,
 ): Promise<string> {
   const scriptPath = path.resolve(
     parentRoot,
@@ -271,17 +265,42 @@ async function computeParentSourceManifestHash(
     "parent-source-manifest.mjs",
   );
   try {
-    const result = await execFileAsync(
-      process.execPath,
-      [scriptPath, parentRoot],
-      {
-        encoding: "utf8",
-        env: sanitizedGitEnvironment(),
-        windowsHide: true,
-        maxBuffer: 16 * 1024 * 1024,
-      },
+    const stats = await lstat(scriptPath);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 1024 * 1024)
+      throw new Error("The module hash helper is not a regular bounded file.");
+    const trustedSource = await readFile(scriptPath);
+    const trustedHash = `sha256:${createHash("sha256").update(trustedSource).digest("hex")}`;
+    if (trustedHash !== expectedModuleHasherHash)
+      throw new Error("The module hash helper changed after verification.");
+    const invocation = Buffer.from(
+      `\nprocess.stdout.write(JSON.stringify({hash:computeModuleSourceManifestSync(${JSON.stringify(path.resolve(parentRoot))}).hash})+"\\n");\n`,
     );
-    const parsed = JSON.parse(result.stdout) as { hash?: unknown };
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-"], {
+        env: sanitizedGitEnvironment(),
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      const chunks: Buffer[] = [];
+      let size = 0;
+      child.stdout.on("data", (chunk: Buffer) => {
+        size += chunk.byteLength;
+        if (size > 16 * 1024 * 1024) {
+          child.kill();
+          reject(new Error("The module hash helper output is too large."));
+        } else {
+          chunks.push(chunk);
+        }
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code !== 0) reject(new Error("The module hash helper failed."));
+        else resolve(Buffer.concat(chunks).toString("utf8"));
+      });
+      child.stdin.on("error", reject);
+      child.stdin.end(Buffer.concat([trustedSource, invocation]));
+    });
+    const parsed = JSON.parse(stdout) as { hash?: unknown };
     if (
       typeof parsed.hash !== "string" ||
       !/^sha256:[a-f0-9]{64}$/u.test(parsed.hash)
@@ -386,10 +405,12 @@ export class PersonalSkillAdapter implements PersonalSkillAdapterPort {
   private readonly skillPath: string;
   private readonly upstreamCommit: string;
   private readonly expectedPackageHash: string | undefined;
+  private readonly expectedBasePackageHash: string | undefined;
 
   constructor(options: {
     expectedCompatibilityManifestHash?: string;
     expectedPackageHash?: string;
+    expectedBasePackageHash?: string;
     skillPath: string;
     upstreamCommit: string;
   }) {
@@ -414,6 +435,16 @@ export class PersonalSkillAdapter implements PersonalSkillAdapterPort {
       );
     }
     this.expectedPackageHash = options.expectedPackageHash;
+    if (
+      options.expectedBasePackageHash !== undefined &&
+      !/^sha256:[a-f0-9]{64}$/u.test(options.expectedBasePackageHash)
+    ) {
+      throw new PersonalSkillError(
+        "skill_untrusted",
+        "The base Skill package hash is invalid.",
+      );
+    }
+    this.expectedBasePackageHash = options.expectedBasePackageHash;
     if (
       options.expectedCompatibilityManifestHash !== undefined &&
       !/^sha256:[a-f0-9]{64}$/u.test(options.expectedCompatibilityManifestHash)
@@ -498,6 +529,15 @@ export class PersonalSkillAdapter implements PersonalSkillAdapterPort {
         { cause: error },
       );
     });
+    if (
+      this.expectedBasePackageHash !== undefined &&
+      basePackage.packageHash !== this.expectedBasePackageHash
+    ) {
+      throw new PersonalSkillError(
+        "skill_untrusted",
+        "The base Skill package changed during this run.",
+      );
+    }
     const hasher = createHash("sha256");
     hasher.update("selfopenwiki:personal-skill-binding-v1\0", "utf8");
     hasher.update(this.upstreamCommit, "ascii");

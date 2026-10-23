@@ -125,7 +125,14 @@ def _status_freshness(value: Mapping[str, Any]) -> str:
             return "stale"
     environment = value.get("cppIncludeEnvironment")
     if "cppIncludeEnvironment" in value:
-        if not isinstance(environment, Mapping) or environment.get("observed") is not True or environment.get("complete") is not True:
+        if not isinstance(environment, Mapping) or environment.get("observed") is not True:
+            return "unknown"
+        if "inputsVerified" in environment:
+            if environment.get("changed") is not False:
+                return "stale"
+            if environment["inputsVerified"] is not True:
+                return "unknown"
+        elif environment.get("complete") is not True:
             return "unknown"
         if environment.get("changed") is not False:
             return "stale"
@@ -239,6 +246,7 @@ class CodeGraphAdapter:
         if environment is not None and (
             not isinstance(environment, Mapping)
             or any(type(environment.get(key)) is not bool for key in ("observed", "complete", "changed"))
+            or ("inputsVerified" in environment and type(environment["inputsVerified"]) is not bool)
             or ("affectedFileCount" in environment and not (
                 type(environment["affectedFileCount"]) is int and environment["affectedFileCount"] >= 0
             ))
@@ -263,7 +271,7 @@ class CodeGraphAdapter:
             } | {"affectedFileCount": (
                 environment["affectedFileCount"] if type(environment.get("affectedFileCount")) is int
                 else len(environment["affectedFiles"])
-            )}
+            )} | ({"inputsVerified": environment["inputsVerified"]} if "inputsVerified" in environment else {})
         indexing_config = value.get("indexingConfig")
         if isinstance(indexing_config, Mapping) and indexing_config.get("error") is not None:
             result["indexingConfigInvalid"] = True
@@ -328,6 +336,10 @@ class CodeGraphAdapter:
             raise CodeGraphAdapterError("codegraph-project-not-initialized")
         if status["freshness"] != "fresh":
             raise CodeGraphAdapterError("codegraph-project-index-stale")
+        environment = status.get("cppIncludeEnvironment")
+        warnings = ["cpp-include-coverage-incomplete"] if (
+            isinstance(environment, Mapping) and environment.get("complete") is False
+        ) else []
         plan = _with_hash({
             "schemaVersion": 1,
             "providerId": "codegraph",
@@ -341,6 +353,7 @@ class CodeGraphAdapter:
             "sideEffectClass": "none",
             "supportStatus": "unverified",
             "reasonCode": "codegraph-query-after-ensure",
+            **({"analysisWarnings": warnings} if warnings else {}),
         })
         return plan
 
@@ -362,6 +375,7 @@ class CodeGraphAdapter:
             "queryHash": plan["queryHash"],
             "projectRootHash": plan["projectRootHash"],
             "data": output.strip(),
+            **({"analysisWarnings": plan["analysisWarnings"]} if "analysisWarnings" in plan else {}),
         }
 
     def plan_maintenance(
