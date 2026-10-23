@@ -16,6 +16,7 @@ from selfworkflow import __version__
 from selfworkflow.catalog import compile_catalog
 from selfworkflow.adapters import build_runtime
 from selfworkflow.documents import DocumentError, publish_documents, document_binding, render_document_instruction
+from selfworkflow.skill_bundle import check_skill, sync_skill
 from selfworkflow.installer import (
     InstallerError,
     apply_install_plan,
@@ -508,6 +509,11 @@ def main(argv: list[str] | None = None) -> int:
     for action in ("check", "snippet"):
         document_action = document_commands.add_parser(action)
         document_action.add_argument("--root", required=True)
+    skill = commands.add_parser("skill", help="Synchronize or verify the complete repository Skill (maintainer only).")
+    skill_commands = skill.add_subparsers(dest="skill_command", required=True)
+    for action in ("sync", "check"):
+        skill_action = skill_commands.add_parser(action)
+        skill_action.add_argument("--repository", default=str(Path.cwd()))
     resolve_parser = commands.add_parser("resolve")
     resolve_parser.add_argument("--catalog", required=True)
     resolve_parser.add_argument("--request", required=True)
@@ -1001,6 +1007,8 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.agents_root, arguments.codex_root, arguments.state_root,
                 arguments.dsh_root,
             )
+        elif arguments.command == "skill":
+            result = (sync_skill if arguments.skill_command == "sync" else check_skill)(arguments.repository)
         elif arguments.command == "documents":
             if arguments.document_command == "publish":
                 result = publish_documents(arguments.repository, arguments.output)

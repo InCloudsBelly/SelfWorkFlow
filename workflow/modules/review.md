@@ -1,6 +1,6 @@
 # Review 模块
 
-本模块唯一管理 Review 调度、材料、隔离和复审；专业 Skill 只提供检查项，不另建 Reviewer。阶段变化本身不触发重复审查。
+Review 调度、材料、隔离与复审由本模块唯一管理；专业 Skill 只补检查项，阶段变化不重复审查。
 
 ## 调度
 
@@ -11,12 +11,13 @@
 
 ## 输入、模型与复用
 
-- Review 默认继承主 Agent 模型/推理配置，不读取机器本地 Review 模型配置，不传 model/reasoning_effort 覆盖；没有实际模型回执不虚构型号或缓存命中。独立上下文不是不同模型，不为缓存导入作者推理/完整历史。
-- 主 Agent 一次提供请求、验收、适用规则、最终方案/实际增量与必要证据，绑定内容/hash。独立 Reviewer 只读绑定材料验证反例；不接收完整主历史、整库 Wiki 或无关材料。知识 Review 可读绑定候选与必要来源，不重走主流程。
+- Review 默认继承主 Agent 模型/推理配置，不读取机器本地 Review 模型配置，不传 model/reasoning_effort 覆盖；不虚构型号或缓存命中，不导入作者推理/完整历史。
+- 主 Agent 一次提供请求、验收、规则、最终方案/实际增量与必要证据，绑定内容/hash。Reviewer 只读验证反例，不接收完整主历史、整库 Wiki 或无关材料。知识 Review 可读绑定候选与必要来源，不重走主流程。
 - Reviewer 不得调用 CodeGraph/provider、运行验证、写工作区、更新知识或创建下级 Agent。主 Agent 负责 CodeGraph evidence；缺少 CodeGraph evidence 且结论依赖它时返回该项 unverified，不能用猜测替代。
 - 匹配项目 .selfworkflow/review.yaml 的 Skill 优先，通用 Skill 仅补充。复用相同输入、规则、Skill hash 的有效结论；相关变化只失效受影响项。必要反例检查不能被“禁止重复”压掉。
-- 优先复用原 Reviewer，从本会话实际工具中选择追加/唤醒入口（如 `send_message`、`followup_task` 或 `send_input`），区分运行中与空闲，不按宿主名称假定工具存在。仅上下文不可用/污染/版本不兼容才替换。TEA 仅显式启用，复用此证据。
+- 复用原 Reviewer，从本会话实际工具选择 `send_message`、`followup_task` 或 `send_input`，区分运行中与空闲，不按宿主猜工具。仅上下文不可用/污染/版本不兼容才替换。TEA 仅显式启用，复用证据。
 - 宿主真实完成状态是普通审查证据。独立能力不可用标 unverified；无清理回执不声称已销毁，也不因契约专用清理回执缺失阻塞普通任务。
+- 普通任务缺独立能力时继续实施、测试和结构化自审，交付标明独立 Review 未执行及影响；不反复索取自审豁免或降低模式。用户明确要求独立审查、显式契约及 Wiki 正式发布保留门禁；无法可靠自验的高风险动作暂缓。
 
 ## 显式契约模式
 

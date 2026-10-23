@@ -60,7 +60,6 @@ class WorkflowCompressionTests(unittest.TestCase):
             "Capability Check",
             "关键决策",
             "需重新确认",
-            "artifact-manifest.json",
             "Plan 是实施边界",
             "不得省略必需规则冒充优化",
             "当前目标根因或完成验收必需的故障",
@@ -78,7 +77,8 @@ class WorkflowCompressionTests(unittest.TestCase):
         for text in (full, deep):
             self.assertIn("modules/review.md", text)
             self.assertIn("testing-review-quality", text)
-        self.assertIn("implement-tdd", full)
+        self.assertIn("../../skills/testing-review-quality/SKILL.md", full)
+        self.assertNotIn("implement-tdd", full)
         self.assertIn("本模式不要求再读 Full", deep)
         review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
         self.assertIn("plan-integrated-review", review)
@@ -177,12 +177,23 @@ class WorkflowCompressionTests(unittest.TestCase):
     def test_projection_and_resume_preserve_only_bound_task_state(self):
         text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         for phrase in (
-            "在工具内解析", "version/profile/runtimeHash", "path/sha256",
             "不先输出全清单再截断", "仅需跨压缩/交接时", "规则路径/hash与正文是否仍在",
             "有效证据及其输入", "待办/运行任务/Reviewer 标识",
             "压缩本身不撤销授权或使未变证据失效", "不为短任务新增记录",
         ):
             self.assertIn(phrase, text)
+        legacy = (ROOT / "workflow/legacy-host.md").read_text(encoding="utf-8")
+        for phrase in ("artifact-manifest.json", "在工具内解析", "version/profile/runtimeHash", "path/sha256"):
+            self.assertIn(phrase, legacy)
+        self.assertIn("workflow/legacy-host.md", text)
+
+    def test_build_cache_rules_are_loaded_at_the_build_boundary(self):
+        bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        build = (ROOT / "workflow/modules/build.md").read_text(encoding="utf-8")
+        self.assertIn("workflow/modules/build.md", bootstrap)
+        for boundary in ("Clean/Rebuild", "-NoLiveCoding", "共享 Intermediate/PCH", "隔离输出", "取得用户确认"):
+            self.assertIn(boundary, build)
+        self.assertNotIn("Clean/Rebuild", bootstrap)
 
     def test_module_restrictions_are_scoped_to_their_operations_and_artifacts(self):
         expected = {

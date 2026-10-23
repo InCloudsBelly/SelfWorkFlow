@@ -85,6 +85,62 @@ class DocumentPublicationTests(unittest.TestCase):
                 publish_documents(source, output)
             self.assertFalse(output.exists())
 
+    def test_skill_bundle_can_be_republished_without_ingesting_itself(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = source_tree(Path(folder))
+            skill = source / "skills/selfworkflow"
+            skill.mkdir()
+            (skill / "SKILL.md").write_text(
+                "---\nname: selfworkflow\ndescription: Workflow entry\n---\n"
+                "Read [the bundled entry](references/public/WORKFLOW.md).\n",
+                encoding="utf-8",
+            )
+            output = skill / "references/public"
+            first = publish_documents(source, output)
+            second = publish_documents(source, output)
+            external = publish_documents(source, source.parent / "external-public")
+            self.assertEqual(first["revision"], second["revision"])
+            self.assertEqual(first["documentCount"], second["documentCount"])
+            self.assertEqual(first["revision"], external["revision"])
+            release = Path(second["documentRoot"])
+            self.assertFalse((release / "methods/selfworkflow").exists())
+            self.assertTrue((release / "methods/example/details.md").is_file())
+
+    def test_only_the_excluded_skill_output_is_allowed_inside_skills(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = source_tree(Path(folder))
+            for relative in ("skills/example/public", "skills/selfworkflow/other-output"):
+                output = source / relative
+                with self.subTest(output=relative):
+                    with self.assertRaisesRegex(DocumentError, "document-output-invalid"):
+                        publish_documents(source, output)
+                    self.assertFalse(output.exists())
+
+    def test_published_light_routes_have_direct_bounded_method_dependencies(self):
+        # This is a static character/load-set budget, not a measured model token count.
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as folder:
+            result = publish_documents(repository, Path(folder) / "public")
+            release = Path(result["documentRoot"])
+            entry = Path(result["entry"]).read_text(encoding="utf-8")
+            workflow = (release / "WORKFLOW.md").read_text(encoding="utf-8")
+            skill = (repository / "skills/selfworkflow/SKILL.md").read_text(encoding="utf-8")
+            light = (release / "workflow/modes/light.md").read_text(encoding="utf-8")
+            minimal = len(skill) + len(entry) + len(workflow) + len(light)
+            self.assertLessEqual(minimal, 5_000)
+            self.assertNotIn("先读 [文档使用约定]", workflow)
+            self.assertIn("已安装通用 Skill 且入口可读，即已接线", workflow)
+            self.assertIn("不把整表当启动依赖", workflow)
+            for method in ("workflow-quality", "workflow-skill-maintenance", "code-quality", "testing-review-quality"):
+                self.assertIn(f"methods/{method}/METHOD.md", workflow)
+                self.assertTrue((release / f"methods/{method}/METHOD.md").is_file())
+            maintenance = minimal
+            for method in ("workflow-quality", "workflow-skill-maintenance"):
+                operation = (release / f"methods/{method}/METHOD.md").read_text(encoding="utf-8")
+                maintenance += len(operation)
+            self.assertLessEqual(maintenance, 6_800)
+            self.assertLessEqual(len((release / "workflow/onboarding.md").read_text(encoding="utf-8")), 1_000)
+
     def test_concurrent_publication_cannot_switch_the_entry_or_remove_another_lock(self):
         from selfworkflow.documents import _collect
         with tempfile.TemporaryDirectory() as folder:

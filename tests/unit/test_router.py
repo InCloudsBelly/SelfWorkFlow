@@ -352,7 +352,6 @@ class RouterTests(unittest.TestCase):
             result.selected,
             (
                 "workflow-core",
-                "testing-review-quality",
                 "tea-quality-foundation",
                 "matt-skills-foundation",
                 "ponytail",

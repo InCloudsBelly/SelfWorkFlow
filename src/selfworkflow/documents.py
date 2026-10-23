@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 import os
 from pathlib import Path
@@ -139,7 +139,7 @@ def _document_name(name: str) -> str:
     return target if target.endswith(".md") else target + ".md"
 
 
-def _collect(source: Path, staging: Path) -> dict[str, str]:
+def _collect(source: Path, staging: Path) -> dict[str, str | bytes]:
     from selfworkflow.adapters import (
         _copy_tree, _copy_matt_skills, _copy_tea_quality, _copy_ponytail,
         _copy_anthropic_skill_creator, _copy_community_sources,
@@ -148,7 +148,10 @@ def _collect(source: Path, staging: Path) -> dict[str, str]:
     shutil.copyfile(source / "WORKFLOW.md", staging / "WORKFLOW.md")
     for relative in ("workflow", "skills", "capabilities", "schemas", "overlays"):
         if (source / relative).is_dir():
-            _copy_tree(source / relative, staging / relative)
+            _copy_tree(
+                source / relative, staging / relative,
+                excluded_roots=(source / "skills/selfworkflow",),
+            )
     locks = source / "dependencies/locks"
     for lock, copier in (
         ("matt-pocock-skills", lambda: _copy_matt_skills(source, staging, include_grill_me=True)),
@@ -179,15 +182,23 @@ def _collect(source: Path, staging: Path) -> dict[str, str]:
             continue  # Local entries were already published by the curated importer.
         if "/agents/" in name:
             continue
-        if Path(name).suffix.lower() in {".md", ".csv", ".json", ".yaml", ".yml", ".txt", ".xml", ".toml"} or Path(name).name.startswith("LICENSE"):
+        if name.startswith("references/community-skills/ui-ux-pro-max/") and Path(name).suffix.lower() in {".py", ".csv", ".json", ".yaml", ".yml", ".txt"}:
+            mapping[name] = name  # The UI search tool consumes the pinned original files.
+        elif Path(name).suffix.lower() in {".md", ".csv", ".json", ".yaml", ".yml", ".txt", ".xml", ".toml"} or Path(name).name.startswith("LICENSE"):
             mapping[name] = _document_name(name)
     files = {}
     pending = list(mapping)
     while pending:
         name = pending.pop()
         path = paths[name]
+        if mapping[name] == name and name.startswith("references/community-skills/ui-ux-pro-max/"):
+            # The source locks compare canonical LF text; publish the same bytes
+            # regardless of the maintainer's submodule checkout configuration.
+            files[mapping[name]] = path.read_bytes().replace(b"\r\n", b"\n")
+            continue
         if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
-            files[mapping[name]] = path.read_bytes()
+            content = path.read_bytes()
+            files[mapping[name]] = content.replace(b"\r\n", b"\n") if path.suffix.lower() == ".svg" else content
             continue
         text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
         destination = mapping[name]
@@ -281,13 +292,13 @@ def _collect(source: Path, staging: Path) -> dict[str, str]:
         "通用流程、授权和 Review 调度由 WORKFLOW.md 及其模块管理；来源方法只补充专业方法，"
         "不另起访谈、确认或审查团队，不执行来源中的宿主安装、hooks 或菜单。\n\n"
         "来源方法里的厂商工具、脚本和配置不自动成为当前能力；只使用实际可用且获授权的工具。"
-        "本包不提供可执行程序，不从文档路径猜测工具路径；无法执行的必要步骤报告 unverified。"
+        "UI 检索脚本与其原始数据随包提供，按对应方法核验 Python 和执行授权；本包不部署 MCP、Viewer 或其他外部服务。"
+        "不从文档路径猜测未随包的工具；无法执行的必要步骤报告 unverified。"
         "严格 Host 仍须独立提供并验证 runtime/package/receipt，不能以读到文档作为通过。\n"
     )
     files["WORKFLOW.md"] = (
-        "文档入口模式：documentRoot 明确为本 WORKFLOW.md 所在的 releases/<revision> 目录，"
-        "本任务已绑定该目录与 revision。先读 [文档使用约定](DOCUMENTS.md)，"
-        "然后遵循下列规则。方法通过 [方法索引](methods/INDEX.md) 读取，不读取冻结的宿主 Skill 副本。\n\n"
+        "文档入口模式：本任务 documentRoot 为本文件所在的 releases/<revision> 目录；继承入口绑定。"
+        "方法仅提供专业补充，不另起流程或执行上游安装、hooks、菜单；不读取历史宿主副本。\n\n"
         + files["WORKFLOW.md"]
     )
     return files
@@ -311,13 +322,20 @@ def _publication_lock(output: Path):
 
 
 def publish_documents(repository_root: str | Path, output_root: str | Path) -> dict:
+    return _publish_documents(repository_root, output_root)
+
+
+def _publish_documents(repository_root: str | Path, output_root: str | Path, *, files: dict | None = None, _already_locked: bool = False) -> dict:
     source = _safe(Path(repository_root).absolute())
     output = _safe(Path(output_root).absolute())
     collected_roots = ("workflow", "skills", "capabilities", "schemas", "overlays", "dependencies", "extensions")
-    if source == output or source.is_relative_to(output) or any(output.is_relative_to(source / relative) for relative in collected_roots):
+    bundled_output = source / "skills/selfworkflow/references/public"
+    inside_collected = any(output.is_relative_to(source / relative) for relative in collected_roots)
+    if source == output or source.is_relative_to(output) or (inside_collected and output != bundled_output):
         raise DocumentError("document-output-invalid")
     entry = output / "WORKFLOW.md"
-    with _publication_lock(output), tempfile.TemporaryDirectory(prefix=".document-publish-", dir=output.parent) as temporary:
+    lock = nullcontext() if _already_locked else _publication_lock(output)
+    with lock, tempfile.TemporaryDirectory(prefix=".document-publish-", dir=output.parent) as temporary:
         before = entry.read_bytes() if entry.exists() else None
         if before is not None:
             _bound_release(output)  # A new release may repair old routes, but never old content drift.
@@ -325,7 +343,8 @@ def publish_documents(repository_root: str | Path, output_root: str | Path) -> d
         temporary_root = Path(temporary)
         source_copy = temporary_root / "source"
         source_copy.mkdir()
-        files = _collect(source, source_copy)
+        if files is None:
+            files = _collect(source, source_copy)
         revision = _revision(files)
         staged = temporary_root / "release"
         for name, content in files.items():

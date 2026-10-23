@@ -2,7 +2,7 @@
 
 只在读取、查询、总结或不发布的整理方案时加载。复用入口的 status、唯一 Wiki root 和失败关闭规则。
 
-1. 从 `openwiki_status` 确认实现至少 0.1.2、默认 schema 2、external mode、OAuth-free、`externalAgent.ready=true`、恢复闭环，以及 verified 的 `knowledge.read.safe`。
+1. 从 `openwiki_status` 确认实现至少 0.1.2、默认 schema 2、external mode、OAuth-free，以及 verified 的 `knowledge.read.safe`。不要求发布 capability 对、完整个人生命周期或 `externalAgent.ready=true`；实际读取仍须通过后端恢复状态与一致性锁检查。
 2. 调用 `openwiki_read {}` 取得正式页面目录和 revision；按问题选页面，再用 `paths` 与 `expectedWikiRevision` 分批读取正文。单批 1–32 页，每页最多 256 KiB，合计最多 1 MiB；只读取目录列出的正式根内 Markdown。
 3. 引用返回的 `sourceId/revision/contentHash/verificationStatus`。`unverified` 表示内容语义尚未重新验证；正文和 Claims 不能证明新机器上的来源已验证。空页面不用于总结，revision 冲突先刷新目录再选择。
 
