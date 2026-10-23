@@ -1,0 +1,67 @@
+# 只读参考：post-grill-review-policy.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/post-grill-review-policy.schema.json",
+  "title": "SelfWorkFlow V3 post-Grill review policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "policyId", "trigger", "dispatch", "attestation", "gate"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "policyId": {"const": "post-grill-review-independence-v1"},
+    "trigger": {
+      "type": "object", "additionalProperties": false, "required": ["requiresAll"],
+      "properties": {"requiresAll": {"const": ["grill-me-completed", "common-understanding-confirmed"]}}
+    },
+    "dispatch": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reviewMode", "forkContext", "inputMode", "hostServicesBoundAtConstruction", "summaryResolvedByHostReference", "summaryProvenanceAttestedByHost", "allowedPayloadFields", "forbiddenInputClasses"],
+      "properties": {
+        "reviewMode": {"const": "independent-design-review"},
+        "forkContext": {"const": false},
+        "inputMode": {"const": "summary-only"},
+        "hostServicesBoundAtConstruction": {"const": true},
+        "summaryResolvedByHostReference": {"const": true},
+        "summaryProvenanceAttestedByHost": {"const": true},
+        "allowedPayloadFields": {"const": ["schemaVersion", "reviewMode", "designReviewSummary"]},
+        "forbiddenInputClasses": {"const": ["grill-transcript", "grill-reasoning", "parent-context"]}
+      }
+    },
+    "attestation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["authority", "ignoreAgentSelfReport", "bindActualDispatchPayloadIdentitiesAndResult", "bindPlanAttemptNonceAndValidityWindow", "consumeOnce"],
+      "properties": {
+        "authority": {"const": "host-only"},
+        "ignoreAgentSelfReport": {"const": true},
+        "bindActualDispatchPayloadIdentitiesAndResult": {"const": true},
+        "bindPlanAttemptNonceAndValidityWindow": {"const": true},
+        "consumeOnce": {"const": true}
+      }
+    },
+    "gate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evaluator", "fallbackModes", "invalidEvidenceAction", "requireApprovedStructuredResult", "fallbackAuthorization"],
+      "properties": {
+        "evaluator": {"const": "post-grill-review-independence-v1"},
+        "fallbackModes": {"const": ["independent-context-without-attestation", "same-agent-structured-review"]},
+        "invalidEvidenceAction": {"const": "pause"},
+        "requireApprovedStructuredResult": {"const": true},
+        "fallbackAuthorization": {
+          "type": "object", "additionalProperties": false,
+          "required": ["resolveAtHostBoundary", "bindPlanAttemptAndSummary", "consumeOnceOnProceed"],
+          "properties": {
+            "resolveAtHostBoundary": {"const": true},
+            "bindPlanAttemptAndSummary": {"const": true},
+            "consumeOnceOnProceed": {"const": true}
+          }
+        }
+      }
+    }
+  }
+}
+
+````
