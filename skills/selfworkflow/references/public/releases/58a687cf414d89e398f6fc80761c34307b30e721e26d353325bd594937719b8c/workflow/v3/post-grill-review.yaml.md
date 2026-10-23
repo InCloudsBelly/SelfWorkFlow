@@ -1,0 +1,45 @@
+# 只读参考：post-grill-review.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 3
+policyId: post-grill-review-independence-v1
+trigger:
+  requiresAll:
+    - grill-me-completed
+    - common-understanding-confirmed
+dispatch:
+  reviewMode: independent-design-review
+  forkContext: false
+  inputMode: summary-only
+  hostServicesBoundAtConstruction: true
+  summaryResolvedByHostReference: true
+  summaryProvenanceAttestedByHost: true
+  allowedPayloadFields:
+    - schemaVersion
+    - reviewMode
+    - designReviewSummary
+  forbiddenInputClasses:
+    - grill-transcript
+    - grill-reasoning
+    - parent-context
+attestation:
+  authority: host-only
+  ignoreAgentSelfReport: true
+  bindActualDispatchPayloadIdentitiesAndResult: true
+  bindPlanAttemptNonceAndValidityWindow: true
+  consumeOnce: true
+gate:
+  evaluator: post-grill-review-independence-v1
+  fallbackModes:
+    - independent-context-without-attestation
+    - same-agent-structured-review
+  invalidEvidenceAction: pause
+  requireApprovedStructuredResult: true
+  fallbackAuthorization:
+    resolveAtHostBoundary: true
+    bindPlanAttemptAndSummary: true
+    consumeOnceOnProceed: true
+
+````
