@@ -2,8 +2,8 @@ schemaVersion: 1
 sourceId: codegraph-ue
 canonicalUrl: https://github.com/InCloudsBelly/codegraph_ue.git
 path: extensions/codegraph/codegraph_ue
-gitlinkCommit: 9e126dfd13308163b6bea439d042375dbd2eb088
-sourceTree: 9773bda401b85d026774912836b6f5a32cd3ca6d
+gitlinkCommit: d72a502cb4b864b1f65452b7b58cfe4253f6ae06
+sourceTree: 29bddbd62fea9a19d357ceb8047e3d54d5092b64
 package:
   name: '@colbymchenry/codegraph'
   version: '1.6.2'
