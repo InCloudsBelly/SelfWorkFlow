@@ -5,7 +5,7 @@ description: 用于文件变更、验收或外部副作用的证据与既有修�
 
 # Workflow Quality
 
-仅负责跨领域验收证据、用户已有修改和副作用安全；阶段/授权遵循启动入口，代码责任层用 `code-quality`，测试方法用 `testing-review-quality`，Review 调度只读 `workflow/modules/review.md`。不因引用加载未命中的 Skill。
+仅负责跨领域验收证据、用户已有修改和副作用安全；阶段/授权遵循启动入口，代码责任层用 `code-quality`，测试方法用 `testing-review-quality`，Review 调度只读 [workflow/modules/review.md](../../workflow/modules/review.md)。不因引用加载未命中的 Skill。
 
 - 验收条件对应新鲜证据；记录命令、退出状态和实际消费者结果。不适用说明原因，缺失/未执行/失败标 `unverified`。文档核对格式、链接、引用及适用的生成/呈现结果。
 - 保护用户已有修改、凭据和不可逆边界；副作用按方案、Review、授权执行后复读。范围未变复用授权，证据更新只复核影响项。失败/部分应用保留可恢复状态；内容提交与清理分别验证。

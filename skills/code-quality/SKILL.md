@@ -11,6 +11,13 @@ SelfWorkflow 管理阶段、授权与 Review；本 Skill 仅管代码责任层�
 
 沿最小完整切片追踪 producer → persisted state → transform → consumer/detection point，识别不变量、失败责任层与证据缺口。区分 last-good / first-bad；日志、退出码、dirty 或内存状态不等于持久化成功。只读分析不启动 TDD、构建、写入或完整设计。
 
+## 按实际操作加载
+
+- 跨文件行为理解、符号/依赖查询：先用[图谱读取](../../workflow/modules/codegraph-read.md)；配置/文档/日志和已给定精确源码路径不启动图核对。
+- 行为变更、测试设计/执行证据：[测试方法](../testing-review-quality/SKILL.md)；普通分析/Review 不因阶段名称加载。
+- 实际纳入索引的源码批次后：[图谱更新](../../workflow/modules/codegraph-update.md)，只由主 Agent 合并维护。
+- C++、项目 Review、Ponytail 只按实际信号加载，不因引用预读；Review 调度不重复。
+
 ## 变更
 
 仅诊断需要验证的故障或准备变更时，完整读取 [变更规则](references/change-rules.md)；当前任务同版本正文仍完整时复用。不得为只读任务预载实施规则。最窄 owner-layer 修复优先，不将应用策略泄漏到稳定公共层；保护用户修改，验收看实际消费者结果而非进程成功。

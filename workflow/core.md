@@ -4,7 +4,7 @@
 
 ## 输出与代码任务增强
 
-所有沟通和工程文档使用中文；代码、命令、错误、路径和协议字段按事实保留。代码任务按需加载 Ponytail；非代码任务不自动加载。Ponytail 的 mode 为 `full` 时仍受当前代码任务范围约束。项目级 `.codegraph/` 是唯一 CodeMap：缺失时初始化，已有索引增量同步，不自动全量重建；细则读取 `codegraph-read` 和 `codegraph-update`。失败保留原库并标记图证据 `unverified`；普通任务可继续直接源码核对和验证，不冒充图新鲜或查询成功。
+所有沟通和工程文档使用中文；代码、命令、错误、路径和协议字段按事实保留。代码任务按需加载 Ponytail；非代码任务不自动加载。Ponytail 的 mode 为 `full` 时仍受当前代码任务范围约束。项目级图谱的新鲜度、初始化/同步/重建与失败边界仅由[读取模块](modules/codegraph-read.md)和[写后模块](modules/codegraph-update.md)管理，本页不另做初始化或核对。工具不替代源码、真实构建或运行证据，缺失如实 unverified，普通任务可继续独立工作。
 
 ## 核心流程
 
@@ -30,11 +30,11 @@
 
 ## 实施前整体 Review
 
-普通中间文档不单开审查；高风险前置审查只接收完整必要包。Full/Deep 交付前一个独立 Reviewer 综合 Standards/Spec；Light 窄自审。所有模式取消双 Reviewer，修复只复核影响项；能力缺失及交付边界按 `workflow/modules/review.md` 处理。仅显式契约的 Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision；普通任务不创建这些回执。Review SubAgent 只读绑定材料，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent，不导入作者历史；继承主 Agent 模型/推理配置，不使用专属覆盖。
+普通中间文档不单开审查；高风险前置审查只接收完整必要包。Full/Deep 交付前一个独立 Reviewer 综合 Standards/Spec；Light 窄自审。所有模式取消双 Reviewer，修复只复核影响项；能力缺失及交付边界按 [workflow/modules/review.md](modules/review.md) 处理。仅显式契约的 Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision；普通任务不创建这些回执。Review SubAgent 只读绑定材料，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent，不导入作者历史；继承主 Agent 模型/推理配置，不使用专属覆盖。
 
 ## 按需能力
 
-代码任务按需读 `workflow/modules/code.md`，CodeGraph 读/写后分别按 `codegraph-read.md` / `codegraph-update.md`；Review、留痕、知识到阶段才加载。Matt grilling 与所有 TEA 能力仅显式选择，已执行的同一 Skill/阶段/证据组合复用。简单环境事实由主 Agent 批量查明，不强制派发 SubAgent；辅助 Agent 不递归、不重做主流程。工具结果先过滤，保持必要前缀稳定，不为缓存保温发请求。
+代码任务按需读 [workflow/modules/code.md](modules/code.md)，CodeGraph 读/写后分别按 `codegraph-read.md` / `codegraph-update.md`；Review、留痕、知识到阶段才加载。Matt grilling 与所有 TEA 能力仅显式选择，已执行的同一 Skill/阶段/证据组合复用。简单环境事实由主 Agent 批量查明，不强制派发 SubAgent；辅助 Agent 不递归、不重做主流程。工具结果先过滤，保持必要前缀稳定，不为缓存保温发请求。
 
 ## 安全底线
 

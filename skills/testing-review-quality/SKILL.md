@@ -1,24 +1,14 @@
 ---
 name: testing-review-quality
-description: 用于行为变更 TDD 和测试证据核验；普通 Review 直接读 review.md，纯分析或机械文档不因阶段名称加载。
+description: 行为变更 TDD、测试设计或执行证据核验；普通 Review、纯分析和机械文档不触发。
 ---
 
-# 测试、Review 与验证
+# 测试与验证
 
-SelfWorkflow 管理阶段、模式和授权；本 Skill 只提供测试方法与证据要求。
+阶段/授权归 SelfWorkflow，代码边界归 code-quality，[独立审查](../../workflow/modules/review.md)只归 Review 模块。
 
-## 行为变更
+行为变更采用 RED→最小 GREEN→同命令复跑与最窄回归：RED 必须因缺失行为失败，不是环境/语法/fixture 失败。通过现有公共接口/真实消费者测试正常、失败、边界及状态不变量；预期独立于实现，不 Mock 私有协作，不横向预写整套假想测试。测试接缝写入实施契约；同范围已有授权复用，实质接口/范围选择才澄清。
+复杂接缝、Mock 或用例设计需要示例时，再从 documentRoot 的 `methods/matt-pocock/tdd/METHOD.md` 读取相关方法；不为每次普通测试预载上游。
 
-使用 Matt tdd：RED 须因缺失行为而非环境/语法/fixture 失败；最小 GREEN 后复跑同一命令和最窄回归，覆盖直接/失败路径、状态不变量。功能、修复、行为重构、迁移均适用；机械修改或规格修订可免 TDD，仍需解析及实际消费者验证。
-
-禁编译/测试时记录编写状态、`execution=not-run`、`verification=unverified`、原因和人工步骤，不虚构 RED/GREEN。豁免仅绑定当前任务/范围。
-
-## Review
-
-到阶段只读当前 runtime 的 `workflow/modules/review.md`，此处不重复调度、隔离或复审规则。
-
-## Verify / Complete
-
-测试证据绑定命令、退出状态、消费者输出及验收条件；输入/规则/环境未变则复用，漂移只重验影响项。通用副作用与验收安全由 `workflow-quality` 承接。
-
-仅显式契约或 Host 已按契约承接时加载 [契约 Host 规则](references/contract-host.md)，保留防伪与完成门禁；能力不足如实阻塞该模式。
+机械修改/规格修订可免 TDD，仍做解析及消费者验证。禁编译/测试时分别记编写状态、`execution=not-run`、`verification=unverified`、原因与人工步骤，不虚构 RED/GREEN，豁免只绑定本次范围。
+验证绑定命令、退出状态、消费者输出与验收；输入/规则/环境未变复用，变化只重验影响项。通用副作用归 workflow-quality。仅显式契约或 Host 已按契约承接时读[契约规则](references/contract-host.md)，缺能力不降级冒充通过。
