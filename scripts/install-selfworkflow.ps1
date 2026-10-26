@@ -511,7 +511,8 @@ function Ensure-CodeGraphMcpLauncher {
     $directMode = ""
     if ($RuntimeRoot.Replace('/', '\').TrimEnd('\').EndsWith('\extensions\codegraph\codegraph_ue', [StringComparison]::OrdinalIgnoreCase)) {
         # shortcut: shared package versions cannot identify fork daemons; retire when the daemon handshake binds builds.
-        $directMode = 'set "CODEGRAPH_NO_DAEMON=1"'
+        $directMode = 'set "CODEGRAPH_NO_DAEMON=1"' + "`r`n" +
+            'if not defined CODEGRAPH_WATCHDOG_TIMEOUT_MS set "CODEGRAPH_WATCHDOG_TIMEOUT_MS=600000"'
     }
     $parent = Split-Path -Parent $TargetPath
     [IO.Directory]::CreateDirectory($parent) | Out-Null
@@ -532,17 +533,22 @@ exit /b %SELFWORKFLOW_CODEGRAPH_EXIT%
 }
 
 function Ensure-CodexCodeGraphMcp {
-    param([string]$CodexConfigPath, [string]$LauncherPath)
+    param([string]$CodexConfigPath, [string]$LauncherPath, [string]$RuntimeRoot = "")
     $parent = Split-Path -Parent $CodexConfigPath
     [IO.Directory]::CreateDirectory($parent) | Out-Null
     $begin = "# selfworkflow:codegraph-mcp:begin"
     $end = "# selfworkflow:codegraph-mcp:end"
+    $timeoutSettings = ""
+    if ($RuntimeRoot.Replace('/', '\').TrimEnd('\').EndsWith('\extensions\codegraph\codegraph_ue', [StringComparison]::OrdinalIgnoreCase)) {
+        # Large UE graphs legitimately spend over a minute checking their inputs.
+        $timeoutSettings = "`r`nstartup_timeout_sec = 600`r`ntool_timeout_sec = 1200"
+    }
     $section = @"
 $begin
 [mcp_servers.codegraph]
 command = "$($LauncherPath.Replace('\', '\\').Replace('"', '\"'))"
 # official command: codegraph serve --mcp
-args = ["serve", "--mcp"]
+args = ["serve", "--mcp"]$timeoutSettings
 $end
 "@.Trim("`r", "`n")
     $state = Get-McpFileState $CodexConfigPath
@@ -662,7 +668,7 @@ try {
         Get-McpFileState $CodexCodeGraphMcpConfigPath | Out-Null
         Set-InstallStage "codegraph-mcp-launcher-only" 75
         $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath $runtimeReport.commandPrefix
-        $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath
+        $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath $runtimeRoot
         if ($preserveSource -and (Get-McpFileHash $ProviderConfigFile) -ne $providerBeforeHash) {
             Stop-Install "codegraph-mcp" 75 "provider-config-precondition-conflict"
         }
@@ -735,7 +741,7 @@ try {
     $hostReport = Ensure-HostLauncher $HostLauncherPath
     Set-InstallStage "codegraph-mcp" 75
     $launcherReport = Ensure-CodeGraphMcpLauncher $runtimeRoot $CodeGraphMcpLauncherPath $runtimeReport.commandPrefix
-    $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath
+    $codexReport = Ensure-CodexCodeGraphMcp $CodexCodeGraphMcpConfigPath $CodeGraphMcpLauncherPath $runtimeRoot
     $doctorAfterArguments = @("doctor", "--agents-root", $AgentsRoot, "--codex-root", $CodexRoot, "--state-root", $StateRoot) + $DshArguments
     Invoke-SelfWorkflow $doctorAfterArguments (Join-Path $script:LogDirectory "doctor-after.json") | Out-Null
 
