@@ -19,6 +19,35 @@ from selfworkflow.installer import _atomic_write
 
 _ROUTE = "skills/selfworkflow/references/public/WORKFLOW.md"
 _VERSION = re.compile(r"(?m)^规则版本：[^\r\n]*(?:\r?\n|$)")
+_CORE_START = "<!-- selfworkflow:core -->"
+_CORE_END = "<!-- /selfworkflow:core -->"
+_CORE = re.compile(r"(?ms)^<!-- selfworkflow:core -->\r?\n.*?^<!-- /selfworkflow:core -->(?:\r?\n)?")
+
+
+def _core_entry(raw: bytes, revision: str, core: str, public: str) -> bytes:
+    if _CORE_START in core or _CORE_END in core:
+        raise DocumentError("skill-core-invalid")
+    text = raw.decode("utf-8")
+    if text.count(_CORE_START) != text.count(_CORE_END) or text.count(_CORE_START) > 1:
+        raise DocumentError("skill-core-invalid")
+    if _CORE_START in text and not _CORE.search(text):
+        raise DocumentError("skill-core-invalid")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    core = core.removeprefix("documentRoot 为本文件目录，revision 为目录名。\n\n")
+    prefix = f"{public}/releases/{revision}/"
+    core = re.sub(
+        r"\[([^\]\n]+)\]\(([^)]+)\)",
+        lambda match: match[0] if match[2].startswith(("#", "http:", "https:", "mailto:"))
+        else f"{match[1]}（`{match[2]}`）",
+        core,
+    )
+    block = (
+        f"{_CORE_START}\n"
+        f"无需再读公共转发页。[绑定规则源]({prefix}WORKFLOW.md)的目录为 documentRoot，"
+        "目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。\n\n"
+        f"{core.rstrip()}\n{_CORE_END}\n"
+    )
+    return (_CORE.sub("", text).rstrip("\r\n") + newline * 2 + block.replace("\n", newline)).encode("utf-8")
 
 
 def _versioned_entry(raw: bytes, revision: str) -> bytes:
@@ -48,6 +77,9 @@ def _entries(source: Path) -> tuple[bytes, bytes]:
     if text.count(f"]({_ROUTE})") != 1:
         raise DocumentError("skill-entry-route-invalid")
     portable = text.replace(f"]({_ROUTE})", "](references/public/WORKFLOW.md)")
+    portable = portable.replace(
+        "](skills/selfworkflow/references/public/releases/", "](references/public/releases/",
+    )
     return raw, portable.encode("utf-8")
 
 
@@ -62,7 +94,8 @@ def check_skill(repository_root: str | Path) -> dict:
     target = _safe(source / "skills/selfworkflow/SKILL.md")
     if not target.is_file() or target.read_bytes() != portable:
         raise DocumentError("skill-entry-drift")
-    expected = _revision(_source_files(source))
+    files = _source_files(source)
+    expected = _revision(files)
     binding = document_binding(source / "skills/selfworkflow/references/public")
     if binding["revision"] != expected:
         raise DocumentError("skill-bundle-stale")
@@ -70,6 +103,8 @@ def check_skill(repository_root: str | Path) -> dict:
         raise DocumentError("skill-public-entry-stale")
     if _versioned_entry(root_entry, expected) != root_entry:
         raise DocumentError("skill-version-stale")
+    if _core_entry(root_entry, expected, files["WORKFLOW.md"], "skills/selfworkflow/references/public") != root_entry:
+        raise DocumentError("skill-core-stale")
     for release in Path(binding["documentRoot"]).parent.iterdir():
         if release.is_dir() and re.fullmatch(r"[0-9a-f]{64}", release.name) and release.name != expected:
             if _revision(_read_release(release)) != release.name:
@@ -92,8 +127,13 @@ def sync_skill(repository_root: str | Path) -> dict:
         before = target.read_bytes() if target.exists() else None
         files = _source_files(source)
         revision = _revision(files)
-        versioned = _versioned_entry(root_entry, revision)
-        portable = _versioned_entry(portable, revision)
+        versioned = _core_entry(
+            _versioned_entry(root_entry, revision), revision, files["WORKFLOW.md"],
+            "skills/selfworkflow/references/public",
+        )
+        portable = _core_entry(
+            _versioned_entry(portable, revision), revision, files["WORKFLOW.md"], "references/public",
+        )
         result = _publish_documents(source, outputs[0], files=files, _already_locked=True)
         # Both entry points receive one collected snapshot, never two source reads.
         _publish_documents(source, outputs[1], files=files, _already_locked=True)

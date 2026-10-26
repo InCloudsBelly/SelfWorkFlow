@@ -7,28 +7,14 @@ description: Use for reading, designing, implementing, debugging, maintaining, o
 
 提供不依赖任何本地工具或厂商 Agent 的 C++ 推理核心。CodeGraph、LSP、编译器、Sanitizer、调试器和深度审计器是辅助能力；缺失时不得伪造其结果。
 
-代码阅读优先级：若当前工作目录已绑定且索引新鲜的 CodeGraph，先用 CodeGraph
-进行符号、调用关系、依赖和导航查询，再用 `rg` 做精确字面搜索、读取未纳入索引的文件和最终文本核对。
-CodeGraph 缺失、过期、未覆盖目标文件或运行时不可用时，明确标记限制并回退 `rg`；不得把过期结果当作新鲜证据。
-
-新对话第一次命中代码任务时，先做一次当前工作目录的 CodeGraph 状态检查。
-若绑定存在但索引过期，向用户提供“显式更新并使用”“不更新但使用现有索引（过期只读）”
-和“本对话不使用 CodeGraph”三个选项；项目索引缺失时按 SelfWorkflow 路由自动初始化，
-后续代码理解优先使用 CodeGraph，不重复询问，除非项目或 Provider 身份变化或用户主动切换。
-本对话偏好使用已验证且 fresh 的 CodeGraph 全局图；它不能替代最终文本核对、构建或运行期证据。
-更新失败或能力未验证时保留 `unverified`/过期标记，不能静默把 `rg` 结果冒充 CodeGraph 证据。
+图谱绑定、新鲜度、失败与生命周期统一遵循 [workflow/modules/codegraph-read.md](../../workflow/modules/codegraph-read.md)；本方法不另做状态检查、初始化或询问偏好。只读已绑定项目图并复核源码，工具缺失如实 unverified；不将 rg、AST 或图谱当构建/运行证据。
 
 只读分析只应用推理核心和直接命中的按需参考；不会因此进入修改、构建、调试器或完整 Design/Plan/Review 流程。
 
-## 核心流程
+## C++ 判定
 
-1. 固定目标、平台、标准版本、编译器/构建模式与用户已有改动。
-2. 对 Bug 固定 failure envelope：期望、实际、精确输入、首次观察点、last-good / first-bad、复现与恢复状态。
-3. 构造最小完整切片：producer → 持久状态/资源 → transform → consumer。区分 root-cause owner 与 detection point，在最早拥有数据及不变量的责任层修复，禁止下游补偿掩盖上游错误。
-4. 明确所有权、生命周期、值类别、类型边界、状态不变量和错误传播；再检查 UB、整数/边界、异常安全、并发、ABI、性能与构建风险。
-5. 采用最小侵入修改：保持稳定底层接口，除非共享需求和兼容性证据证明必须下沉；保护用户已有修改。
-6. 计算缓存、生成物、序列化数据、checkpoint 与下游 consumer 的失效/重建范围。
-7. 用最窄测试层证明 Red/Green、直接路径、失败路径、边界、状态不变量和受影响共享路径。构建、Sanitizer 或运行期证据未执行时标记 `unverified`。
+责任层、故障切片、状态/失效、最小改动和测试归[代码方法](../code-quality/SKILL.md)，同版已读直接复用，不重复启动流程。
+固定平台、C++标准、编译器/构建模式；检查所有权、生命周期、值类别、类型边界、UB、整数/边界、异常安全、并发/内存序、ABI、性能与构建风险。工具只提供证据，不能代替消费者、真实构建或运行验证。
 
 ## 按需参考
 

@@ -199,21 +199,210 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         self.assertEqual(result["maintenanceActions"], ["sync"])
         self.assertEqual([call["argv"][1] for call in port.calls], ["status", "sync", "status", "status", "explore"])
 
-    def test_missing_project_is_fully_initialized_before_it_is_reported_fresh(self):
+    def test_missing_project_requires_explicit_initialization(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
         port = FakeCommandPort(
             self._result(stdout=self._status(initialized=False)),
-            self._result(stdout="initialized"),
-            self._result(stdout=self._status()),
         )
         lifecycle, _ = self._lifecycle(port)
 
-        result = lifecycle.ensure(str(self.project))
+        with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-explicit-initialization-required"):
+            lifecycle.ensure(str(self.project))
+        self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
 
-        self.assertEqual(result["providerId"], "codegraph")
-        self.assertEqual(result["status"], "succeeded")
-        self.assertEqual(result["freshness"], "fresh")
-        self.assertEqual(result["actions"], ["initialize"])
-        self.assertEqual(port.calls[1]["argv"], ("codegraph", "init", str(self.project).replace("\\", "/")))
+    def test_automatic_boundaries_never_initialize_a_missing_or_unrecognized_index(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        for artifact in (None, "codegraph.db-wal", "codegraph.db-shm", "codegraph.db-journal"):
+            index = self.project / ".codegraph"
+            if artifact:
+                index.mkdir(exist_ok=True)
+                (index / artifact).write_bytes(b"preserve recovery data")
+            for boundary in ("ensure", "preflight", "sync", "query"):
+                with self.subTest(artifact=artifact, boundary=boundary):
+                    port = FakeCommandPort(self._result(stdout=self._status(initialized=False)))
+                    lifecycle, _ = self._lifecycle(port)
+                    arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-explicit-initialization-required"):
+                        getattr(lifecycle, boundary)(*arguments)
+                    self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
+                    self.assertFalse((index / "codegraph.db").exists())
+                    if artifact:
+                        self.assertEqual((index / artifact).read_bytes(), b"preserve recovery data")
+
+    def test_incomplete_or_unknown_index_state_never_starts_automatic_sync(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        for state in ("partial", "failed", "unknown", "", None):
+            value = json.loads(self._status())
+            value["index"]["state"] = state
+            for boundary in ("ensure", "preflight", "sync", "query"):
+                with self.subTest(state=state, boundary=boundary):
+                    port = FakeCommandPort(self._result(stdout=json.dumps(value)))
+                    lifecycle, _ = self._lifecycle(port)
+                    arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-index-state-not-complete"):
+                        getattr(lifecycle, boundary)(*arguments)
+                    self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
+
+    def test_inconsistent_file_and_node_presence_never_triggers_automatic_reextraction(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        for files, nodes in ((80000, 0), (0, 2000000)):
+            value = json.loads(self._status())
+            value.update(fileCount=files, nodeCount=nodes)
+            for boundary in ("ensure", "preflight", "sync", "query"):
+                with self.subTest(files=files, nodes=nodes, boundary=boundary):
+                    port = FakeCommandPort(self._result(stdout=json.dumps(value)))
+                    lifecycle, _ = self._lifecycle(port)
+                    arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-index-data-inconsistent"):
+                        getattr(lifecycle, boundary)(*arguments)
+                    self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
+
+    def test_legitimate_empty_complete_index_can_sync_without_initialization(self):
+        value = json.loads(self._status())
+        value.update(fileCount=0, nodeCount=0, edgeCount=0)
+        port = FakeCommandPort(self._result(stdout=json.dumps(value)),
+                               self._result(stdout="synced"), self._result(stdout=json.dumps(value)))
+        lifecycle, _ = self._lifecycle(port)
+        self.assertEqual(lifecycle.ensure(str(self.project))["actions"], ["sync"])
+        self.assertEqual([call["argv"][1] for call in port.calls], ["status", "sync", "status"])
+
+    def test_publication_marker_blocks_all_boundaries_before_provider_dispatch(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        marker = self.project / ".codegraph.publication.json"
+        for content in ("", "{}", '{"schemaVersion": 999}', "partial JSON"):
+            marker.write_text(content, encoding="utf-8")
+            for boundary in ("status", "ensure", "preflight", "sync", "query"):
+                with self.subTest(content=content, boundary=boundary):
+                    port = FakeCommandPort()
+                    lifecycle, _ = self._lifecycle(port)
+                    arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-recovery-required"):
+                        getattr(lifecycle, boundary)(*arguments)
+                    self.assertEqual(port.calls, [])
+                    self.assertEqual(marker.read_text(encoding="utf-8"), content)
+
+    def test_platform_default_publication_markers_block_without_an_override(self):
+        from unittest.mock import patch
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        for suffix in (".publication.json", ".publication.lock"):
+            marker = self.project / (".codegraph-wsl" + suffix)
+            marker.write_text("pending", encoding="utf-8")
+            try:
+                port = FakeCommandPort(self._result(stdout=self._status()))
+                lifecycle, _ = self._lifecycle(port)
+                with patch.dict("os.environ", {"CODEGRAPH_DIR": ""}):
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-recovery-required"):
+                        lifecycle.status(str(self.project))
+                self.assertEqual(port.calls, [])
+            finally:
+                marker.unlink()
+
+    def test_publication_during_final_or_query_status_stops_before_explore(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        marker = self.project / ".codegraph.publication.json"
+        for status_number in (2, 3):
+            with self.subTest(status_number=status_number):
+                class PublicationPort(FakeCommandPort):
+                    def run(port, argv, *, cwd=None):
+                        result = super().run(argv, cwd=cwd)
+                        count = sum(call["argv"][1] == "status" for call in port.calls)
+                        if argv[1] == "status" and count == status_number:
+                            marker.write_text("pending", encoding="utf-8")
+                        return result
+
+                port = PublicationPort(
+                    self._result(stdout=self._status()), self._result(stdout="synced"),
+                    self._result(stdout=self._status()), self._result(stdout=self._status()),
+                    self._result(stdout="symbols: main"),
+                )
+                lifecycle, adapter = self._lifecycle(port)
+                try:
+                    with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-recovery-required"):
+                        lifecycle.query(str(self.project), "main")
+                    self.assertNotIn("explore", [call["argv"][1] for call in port.calls])
+                    # The automatic guard is scoped; another project's diagnostic
+                    # must retain the adapter's ordinary source validation.
+                    other = self.project / "other"
+                    other.mkdir(exist_ok=True)
+                    state = json.loads(self._status())
+                    state["projectPath"] = str(other)
+                    port.results = [self._result(stdout=json.dumps(state))]
+                    self.assertEqual(adapter.status(str(other))["freshness"], "fresh")
+                finally:
+                    marker.unlink(missing_ok=True)
+
+    def test_publication_marker_is_scoped_to_selected_index_directory(self):
+        from unittest.mock import patch
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        (self.project / ".codegraph.publication.json").write_text("pending", encoding="utf-8")
+        port = FakeCommandPort(self._result(stdout=self._status(initialized=False)))
+        lifecycle, _ = self._lifecycle(port)
+        with patch.dict("os.environ", {"CODEGRAPH_DIR": ".codegraph-candidate"}):
+            with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-explicit-initialization-required"):
+                lifecycle.ensure(str(self.project))
+            (self.project / ".codegraph-candidate.publication.json").write_text("pending", encoding="utf-8")
+            with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-recovery-required"):
+                lifecycle.ensure(str(self.project))
+        self.assertEqual(len(port.calls), 1)
+
+    def test_lease_without_a_marker_blocks_before_provider_dispatch(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        lease = self.project / ".codegraph.publication.lock"
+        lease.write_text('{"purpose":"publication"}', encoding="utf-8")
+        for boundary in ("status", "ensure", "preflight", "sync", "query"):
+            with self.subTest(boundary=boundary):
+                port = FakeCommandPort()
+                lifecycle, _ = self._lifecycle(port)
+                arguments = (str(self.project), "symbol") if boundary == "query" else (str(self.project),)
+                with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-recovery-required"):
+                    getattr(lifecycle, boundary)(*arguments)
+                self.assertEqual(port.calls, [])
+
+    def test_uncertain_publication_state_stops_before_provider_dispatch(self):
+        from unittest.mock import patch
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        original = Path.lstat
+        marker = self.project / ".codegraph.publication.json"
+
+        def deny_marker(candidate, *arguments, **keywords):
+            if candidate == marker:
+                raise PermissionError("injected publication permission failure")
+            return original(candidate, *arguments, **keywords)
+
+        port = FakeCommandPort()
+        lifecycle, _ = self._lifecycle(port)
+        with patch.object(Path, "lstat", deny_marker):
+            with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-state-unknown"):
+                lifecycle.ensure(str(self.project))
+        self.assertEqual(port.calls, [])
+
+    def test_publication_appearing_during_status_stops_before_sync(self):
+        from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
+
+        marker = self.project / ".codegraph.publication.json"
+        result = self._result(stdout=self._status())
+
+        class PublicationDuringStatusPort(FakeCommandPort):
+            def run(self, argv, *, cwd=None):
+                observed = super().run(argv, cwd=cwd)
+                marker.write_text("pending", encoding="utf-8")
+                return observed
+
+        port = PublicationDuringStatusPort(result)
+        lifecycle, _ = self._lifecycle(port)
+        with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-publication-recovery-required"):
+            lifecycle.ensure(str(self.project))
+        self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
 
     def test_stale_index_is_preserved_without_automatic_rebuild_at_every_boundary(self):
         from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
@@ -266,7 +455,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         with self.assertRaises(CodeGraphProjectError) as caught:
             lifecycle.preflight(str(self.project))
 
-        self.assertEqual(caught.exception.reason, "codegraph-existing-index-not-initialized")
+        self.assertEqual(caught.exception.reason, "codegraph-explicit-initialization-required")
         self.assertEqual(database.read_bytes(), b"existing incompatible index")
         self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
 
@@ -335,10 +524,10 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         self.assertNotIn("deep", result)
         self.assertNotIn("conversationId", result)
 
-    def test_query_initializes_and_then_uses_codegraph_explore(self):
+    def test_query_syncs_an_existing_complete_graph_then_uses_codegraph_explore(self):
         port = FakeCommandPort(
-            self._result(stdout=self._status(initialized=False)),
-            self._result(stdout="initialized"),
+            self._result(stdout=self._status()),
+            self._result(stdout="synced"),
             self._result(stdout=self._status()),
             self._result(stdout=self._status()),
             self._result(stdout="symbols: main -> helper"),
@@ -388,10 +577,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
     def test_indexing_after_maintenance_never_escalates_to_another_writer(self):
         from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
 
-        cases = (
-            (self._status(initialized=False), (), "init"),
-            (self._status(state="partial"), (), "sync"),
-        )
+        cases = ((self._status(), (), "sync"),)
         for initial, before_last, last in cases:
             with self.subTest(action=last):
                 port = FakeCommandPort(
@@ -430,7 +616,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
 
         port = FakeCommandPort(
-            self._result(stdout=self._status(state="partial")),
+            self._result(stdout=self._status()),
             self._result(exit_code=9, stderr="provider failure"),
         )
         lifecycle, _ = self._lifecycle(port)
@@ -441,7 +627,7 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "codegraph-command-failed")
         self.assertEqual([call["argv"][1] for call in port.calls], ["status", "sync"])
 
-    def test_failed_initialization_never_returns_a_fake_fresh_status(self):
+    def test_absent_index_never_runs_failing_initialization_or_returns_fresh(self):
         from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError
 
         port = FakeCommandPort(
@@ -453,7 +639,8 @@ class CodeGraphLifecycleTests(unittest.TestCase):
         with self.assertRaises(CodeGraphProjectError) as caught:
             lifecycle.ensure(str(self.project))
 
-        self.assertEqual(caught.exception.reason, "codegraph-command-failed")
+        self.assertEqual(caught.exception.reason, "codegraph-explicit-initialization-required")
+        self.assertEqual([call["argv"][1] for call in port.calls], ["status"])
         self.assertNotIn("fresh", str(caught.exception))
 
 

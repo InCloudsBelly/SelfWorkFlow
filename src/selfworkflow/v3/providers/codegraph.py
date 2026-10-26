@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
@@ -173,9 +175,20 @@ class CodeGraphAdapter:
         self._prefix = _validate_prefix(command_prefix)
         self._ownership = ownership
         self._pre_dispatch_validator = pre_dispatch_validator
+        self._dispatch_guards: ContextVar[tuple[Callable[[], None], ...]] = ContextVar(
+            "codegraph_dispatch_guards", default=(),
+        )
         self._allow_metadata_only_status = allow_metadata_only_status
         self._issued_maintenance_plans: set[str] = set()
         self._consumed_maintenance_plans: set[str] = set()
+
+    @contextmanager
+    def _guarded_dispatch(self, validator: Callable[[], None]):
+        token = self._dispatch_guards.set((*self._dispatch_guards.get(), validator))
+        try:
+            yield
+        finally:
+            self._dispatch_guards.reset(token)
 
     @property
     def ownership(self) -> str:
@@ -189,6 +202,8 @@ class CodeGraphAdapter:
         try:
             if self._pre_dispatch_validator is not None:
                 self._pre_dispatch_validator()
+            for validator in self._dispatch_guards.get():
+                validator()
             result = self._port.run(self._prefix + tuple(arguments), cwd=None)
         except CodeGraphAdapterError:
             raise

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+import os
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,22 @@ def _changed_path_count(changed_paths: Sequence[str] | None) -> int:
     return len(values)
 
 
+def _assert_no_pending_publication(root: Path) -> None:
+    name = os.environ.get("CODEGRAPH_DIR", "").strip()
+    # Without an override the provider may choose either platform default.
+    names = (name,) if name else (".codegraph", ".codegraph-wsl")
+    if name == "." or ".." in name or "/" in name or "\\" in name or Path(name).is_absolute():
+        names = (".codegraph",)
+    for selected in names:
+        for suffix in (".publication.json", ".publication.lock"):
+            try:
+                (root / f"{selected}{suffix}").lstat()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                raise CodeGraphProjectError("codegraph-publication-state-unknown") from None
+            raise CodeGraphProjectError("codegraph-publication-recovery-required")
+
 class CodeGraphProjectLifecycle:
     """Execute one automatic boundary; CodeGraph owns process/DB locking."""
 
@@ -66,27 +83,38 @@ class CodeGraphProjectLifecycle:
             raise CodeGraphProjectError("codegraph-adapter-invalid")
         self._adapter = adapter
 
-    def status(self, project_root: str) -> dict[str, Any]:
-        root = _safe_project_root(project_root)
+    def _guarded_call(self, root: Path, operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        _assert_no_pending_publication(root)
+
+        def validate_dispatch() -> None:
+            try:
+                _assert_no_pending_publication(root)
+            except CodeGraphProjectError as error:
+                raise CodeGraphAdapterError(error.reason) from None
+
         try:
-            return self._adapter.status(str(root))
+            with self._adapter._guarded_dispatch(validate_dispatch):
+                result = operation()
         except CodeGraphAdapterError as error:
             raise CodeGraphProjectError(error.reason) from None
+        _assert_no_pending_publication(root)
+        return result
+
+    def status(self, project_root: str) -> dict[str, Any]:
+        root = _safe_project_root(project_root)
+        return self._guarded_call(root, lambda: self._adapter.status(str(root)))
 
     def _maintain(self, action: str, root: Path) -> dict[str, Any]:
-        try:
+        def maintain() -> dict[str, Any]:
             plan = self._adapter.plan_maintenance(action, str(root))
             return self._adapter.execute_maintenance(
                 plan, str(root), confirmed_plan_hash=plan["planHash"],
             )
-        except CodeGraphAdapterError as error:
-            raise CodeGraphProjectError(error.reason) from None
+
+        return self._guarded_call(root, maintain)
 
     def _initial_status(self, root: Path) -> dict[str, Any]:
-        try:
-            return self._adapter.maintenance_status(str(root))
-        except CodeGraphAdapterError as error:
-            raise CodeGraphProjectError(error.reason) from None
+        return self._guarded_call(root, lambda: self._adapter.maintenance_status(str(root)))
 
     def _ensure_from_status(
         self, root: Path, initial: Mapping[str, Any],
@@ -98,20 +126,22 @@ class CodeGraphProjectLifecycle:
         if current.get("indexState") == "indexing":
             raise CodeGraphProjectError("codegraph-project-busy")
         if current.get("initialized") is not True:
-            if (root / ".codegraph" / "codegraph.db").exists():
-                raise CodeGraphProjectError("codegraph-existing-index-not-initialized")
-            self._maintain("initialize", root)
-            actions.append("initialize")
-            current = self.status(str(root))
-        else:
-            # An extraction-version upgrade needs a separately verified candidate.
-            if current.get("reindexRecommended") is True:
-                raise CodeGraphProjectError("codegraph-rebuild-required-preserving-existing-index")
-            # Git status can be clean after checkout while the index is stale.
-            # The official sync reconciles disk and skips unchanged source files.
-            self._maintain("sync", root)
-            actions.append("sync")
-            current = self.status(str(root))
+            raise CodeGraphProjectError("codegraph-explicit-initialization-required")
+        # Missing/unknown state can be an interrupted publication or partial bake.
+        if current.get("indexState") != "complete":
+            raise CodeGraphProjectError("codegraph-index-state-not-complete")
+        files, nodes = current.get("fileCount"), current.get("nodeCount")
+        if type(files) is int and type(nodes) is int and (files == 0) != (nodes == 0):
+            raise CodeGraphProjectError("codegraph-index-data-inconsistent")
+        # An extraction-version upgrade needs a separately verified candidate.
+        if current.get("reindexRecommended") is True:
+            raise CodeGraphProjectError("codegraph-rebuild-required-preserving-existing-index")
+        # Git status can be clean after checkout while the index is stale.
+        # The official sync reconciles disk and skips unchanged source files.
+        _assert_no_pending_publication(root)
+        self._maintain("sync", root)
+        actions.append("sync")
+        current = self.status(str(root))
 
         if current.get("indexState") == "indexing":
             raise CodeGraphProjectError("codegraph-project-busy")
@@ -148,12 +178,9 @@ class CodeGraphProjectLifecycle:
     ) -> dict[str, Any]:
         root = _safe_project_root(project_root)
         ensured = self._ensure_from_status(root, self._initial_status(root))
-        try:
-            result = self._adapter.query(
-                str(root), query, query_kind=query_kind,
-            )
-        except CodeGraphAdapterError as error:
-            raise CodeGraphProjectError(error.reason) from None
+        result = self._guarded_call(root, lambda: self._adapter.query(
+            str(root), query, query_kind=query_kind,
+        ))
         result["updated"] = ensured["updated"]
         result["maintenanceActions"] = ensured["actions"]
         return result

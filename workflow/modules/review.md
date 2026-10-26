@@ -11,6 +11,9 @@ Review 调度、材料、隔离与复审由本模块唯一管理；专业 Skill 
 
 ## 输入、模型与复用
 
+- 交接优先可达的同版规则/证据引用与本次增量；目标无法访问宿主目录时，一次提供命中的必要正文，不能把不可达路径当已提供，也不逐页/逐问题复制整套规范。
+- 创建 Reviewer 时工具支持则显式 `fork_turns="none"`；其他子任务默认最小任务包，确需历史才有据继承。只回传发现、证据与缺口，不重放原材料。
+- 专业细则由承担该专项的上下文读取；主 Agent 不为交接预读或复制整包。已完整读入的同版正文复用；每个 Finding 由同一 Reviewer 核验，不逐项创建或重走全量审查。
 - Review 默认继承主 Agent 模型/推理配置，不读取机器本地 Review 模型配置，不传 model/reasoning_effort 覆盖；不虚构型号或缓存命中，不导入作者推理/完整历史。
 - 主 Agent 一次提供请求、验收、规则、最终方案/实际增量与必要证据，绑定内容/hash。Reviewer 只读验证反例，不接收完整主历史、整库 Wiki 或无关材料。知识 Review 可读绑定候选与必要来源，不重走主流程。
 - Reviewer 不得调用 CodeGraph/provider、运行验证、写工作区、更新知识或创建下级 Agent。主 Agent 负责 CodeGraph evidence；缺少 CodeGraph evidence 且结论依赖它时返回该项 unverified，不能用猜测替代。

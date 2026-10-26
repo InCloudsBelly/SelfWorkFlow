@@ -159,17 +159,24 @@ class DocumentPublicationTests(unittest.TestCase):
             entry = Path(result["entry"]).read_text(encoding="utf-8")
             workflow = (release / "WORKFLOW.md").read_text(encoding="utf-8")
             skill = (repository / "skills/selfworkflow/SKILL.md").read_text(encoding="utf-8")
-            minimal = len(skill) + len(entry) + len(workflow)
-            self.assertLessEqual(minimal, 1_350)
+            # The delivered Skill now embeds the bound core; legacy pointers are not read.
+            minimal = len(skill)
+            self.assertEqual(skill.count("<!-- selfworkflow:core -->"), 1)
+            self.assertIn("无需再读公共转发页", skill)
+            self.assertLessEqual(minimal, 1_400)
             self.assertNotIn("workflow/modes/light.md", workflow)
             self.assertNotIn("](DOCUMENTS.md)", workflow)
             for method in ("workflow-quality", "workflow-skill-maintenance"):
                 self.assertIn(f"methods/{method}/METHOD.md", workflow)
                 self.assertTrue((release / f"methods/{method}/METHOD.md").is_file())
-            code = (release / "workflow/modules/code.md").read_text(encoding="utf-8")
-            for method in ("code-quality", "testing-review-quality"):
-                self.assertIn(f"methods/{method}/METHOD.md", code)
-                self.assertTrue((release / f"methods/{method}/METHOD.md").is_file())
+            alias = (release / "workflow/modules/code.md").read_text(encoding="utf-8")
+            self.assertIn("methods/code-quality/METHOD.md", alias)
+            code_path = release / "methods/code-quality/METHOD.md"
+            code = code_path.read_text(encoding="utf-8")
+            targets = [(code_path.parent / route).resolve() for route in re.findall(r"\[[^\]]+\]\(([^)]+)\)", code)]
+            testing = release / "methods/testing-review-quality/METHOD.md"
+            self.assertIn(testing.resolve(), targets)
+            self.assertTrue(testing.is_file())
             maintenance = minimal + sum(len((release / f"methods/{method}/METHOD.md").read_text(encoding="utf-8")) for method in ("workflow-quality", "workflow-skill-maintenance"))
             self.assertLessEqual(maintenance, 4_300)
             self.assertLessEqual(len((release / "workflow/onboarding.md").read_text(encoding="utf-8")), 1_000)
@@ -258,6 +265,9 @@ class DocumentPublicationTests(unittest.TestCase):
                 self.assertEqual(main(["documents", "snippet", "--root", str(public)]), 0)
             self.assertIn(public.resolve().as_posix() + "/WORKFLOW.md", output.getvalue())
             self.assertNotIn(publication["revision"], output.getvalue())
+            self.assertIn("普通问答、概念讨论和精确本地查询不启动流程", output.getvalue())
+            self.assertNotIn("每个用户顶层任务", output.getvalue())
+            self.assertIn("仅返回 revision、documentRoot 与正文", output.getvalue())
 
     def test_broken_publication_keeps_the_last_good_entry_and_rejects_tampering(self):
         with tempfile.TemporaryDirectory() as folder:

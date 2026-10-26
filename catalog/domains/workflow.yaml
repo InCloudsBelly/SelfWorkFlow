@@ -72,8 +72,8 @@ entries:
     source:
       kind: workflow
       path: workflow/core.md
-      revision: git:625d60297a6b30ecce0a1b03cac94ad04e7491cd
-      contentHash: sha256:ed898816a3ec453543eab1f64c23422a46258c43a2bb26163e4bf02aac73f858
+      revision: git:2e0d947babc6638fef77c921a6a640c3235ce92c
+      contentHash: sha256:15892cd674da888c9166dad48c44e68c308f08124caa7f0d29569b8e29d91d61
     aliases:
       - name: core-workflow
         target: workflow-core
@@ -116,8 +116,8 @@ entries:
     source:
       kind: skill
       path: skills/workflow-quality/SKILL.md
-      revision: git:625d60297a6b30ecce0a1b03cac94ad04e7491cd
-      contentHash: sha256:8caa2056c02037d452b9a639375aeed410ec0bcf5315db2e0c3ee4d8eeefdc72
+      revision: git:2e0d947babc6638fef77c921a6a640c3235ce92c
+      contentHash: sha256:ef7ba45c5cc3412179f3b79a8e3ee53708b6fb12396be86487e0ab7e2802a534
     aliases:
       - name: quality-guardrails
         target: workflow-quality
@@ -147,8 +147,8 @@ entries:
     source:
       kind: skill
       path: skills/testing-review-quality/SKILL.md
-      revision: git:2c295dd12c1c4e96741625fdd19c6b4a849a54ed
-      contentHash: sha256:8d3bc1657814c3b9a23fff851d2a6adb613b3e2972ddd9322681edfc06da215d
+      revision: git:603405193f4536c7c7a9981ac103a604f46608c2
+      contentHash: sha256:1f7258044392fe92ebee5d50285ffeacc1f7546dbb06c3e1ad01f67013234375
     aliases:
       - name: testing-review-gate
         target: testing-review-quality

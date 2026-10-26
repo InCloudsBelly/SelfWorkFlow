@@ -5,7 +5,7 @@ description: "在研究并撰写有来源的文章、教程、专题报告，或
 
 # 研究写作
 
-从本任务已验证的 bootstrap snapshot 绝对根目录读取 `references/community-skills/composio-skills/content-research-writer/SKILL.md`，复用 artifact manifest 并核对 hash。只把上游当作研究、结构、引用和迭代方法；当前入口的职责/触发边界优先。
+从本任务已绑定的引用根（文档模式 documentRoot；显式契约用已核验 runtime 根）读取 `references/community-skills/composio-skills/content-research-writer/SKILL.md`，复用当前版本与所需引用身份。只把上游当作研究、结构、引用和迭代方法；当前入口的职责/触发边界优先。
 
 先复用给定材料、已核实证据、受众、篇幅与用户风格。信息充分就写；仅缺关键事实时询问，不重启 Grill、不强制另建写作目录或 Claude 会话。需要新检索时遵守当前来源规则，事实、推断和缺证据分别说明；不得编造引用。
 

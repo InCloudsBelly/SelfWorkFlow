@@ -41,7 +41,7 @@ class WorkflowCompressionTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(baseline).hexdigest(), self.BASELINE_WORKFLOW_SHA256)
         self.assertLessEqual(len(text), 1_000)
         self.assertLessEqual(len(text), int(len(baseline.decode("utf-8")) * 0.10))
-        for path in ("workflow/modes/full.md", "workflow/modes/deep.md", "workflow/modules/code.md", "workflow/modules/build.md", "workflow/legacy-host.md"):
+        for path in ("workflow/modes/full.md", "workflow/modes/deep.md", "skills/code-quality/SKILL.md", "workflow/modules/build.md", "workflow/legacy-host.md"):
             self.assertIn(path, text)
             self.assertTrue((ROOT / path).is_file())
         self.assertNotIn("workflow/modes/light.md", text)
@@ -112,7 +112,7 @@ class WorkflowCompressionTests(unittest.TestCase):
     def test_representative_rule_route_stays_compact_without_duplicating_review(self):
         # Character budget for regression protection, not a measured token count.
         paths = (
-            "WORKFLOW.md", "workflow/modes/full.md", "workflow/modules/code.md",
+            "WORKFLOW.md", "workflow/modes/full.md",
             "workflow/modules/codegraph-read.md", "workflow/modules/review.md",
             "skills/code-quality/SKILL.md", "skills/workflow-quality/SKILL.md",
             "skills/testing-review-quality/SKILL.md",
@@ -164,10 +164,10 @@ class WorkflowCompressionTests(unittest.TestCase):
     def test_module_restrictions_are_scoped_to_their_operations_and_artifacts(self):
         expected = {
             "WORKFLOW.md": ("按实际操作读取", "模块失败仅阻塞依赖动作"),
-            "workflow/modules/knowledge.md": ("不适用于普通代码", "本次 Wiki 操作首调"),
+            "workflow/modules/knowledge.md": ("不适用于普通代码", "其他后端走显式 adapter"),
             "workflow/modules/artifacts.md": ("不强制普通任务新建", "不自动触发知识发布"),
             "workflow/modules/optional-integrations.md": ("只约束对应增强模块", "不阻塞无关模块"),
-            "skills/kg-selfopenwiki/SKILL.md": ("不约束其他模块或 SelfWorkflow 源 Git",),
+            "skills/kg-selfopenwiki/SKILL.md": ("不约束其他模块或 SelfWorkflow 源 Git", "本次Wiki首次MCP调用openwiki_status"),
             "workflow/modules/review.md": ("知识 Review 可读绑定候选与必要来源",),
         }
         for relative, phrases in expected.items():

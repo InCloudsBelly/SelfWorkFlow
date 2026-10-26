@@ -155,22 +155,18 @@ class ProviderManagerTests(unittest.TestCase):
             )
         self.assertEqual(manager.retire("legacy-provider")["status"], "absent")
 
-    def test_preflight_initializes_missing_project_before_returning_fresh(self):
+    def test_preflight_requires_explicit_initialization_for_a_missing_project(self):
+        from selfworkflow.v3.provider_manager import ProviderManagerError
+
         port = FakeCommandPort(
             self._result(stdout=self._status(initialized=False)),
-            self._result(stdout="initialized"),
-            self._result(stdout=self._status()),
         )
         manager, project = self._manager(port=port)
         self._configure(manager)
-        result = manager.preflight(str(project))
-        self.assertEqual(result["status"], "succeeded")
-        self.assertEqual(result["actions"], ["initialize"])
-        self.assertEqual(
-            port.calls[1]["argv"][:2],
-            ("node", str(self.root / "private" / "codegraph" / "dist" / "bin" / "codegraph.js")),
-        )
-        self.assertIn("init", port.calls[1]["argv"])
+        with self.assertRaisesRegex(ProviderManagerError, "codegraph-explicit-initialization-required"):
+            manager.preflight(str(project))
+        self.assertEqual(len(port.calls), 1)
+        self.assertEqual(port.calls[0]["argv"][2], "status")
 
     def test_sync_reports_rebuild_requirement_without_rebuilding(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
@@ -260,11 +256,10 @@ class ProviderManagerTests(unittest.TestCase):
             )
         self.assertEqual([call["argv"][2] for call in port.calls], ["status", "sync", "status", "sync"])
 
-    def test_failure_is_fail_closed_and_does_not_claim_fresh(self):
+    def test_command_failure_is_fail_closed_and_does_not_claim_fresh(self):
         from selfworkflow.v3.provider_manager import ProviderManagerError
 
         port = FakeCommandPort(
-            self._result(stdout=self._status(initialized=False)),
             self._result(exit_code=9, stderr="provider output"),
         )
         manager, project = self._manager(port=port)

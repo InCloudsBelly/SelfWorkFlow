@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: tea-test-design
-sourceHash: sha256:08993eb0237587f5fcdaf9aec2c2f5d30c1aa0dd2d066a22a24a92886fc44bc4
+sourceHash: sha256:b526cbdafa73e3f1c526c7f2bbe3c376c648340a27ee4ca8fb903464f46e50f1
 stage: planned
 slot: test.quality.plan
 selectionMode: static

@@ -773,11 +773,9 @@ def build_runtime(
                     temporary / "extensions/knowledge/selfopenwiki",
                     excluded_roots=_wiki_runtime_exclusions(source),
                 )
-                generic_skill = temporary / "skills" / "knowledge-backend" / "SKILL.md"
-                generic_skill.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(
-                    source / "skills/knowledge-backend/SKILL.md",
-                    generic_skill,
+                _copy_tree(
+                    source / "skills/knowledge-backend",
+                    temporary / "skills/knowledge-backend",
                 )
                 _copy_tree(
                     source / "skills/kg-selfopenwiki",

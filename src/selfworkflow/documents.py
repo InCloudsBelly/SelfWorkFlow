@@ -92,9 +92,9 @@ def render_document_instruction(public_root: str | Path) -> str:
     root = _safe(Path(public_root).absolute())
     return (
         "## SelfWorkflow 文档入口\n\n"
-        f"每个用户顶层任务开始前，实际读取并遵循 `{(root / 'WORKFLOW.md').as_posix()}`。\n"
+        f"工程开发、修复、代码审查或显式工作流任务，首次读取并遵循 `{(root / 'WORKFLOW.md').as_posix()}`。\n"
         "子任务、独立 Reviewer 和上下文续接继承主任务的文档 revision 与 documentRoot，不重新选择 latest。\n"
-        "只按需读取当前版本的规则和方法，不使用历史安装的规则/方法副本；本入口不内嵌版本化规则。\n"
+        "普通问答、概念讨论和精确本地查询不启动流程；兼容指针在工具内解析，仅返回 revision、documentRoot 与正文。只读命中规则，不读历史安装副本；本入口不内嵌版本化规则。\n"
         "入口或必要能力不可用时报告对应缺口，不虚构执行或验证结果。\n"
     )
 

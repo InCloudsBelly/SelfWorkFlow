@@ -1,14 +1,11 @@
 ---
 name: kg-selfopenwiki
-description: 在 SelfWorkflow knowledge profile 下读取、总结、更新、恢复、绑定或可视化个人 Wiki 时使用；也用于开发预览经 WheelMaker/Relay、反向代理或 iframe 后持续加载、空白，或静态脚本 403 时查询相关排障知识。明确另选知识后端时服从该选择。其他普通代码任务、普通 Markdown 编辑、仅生成 Obsidian 产物不触发；改造 Skill/工作流由 workflow-skill-maintenance 负责。
+description: 已选 SelfWiki 后读取/提议/更新/恢复/绑定/浏览个人Wiki，或Relay/代理/iframe预览加载、空白、静态脚本403的知识查询；另选后端时服从。普通代码/Markdown/Obsidian不触发。
 ---
 
-# SelfOpenWiki 后端入口
+# SelfOpenWiki 操作入口
 
-SelfWorkflow 管模式、阶段、授权、Review 和验证；本 Skill 只路由 Wiki 操作。
-下文的 status/readiness、发布确认、CAS 和 Wiki Git 限制仅作用于 Wiki 操作与 Wiki 仓库，不约束其他模块或 SelfWorkflow 源 Git。
-先判断本轮操作，只读下表对应引用。任务换操作时补读所需引用，已读且版本未变的规则复用。
-不要因 `knowledge` profile 或出现链接而加载全部引用、模块内部 Writer Skill 或完整 MCP 契约。
+SelfWorkflow 管阶段/授权/Review，本方法只路由；下述限制不约束其他模块或 SelfWorkflow 源 Git。只读当前操作引用，换操作补缺，同版已读复用；不因profile/链接预载全部引用、内部Writer或完整MCP契约。
 
 | 本轮操作 | 必需引用 |
 | --- | --- |
@@ -20,15 +17,11 @@ SelfWorkflow 管模式、阶段、授权、Review 和验证；本 Skill 只路�
 | 安装、重绑、检查接入 | [setup.md](references/setup.md) |
 | 明确选择旧 external 或 legacy_provider 协议 | [compatibility.md](references/compatibility.md) |
 
-未说明是否写入的“整理 Wiki”先按只读/提议处理；发布仍需用户确认。
+“整理Wiki”未明确写入先只读/提议；直接要求总结到Wiki/更新/发布即对应范围授权，不重问。read只读，propose不发布，update绑定来源/版本、独立Review与CAS；Writer只写分配候选，Reviewer只读，不直接写正式Wiki、不造hash/receipt/来源/验证或成功。
+本次Wiki首次MCP调用openwiki_status；以实时strict schema、结构化状态和操作capability为准，默认schema2/external_agent/authRequired=false。缺工具/能力/可验证路径或漂移仅对应动作unverified，不猜字段/切后端/legacy fallback；ready=false可诊断，安全读/有效Viewer分别判门禁。
+工作流沿原documentRoot/revision；Wiki运行身份只绑定模块/依赖/Skill/协议/执行构建及能力证据，整仓dirty/无关变动/暂存/父仓或公共版本不单独失效。规则经模块验证后可热加载；换执行构建需重连MCP。若recovery.message明确“Reconnect this MCP server”，先重连再status，不能在旧连接反复retry。
+一致性读、个人发布/写恢复要求version.mcpServer>=0.1.2；旧版仅status/只读诊断，不凭安装推断连接升级。只核对本次及已知同Wiki参与者，不枚举其他会话/进程；已知不兼容并发无法安全排除则对应读写unverified。
+唯一Wiki根为paths.wikiRoot，不读Agent自己的Wiki或猜目录。正式Markdown/长期Claims/可分享来源属独立Wiki Git，同级<根>.selfopenwiki仅本机事务。实现属显式SelfWorkflow源根extensions/knowledge/selfopenwiki及固定submodule，不从snapshot猜dist或扫描磁盘；仅安装/迁移读其WIKI_LAYOUT.md。
+发布不自动commit/push，两者各查授权并复用同范围授权；不把个人路径、凭据、私有receipt/运行数据写公共Git。专业规则不另起完整工作流。
 
-## 共用边界
-
-- 本次 Wiki 操作的第一次 MCP 调用是 `openwiki_status`，以实时 strict schema、结构化状态和 capability 为准。默认是 schema 2、`external_agent`、`authRequired=false`；只检查本次操作需要的能力，缺工具/能力、路径不可验证或证据漂移时仅对应动作 `unverified`，不猜字段、不切换后端或 legacy fallback。`ready=false` 仍允许恢复诊断，不自动禁止 verified 的安全读取或有效 Viewer；各自遵守一致性与能力门禁。
-- 工作流规则身份绑定本任务的 `documentRoot/revision`；Wiki 运行身份独立绑定当前模块内容及对应能力证据。整仓 dirty、无关规则变动、Git 暂存状态或父仓/公共文档版本变化，不单独阻止已验证模块的 Agent 调用；模块自身、依赖或协议漂移仍按对应能力失效并重新验证。可热加载的规则在模块验证通过后于下一次调用生效；可执行构建变化须重连当前 MCP。
-- 若 `openwiki_status` 或工具的 `recovery.message` 明确要求 `Reconnect this MCP server`，重连当前 MCP 并重新读取 status；不能只按 `recovery.action=retry` 在旧连接上反复调用。
-- 一致性读取、个人发布和写恢复要求 `version.mcpServer >= 0.1.2`。旧版只用于 status/只读诊断；不以安装成功推断当前连接已升级。核对本次实际使用及已知参与同一 Wiki 操作的连接，不为证明“没有旧连接”枚举其他会话/进程。已知不兼容的并发参与者不能安全排除时，仅对应读写保持 `unverified`；诊断和独立工作继续。
-- `paths.wikiRoot` 是唯一 override Wiki root；不读 Agent 自己的 Wiki、不猜其他目录。正式 Markdown、长期 `.claims` 和可分享来源属于独立 Wiki Git；同级 `<wiki-root>.selfopenwiki` 只保存本机事务状态。迁移阅读/导入规范见当前 runtime 根 `extensions/knowledge/selfopenwiki/WIKI_LAYOUT.md`，仅安装/迁移时读取。
-- Wiki 实现属于 SelfWorkflow 源 Git 的 `extensions/knowledge/selfopenwiki/`，上游依赖由根 `.gitmodules` 固定；不依赖独立 SelfOpenWiki 源仓库。snapshot 保存规则与受控源码；实际 MCP/Viewer 构建使用显式 SelfWorkflow 源根，不能从 snapshot 猜 `dist` 或扫描磁盘找源码。
-- `knowledge.read` 只读，`knowledge.propose` 不发布；`knowledge.update` 需有效写入授权、版本/来源校验、独立 Review 和 CAS。直接要求总结到 Wiki、更新或发布即覆盖对应范围，不重问同一授权；格式修正与无语义冲突的 revision 刷新只重新核验技术绑定。Writer 只写返回的候选包，Reviewer 只读候选；不直接写正式 Wiki，不虚构来源、hash、receipt、模型验证或发布成功。
-- 发布不自动 commit/push；两者各需明确授权，已有同范围授权复用。个人路径、凭据、私有 receipt 和运行数据不写入 SelfWorkflow 公共 Git。专业规则复用 SelfWorkflow 门禁，不另起完整工作流。
+restore_required 禁止不一致读取/写入，Viewer直接文件浏览不承诺快照一致；读取用 verified openwiki_read，先目录/revision再选页。已选SelfWiki时预览排障只读查既有知识，不建发布事务；普通网页慢、模型或任意API403不触发，知识不可用不阻原诊断。

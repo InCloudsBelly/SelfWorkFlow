@@ -5,7 +5,7 @@ Pipeline、PlanGraph、RunLedger、Review dispatch、Provider 或知识后端。
 
 ## 适用条件
 
-仅当任务强度为 `Full`/`Deep`，或一次任务形成至少两份正式工作文档（设计、
+须显式启用本扩展，并满足以下任一条件：任务强度为 `Full`/`Deep`；或形成至少两份正式工作文档（设计、
 测试设计、实施计划、整体 Review 摘要）时启用。`Light` 单份文档不创建正式
 生命周期记录。
 

@@ -41,6 +41,42 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 metadata = yaml.safe_load((entry.parent / "agents/openai.yaml").read_text(encoding="utf-8"))
                 self.assertIs(metadata["policy"]["allow_implicit_invocation"], False)
 
+    def test_optional_method_references_resolve_in_runtime_and_document_packages(self):
+        import hashlib
+        import re
+        import yaml
+        from selfworkflow.documents import publish_documents
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            manifest = build_runtime(self.ROOT, runtime, "layout-regression", profile="core")
+            publication = publish_documents(self.ROOT, root / "public")
+            documents = Path(publication["documentRoot"])
+            entries = {item["path"]: item["sha256"] for item in manifest["files"]}
+            callers = (("testing-review-quality", "tdd"),
+                       ("workflow-skill-maintenance", "skill-creator"))
+            for carrier, package, directory, filename in (
+                ("runtime", runtime, "skills", "SKILL.md"),
+                ("document", documents, "methods", "METHOD.md"),
+            ):
+                for caller, expected_method in callers:
+                    with self.subTest(carrier=carrier, caller=caller):
+                        rule = package / directory / caller / filename
+                        body = rule.read_text(encoding="utf-8")
+                        references = [(path, rule.parent) for path in re.findall(r"\]\(([^)\n]+/(?:SKILL|METHOD)\.md)\)", body)]
+                        references += [(path, package) for path in re.findall(r"`([^`\n]+/(?:SKILL|METHOD)\.md)`", body)]
+                        self.assertEqual(len(references), 1, caller)
+                        reference, base = references[0]
+                        target = (base / reference).resolve()
+                        self.assertTrue(target.is_relative_to(package.resolve()), reference)
+                        self.assertTrue(target.is_file(), reference)
+                        metadata = yaml.safe_load(target.read_text(encoding="utf-8").split("---", 2)[1])
+                        self.assertEqual(metadata["name"], expected_method)
+                        if carrier == "runtime":
+                            relative = target.relative_to(runtime.resolve()).as_posix()
+                            self.assertEqual(entries[relative], hashlib.sha256(target.read_bytes()).hexdigest())
+
     def test_default_runtime_is_deterministic_lightweight_core(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
@@ -66,22 +102,21 @@ class RuntimeSnapshotTests(unittest.TestCase):
                 (self.ROOT / "WORKFLOW.md").read_bytes(),
             )
             workflow_text = (root / "first/WORKFLOW.md").read_text(encoding="utf-8")
-            for phrase in (
-                "SelfWorkflow active: <profile>",
-                "mode: <Light|Full|Deep>",
-                "阶段/总阶段",
-                "独立 SubAgent",
-                "所有模式禁止双 Reviewer",
-                "侵入预算",
-                "测试不能反向扩张生产架构",
-                "实施契约",
-                "首次编辑测试/生产代码前",
-                "已有同范围授权复用",
-                "关键风险变化需重新确认",
-                "按实际命中加载",
-                "官方 MCP",
-            ):
-                self.assertIn(phrase, workflow_text)
+            self.assertIn("按实际操作读取", workflow_text)
+            owners = {
+                "workflow/core.md": ("SelfWorkflow active: <profile>", "mode: <Light|Full|Deep>",
+                                     "已完成主阶段/总主阶段", "已有同范围授权复用"),
+                "workflow/modules/review.md": ("一个独立 SubAgent", "所有模式取消双 Reviewer"),
+                "skills/code-quality/references/change-rules.md": (
+                    "侵入预算", "测试不能反向驱动生产架构", "实施契约",
+                    "第一次编辑测试、生产代码", "真正越出批准目标/owner", "更窄方案后确认"),
+                "workflow/modules/codegraph-read.md": ("官方 MCP",),
+            }
+            for relative, phrases in owners.items():
+                packaged = root / "first" / relative
+                self.assertEqual(packaged.read_bytes(), (self.ROOT / relative).read_bytes())
+                for phrase in phrases:
+                    self.assertIn(phrase, packaged.read_text(encoding="utf-8"))
             self.assertFalse((root / "first/extensions").exists())
             self.assertTrue((root / "first/schemas/plan-graph.schema.json").is_file())
             self.assertTrue((root / "first/schemas/work-artifact-manifest.schema.json").is_file())

@@ -34,6 +34,14 @@ class WikiModuleRuntimeTests(unittest.TestCase):
                 self.assertEqual(
                     entry["sha256"], hashlib.sha256(content).hexdigest()
                 )
+                for authored in (self.ROOT / "skills/knowledge-backend/references").glob("*.md"):
+                    relative = "skills/knowledge-backend/references/" + authored.name
+                    with self.subTest(reference=relative):
+                        packaged = output / relative
+                        self.assertTrue(packaged.is_file(), relative)
+                        self.assertEqual(packaged.read_bytes(), authored.read_bytes())
+                        entry = next(item for item in manifest["files"] if item["path"] == relative)
+                        self.assertEqual(entry["sha256"], hashlib.sha256(authored.read_bytes()).hexdigest())
         finally:
             reference.unlink(missing_ok=True)
             if not any(references.iterdir()):

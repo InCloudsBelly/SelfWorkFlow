@@ -236,7 +236,10 @@ class TestingReviewHardeningTests(unittest.TestCase):
             execution_policy_snapshot=self._execution_policy(catalog, read_only_review),
         )
         reviewed = next(stage for stage in graph.document["stages"] if stage["stageId"] == "reviewed")
-        for slot_id in ("review.self", "review.independent", "test.quality.review"):
+        independent = next(slot for slot in reviewed["slots"] if slot["slotId"] == "review.independent")
+        self.assertEqual(independent["applicability"], "applicable")
+        self.assertEqual(independent["selectedModules"], ["review-code-review"])
+        for slot_id in ("review.self", "test.quality.review"):
             slot = next(slot for slot in reviewed["slots"] if slot["slotId"] == slot_id)
             self.assertEqual(slot["applicability"], "not-applicable")
         implemented = next(stage for stage in graph.document["stages"] if stage["stageId"] == "implemented")

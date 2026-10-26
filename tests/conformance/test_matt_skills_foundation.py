@@ -299,24 +299,30 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertIn("TEA", workflow)
         self.assertIn("显式", workflow)
         self.assertIn("CodeGraph", workflow)
-        self.assertIn("过期", workflow)
+        self.assertIn("modules/codegraph-read.md", workflow)
+        graph = (self.ROOT / "workflow/modules/codegraph-read.md").read_text(encoding="utf-8")
+        for boundary in ("indexState=complete", "不自动 init", "不冒充图证据"):
+            self.assertIn(boundary, graph)
         self.assertIn("Ponytail", workflow)
         self.assertIn("非代码任务不自动加载", workflow)
         self.assertNotIn("Caveman", workflow)
         self.assertNotIn("只读取当前阶段需要的 Superpowers Skill", workflow)
 
         active_workflow = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        self.assertIn("modules/code.md", active_workflow)
-        self.assertIn("Ponytail、C++、项目 Review Skill 按实际命中加载", active_workflow)
+        self.assertIn("skills/code-quality/SKILL.md", active_workflow)
+        self.assertIn("引用不触发", active_workflow)
         code_module = (self.ROOT / "workflow/modules/code.md").read_text(encoding="utf-8")
-        self.assertIn("codegraph-read.md", code_module)
+        self.assertIn("skills/code-quality/SKILL.md", code_module)
+        code_quality = (self.ROOT / "skills/code-quality/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("modules/codegraph-read.md", code_quality)
+        self.assertIn("C++、项目 Review、Ponytail 只按实际信号加载", code_quality)
         cpp_skill = (self.ROOT / "skills/cpp-core/SKILL.md").read_text(
             encoding="utf-8"
         )
-        self.assertIn("代码阅读优先级", cpp_skill)
-        self.assertIn("CodeGraph 缺失、过期", cpp_skill)
-        self.assertIn("新对话第一次命中代码任务", cpp_skill)
-        self.assertIn("本对话偏好", cpp_skill)
+        self.assertIn("modules/codegraph-read.md", cpp_skill)
+        for boundary in ("所有权", "生命周期", "UB", "并发/内存序", "ABI"):
+            self.assertIn(boundary, cpp_skill)
+        self.assertIn("不另做状态检查、初始化或询问偏好", cpp_skill)
         provider_doc = (self.ROOT / "docs/providers/codegraph.md").read_text(
             encoding="utf-8"
         )

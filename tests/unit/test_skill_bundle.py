@@ -49,6 +49,56 @@ class SkillBundleTests(unittest.TestCase):
         self.assertEqual(code, 0, output)
         return json.loads(output)
 
+    def test_consumer_skill_contains_bound_core_and_direct_method_routes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = repository(folder)
+            (source / "WORKFLOW.md").write_text(
+                "# Consumer core\n\nUse [Example](skills/example/SKILL.md).\nSee `methods/INDEX.md`.\n", encoding="utf-8",
+            )
+            result = self.sync(source)
+            root_entry = (source / "SKILL.md").read_text(encoding="utf-8")
+            portable = (source / "skills/selfworkflow/SKILL.md").read_text(encoding="utf-8")
+            self.assertIn("# Consumer core", portable)
+            self.assertIn("`methods/example/METHOD.md`", portable)
+            self.assertIn("`methods/INDEX.md`", portable)
+            for entry, text in ((source / "SKILL.md", root_entry),
+                                (source / "skills/selfworkflow/SKILL.md", portable)):
+                binding = re.search(r"\[绑定规则源\]\(([^)]+)\)", text)[1]
+                directory = (entry.parent / binding).parent
+                self.assertTrue((directory / "methods/example/METHOD.md").is_file())
+                self.assertTrue((directory / "methods/INDEX.md").is_file())
+                self.assertLessEqual(text.count(result["revision"]), 2)
+            self.assertIn("无需再读公共转发页", portable)
+            self.assertEqual(invoke("skill", "check", "--repository", str(source))[0], 0)
+
+    def test_check_rejects_tampered_inline_core_even_when_both_entries_match(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = repository(folder)
+            (source / "WORKFLOW.md").write_text("# Canonical core\n", encoding="utf-8")
+            self.sync(source)
+            for relative in ("SKILL.md", "skills/selfworkflow/SKILL.md"):
+                entry = source / relative
+                text = entry.read_text(encoding="utf-8")
+                self.assertIn("# Canonical core", text)
+                entry.write_text(text.replace("# Canonical core", "# Changed core"), encoding="utf-8")
+            code, output = invoke("skill", "check", "--repository", str(source))
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("skill-core-stale", output)
+
+    def test_reserved_core_markers_fail_before_replacing_any_published_entry(self):
+        for marker in ("<!-- selfworkflow:core -->", "<!-- /selfworkflow:core -->"):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as folder:
+                source = repository(folder)
+                self.sync(source)
+                entries = [source / "SKILL.md", source / "skills/selfworkflow/SKILL.md",
+                           source / BUNDLE / "WORKFLOW.md", source / "public/WORKFLOW.md"]
+                before = [entry.read_bytes() for entry in entries]
+                (source / "WORKFLOW.md").write_text(f"# Invalid core\n{marker}\n", encoding="utf-8")
+                code, output = invoke("skill", "sync", "--repository", str(source))
+                self.assertNotEqual(code, 0, output)
+                self.assertIn("skill-core-invalid", output)
+                self.assertEqual([entry.read_bytes() for entry in entries], before)
+
     def test_sync_rejects_a_non_skill_directory_before_creating_outputs(self):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder)

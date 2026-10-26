@@ -5,7 +5,7 @@ description: "仅在明确创建或编辑 JSON Canvas、.canvas 文件或 Obsidi
 
 # JSON Canvas 产物
 
-从本任务已验证的 bootstrap snapshot 绝对根目录读取 `references/community-skills/obsidian-skills/skills/json-canvas/SKILL.md`，复用 artifact manifest 并核对 hash。没有明确 .canvas/JSON Canvas/Obsidian 画布产物意图时使用既有图示或可视化能力，不自行改变输出格式。
+从本任务已绑定的引用根（文档模式 documentRoot；显式契约用已核验 runtime 根）读取 `references/community-skills/obsidian-skills/skills/json-canvas/SKILL.md`，复用当前版本与所需引用身份。没有明确 .canvas/JSON Canvas/Obsidian 画布产物意图时使用既有图示或可视化能力，不自行改变输出格式。
 
 读取给定结构/文件和目标路径，创建或编辑 JSON Canvas 节点、边、分组与布局；保留既有 ID、内容和用户修改。引用文件时沿用已批准位置，不扫描 vault、不搬移原文件。
 

@@ -6,10 +6,10 @@
 
 | 模块 | 阶段 / slot | 执行入口 | 边界 |
 | --- | --- | --- | --- |
-| `tea-framework` | Plan / `plan.assessment` | `skills/tea-quality/SKILL.md` → framework | 只读评估已有框架、测试约定、命令与缺口；不生成脚手架。 |
-| `tea-ci` | Verify、Release 检查 / `verify.ci` | `skills/tea-quality/SKILL.md` → ci | 只读检查流水线、质量门禁、制品和运行证据；不编辑 CI，不启动远端任务。 |
+| `tea-framework` | Plan / `plan.assessment` | [skills/tea-quality/SKILL.md](../../skills/tea-quality/SKILL.md) → framework | 只读评估已有框架、测试约定、命令与缺口；不生成脚手架。 |
+| `tea-ci` | Verify、Release 检查 / `verify.ci` | [skills/tea-quality/SKILL.md](../../skills/tea-quality/SKILL.md) → ci | 只读检查流水线、质量门禁、制品和运行证据；不编辑 CI，不启动远端任务。 |
 | `ponytail-debt` | Review / `review.debt` | `skills/ponytail-debt/SKILL.md` | 当前任务范围的一次性债务报告；不启用会话模式，不修改代码，不自动落盘。 |
-| `implement-spec` | Implement 前置 / `implement.spec` | `skills/implement-spec/SKILL.md` | 大型多任务需求的可选实施契约与协调指引；必须已有 spec、任务 DAG、Plan Review 和明确实施确认。 |
+| `implement-spec` | Implement 前置 / `implement.spec` | [skills/implement-spec/SKILL.md](../../skills/implement-spec/SKILL.md) | 大型多任务需求的可选实施契约与协调指引；必须已有 spec、任务 DAG、Plan Review 和明确实施确认。 |
 
 普通对话直接按上述入口读取技能；只有 contract-managed Host 才生成 PlanGraph 和 RunLedger。
 V3 的 `implement-spec` 还要求 `durableSpec=true`、`requirementsMaturity=approved`、`writeTask=true` 和 `operationType=implement`。

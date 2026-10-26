@@ -33,7 +33,7 @@ Windows 目标为 `%USERPROFILE%\.agents\skills\selfworkflow\`。这是 Skill �
 
 `Publish_SelfWorkFlow_Documents.bat` 调用同一同步流程；消费者不用运行它。根 `SKILL.md` 是入口文字的唯一维护源；安装副本由它派生。同步从同一份内容快照更新随包规则和兼容 `public`，保留旧版本；检查同时验证源码一致性、入口副本、资源与保留版本，漏同步会失败。测试包含这项仓库交付检查。
 
-源码、根入口、安装副本和完整新版本目录须一起提交。后续 clone/pull 获取到的就是可直接读取的最终 Skill；已安装副本通过宿主的来源更新刷新。`SKILL.md` 正文显示规则版本的前 12 位 hash，由 `skill sync` 自动生成、`skill check` 校验。进行中的任务继续使用保留的旧 revision，不手工删除或改写版本目录。新任务只读 Skill、短版本指针与核心规则；Light 无额外模式文件，Full/Deep 和专业方法按实际操作加载，不遍历全部 Supporting files。
+源码、根入口、安装副本和完整新版本目录须一起提交。后续 clone/pull 获取到的就是可直接读取的最终 Skill；已安装副本通过宿主的来源更新刷新。`SKILL.md` 正文显示规则版本的前 12 位 hash，由 `skill sync` 自动生成、`skill check` 校验。进行中的任务继续使用保留的旧 revision，不手工删除或改写版本目录。新任务只读 Skill 内联的绑版核心规则，无需再读公共指针或重复核心；内部路径相对绑定 documentRoot；Light 无额外模式文件，Full/Deep 和专业方法按实际操作加载，不遍历全部 Supporting files。
 
 ## 公共文档兼容入口
 

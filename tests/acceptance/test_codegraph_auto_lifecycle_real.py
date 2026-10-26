@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from selfworkflow.v3.codegraph_lifecycle import CodeGraphProjectError, CodeGraphProjectLifecycle
 from selfworkflow.v3.providers.codegraph import CodeGraphAdapter, CommandResult
@@ -48,6 +49,13 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
         )
         self.addCleanup(self.temporary.cleanup)
         self.project = Path(self.temporary.name).resolve()
+        # A fixture below a real indexed checkout must not adopt its parent's
+        # graph during the missing-index check. Isolate all three consumers:
+        # lifecycle, CLI, and MCP, using the supported directory override.
+        self.index_directory = ".codegraph-" + self.project.name
+        directory_environment = mock.patch.dict(os.environ, {"CODEGRAPH_DIR": self.index_directory})
+        directory_environment.start()
+        self.addCleanup(directory_environment.stop)
         self.environment = dict(os.environ)
         self.environment.update({
             "CODEGRAPH_NO_DAEMON": "1", "CODEGRAPH_WASM_RELAUNCHED": "1",
@@ -59,7 +67,7 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
             self.environment["TMP"] = self.environment["TEMP"]
         self.port = RealCommandPort(self.environment)
         self._git("init", "-b", "codex/fixture-alpha")
-        self._write(".gitignore", ".codegraph/\nignored/\n")
+        self._write(".gitignore", f"{self.index_directory}/\nignored/\n")
         self._write("alpha.py", "def branch_alpha_only():\n    return 1\n")
         self._commit("alpha fixture")
         self._git("checkout", "-b", "codex/fixture-beta")
@@ -70,10 +78,19 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
 
     def _lifecycle(self):
         # Match the official CLI/Manager's separate adapter session per boundary.
-        return CodeGraphProjectLifecycle(CodeGraphAdapter(
+        return CodeGraphProjectLifecycle(self._adapter())
+
+    def _adapter(self):
+        return CodeGraphAdapter(
             command_port=self.port, command_prefix=(self.node, self.script),
             ownership="user-local",
-        ))
+        )
+
+    def _initialize(self, project=None):
+        adapter = self._adapter()
+        root = str(project or self.project)
+        plan = adapter.plan_maintenance("initialize", root)
+        return adapter.execute_maintenance(plan, root, confirmed_plan_hash=plan["planHash"])
 
     def _git(self, *arguments, project=None):
         root = project or self.project
@@ -109,8 +126,13 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
         return any(node.get("name") == name for node in self._symbols(name))
 
     def test_branch_manual_untracked_and_workflow_batches_reconcile_actual_nodes(self):
+        with self.assertRaisesRegex(CodeGraphProjectError, "codegraph-explicit-initialization-required"):
+            self._lifecycle().preflight(str(self.project))
+        self.assertFalse((self.project / self.index_directory / "codegraph.db").exists())
+        self.assertTrue(all(call[2] == "status" for call in self.port.calls))
+        self._initialize()
         initial = self._lifecycle().preflight(str(self.project))
-        self.assertEqual(initial["actions"], ["initialize"])
+        self.assertEqual(initial["actions"], ["sync"])
         self.assertTrue(self._has_symbol("branch_alpha_only"))
 
         self._git("checkout", "codex/fixture-beta")
@@ -152,6 +174,7 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
         self.assertEqual(self._symbols("final_batch_symbol")[0]["updatedAt"], unchanged_node["updatedAt"])
 
     def test_official_mcp_default_watcher_and_cross_project_preflight(self):
+        self._initialize()
         self._lifecycle().preflight(str(self.project))
         other_temporary = tempfile.TemporaryDirectory(
             prefix="selfworkflow-cg-cross-", dir=self.project.parent, ignore_cleanup_errors=True,
@@ -239,7 +262,7 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
 
         # The same MCP session reads another root whose cached graph has no watcher.
         self._git("init", "-b", "codex/cross-alpha", project=other_project)
-        (other_project / ".gitignore").write_text(".codegraph/\n", encoding="utf-8")
+        (other_project / ".gitignore").write_text(f"{self.index_directory}/\n", encoding="utf-8")
         (other_project / "cross.py").write_text("def cross_branch_alpha_only():\n    return 1\n", encoding="utf-8")
         self._git("add", "--all", project=other_project)
         self._git("commit", "-m", "cross alpha", project=other_project)
@@ -248,6 +271,7 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
         self._git("add", "--all", project=other_project)
         self._git("commit", "-m", "cross beta", project=other_project)
         self._git("checkout", "codex/cross-alpha", project=other_project)
+        self._initialize(other_project)
         self._lifecycle().preflight(str(other_project))
         self.assertIn("cross_branch_alpha_only", json.dumps(explore(other_project, "cross_branch_alpha_only", 3)))
         self._git("checkout", "codex/cross-beta", project=other_project)
@@ -263,6 +287,7 @@ class CodeGraphAutoLifecycleRealTests(unittest.TestCase):
         self.assertTrue(self._has_symbol("native_watcher_new_symbol"))
 
     def test_native_lock_contention_is_busy_and_next_boundary_recovers(self):
+        self._initialize()
         self._lifecycle().preflight(str(self.project))
         self._git("checkout", "codex/fixture-beta")
         sdk = Path(self.script).resolve().parent.parent / "index.js"
