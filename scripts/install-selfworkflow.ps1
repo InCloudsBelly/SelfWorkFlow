@@ -512,7 +512,8 @@ function Ensure-CodeGraphMcpLauncher {
     if ($RuntimeRoot.Replace('/', '\').TrimEnd('\').EndsWith('\extensions\codegraph\codegraph_ue', [StringComparison]::OrdinalIgnoreCase)) {
         # shortcut: shared package versions cannot identify fork daemons; retire when the daemon handshake binds builds.
         $directMode = 'set "CODEGRAPH_NO_DAEMON=1"' + "`r`n" +
-            'if not defined CODEGRAPH_WATCHDOG_TIMEOUT_MS set "CODEGRAPH_WATCHDOG_TIMEOUT_MS=600000"'
+            'if not defined CODEGRAPH_WATCHDOG_TIMEOUT_MS set "CODEGRAPH_WATCHDOG_TIMEOUT_MS=600000"' + "`r`n" +
+            'if not defined CODEGRAPH_QUERY_BUSY_TIMEOUT_MS set "CODEGRAPH_QUERY_BUSY_TIMEOUT_MS=180000"'
     }
     $parent = Split-Path -Parent $TargetPath
     [IO.Directory]::CreateDirectory($parent) | Out-Null
