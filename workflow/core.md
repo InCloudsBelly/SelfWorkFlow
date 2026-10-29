@@ -30,7 +30,7 @@
 
 ## 实施前整体 Review
 
-普通中间文档不单开审查；高风险前置审查只接收完整必要包。Full/Deep 交付前一个独立 Reviewer 综合 Standards/Spec；Light 窄自审。所有模式取消双 Reviewer，修复只复核影响项；能力缺失及交付边界按 [workflow/modules/review.md](modules/review.md) 处理。仅显式契约的 Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision；普通任务不创建这些回执。Review SubAgent 只读绑定材料，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent，不导入作者历史；继承主 Agent 模型/推理配置，不使用专属覆盖。
+普通中间文档不单开审查；高风险前置审查只接收完整必要包。Full/Deep 交付前一个独立 Reviewer 综合 Standards/Spec；Light 窄自审。所有模式取消双 Reviewer，先完成约定范围的覆盖，再按有效覆盖缩小修复复核范围；覆盖完成条件、能力缺失及交付边界按 [workflow/modules/review.md](modules/review.md) 处理。仅显式契约的 Review 结果绑定 `design.gate`、`plan.gate`、`decision-record`，关键决策要求 `selectedId == recommendationId` 或记录用户选择、local component、easy rollback 和 critical decision；普通任务不创建这些回执。Review SubAgent 只读绑定材料，不调用 CodeGraph、provider、验证、写入、知识更新或下级 Agent，不导入作者历史；继承主 Agent 模型/推理配置，不使用专属覆盖。
 
 ## 按需能力
 
