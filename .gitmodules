@@ -25,7 +25,7 @@
 [submodule "extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer"]
 	path = extensions/knowledge/selfopenwiki/visualizer/zxh_wiki_viewer
 	url = https://github.com/InCloudsBelly/zxh_wiki_viewer.git
-	branch = codex/selfopenwiki-local-source
+	branch = main
 [submodule "extensions/codegraph/codegraph_ue"]
 	path = extensions/codegraph/codegraph_ue
 	url = https://github.com/InCloudsBelly/codegraph_ue.git
