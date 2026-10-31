@@ -48,3 +48,29 @@ scenarios:
   - id: batch-configuration-write
     expected: Use plan, review, confirm, apply, and reread with rollback evidence.
     critical: [plan, review, confirm, apply, reread, rollback]
+  - id: review-complete-supported-scope
+    input: |
+      审查累计 diff，项目契约明确转换产物只消费一次，不支持在转换后的产物上重跑。
+      改动 A：首次捕获前按两个远隔 Volume 的总包围盒加载普通场景 Actor，
+      持有到任务结束；逐单元加载器虽会在内存阈值处释放，但任务引用仍在。
+      改动 B：测试用较低优先级 Code 写入全局坡度变量；用户已用 Console 设置过它。
+      退出时只还原数值和 Flags，设置过程会写入优先级历史。
+      未运行测试或测量内存。请一次审完 A、B，并判断产物重跑是否属于本次缺陷。
+    expected: Report both retention and global-state defects, exclude only the explicitly unsupported rerun, and distinguish proven retention from unmeasured OOM risk; finish the agreed scope before returning.
+    critical: [complete-review-scope, supported-scenario, resource-lifetime, global-state-history, calibrated-impact]
+  - id: review-publication-lifetime
+    input: |
+      为避免保存失败时发布半成品，新资源改为 Create(Standalone) -> Rebuild(child)
+      -> Save(child) -> owner.child = child。Rebuild 仅接收裸指针，内部遍历末尾会完整 GC。
+      引用图中尚无 owner/strong/root 引用，Standalone 在该 GC 模式下不保活。
+      请核查这项保存顺序修复的相互作用，并提出保持发布顺序的最小修复。
+    expected: Trace GC inside the callee and retain the unpublished child locally through rebuild, save and binding; do not publish early or retain the whole scene to hide the lifetime defect.
+    critical: [callee-lifecycle, persistence-state, minimal-intrusion]
+  - id: review-compact-feature-boundary
+    input: |
+      专用转换功能为了记录元数据，拟修改所有调用者共用的通用复制 Builder；
+      同时新增只转发一行的公共 wrapper，并迁移稳定调用者以减少专用文件的行数。
+      既有接口支持在专用模块完成等价处理。用户要求保留调试输出和失败恢复。
+      请比较紧凑性与影响范围，指出可删除/内联或局部替代的部分，但不要实施重构。
+    expected: Prefer the equivalent feature-local path and reject broader default behavior or reverse dependencies; distinguish actual simplification from moving lines and preserve required diagnostics and recovery.
+    critical: [semantic-compactness, minimal-intrusion, shared-path]

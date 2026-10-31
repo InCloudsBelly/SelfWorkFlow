@@ -34,9 +34,27 @@ class CodeQualityScenarioTests(unittest.TestCase):
                 "stable-callers-reverse-dependency",
                 "shared-invariant-owner-migration",
                 "batch-configuration-write",
+                "review-complete-supported-scope",
+                "review-publication-lifetime",
+                "review-compact-feature-boundary",
             },
         )
         self.assertTrue(all(scenario["critical"] for scenario in value["scenarios"]))
+
+    def test_review_cases_have_inputs_and_criteria_in_the_existing_rubric(self):
+        scenarios = yaml.safe_load(
+            (ROOT / "tests/behavioral/scenarios/code-quality.yaml").read_text(encoding="utf-8")
+        )["scenarios"]
+        rubric = yaml.safe_load(
+            (ROOT / "tests/behavioral/rubrics/code-quality.yaml").read_text(encoding="utf-8")
+        )
+        cases = [case for case in scenarios if case["id"].startswith("review-")]
+        self.assertTrue(cases)
+        for case in cases:
+            with self.subTest(case=case["id"]):
+                self.assertTrue(case["input"].strip())
+                self.assertTrue(case["expected"].strip())
+                self.assertTrue(set(case["critical"]).issubset(rubric["critical"]))
 
     def test_skills_are_standalone_generic_and_contain_core_invariants(self):
         code_quality = (ROOT / "skills/code-quality/SKILL.md").read_text(encoding="utf-8")
@@ -55,20 +73,16 @@ class CodeQualityScenarioTests(unittest.TestCase):
             "明确确认", "实施契约", "第一次编辑测试",
             "安全/性能/兼容性/维护成本", "停止受影响编辑",
             "Plan 冻结目标", "发现问题不等于授权修复",
-            "广回归失败", "修订 Plan", "有界收敛检查",
+            "广回归失败", "同步计划", "有界迁移",
             "稳定现有调用者", "真实共享不变量", "测试方便", "unverified",
         ):
             self.assertTrue(phrase in combined_rules, phrase)
-        self.assertIn("fresh evidence", workflow_quality)
+        self.assertIn("新鲜证据", workflow_quality)
         combined = code_quality + workflow_quality
-        for content in (code_quality, workflow_quality):
-            frontmatter = content.split("---", 2)[1]
-            description = next(
-                line.removeprefix("description: ")
-                for line in frontmatter.splitlines()
-                if line.startswith("description: ")
-            )
-            self.assertTrue(description.startswith("Use when "))
+        for name, content in (("code-quality", code_quality), ("workflow-quality", workflow_quality)):
+            frontmatter = yaml.safe_load(content.split("---", 2)[1])
+            self.assertEqual(frontmatter["name"], name)
+            self.assertTrue(frontmatter["description"].strip())
         self.assertNotIn("kuaishou", combined.casefold())
         self.assertNotIn(":\\", combined)
 
@@ -81,7 +95,7 @@ class CodeQualityScenarioTests(unittest.TestCase):
         )
         entry = next(item for item in catalog["entries"] if item["id"] == "code-quality")
 
-        self.assertIn("reading or explaining behavior code", code_quality)
+        self.assertIn("用于解释、诊断或变更行为", code_quality)
         self.assertIn("## 只读", code_quality)
         self.assertIn("只读分析不启动 TDD、构建、写入", code_quality)
         self.assertIn("analyze", entry["selectors"]["operationTypes"])

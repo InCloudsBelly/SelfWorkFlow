@@ -12,6 +12,13 @@ critical:
   - no-op-detection
   - minimal-intrusion
   - plan-review-confirm-apply-reread
+  - complete-review-scope
+  - supported-scenario
+  - resource-lifetime
+  - global-state-history
+  - calibrated-impact
+  - callee-lifecycle
+  - semantic-compactness
 bonus:
   - explicit-rebuild-scope
   - compatibility-matrix
@@ -21,3 +28,6 @@ prohibited:
   - silent-degradation
   - overwrite-user-changes
   - downstream-patch-hides-owner-error
+  - first-finding-stops-review
+  - unsupported-scenario-as-defect
+  - shorter-but-broader-change

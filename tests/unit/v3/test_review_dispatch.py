@@ -194,7 +194,7 @@ class _SpyPort:
                         "layer": "generic",
                         "id": "selfworkflow.testing-review-quality",
                         "path": "skills/testing-review-quality/SKILL.md",
-                        "contentHash": "sha256:f0955d06cbb43daaff947964700974e0f22bbd1338e62ae7a63514fa03a76c08",
+                        "contentHash": "sha256:1f7258044392fe92ebee5d50285ffeacc1f7546dbb06c3e1ad01f67013234375",
                         "required": True,
                     }]
                 ),
