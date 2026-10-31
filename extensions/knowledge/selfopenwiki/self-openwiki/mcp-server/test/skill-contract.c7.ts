@@ -28,11 +28,11 @@ describe("repository C7 Skill contract", () => {
     expect(registry.select([])).toEqual(
       expect.objectContaining({
         aggregateHash:
-          "sha256:1ac09de491ab8696ce9ad948c77d1ada21d9f165d21826533892c489e281b806",
+          "sha256:60bc4644623b373155ecc53086ef6b00249b8d5f25f690a9070ce56c7df52b26",
         skills: [
           expect.objectContaining({
             packageHash:
-              "sha256:6d8a3287f6f0d55e6f549a4aeabf50e81fa9320755cfb6e81fb5a40c7aeadd06",
+              "sha256:47f2c3b99da439d40c7f4062eb17b8c802403fd19dd1ca7c87455aa9c715df3b",
           }),
         ],
       }),

@@ -68,6 +68,10 @@ type ExternalUpdatePort = {
   finalize(input: unknown): Promise<unknown>;
   recoverStartup?(): Promise<unknown>;
   status?(): Promise<{ readonly transactionId: string } | null>;
+  recoverUncommittedStart?(
+    input: unknown,
+    verifyUnboundStart: () => Promise<boolean>,
+  ): Promise<void>;
 };
 
 export class C7PersonalGateway implements PersonalC7Gateway {
@@ -101,6 +105,7 @@ export class C7PersonalGateway implements PersonalC7Gateway {
     readonly markdownWikiRevision?: string;
     readonly wikiRevision: string;
     readonly wikiRoot: string;
+    readonly verifyUnboundStart?: () => Promise<boolean>;
   }): Promise<PersonalCandidateBinding> {
     const confirmedWikiPaths = [
       ...input.pages.map((page) => page.path),
@@ -114,13 +119,8 @@ export class C7PersonalGateway implements PersonalC7Gateway {
       input.wikiRoot,
       `${input.wikiRoot}.selfopenwiki`,
     );
-    await recoverPersonalExternalService(service);
-    // A resumed transaction keeps its original snapshot and reviewed scope.
-    if ((await service.status?.()) == null) {
-      await assertPersonalPlanNavigation(input);
-    }
-    const output = await service.begin({
-      action: "start",
+    const request = {
+      action: "start" as const,
       confirmedByUser: input.confirmedByUser,
       confirmedWikiPaths,
       expectedWikiRevision: input.markdownWikiRevision ?? input.wikiRevision,
@@ -154,7 +154,26 @@ export class C7PersonalGateway implements PersonalC7Gateway {
             sourceConfirmation: input.sourceConfirmation,
             sourceManifestId: input.sourceManifestId,
           }),
-    });
+    };
+    try {
+      await recoverPersonalExternalService(service);
+    } catch (error) {
+      if (
+        error === null ||
+        typeof error !== "object" ||
+        !("code" in error) ||
+        error.code !== "restore_required" ||
+        !input.verifyUnboundStart ||
+        !service.recoverUncommittedStart
+      )
+        throw error;
+      await service.recoverUncommittedStart(request, input.verifyUnboundStart);
+      await recoverPersonalExternalService(service);
+    }
+    // Issued bindings and terminal replay retain the original recovery path.
+    if ((await service.status?.()) == null)
+      await assertPersonalPlanNavigation(input);
+    const output = await service.begin(request);
     try {
       return await this.candidateFromOutput(
         output,
@@ -187,6 +206,59 @@ export class C7PersonalGateway implements PersonalC7Gateway {
     if (input.runtimeRoot === undefined) {
       throw codedGatewayError("upstream_incompatible");
     }
+    return this.candidateFromOutput(output, path.resolve(input.runtimeRoot));
+  }
+
+  async recoverRepair(input: {
+    readonly candidate: PersonalCandidateBinding;
+    readonly runId: string;
+    readonly runtimeRoot: string;
+    readonly wikiRoot: string;
+  }): Promise<PersonalCandidateBinding | null> {
+    const service = this.serviceFor(
+      input.runId,
+      input.wikiRoot,
+      input.runtimeRoot,
+    );
+    await recoverPersonalExternalService(service);
+    // The C7 owner alone verifies its persisted predecessor/successor relation.
+    const output = await service.begin({
+      action: "resume",
+      bindingHash: input.candidate.candidateBindingHash,
+      transactionId: input.candidate.transactionId,
+    });
+    if (!isRecord(output) || output.ok !== true)
+      throw codedGatewayError("upstream_incompatible");
+    if (
+      [
+        "external_review_resumed",
+        "needs_clarification",
+        "published",
+        "published_with_follow_up",
+      ].includes(String(output.status))
+    )
+      return null;
+    if (
+      output.status !== "external_update_resumed" ||
+      !isRecord(output.workPackage)
+    )
+      throw codedGatewayError("upstream_incompatible");
+    const work = output.workPackage;
+    if (
+      work.transactionId !== input.candidate.transactionId ||
+      work.beforeWikiRevision !== input.candidate.wikiRevision
+    )
+      throw codedGatewayError("restore_required");
+    if (
+      work.generation === input.candidate.generation &&
+      work.bindingHash === input.candidate.candidateBindingHash
+    )
+      return null;
+    if (
+      work.generation !== input.candidate.generation + 1 ||
+      work.bindingHash === input.candidate.candidateBindingHash
+    )
+      throw codedGatewayError("restore_required");
     return this.candidateFromOutput(output, path.resolve(input.runtimeRoot));
   }
 

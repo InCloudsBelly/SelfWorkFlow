@@ -602,7 +602,7 @@ describe("durable personal Wiki run store", () => {
       generation: 2,
       phase: "writing",
     });
-    expect(next?.jobId).not.toBe(first.jobId);
+    expect(next?.jobId).toBe(first.jobId);
   });
 });
 

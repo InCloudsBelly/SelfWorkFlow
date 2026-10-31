@@ -91,6 +91,7 @@ _CORE_PATHS = (
     "skills/obsidian-markdown",
     "skills/obsidian-bases",
     "skills/json-canvas",
+    "skills/sympy",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
     "dependencies/locks/matt-pocock-skills.lock.yaml",
@@ -101,6 +102,7 @@ _CORE_PATHS = (
     "dependencies/locks/ui-ux-pro-max.lock.yaml",
     "dependencies/locks/composio-skills.lock.yaml",
     "dependencies/locks/obsidian-skills.lock.yaml",
+    "dependencies/locks/scientific-agent-skills.lock.yaml",
     "overlays/tea",
     "adapters",
     # V3 is shipped as an explicit, self-contained extension. The lightweight
@@ -124,6 +126,9 @@ _COMMUNITY_SOURCES = {
     ), "Apache-2.0", "declared"),
     "obsidian-skills": ("https://github.com/kepano/obsidian-skills.git", (
         "LICENSE", "skills/obsidian-markdown", "skills/obsidian-bases", "skills/json-canvas",
+    ), "MIT", "verified"),
+    "scientific-agent-skills": ("https://github.com/K-Dense-AI/scientific-agent-skills.git", (
+        "LICENSE.md", "skills/sympy",
     ), "MIT", "verified"),
 }
 _TEA_RUNTIME_WORKFLOWS = {
@@ -472,7 +477,7 @@ def _copy_anthropic_skill_creator(source: Path, destination: Path) -> None:
 
 
 def _copy_community_sources(source: Path, destination: Path) -> None:
-    """Copy only the locked resource closures behind the five local entries."""
+    """Copy only the locked resource closures behind the selected local entries."""
 
     for source_id, (url, resources, spdx, license_status) in _COMMUNITY_SOURCES.items():
         try:

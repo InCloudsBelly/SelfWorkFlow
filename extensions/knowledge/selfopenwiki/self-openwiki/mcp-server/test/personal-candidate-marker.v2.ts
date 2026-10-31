@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -46,6 +46,10 @@ describe("personal candidate page marker", () => {
       marker,
     );
     expect(await readFile(markerPath, "utf8")).toContain("candidate_written");
+
+    const linkedPath = path.join(root, "linked-marker.json");
+    await symlink(markerPath, linkedPath, "file");
+    await expect(readPersonalCandidateMarker(linkedPath)).rejects.toMatchObject({ code: "invalid_state" });
 
     await expect(
       transitionPersonalCandidateMarker(

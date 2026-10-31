@@ -29,3 +29,6 @@
 [submodule "extensions/codegraph/codegraph_ue"]
 	path = extensions/codegraph/codegraph_ue
 	url = https://github.com/InCloudsBelly/codegraph_ue.git
+[submodule "dependencies/upstream/scientific-agent-skills"]
+	path = dependencies/upstream/scientific-agent-skills
+	url = https://github.com/K-Dense-AI/scientific-agent-skills.git

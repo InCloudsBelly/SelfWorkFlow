@@ -2,9 +2,11 @@
 
 只在生成更新候选或已确认知识写入时加载。SelfWorkflow 已有的设计、实施授权和独立 Review 门禁复用；通用生命周期为 `knowledge.read → knowledge.propose → knowledge.update`，propose 不发布。
 
-写作与内容 Review 统一按[质量标准](../../knowledge-backend/references/wiki-quality.md)与[正文契约](../../knowledge-backend/references/article-contract.md)，不再回读知识模块。PageJob/同一Reviewer传适用指标、单元/条件、目标锚点、来源/缺口及同版必要细则；执行覆盖、逆向质询、三类走查、评分与分歧处理，仅复核影响项；同时传递L1的必要先备/契约、用途/目标/版本和选读/证据，检查人类接续与Agent有界依赖，不按链接数评分或递归展开所有相关页。全库任务逐页覆盖，正文解释充分，导航/来源/措辞页按职责适用；数值阈值不复制，发布成功不等于质量达标，不增加 MCP 字段/确认或 Reviewer。
+写作与内容Review统一按[质量标准](../../knowledge-backend/references/wiki-quality.md)与[正文契约](../../knowledge-backend/references/article-contract.md)，不回读知识模块。PageJob复用一份适用项、单元/条件、正文锚点和来源/缺口清单；Writer自检，同一Reviewer合并人类、图文/实际呈现、Agent实施/依赖走查，独立核来源后集中评分。共享观察跨指标复用，修订只查影响项，达标即结束，不默认全项满分；专题/全库仍覆盖全部授权页面和关键机制。L1必要契约/用途/版本与选读/证据随包传递，不递归展开所有相关页。细则仅具体问题需要时读，数值阈值不复制；发布成功不等于质量达标，不增加MCP字段、确认、润色轮次或Reviewer。
 
-角色间优先传可达同版规范、适用项及页面增量；同版已读正文跨PageJob复用，不每页粘贴整套规范。隔离角色不能访问宿主目录时，向其获授权包一次提供必要条款/正文，不只给不可达路径。
+角色间传可达同版规范及其绑定、适用项、范围/单元/条件清单、来源和页面增量，并确认Writer/Reviewer实际取得。在既有PagePlan.instructions留质量版本、适用项与覆盖引用；Host把对应必要正文一次传入获授权的隔离包/交接材料，Review同时接收个人生命周期binding及C7 reviewPackage。只给不可达路径或后端发布回执都不能证明质量标准已执行。同版正文跨PageJob复用，不每页粘贴；修复重用的页面作业只表示内容/Claim未变，独立Review仍核对原范围及受影响依赖。
+
+涉及数学表达时，Host把已绑定的[数学方法](../../sympy/SKILL.md)与[公式约定](../../sympy/references/wiki-math.md)必要正文一并交接，复用计算证据。公式解释/参数并入人类理解走查，正确性与目标Viewer显示分别核验；不额外建评分轮次，纯浏览/无数学内容不加载。
 
 默认协议为 `selfopenwiki:personal-openwiki-v1`，六工具是本模块的官方能力适配，不宣称与 upstream schema 字节一致。第一次 `openwiki_status` 必须确认 schema 2、external mode、OAuth-free、`externalAgent.ready=true`、恢复闭环、旧 external capability 对，以及下列个人能力全部 verified：
 

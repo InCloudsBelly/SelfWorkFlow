@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -21,8 +22,8 @@ from selfworkflow.installer import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILLS = {"ui-ux-pro-max", "content-research-writer", "obsidian-markdown",
-          "obsidian-bases", "json-canvas"}
-SOURCES = ("ui-ux-pro-max", "composio-skills", "obsidian-skills")
+          "obsidian-bases", "json-canvas", "sympy"}
+SOURCES = ("ui-ux-pro-max", "composio-skills", "obsidian-skills", "scientific-agent-skills")
 
 
 def refresh_manifest(runtime):
@@ -59,6 +60,9 @@ class CommunitySkillIntegrationTests(unittest.TestCase):
                 "obsidian-skills/skills/obsidian-markdown/references/PROPERTIES.md",
                 "obsidian-skills/skills/obsidian-bases/SKILL.md",
                 "obsidian-skills/skills/json-canvas/SKILL.md",
+                "scientific-agent-skills/LICENSE.md",
+                "scientific-agent-skills/skills/sympy/SKILL.md",
+                "scientific-agent-skills/skills/sympy/references/code-generation-printing.md",
             ]
             published = {item["path"] for item in manifest["files"]}
             for relative in required:
@@ -77,7 +81,7 @@ class CommunitySkillIntegrationTests(unittest.TestCase):
             self.assertFalse(list(script.parent.rglob("__pycache__")))
             self.assertFalse((Path(temporary) / "design-system").exists())
 
-    def test_core_runtime_publishes_five_bounded_entries(self):
+    def test_core_runtime_publishes_selected_bounded_entries(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             runtime = Path(temporary) / "runtime"
             build_runtime(ROOT, runtime, "0.1.0.dev0")
@@ -255,6 +259,10 @@ class CommunitySkillIntegrationTests(unittest.TestCase):
             for skill in SKILLS:
                 self.assertEqual((agents / "skills" / skill / "SKILL.md").read_bytes(),
                                  (snapshot / "skills" / skill / "SKILL.md").read_bytes())
+            installed_math = (agents / "skills/sympy/SKILL.md").read_text(encoding="utf-8")
+            upstream_reference = re.search(r"`(references/community-skills/[^`]+/SKILL\.md)`", installed_math)
+            self.assertIsNotNone(upstream_reference, "native math must resolve through the bound runtime root")
+            self.assertTrue((snapshot / upstream_reference[1]).is_file())
             for source_id in SOURCES:
                 lock = yaml.safe_load((snapshot / f"dependencies/locks/{source_id}.lock.yaml").read_text(encoding="utf-8"))
                 for name, expected in lock["files"].items():

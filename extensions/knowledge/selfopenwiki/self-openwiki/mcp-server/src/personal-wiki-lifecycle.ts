@@ -37,6 +37,7 @@ import type {
   PersonalPageJob,
   PersonalPagePlan,
 } from "./personal-run-store.js";
+import { personalStoredClaimDecisionHash } from "./personal-run-store.js";
 
 export type PersonalRootBinding = {
   readonly wikiRoot: string;
@@ -199,9 +200,14 @@ export interface PersonalRunStore {
     readonly queueHash: string;
   }>;
   rollbackPlan?(runId: string, planHash: string): Promise<void>;
+  verifyUnboundStart?(
+    runId: string,
+    expectedStateHash: string,
+  ): Promise<boolean>;
   beginSuccessor?(
     runId: string,
     candidate: PersonalCandidateBinding,
+    repairPages?: readonly string[],
   ): Promise<{ readonly queueHash: string }>;
   attachCandidate?(
     runId: string,
@@ -229,6 +235,12 @@ export interface PersonalRunStore {
 }
 
 export interface PersonalC7Gateway {
+  recoverRepair?(input: {
+    readonly candidate: PersonalCandidateBinding;
+    readonly runId: string;
+    readonly runtimeRoot: string;
+    readonly wikiRoot: string;
+  }): Promise<PersonalCandidateBinding | null>;
   readCompletion?(input: {
     readonly candidate: PersonalCandidateBinding;
     readonly expectedAfterWikiHash: string;
@@ -250,6 +262,7 @@ export interface PersonalC7Gateway {
     readonly markdownWikiRevision?: string;
     readonly wikiRevision: string;
     readonly wikiRoot: string;
+    readonly verifyUnboundStart?: () => Promise<boolean>;
   }): Promise<PersonalCandidateBinding>;
   resumeRepair?(input: {
     readonly bindingHash: string;
@@ -318,10 +331,10 @@ export class PersonalWikiLifecycle {
           this.runStore.setWikiRevisions !== undefined &&
           this.runStore.setPhase !== undefined
         ) {
-          const recovered = await recoverPersonalClaimsFinalization(
-            root.runtimeRoot,
-            root.wikiRoot,
-          );
+          const canRecover = await this.prepareClaimsRecovery(root);
+          const recovered = canRecover ? await recoverPersonalClaimsFinalization(
+            root.runtimeRoot, root.wikiRoot,
+          ) : null;
           if (recovered !== null) {
             const state = await this.runStore.read(recovered.journal.runId);
             if (
@@ -380,10 +393,11 @@ export class PersonalWikiLifecycle {
           ) {
             throw codedPersonalError("restore_required");
           }
-          await reconcileCandidateRecovery(
-            await this.runStore.read(started.runId),
-            this.runStore,
-          );
+          let state = await this.runStore.read(started.runId);
+          if (state.phase === "review" && await this.recoverInterruptedRepair(state)) {
+            state = await this.runStore.read(started.runId);
+          }
+          await reconcileCandidateRecovery(state, this.runStore);
         }
         return started;
       },
@@ -441,6 +455,7 @@ export class PersonalWikiLifecycle {
       ...(this.claimsResolver === undefined ? {} : { claimSnapshots }),
     });
     let state = await this.runStore.read(parsed.runId);
+    const unboundStartStateHash = personalHash(state);
     let candidate: PersonalCandidateBinding;
     try {
       candidate =
@@ -459,9 +474,22 @@ export class PersonalWikiLifecycle {
             state.markdownWikiRevision ?? state.wikiRevision,
           wikiRevision: state.markdownWikiRevision ?? state.wikiRevision,
           wikiRoot: state.wikiRoot,
+          ...(!stateBeforePlan.planHash ||
+          this.runStore.verifyUnboundStart === undefined
+            ? {}
+            : {
+                verifyUnboundStart: () =>
+                  this.runStore.verifyUnboundStart!(
+                    parsed.runId,
+                    unboundStartStateHash,
+                  ),
+              }),
         }));
     } catch (error) {
-      await this.runStore.rollbackPlan?.(parsed.runId, plan.planHash);
+      // A failed replay must not erase a plan accepted before this call.
+      if (!stateBeforePlan.planHash) {
+        await this.runStore.rollbackPlan?.(parsed.runId, plan.planHash);
+      }
       throw error;
     }
     if (state.candidate === undefined) {
@@ -660,9 +688,6 @@ export class PersonalWikiLifecycle {
         ...retractedClaimIds,
       ]);
       await validatePersonalClaimEvidence(state, parsed.claims ?? []);
-      const candidateRootHash = await snapshotPersonalCandidate(
-        candidateBinding.candidateRoot,
-      );
       const markerPath = path.join(
         state.runtimeRoot,
         "page-markers",
@@ -674,6 +699,17 @@ export class PersonalWikiLifecycle {
         if (
           marker === null ||
           marker.state !== "accepted" ||
+          marker.runId !== state.runId || marker.jobId !== job.jobId ||
+          marker.pagePath !== job.path || marker.pagePathHash !== personalHash(job.path) ||
+          marker.transactionId !== candidateBinding.transactionId ||
+          marker.generation > candidateBinding.generation ||
+          !isContainedCanonicalPath(state.runtimeRoot, marker.candidateRoot) ||
+          (marker.generation === candidateBinding.generation && (
+            marker.candidateBindingHash !== candidateBinding.candidateBindingHash ||
+            marker.candidateRoot !== candidateBinding.candidateRoot)) ||
+          job.pageContentHash !== pageContentHash || job.claimDecisionHash !== claimDecisionHash ||
+          (marker.generation < candidateBinding.generation &&
+            personalStoredClaimDecisionHash(state.runId, job) !== claimDecisionHash) ||
           marker.pageContentHash !== pageContentHash ||
           marker.claimDecisionHash !== claimDecisionHash
         ) {
@@ -700,6 +736,9 @@ export class PersonalWikiLifecycle {
           status: "page_accepted",
         };
       }
+      const candidateRootHash = await snapshotPersonalCandidate(
+        candidateBinding.candidateRoot,
+      );
       const now = new Date().toISOString();
       await writePersonalCandidateMarker(markerPath, {
         candidateBindingHash: candidateBinding.candidateBindingHash,
@@ -951,121 +990,132 @@ export class PersonalWikiLifecycle {
     }
     let personalWikiRevision: string | undefined;
     const beforeWikiHash = state.markdownWikiRevision ?? state.wikiRevision;
-    const submitted =
-      this.claimsResolver !== undefined && state.jobs !== undefined
-        ? await withC7Locks(
-            state.runtimeRoot,
-            ["operation", "wiki"],
-            async () => {
-              const before = await snapshotPersonalWiki(state.wikiRoot);
-              if (
-                before.markdownRootHash !== beforeWikiHash ||
-                (state.markdownWikiRevision !== undefined &&
-                  before.rootHash !== state.wikiRevision)
-              ) {
-                throw codedPersonalError("wiki_conflict");
-              }
-              const reviewReceiptInputHash = personalHash(reviewReceipt);
-              const existingMarker = await readPersonalFinalizationMarker(
-                state.runtimeRoot,
-              );
-              if (
-                existingMarker !== null &&
-                (existingMarker.runId !== state.runId ||
-                  existingMarker.transactionId !==
-                    state.candidate!.transactionId ||
-                  existingMarker.generation !== state.candidate!.generation ||
-                  existingMarker.bindingHash !==
-                    state.candidate!.candidateBindingHash ||
-                  existingMarker.reviewReceiptInputHash !==
-                    reviewReceiptInputHash)
-              ) {
-                throw codedPersonalError("invalid_state");
-              }
-              const claimsJournal = await preparePersonalClaimsFinalization(
-                state,
-                before.markdownRootHash,
-                reviewReceipt.candidateRootHash,
-                personalHash(before.claims),
-                reviewReceiptInputHash,
-              );
-              await writePersonalClaimsFinalization(claimsJournal);
-              await writePersonalFinalizationMarker(state.runtimeRoot, {
-                bindingHash: state.candidate!.candidateBindingHash,
-                generation: state.candidate!.generation,
-                reviewReceiptInputHash,
-                runId: state.runId,
-                status: "prepared",
-                transactionId: state.candidate!.transactionId,
-                type: "selfopenwiki:personal-finalization-v1",
-                version: 1,
-              });
-              const result = await this.c7!.submitReview!({
-                beforeWikiHash,
-                reviewReceipt,
-                runId: parsed.runId,
-                runtimeRoot: state.runtimeRoot,
-                wikiRoot: state.wikiRoot,
-              });
-              if (result.kind !== "complete") {
+    let submitted: PersonalReviewSubmissionResult;
+    try {
+      submitted =
+        this.claimsResolver !== undefined && state.jobs !== undefined &&
+          (reviewReceipt.verdict === "pass" || reviewReceipt.verdict === "follow_up")
+          ? await withC7Locks(
+              state.runtimeRoot,
+              ["operation", "wiki"],
+              async () => {
+                const before = await snapshotPersonalWiki(state.wikiRoot);
+                if (
+                  before.markdownRootHash !== beforeWikiHash ||
+                  (state.markdownWikiRevision !== undefined &&
+                    before.rootHash !== state.wikiRevision)
+                ) {
+                  throw codedPersonalError("wiki_conflict");
+                }
+                const reviewReceiptInputHash = personalHash(reviewReceipt);
+                const existingMarker = await readPersonalFinalizationMarker(
+                  state.runtimeRoot,
+                );
+                if (
+                  existingMarker !== null &&
+                  (existingMarker.runId !== state.runId ||
+                    existingMarker.transactionId !==
+                      state.candidate!.transactionId ||
+                    existingMarker.generation !== state.candidate!.generation ||
+                    existingMarker.bindingHash !==
+                      state.candidate!.candidateBindingHash ||
+                    existingMarker.reviewReceiptInputHash !==
+                      reviewReceiptInputHash)
+                ) {
+                  throw codedPersonalError("invalid_state");
+                }
+                const claimsJournal = await preparePersonalClaimsFinalization(
+                  state,
+                  before.markdownRootHash,
+                  reviewReceipt.candidateRootHash,
+                  personalHash(before.claims),
+                  reviewReceiptInputHash,
+                );
+                await writePersonalClaimsFinalization(claimsJournal);
+                await writePersonalFinalizationMarker(state.runtimeRoot, {
+                  bindingHash: state.candidate!.candidateBindingHash,
+                  generation: state.candidate!.generation,
+                  reviewReceiptInputHash,
+                  runId: state.runId,
+                  status: "prepared",
+                  transactionId: state.candidate!.transactionId,
+                  type: "selfopenwiki:personal-finalization-v1",
+                  version: 1,
+                });
+                const result = await this.c7!.submitReview!({
+                  beforeWikiHash,
+                  reviewReceipt,
+                  runId: parsed.runId,
+                  runtimeRoot: state.runtimeRoot,
+                  wikiRoot: state.wikiRoot,
+                });
+                if (result.kind !== "complete") {
+                  await removePersonalClaimsFinalization(state.runtimeRoot);
+                  await removePersonalFinalizationMarker(state.runtimeRoot);
+                  return result;
+                }
+                if (
+                  result.beforeWikiHash !== beforeWikiHash ||
+                  result.afterWikiHash !== claimsJournal.afterWikiHash
+                ) {
+                  throw codedPersonalError("wiki_conflict");
+                }
+                const after = await snapshotPersonalWiki(state.wikiRoot);
+                if (
+                  after.markdownRootHash !== result.afterWikiHash ||
+                  personalHash(after.claims) !== claimsJournal.baselineClaimsHash
+                ) {
+                  throw codedPersonalError("wiki_conflict");
+                }
+                await writePersonalFinalizationMarker(state.runtimeRoot, {
+                  afterWikiHash: result.afterWikiHash,
+                  bindingHash: state.candidate!.candidateBindingHash,
+                  generation: state.candidate!.generation,
+                  reviewReceiptHash: result.reviewReceiptHash,
+                  reviewReceiptInputHash,
+                  runId: state.runId,
+                  status: "published",
+                  transactionId: state.candidate!.transactionId,
+                  type: "selfopenwiki:personal-finalization-v1",
+                  version: 1,
+                });
+                const finalSnapshot = await applyPersonalClaimsFinalization(
+                  claimsJournal,
+                  state.wikiRoot,
+                );
+                personalWikiRevision = finalSnapshot.rootHash;
+                if (this.runStore.setWikiRevisions !== undefined) {
+                  await this.runStore.setWikiRevisions(parsed.runId, {
+                    markdownWikiRevision: result.afterWikiHash,
+                    wikiRevision: personalWikiRevision,
+                  });
+                } else {
+                  await this.runStore.setWikiRevision?.(
+                    parsed.runId,
+                    personalWikiRevision,
+                  );
+                }
+                await this.runStore.setPhase?.(parsed.runId, "complete");
                 await removePersonalClaimsFinalization(state.runtimeRoot);
                 await removePersonalFinalizationMarker(state.runtimeRoot);
                 return result;
-              }
-              if (
-                result.beforeWikiHash !== beforeWikiHash ||
-                result.afterWikiHash !== claimsJournal.afterWikiHash
-              ) {
-                throw codedPersonalError("wiki_conflict");
-              }
-              const after = await snapshotPersonalWiki(state.wikiRoot);
-              if (
-                after.markdownRootHash !== result.afterWikiHash ||
-                personalHash(after.claims) !== claimsJournal.baselineClaimsHash
-              ) {
-                throw codedPersonalError("wiki_conflict");
-              }
-              await writePersonalFinalizationMarker(state.runtimeRoot, {
-                afterWikiHash: result.afterWikiHash,
-                bindingHash: state.candidate!.candidateBindingHash,
-                generation: state.candidate!.generation,
-                reviewReceiptHash: result.reviewReceiptHash,
-                reviewReceiptInputHash,
-                runId: state.runId,
-                status: "published",
-                transactionId: state.candidate!.transactionId,
-                type: "selfopenwiki:personal-finalization-v1",
-                version: 1,
-              });
-              const finalSnapshot = await applyPersonalClaimsFinalization(
-                claimsJournal,
-                state.wikiRoot,
-              );
-              personalWikiRevision = finalSnapshot.rootHash;
-              if (this.runStore.setWikiRevisions !== undefined) {
-                await this.runStore.setWikiRevisions(parsed.runId, {
-                  markdownWikiRevision: result.afterWikiHash,
-                  wikiRevision: personalWikiRevision,
-                });
-              } else {
-                await this.runStore.setWikiRevision?.(
-                  parsed.runId,
-                  personalWikiRevision,
-                );
-              }
-              await this.runStore.setPhase?.(parsed.runId, "complete");
-              await removePersonalClaimsFinalization(state.runtimeRoot);
-              await removePersonalFinalizationMarker(state.runtimeRoot);
-              return result;
-            },
-          )
-        : await this.c7.submitReview({
-            beforeWikiHash,
-            reviewReceipt,
-            runId: parsed.runId,
-            runtimeRoot: state.runtimeRoot,
-            wikiRoot: state.wikiRoot,
-          });
+              },
+            )
+          : await this.c7.submitReview({
+              beforeWikiHash,
+              reviewReceipt,
+              runId: parsed.runId,
+              runtimeRoot: state.runtimeRoot,
+              wikiRoot: state.wikiRoot,
+            });
+    } catch (error) {
+      if (reviewReceipt.verdict === "changes_requested" && isRecord(error) &&
+        ["transaction_state_invalid", "transaction_invalid"].includes(String(error.code))) {
+        const recovered = await this.recoverInterruptedRepair(state);
+        if (recovered !== null) return personalRepairResult(state, recovered.candidate, recovered.queueHash, []);
+      }
+      throw error;
+    }
     if (submitted.kind === "complete" && this.claimsResolver === undefined) {
       if (this.runStore.setWikiRevisions !== undefined) {
         const finalSnapshot = await snapshotPersonalWiki(state.wikiRoot);
@@ -1126,34 +1176,21 @@ export class PersonalWikiLifecycle {
         this.c7?.resumeRepair !== undefined &&
         this.runStore.beginSuccessor !== undefined
       ) {
-        const successor = await this.c7.resumeRepair({
-          bindingHash: state.candidate.candidateBindingHash,
-          runId: parsed.runId,
-          runtimeRoot: state.runtimeRoot,
-          transactionId: state.candidate.transactionId,
-          wikiRoot: state.wikiRoot,
+        const previousCandidate = state.candidate;
+        return withC7Locks(state.runtimeRoot, ["operation", "wiki"], async () => {
+          const successor = await this.c7!.resumeRepair!({
+            bindingHash: previousCandidate.candidateBindingHash,
+            runId: parsed.runId,
+            runtimeRoot: state.runtimeRoot,
+            transactionId: previousCandidate.transactionId,
+            wikiRoot: state.wikiRoot,
+          });
+          const repairPages = submitted.issues.length > 0 && submitted.issues.every(
+            (issue) => isRecord(issue) && typeof issue.page === "string",
+          ) ? submitted.issues.map((issue) => (issue as { page: string }).page) : undefined;
+          const next = await this.acceptRepairSuccessor(state, successor, repairPages);
+          return personalRepairResult(state, successor, next.queueHash, submitted.issues);
         });
-        const next = await this.runStore.beginSuccessor(
-          parsed.runId,
-          successor,
-        );
-        return {
-          binding: personalBinding(
-            parsed.runId,
-            state.planHash,
-            next.queueHash,
-            successor,
-          ),
-          issues: submitted.issues,
-          nextAction: "resume",
-          ok: true,
-          protocol: "selfopenwiki:personal-openwiki-v1",
-          recovery: { action: "none" },
-          generation: successor.generation,
-          runId: parsed.runId,
-          status: "repair_ready",
-          transactionId: successor.transactionId,
-        };
       }
       return {
         binding,
@@ -1204,6 +1241,180 @@ export class PersonalWikiLifecycle {
         ? {}
         : { followUp: submitted.followUp }),
     };
+  }
+
+  private async recoverInterruptedRepair(state: PersonalRunRecord): Promise<{
+    candidate: PersonalCandidateBinding;
+    queueHash: string;
+  } | null> {
+    if (
+      state.phase !== "review" ||
+      state.candidate === undefined ||
+      state.jobs === undefined ||
+      state.jobs.some((job) => job.status !== "accepted") ||
+      this.c7?.recoverRepair === undefined ||
+      this.runStore.beginSuccessor === undefined
+    )
+      return null;
+    return withC7Locks(state.runtimeRoot, ["operation", "wiki"], async () => {
+      const candidate = await this.c7!.recoverRepair!({
+        candidate: state.candidate!,
+        runId: state.runId,
+        runtimeRoot: state.runtimeRoot,
+        wikiRoot: state.wikiRoot,
+      });
+      if (candidate === null) return null;
+      // Without the original persisted issue scope, reopen the complete plan.
+      const next = await this.acceptRepairSuccessor(state, candidate);
+      return { candidate, queueHash: next.queueHash };
+    });
+  }
+
+  private async acceptRepairSuccessor(
+    state: PersonalRunRecord,
+    successor: PersonalCandidateBinding,
+    repairPages?: readonly string[],
+  ): Promise<{ readonly queueHash: string }> {
+    const previous = state.candidate;
+    if (
+      previous === undefined ||
+      this.runStore.beginSuccessor === undefined ||
+      successor.transactionId !== previous.transactionId ||
+      successor.generation !== previous.generation + 1 ||
+      successor.wikiRevision !== previous.wikiRevision ||
+      successor.candidateBindingHash === previous.candidateBindingHash ||
+      successor.candidateRoot === previous.candidateRoot ||
+      !isContainedCanonicalPath(state.runtimeRoot, successor.candidateRoot)
+    ) {
+      throw codedPersonalError("restore_required");
+    }
+    await this.clearUnpublishedClaims(state, successor);
+    return repairPages === undefined
+      ? this.runStore.beginSuccessor(state.runId, successor)
+      : this.runStore.beginSuccessor(state.runId, successor, repairPages);
+  }
+
+  private async prepareClaimsRecovery(
+    root: PersonalRootBinding,
+  ): Promise<boolean> {
+    if (
+      this.c7?.recoverRepair === undefined ||
+      this.c7.readCompletion === undefined ||
+      this.runStore.read === undefined
+    )
+      return true;
+    const journal = await readPersonalClaimsFinalization(root.runtimeRoot);
+    const marker = await readPersonalFinalizationMarker(root.runtimeRoot);
+    const record = journal ?? marker;
+    if (record === null) return true;
+    const state = await this.runStore.read(record.runId);
+    if (
+      state.candidate === undefined ||
+      state.wikiRoot !== root.wikiRoot ||
+      state.runtimeRoot !== root.runtimeRoot ||
+      [journal, marker].some(
+        (entry) =>
+          entry !== null &&
+          (entry.runId !== state.runId ||
+            entry.transactionId !== state.candidate!.transactionId ||
+            entry.generation !== state.candidate!.generation ||
+            entry.bindingHash !== state.candidate!.candidateBindingHash),
+      ) ||
+      (journal !== null &&
+        marker !== null &&
+        journal.reviewReceiptInputHash !== marker.reviewReceiptInputHash)
+    ) {
+      throw codedPersonalError("restore_required");
+    }
+    if (
+      marker?.status !== "published" &&
+      (await this.recoverInterruptedRepair(state))
+    )
+      return true;
+    const afterWikiHash = journal?.afterWikiHash ?? marker?.afterWikiHash;
+    if (afterWikiHash === undefined) return false;
+    let completed: Extract<
+      PersonalReviewSubmissionResult,
+      { kind: "complete" }
+    >;
+    try {
+      completed = await this.c7.readCompletion({
+        candidate: state.candidate,
+        expectedAfterWikiHash: afterWikiHash,
+        runId: state.runId,
+        runtimeRoot: state.runtimeRoot,
+        wikiRoot: state.wikiRoot,
+      });
+    } catch (error) {
+      // An unpublished prepared operation stays pending; matching Markdown is
+      // insufficient authority to apply Claims, including a no-op Markdown diff.
+      if (
+        marker?.status !== "published" &&
+        isRecord(error) &&
+        error.code === "restore_required"
+      )
+        return false;
+      throw error;
+    }
+    if (journal !== null && marker?.status !== "published") {
+      await writePersonalFinalizationMarker(root.runtimeRoot, {
+        afterWikiHash: completed.afterWikiHash,
+        bindingHash: state.candidate.candidateBindingHash,
+        generation: state.candidate.generation,
+        reviewReceiptHash: completed.reviewReceiptHash,
+        reviewReceiptInputHash: journal.reviewReceiptInputHash,
+        runId: state.runId,
+        status: "published",
+        transactionId: state.candidate.transactionId,
+        type: "selfopenwiki:personal-finalization-v1",
+        version: 1,
+      });
+    }
+    return true;
+  }
+
+  private async clearUnpublishedClaims(
+    state: PersonalRunRecord,
+    successor: PersonalCandidateBinding,
+  ): Promise<void> {
+    const journal = await readPersonalClaimsFinalization(state.runtimeRoot);
+    const marker = await readPersonalFinalizationMarker(state.runtimeRoot);
+    if (journal === null && marker === null) return;
+    const candidate = state.candidate!;
+    if (
+      [journal, marker].some(
+        (entry) =>
+          entry !== null &&
+          (entry.runId !== state.runId ||
+            entry.transactionId !== candidate.transactionId ||
+            entry.generation !== candidate.generation ||
+            entry.bindingHash !== candidate.candidateBindingHash ||
+            entry.status !== "prepared"),
+      ) ||
+      (journal !== null &&
+        (journal.completedOperations.length !== 0 ||
+          journal.applyingOperation !== undefined ||
+          journal.currentClaimsHash !== journal.baselineClaimsHash ||
+          journal.afterWikiHash !== successor.candidateRootHash)) ||
+      (journal !== null &&
+        marker !== null &&
+        journal.reviewReceiptInputHash !== marker.reviewReceiptInputHash)
+    ) {
+      throw codedPersonalError("restore_required");
+    }
+    const before = await snapshotPersonalWiki(state.wikiRoot);
+    if (
+      before.markdownRootHash !== candidate.wikiRevision ||
+      (state.markdownWikiRevision !== undefined &&
+        before.rootHash !== state.wikiRevision) ||
+      (journal !== null &&
+        personalHash(before.claims) !== journal.baselineClaimsHash)
+    )
+      throw codedPersonalError("restore_required");
+    if (journal !== null)
+      await removePersonalClaimsFinalization(state.runtimeRoot);
+    if (marker !== null)
+      await removePersonalFinalizationMarker(state.runtimeRoot);
   }
 
   private async recoverPublishedPersonalRun(
@@ -2091,6 +2302,28 @@ function containedWikiPagePath(root: string, relativePath: string): string {
   return candidate;
 }
 
+function personalRepairResult(
+  state: PersonalRunRecord,
+  candidate: PersonalCandidateBinding,
+  queueHash: string,
+  issues: readonly unknown[],
+): unknown {
+  if (typeof state.planHash !== "string")
+    throw codedPersonalError("invalid_state");
+  return {
+    binding: personalBinding(state.runId, state.planHash, queueHash, candidate),
+    issues,
+    nextAction: "resume",
+    ok: true,
+    protocol: "selfopenwiki:personal-openwiki-v1",
+    recovery: { action: "none" },
+    generation: candidate.generation,
+    runId: state.runId,
+    status: "repair_ready",
+    transactionId: candidate.transactionId,
+  };
+}
+
 function personalBinding(
   runId: string,
   planHash: string,
@@ -2424,6 +2657,25 @@ async function reconcileCandidateRecovery(
     const job = state.jobs.find(
       (candidate) => candidate.jobId === marker.jobId,
     );
+    if (job !== undefined && marker.generation < state.candidate.generation) {
+      if (marker.runId !== state.runId || marker.transactionId !== state.candidate.transactionId ||
+        marker.pagePath !== job.path || marker.pagePathHash !== personalHash(job.path) ||
+        !isContainedCanonicalPath(state.runtimeRoot, marker.candidateRoot)) {
+        throw codedPersonalError("restore_required");
+      }
+      // History never accepts reopened work. Only a durable accepted job can
+      // reuse its original receipt after its new candidate bytes are checked.
+      if (job.status === "accepted") {
+        const bytes = await readStableWikiPage(state.candidate.candidateRoot,
+          containedCandidatePath(state.candidate.candidateRoot, job.path));
+        if (marker.state !== "accepted" || marker.pageContentHash !== job.pageContentHash ||
+          marker.claimDecisionHash !== job.claimDecisionHash ||
+          personalStoredClaimDecisionHash(state.runId, job) !== job.claimDecisionHash ||
+          hashBytes(bytes) !== job.pageContentHash) throw codedPersonalError("restore_required");
+        markerJobs.add(job.jobId);
+      }
+      continue;
+    }
     if (
       job === undefined ||
       job.path !== marker.pagePath ||

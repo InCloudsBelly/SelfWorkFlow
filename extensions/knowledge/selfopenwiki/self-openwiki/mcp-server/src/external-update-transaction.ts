@@ -341,6 +341,158 @@ export class ExternalUpdateTransactionOwner {
     return this.withOperationLock(() => this.startLocked(input));
   }
 
+  async recoverUncommittedStart(
+    input: StartExternalUpdateInput,
+    verifyUnboundStart: () => Promise<boolean>,
+  ): Promise<void> {
+    return this.withLocks(["operation", "wiki"], async () => {
+      try {
+        const normalized = validateStartInput(input);
+        if (!(await verifyUnboundStart())) throw restoreRequired();
+        if (await existsWithoutFollowingLinks(this.activePath()))
+          throw restoreRequired();
+        const updatesRoot = this.updatesRoot();
+        const entries = await readdir(updatesRoot, { withFileTypes: true });
+        const pending = entries.filter(
+          (entry) => entry.name !== "terminal-index.json",
+        );
+        if (
+          pending.length !== 1 ||
+          !pending[0]!.isDirectory() ||
+          pending[0]!.isSymbolicLink() ||
+          !validId(pending[0]!.name)
+        )
+          throw restoreRequired();
+        const transactionId = pending[0]!.name;
+        const terminals = this.terminalStore();
+        if (
+          (await terminals.find(transactionId)) !== null ||
+          (await terminals.findByRequestIdHash(
+            hashCanonical("kg-c7:external-request-id:v1", normalized.requestId),
+          )) !== null
+        )
+          throw restoreRequired();
+        const transactionRoot = path.join(updatesRoot, transactionId);
+        if (!isStrictDescendant(updatesRoot, transactionRoot))
+          throw restoreRequired();
+        const identity = await inspectRealDirectoryIdentity(transactionRoot);
+        if (
+          await existsWithoutFollowingLinks(
+            path.join(transactionRoot, "state.json"),
+          )
+        )
+          throw restoreRequired();
+
+        const before = await snapshotMarkdownTree(this.formalWikiPath);
+        if (before.rootHash !== normalized.expectedWikiRevision)
+          throw restoreRequired();
+        const expected = new Map<string, { hash: string; size: number }>();
+        const addBytes = (relative: string, bytes: Buffer) =>
+          expected.set(relative, {
+            hash: hashBytes(bytes),
+            size: bytes.length,
+          });
+        const requestBytes = startRequestPackageBytes(normalized);
+        addBytes("immutable/request.json", requestBytes);
+        addBytes("immutable/hard-rules.md", normalized.hardRulePackage);
+        addBytes(
+          "immutable/candidate-result-contract.json",
+          normalized.candidateResultContract,
+        );
+        for (const file of before.files)
+          expected.set(`generations/1/candidate/${file.relativePath}`, file);
+        for (const [index, skill] of normalized.skills.skills.entries()) {
+          for (const file of skill.files)
+            addBytes(
+              `immutable/skills/${String(index).padStart(3, "0")}-${skill.id}/${file.relativePath}`,
+              file.bytes,
+            );
+        }
+        const verifiedSource =
+          normalized.sourceSnapshot === undefined
+            ? undefined
+            : {
+                rootPath: normalized.sourceSnapshot.snapshotPath,
+                identity: await inspectRealDirectoryIdentity(
+                  normalized.sourceSnapshot.snapshotPath,
+                ),
+                treeHash: normalized.sourceSnapshot.snapshotTreeHash,
+              };
+        if (normalized.sourceSnapshot !== undefined) {
+          if (
+            (await hashSourceSnapshotTree(
+              normalized.sourceSnapshot.snapshotPath,
+            )) !== normalized.sourceSnapshot.snapshotTreeHash
+          )
+            throw restoreRequired();
+          for (const [relative, fingerprint] of await fingerprintRegularTree(
+            normalized.sourceSnapshot.snapshotPath,
+          )) {
+            expected.set(`immutable/sources/${relative}`, fingerprint);
+          }
+          if (
+            (await hashSourceSnapshotTree(
+              normalized.sourceSnapshot.snapshotPath,
+            )) !== normalized.sourceSnapshot.snapshotTreeHash
+          )
+            throw restoreRequired();
+        }
+        const validate = async () => {
+          if (!(await verifyUnboundStart())) throw restoreRequired();
+          await assertNoOtherRecoveryEvidence(
+            this.canonicalRuntimeDir ?? this.runtimeDir,
+            verifiedSource,
+            expected,
+          );
+          await assertDirectoryIdentity(transactionRoot, identity);
+          await assertExpectedInitializationTree(transactionRoot, expected);
+          const candidate = await snapshotMarkdownTree(
+            path.join(transactionRoot, "generations", "1", "candidate"),
+          );
+          if (
+            candidate.rootHash !== before.rootHash ||
+            (await snapshotMarkdownTree(this.formalWikiPath)).rootHash !==
+              before.rootHash
+          )
+            throw restoreRequired();
+        };
+        await validate();
+        // No issued binding is reconstructed. Keep every byte, then start anew
+        // from the currently verified sources/Skills through the ordinary path.
+        const retainedRoot = path.join(
+          this.canonicalRuntimeDir ?? this.runtimeDir,
+          "tmp",
+        );
+        const previousRetainedIdentity =
+          await inspectOptionalRealDirectory(retainedRoot);
+        await this.ensureRoot(retainedRoot);
+        if (previousRetainedIdentity !== null)
+          await assertDirectoryIdentity(retainedRoot, previousRetainedIdentity);
+        const retainedIdentity =
+          await inspectRealDirectoryIdentity(retainedRoot);
+        const target = path.join(
+          retainedRoot,
+          `uncommitted-start-${transactionId}-${randomUUID()}`,
+        );
+        if (
+          !isStrictDescendant(retainedRoot, target) ||
+          retainedIdentity.dev !== identity.dev ||
+          (await existsWithoutFollowingLinks(target))
+        )
+          throw restoreRequired();
+        await validate();
+        await assertDirectoryIdentity(retainedRoot, retainedIdentity);
+        await rename(transactionRoot, target);
+        await assertDirectoryIdentity(target, {
+          ...identity,
+          realPath: target,
+        });
+      } catch {
+        throw restoreRequired();
+      }
+    });
+  }
+
   private async startLocked(
     input: StartExternalUpdateInput,
   ): Promise<ExternalUpdateStartResult> {
@@ -434,17 +586,7 @@ export class ExternalUpdateTransactionOwner {
       await copyMarkdownTree(this.formalWikiPath, candidateRoot, before);
       await secureTree(candidateRoot, this.security);
 
-      const requestPackage = {
-        version: 1,
-        instruction: normalized.instruction,
-        materials: normalized.materials.map((material) => ({
-          id: material.id,
-          ...(material.source === undefined ? {} : { source: material.source }),
-          byteLength: Buffer.byteLength(material.content, "utf8"),
-          content: material.content,
-        })),
-      } as const;
-      const requestPackageBytes = canonicalJsonBytes(requestPackage);
+      const requestPackageBytes = startRequestPackageBytes(normalized);
       const requestPackageHash = hashDomainBytes(
         REQUEST_DOMAIN,
         requestPackageBytes,
@@ -3241,6 +3383,228 @@ function hashDomainBytes(domain: string, bytes: Uint8Array): string {
 function hashBytes(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
+
+function startRequestPackageBytes(
+  input: Pick<StartExternalUpdateInput, "instruction" | "materials">,
+): Buffer {
+  return canonicalJsonBytes({
+    version: 1,
+    instruction: input.instruction,
+    materials: (input.materials ?? []).map((material) => ({
+      id: material.id,
+      ...(material.source === undefined ? {} : { source: material.source }),
+      byteLength: Buffer.byteLength(material.content, "utf8"),
+      content: material.content,
+    })),
+  });
+}
+
+async function assertNoOtherRecoveryEvidence(
+  runtimeRoot: string,
+  verifiedSource:
+    | {
+        readonly rootPath: string;
+        readonly identity: DirectoryIdentity;
+        readonly treeHash: string;
+      }
+    | undefined,
+  expectedInitialization: ReadonlyMap<string, { hash: string; size: number }>,
+): Promise<void> {
+  const verifySource = async () => {
+    if (verifiedSource === undefined) return;
+    await assertDirectoryIdentity(
+      verifiedSource.rootPath,
+      verifiedSource.identity,
+    );
+    if (
+      (await hashSourceSnapshotTree(verifiedSource.rootPath)) !==
+      verifiedSource.treeHash
+    )
+      throw restoreRequired();
+  };
+  await verifySource();
+  const rootEntries = await readdir(runtimeRoot);
+  if (
+    rootEntries.some((name) =>
+      /^personal-(?:claims-)?finalization(?:[.]|$)/u.test(name),
+    )
+  )
+    throw restoreRequired();
+  for (const name of ["recovery", "attention", "transactions", "temp"]) {
+    const directory = path.join(runtimeRoot, name);
+    if (
+      (await inspectOptionalRealDirectory(directory)) !== null &&
+      (await readdir(directory)).length !== 0
+    )
+      throw restoreRequired();
+  }
+  const temporary = path.join(runtimeRoot, "tmp");
+  if ((await inspectOptionalRealDirectory(temporary)) === null) return;
+  const sourceFiles = new Map(
+    [...expectedInitialization]
+      .filter(([relative]) => relative.startsWith("immutable/sources/"))
+      .map(
+        ([relative, value]) =>
+          [relative.slice("immutable/sources/".length), value] as const,
+      ),
+  );
+  // Source snapshots and retained pre-state copies may remain here. Publication
+  // or transaction records have different recovery owners and must stop replay.
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const candidate = containedPath(directory, entry.name);
+      if (
+        verifiedSource !== undefined &&
+        path.resolve(candidate).toLowerCase() ===
+          path.resolve(verifiedSource.rootPath).toLowerCase()
+      ) {
+        await verifySource();
+        continue;
+      }
+      if (
+        directory === temporary &&
+        entry.name.startsWith("snapshot-") &&
+        verifiedSource !== undefined
+      ) {
+        await assertExpectedPartialTree(candidate, sourceFiles);
+        if (
+          (await hashSourceSnapshotTree(candidate)) !== verifiedSource.treeHash
+        )
+          throw restoreRequired();
+        continue;
+      }
+      if (
+        directory === temporary &&
+        entry.name.startsWith("uncommitted-start-")
+      ) {
+        await assertExpectedInitializationTree(candidate, expectedInitialization);
+        continue;
+      }
+      if (
+        /^(?:commit[.]marker|attention[.]json|plan[.]json|state[.]json|active[.]json|(?:candidate|review)-receipt[.]json|review-(?:package|result-contract)[.]json|terminal-index[.]json|personal-(?:claims-)?finalization(?:[.]|$))/u.test(
+          entry.name,
+        )
+      )
+        throw restoreRequired();
+      const target = containedPath(directory, entry.name);
+      const stat = await lstat(target);
+      if (entry.isSymbolicLink() || stat.isSymbolicLink())
+        throw restoreRequired();
+      if (stat.isDirectory()) {
+        await inspectRealDirectoryIdentity(target);
+        await visit(target);
+      } else if (!stat.isFile() || stat.nlink !== 1) throw restoreRequired();
+    }
+  };
+  await visit(temporary);
+  await verifySource();
+}
+
+async function existsWithoutFollowingLinks(value: string): Promise<boolean> {
+  try {
+    await lstat(value);
+    return true;
+  } catch (error) {
+    if (nodeCode(error) === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function fingerprintRegularTree(
+  root: string,
+): Promise<Map<string, { hash: string; size: number }>> {
+  const files = new Map<string, { hash: string; size: number }>();
+  const walk = async (directory: string, prefix: string) => {
+    const identity = await inspectRealDirectoryIdentity(directory);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = prefix + entry.name;
+      const absolute = containedPath(root, relative);
+      const stat = await lstat(absolute);
+      if (stat.isSymbolicLink()) throw restoreRequired();
+      if (stat.isDirectory()) await walk(absolute, relative + "/");
+      else {
+        if (!stat.isFile() || stat.nlink !== 1) throw restoreRequired();
+        const bytes = await readRegularFile(absolute);
+        files.set(relative, { size: bytes.length, hash: hashBytes(bytes) });
+      }
+    }
+    await assertDirectoryIdentity(directory, identity);
+  };
+  await walk(root, "");
+  return files;
+}
+
+async function assertExpectedInitializationTree(
+  root: string,
+  expected: ReadonlyMap<string, { hash: string; size: number }>,
+): Promise<void> {
+  await assertExpectedPartialTree(root, expected, [
+    "generations",
+    "generations/1",
+    "generations/1/candidate",
+  ]);
+  await inspectRealDirectoryIdentity(
+    containedPath(root, "generations/1/candidate"),
+  );
+  const required = new Set([
+    "immutable/request.json",
+    "immutable/hard-rules.md",
+    "immutable/candidate-result-contract.json",
+    ...[...expected.keys()].filter((name) =>
+      name.startsWith("generations/1/candidate/"),
+    ),
+  ]);
+  for (const relative of required) {
+    const fingerprint = expected.get(relative);
+    const bytes = await readRegularFile(containedPath(root, relative));
+    if (
+      !fingerprint ||
+      bytes.length !== fingerprint.size ||
+      hashBytes(bytes) !== fingerprint.hash
+    )
+      throw restoreRequired();
+  }
+}
+
+async function assertExpectedPartialTree(
+  root: string,
+  expected: ReadonlyMap<string, { hash: string; size: number }>,
+  allowedEmptyDirectories: readonly string[] = [],
+): Promise<void> {
+  const directories = new Set(allowedEmptyDirectories);
+  for (const relative of expected.keys()) {
+    const components = relative.split("/");
+    for (let count = 1; count < components.length; count++)
+      directories.add(components.slice(0, count).join("/"));
+  }
+  const walk = async (directory: string, prefix: string) => {
+    const identity = await inspectRealDirectoryIdentity(directory);
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const relative = prefix + entry.name;
+      const absolute = containedPath(root, relative);
+      const stat = await lstat(absolute);
+      if (stat.isSymbolicLink()) throw restoreRequired();
+      if (stat.isDirectory()) {
+        if (!directories.has(relative)) throw restoreRequired();
+        await walk(absolute, relative + "/");
+      } else {
+        const fingerprint = expected.get(relative);
+        if (
+          !fingerprint ||
+          !stat.isFile() ||
+          stat.nlink !== 1 ||
+          stat.size !== fingerprint.size
+        )
+          throw restoreRequired();
+        if (hashBytes(await readRegularFile(absolute)) !== fingerprint.hash)
+          throw restoreRequired();
+      }
+    }
+    await assertDirectoryIdentity(directory, identity);
+  };
+  await walk(root, "");
+}
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (isPlainRecord(value))

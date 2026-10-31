@@ -1,0 +1,24 @@
+schemaVersion: 1
+sourceId: scientific-agent-skills
+canonicalUrl: https://github.com/K-Dense-AI/scientific-agent-skills.git
+path: dependencies/upstream/scientific-agent-skills
+gitlinkCommit: 5f2bc0341354fd5590aef76a533ada1e1e5b4e62
+gitTree: 557aacccc13b9e9c8c14a5d97e2c2b5229b65c13
+resources:
+- LICENSE.md
+- skills/sympy
+license:
+  path: LICENSE.md
+  spdx: MIT
+  status: verified
+  hash: sha256:09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1
+files:
+  LICENSE.md: sha256:09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1
+  skills/sympy/references/advanced-topics.md: sha256:cff0c044c5d7c7f65235f35a7c0fe19e41a42c27393c9aa7f38a31f00ed28e81
+  skills/sympy/references/code-generation-printing.md: sha256:6a547f4dfd6975762d61d7effd47c9613e16d345e2e1dab89549bfc465f7e404
+  skills/sympy/references/core-capabilities.md: sha256:2c7d55c127ccd5d4d0792892025979c421573f2662c5cededb6cbcf80ee61888
+  skills/sympy/references/core_capabilities.md: sha256:69fffa94caf62276112108bbeff5b7dd4281a5b40c07e44eea381f46f00a6011
+  skills/sympy/references/matrices-linear-algebra.md: sha256:fd64e48e917cf0a71bb0d744e8cfee345a98284256a84fb55793fe4d9783272d
+  skills/sympy/references/physics-mechanics.md: sha256:0d015cf60861aa5fe1598a76e08d612a758f0c0895bbd1ce1dcbfbc9d4bfaf8c
+  skills/sympy/references/review.md: sha256:03d4db2d0432cf7ec3a21b2746da7b96809aa7613d17c101d16460f5ec732ab1
+  skills/sympy/SKILL.md: sha256:bb97087bdddccc845401737ddc7f7a8da1c14ced5e8d40da01271c991ac46e23

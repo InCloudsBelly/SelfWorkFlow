@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
@@ -104,15 +106,47 @@ export async function readPersonalCandidateMarker(
     throw invalidMarker("The candidate marker path must be absolute.");
   }
   let value: unknown;
+  let handle: FileHandle | undefined;
   try {
-    value = JSON.parse(await readFile(markerPath, "utf8"));
+    await assertNoLinkAncestors(path.dirname(markerPath));
+    const before = await lstat(markerPath);
+    if (before.isSymbolicLink() || !before.isFile())
+      throw invalidMarker("The candidate marker must be a regular file.");
+    handle = await open(markerPath, "r");
+    const opened = await handle.stat();
+    if (!sameMarkerFile(before, opened))
+      throw invalidMarker("The candidate marker changed before it was read.");
+    const bytes = await handle.readFile();
+    const [after, current] = await Promise.all([
+      handle.stat(),
+      lstat(markerPath),
+    ]);
+    if (!sameMarkerFile(opened, after) || !sameMarkerFile(opened, current))
+      throw invalidMarker("The candidate marker changed while it was read.");
+    await assertNoLinkAncestors(path.dirname(markerPath));
+    value = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
-    if (isMissing(error)) return null;
+    if (isMissing(error) && handle === undefined) return null;
     throw invalidMarker("The candidate marker is unreadable.", error);
+  } finally {
+    await handle?.close();
   }
   const parsed = personalCandidateMarkerSchema.safeParse(value);
   if (!parsed.success) throw invalidMarker("The candidate marker is invalid.");
   return parsed.data;
+}
+
+function sameMarkerFile(left: Stats, right: Stats): boolean {
+  return (
+    right.isFile() &&
+    !right.isSymbolicLink() &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.birthtimeMs === right.birthtimeMs &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs
+  );
 }
 
 export async function transitionPersonalCandidateMarker(

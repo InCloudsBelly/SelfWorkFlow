@@ -9,6 +9,68 @@ import {
 } from "../src/official-lifecycle-adapter.js";
 
 describe("official OpenWiki lifecycle adapter", () => {
+  test.each([
+    "same",
+    "review",
+    "attention",
+    "foreign",
+    "future",
+    "wrong-wiki",
+    "unknown",
+  ])(
+    "recovers only an authenticated immediate successor: %s",
+    async (scenario) => {
+      const candidate = {
+        candidateBindingHash: hash("b"),
+        candidateRoot: path.resolve("unused-old-candidate"),
+        candidateRootHash: hash("c"),
+        generation: 1 as const,
+        transactionId: "external-12345678",
+        wikiRevision: hash("a"),
+      };
+      const output = {
+        ok: true,
+        status:
+          scenario === "review"
+            ? "external_review_resumed"
+            : scenario === "attention"
+              ? "needs_clarification"
+              : scenario === "unknown"
+                ? "unknown"
+                : "external_update_resumed",
+        workPackage: {
+          transactionId:
+            scenario === "foreign"
+              ? "external-foreign-12345678"
+              : candidate.transactionId,
+          generation: scenario === "same" ? 1 : scenario === "future" ? 3 : 2,
+          bindingHash:
+            scenario === "same" ? candidate.candidateBindingHash : hash("d"),
+          beforeWikiRevision:
+            scenario === "wrong-wiki" ? hash("e") : candidate.wikiRevision,
+        },
+      };
+      const gateway = new C7PersonalGateway({
+        externalUpdate: { begin: async () => output } as never,
+      });
+      const recovery = gateway.recoverRepair({
+        candidate,
+        runId: "77777777-7777-4777-8777-777777777777",
+        runtimeRoot: path.resolve("unused-runtime"),
+        wikiRoot: path.resolve("unused-wiki"),
+      });
+      if (["same", "review", "attention"].includes(scenario))
+        await expect(recovery).resolves.toBeNull();
+      else
+        await expect(recovery).rejects.toMatchObject({
+          code:
+            scenario === "unknown"
+              ? "upstream_incompatible"
+              : "restore_required",
+        });
+    },
+  );
+
   test("keeps the official six-stage names while routing through the personal owner", async () => {
     const owner = {
       begin: vi.fn(async (input: unknown) => ({ stage: "begin", input })),

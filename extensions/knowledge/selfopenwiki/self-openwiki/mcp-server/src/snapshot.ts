@@ -196,6 +196,7 @@ async function collectMarkdownFiles(
   relativeDirectory: string,
   directories: readonly BoundDirectory[],
   streamHashes = false,
+  read = createSnapshotReader(),
 ): Promise<Array<MarkdownTreeSnapshot["files"][number]>> {
   const directory =
     relativeDirectory === ""
@@ -209,97 +210,144 @@ async function collectMarkdownFiles(
   );
   await assertDirectoryChain(directories);
   entries.sort((left, right) => (left.name < right.name ? -1 : 1));
-  const files: Array<MarkdownTreeSnapshot["files"][number]> = [];
-  for (const entry of entries) {
-    // A selected personal Wiki may itself be a Git worktree. Git metadata is
-    // repository state, not Wiki content, and is deliberately excluded from
-    // the content snapshot/publication surface.
-    if (relativeDirectory === "" && entry.name === ".git") continue;
-    // Personal OpenWiki Claim sidecars are control state owned by the
-    // personal adapter. They are snapshotted by its dedicated root snapshot,
-    // while the C7 Markdown transaction intentionally ignores them.
-    if (relativeDirectory === "" && entry.name === ".claims") continue;
-    if (relativeDirectory === "" && entry.name === ".selfopenwiki") {
-      throw invalidWiki(
-        "The Wiki root cannot contain the reserved personal runtime directory.",
-      );
-    }
-    const relativePath =
-      relativeDirectory === ""
-        ? entry.name
-        : path.join(relativeDirectory, entry.name);
-    const normalizedPath = relativePath.split(path.sep).join("/");
-    const absolutePath = path.join(root.absolutePath, relativePath);
-    await assertDirectoryChain(directories);
-    const stat = await lstat(absolutePath).catch((error: unknown) => {
-      throw invalidWiki("A Wiki snapshot entry is unreadable.", error);
-    });
-    if (entry.isSymbolicLink() || stat.isSymbolicLink()) {
-      throw invalidWiki(
-        "Wiki snapshots cannot contain links or reparse paths.",
-      );
-    }
-    // Root Git policies travel with the repository, outside knowledge revisions.
-    if (
-      relativeDirectory === "" &&
-      (entry.name === ".gitignore" || entry.name === ".gitattributes")
-    ) {
-      if (!entry.isFile() || !stat.isFile()) {
-        throw invalidWiki("Root Git policies must be regular files.");
-      }
-      continue;
-    }
-    if (entry.isDirectory() && stat.isDirectory()) {
-      const child = { absolutePath, identity: stat };
-      files.push(
-        ...(await collectMarkdownFiles(
-          root,
-          relativePath,
-          [...directories, child],
-          streamHashes,
-        )),
-      );
-      continue;
-    }
-    if (!entry.isFile() || !stat.isFile()) {
-      throw invalidWiki("Wiki snapshots can contain only regular files.");
-    }
-    if (path.extname(entry.name).toLowerCase() !== ".md") {
-      throw invalidWiki("The formal Wiki can contain only Markdown files.");
-    }
-    const metadata = streamHashes
-      ? await withBoundRegularFile(
-          absolutePath,
-          stat,
-          directories,
-          async (handle, opened) => {
-            const hasher = createHash("sha256");
-            const buffer = Buffer.alloc(65_536);
-            let offset = 0;
-            while (offset < opened.size) {
-              const result = await handle.read(
-                buffer,
-                0,
-                Math.min(buffer.length, opened.size - offset),
-                offset,
-              );
-              if (result.bytesRead === 0) throw changedWiki();
-              hasher.update(buffer.subarray(0, result.bytesRead));
-              offset += result.bytesRead;
-            }
-            const after = await handle.stat();
-            if (after.size !== opened.size || after.mtimeMs !== opened.mtimeMs)
-              throw changedWiki();
-            return { hash: `sha256:${hasher.digest("hex")}`, size: offset };
-          },
-        )
-      : await readBoundRegularFile(absolutePath, stat, directories).then(
-          (bytes) => ({ hash: hashBytes(bytes), size: bytes.byteLength }),
+  const reads: Array<
+    Promise<PromiseSettledResult<MarkdownTreeSnapshot["files"]>>
+  > = [];
+  const track = (operation: Promise<MarkdownTreeSnapshot["files"]>) =>
+    reads.push(
+      operation.then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ status: "rejected" as const, reason }),
+      ),
+    );
+  let results: PromiseSettledResult<MarkdownTreeSnapshot["files"]>[];
+  try {
+    for (const entry of entries) {
+      // A selected personal Wiki may itself be a Git worktree. Git metadata is
+      // repository state, not Wiki content, and is deliberately excluded from
+      // the content snapshot/publication surface.
+      if (relativeDirectory === "" && entry.name === ".git") continue;
+      // Personal OpenWiki Claim sidecars are control state owned by the
+      // personal adapter. They are snapshotted by its dedicated root snapshot,
+      // while the C7 Markdown transaction intentionally ignores them.
+      if (relativeDirectory === "" && entry.name === ".claims") continue;
+      if (relativeDirectory === "" && entry.name === ".selfopenwiki") {
+        throw invalidWiki(
+          "The Wiki root cannot contain the reserved personal runtime directory.",
         );
-    files.push({ ...metadata, relativePath: normalizedPath });
+      }
+      const relativePath =
+        relativeDirectory === ""
+          ? entry.name
+          : path.join(relativeDirectory, entry.name);
+      const normalizedPath = relativePath.split(path.sep).join("/");
+      const absolutePath = path.join(root.absolutePath, relativePath);
+      await assertDirectoryChain(directories);
+      const stat = await lstat(absolutePath).catch((error: unknown) => {
+        throw invalidWiki("A Wiki snapshot entry is unreadable.", error);
+      });
+      if (entry.isSymbolicLink() || stat.isSymbolicLink()) {
+        throw invalidWiki(
+          "Wiki snapshots cannot contain links or reparse paths.",
+        );
+      }
+      // Root Git policies travel with the repository, outside knowledge revisions.
+      if (
+        relativeDirectory === "" &&
+        (entry.name === ".gitignore" || entry.name === ".gitattributes")
+      ) {
+        if (!entry.isFile() || !stat.isFile()) {
+          throw invalidWiki("Root Git policies must be regular files.");
+        }
+        continue;
+      }
+      if (entry.isDirectory() && stat.isDirectory()) {
+        const child = { absolutePath, identity: stat };
+        track(
+          collectMarkdownFiles(
+            root,
+            relativePath,
+            [...directories, child],
+            streamHashes,
+            read,
+          ),
+        );
+        continue;
+      }
+      if (!entry.isFile() || !stat.isFile()) {
+        throw invalidWiki("Wiki snapshots can contain only regular files.");
+      }
+      if (path.extname(entry.name).toLowerCase() !== ".md") {
+        throw invalidWiki("The formal Wiki can contain only Markdown files.");
+      }
+      track(
+        read(async () => {
+          const metadata = streamHashes
+            ? await withBoundRegularFile(
+                absolutePath,
+                stat,
+                directories,
+                async (handle, opened) => {
+                  const hasher = createHash("sha256");
+                  const buffer = Buffer.alloc(65_536);
+                  let offset = 0;
+                  while (offset < opened.size) {
+                    const result = await handle.read(
+                      buffer,
+                      0,
+                      Math.min(buffer.length, opened.size - offset),
+                      offset,
+                    );
+                    if (result.bytesRead === 0) throw changedWiki();
+                    hasher.update(buffer.subarray(0, result.bytesRead));
+                    offset += result.bytesRead;
+                  }
+                  const after = await handle.stat();
+                  if (
+                    after.size !== opened.size ||
+                    after.mtimeMs !== opened.mtimeMs
+                  )
+                    throw changedWiki();
+                  return {
+                    hash: `sha256:${hasher.digest("hex")}`,
+                    size: offset,
+                  };
+                },
+              )
+            : await readBoundRegularFile(absolutePath, stat, directories).then(
+                (bytes) => ({ hash: hashBytes(bytes), size: bytes.byteLength }),
+              );
+          return [{ ...metadata, relativePath: normalizedPath }];
+        }),
+      );
+    }
+  } finally {
+    // Await every opened handle even when enumeration or one read fails.
+    results = await Promise.all(reads);
   }
   await assertDirectoryChain(directories);
-  return files;
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+  return results.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
+}
+
+function createSnapshotReader() {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (active >= 8)
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    else active++;
+    try {
+      return await operation();
+    } finally {
+      const next = waiting.shift();
+      if (next === undefined) active--;
+      else next();
+    }
+  };
 }
 
 async function bindMarkdownRoot(root: string): Promise<BoundDirectory> {

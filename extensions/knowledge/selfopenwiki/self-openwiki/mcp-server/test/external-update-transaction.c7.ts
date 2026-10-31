@@ -21,6 +21,14 @@ import {
   withC7Locks,
 } from "../src/config.js";
 import { ExternalUpdateTransactionOwner } from "../src/external-update-transaction.js";
+import { OpenWikiExternalUpdateService } from "../src/external-update.js";
+import { C7PersonalGateway } from "../src/official-lifecycle-adapter.js";
+import {
+  PersonalWikiLifecycle,
+  personalHash,
+} from "../src/personal-wiki-lifecycle.js";
+import { FilePersonalClaimsResolver } from "../src/personal-claims.js";
+import { snapshotPersonalWiki } from "../src/personal-wiki-snapshot.js";
 import {
   computeExternalTerminalResultHash,
   transitionExternalUpdateState,
@@ -41,6 +49,277 @@ afterEach(async () => {
 });
 
 describe("external update transaction owner", () => {
+  test.each([
+    "repair-ready-begin",
+    "successor-begin",
+    "successor-finish",
+    "write-fails-begin",
+    "legacy-claim-only-begin",
+    "legacy-foreign",
+    "legacy-published",
+    "legacy-review-ready-finish",
+    "legacy-repair-ready-finish",
+    "legacy-applying",
+    "published-state-write-begin",
+  ])(
+    "recovers a repair interrupted before personal state was written: %s",
+    async (boundary) => {
+      const fixture = await createFixture();
+      const runId = "77777777-7777-4777-8777-777777777777";
+      fixture.options.formalWikiPath = await realpath(
+        fixture.options.formalWikiPath,
+      );
+      fixture.options.runtimeDir = `${fixture.options.formalWikiPath}.selfopenwiki`;
+      await mkdir(fixture.options.runtimeDir, { recursive: true });
+      fixture.input.requestId = runId;
+      const owner = new ExternalUpdateTransactionOwner(fixture.options);
+      const prepared = await prepareMinorReview(
+        owner,
+        fixture,
+        false,
+        boundary.startsWith("legacy-"),
+      );
+      const beforePersonal = await snapshotPersonalWiki(
+        fixture.options.formalWikiPath,
+      );
+      const rootBinding = {
+        wikiRoot: fixture.options.formalWikiPath,
+        runtimeRoot: fixture.options.runtimeDir,
+        wikiRevision: beforePersonal.rootHash,
+        markdownWikiRevision: prepared.state.beforeWikiRevision,
+      };
+      const skillBinding = {
+        skillIds: ["kg-c7-project-wiki"],
+        skillAggregateHash: fixture.input.skills.aggregateHash,
+      };
+      const store = new FilePersonalRunStore({
+        runtimeRoot: rootBinding.runtimeRoot,
+        createRunId: () => runId,
+      });
+      await store.begin({
+        ...rootBinding,
+        ...skillBinding,
+        mode: "update",
+        requestedSkills: [],
+      });
+      await store.submitPlan({
+        runId,
+        pages: [
+          { path: "index.md", title: "Index", purpose: "Explain the index." },
+        ],
+      });
+      await store.attachCandidate(runId, {
+        candidateBindingHash: prepared.state.bindingHash,
+        candidateRoot: prepared.state.candidateRoot,
+        candidateRootHash: prepared.state.review!.candidateRootHash,
+        generation: 1,
+        transactionId: prepared.state.transactionId,
+        wikiRevision: prepared.state.beforeWikiRevision,
+      });
+      const service = () =>
+        new OpenWikiExternalUpdateService({
+          sensitivePolicyPath: path.join(
+            rootBinding.runtimeRoot,
+            "unused-sensitive-policy.json",
+          ),
+          skills: { select: () => fixture.input.skills },
+          sources: {
+            verify: async () => {
+              throw new Error(
+                "No source lookup is expected during repair recovery.",
+              );
+            },
+          },
+          publisher: new WikiPublisher(fixture.options),
+          transactions: new ExternalUpdateTransactionOwner(fixture.options),
+        });
+      const lifecycle = (
+        runStore = new FilePersonalRunStore({
+          runtimeRoot: rootBinding.runtimeRoot,
+        }),
+      ) =>
+        new PersonalWikiLifecycle({
+          rootResolver: { resolve: async () => rootBinding },
+          skillAdapter: { resolve: async () => skillBinding },
+          runStore,
+          claimsResolver: new FilePersonalClaimsResolver(),
+          c7: new C7PersonalGateway({ externalUpdate: service() }),
+          upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+        });
+      const job = await store.nextPage(runId);
+      await lifecycle().submitPage({ runId, jobId: job!.jobId });
+      const receipt = reviewReceiptFor(prepared, {
+        verdict: "changes_requested",
+        issues: [
+          {
+            code: "explain_boundary",
+            message: "Explain the boundary.",
+            page: "index.md",
+            severity: "minor",
+          },
+        ],
+      });
+      const journalPath = path.join(
+        rootBinding.runtimeRoot,
+        "personal-claims-finalization.json",
+      );
+      const markerPath = path.join(
+        rootBinding.runtimeRoot,
+        "personal-finalization.json",
+      );
+      if (boundary.startsWith("legacy-")) {
+        const claimsHash = personalHash(beforePersonal.claims);
+        const journal = {
+          afterWikiHash: prepared.state.review!.candidateRootHash,
+          baselineClaimsHash: claimsHash,
+          bindingHash: prepared.state.bindingHash,
+          completedOperations: [],
+          currentClaimsHash: claimsHash,
+          expectedFinalClaimsHash: claimsHash,
+          generation: 1,
+          operations: [],
+          reviewReceiptInputHash: personalHash(receipt),
+          runId,
+          runtimeRoot: rootBinding.runtimeRoot,
+          status: boundary === "legacy-applying" ? "applying" : "prepared",
+          transactionId: prepared.state.transactionId,
+          type: "selfopenwiki:personal-claims-finalization-v1",
+          version: 1,
+        };
+        const marker = {
+          bindingHash: prepared.state.bindingHash,
+          generation: 1,
+          reviewReceiptInputHash: personalHash(receipt),
+          runId:
+            boundary === "legacy-foreign"
+              ? "11111111-1111-4111-8111-111111111111"
+              : runId,
+          status: boundary === "legacy-published" ? "published" : "prepared",
+          ...(boundary === "legacy-published"
+            ? {
+                afterWikiHash: journal.afterWikiHash,
+                reviewReceiptHash: personalHash("unverified-publication"),
+              }
+            : {}),
+          transactionId: prepared.state.transactionId,
+          type: "selfopenwiki:personal-finalization-v1",
+          version: 1,
+        };
+        await writeFile(journalPath, JSON.stringify(journal));
+        await writeFile(markerPath, JSON.stringify(marker));
+      }
+      if (boundary !== "legacy-review-ready-finish") await owner.submitAndPublish({
+        transactionId: prepared.state.transactionId,
+        bindingHash: prepared.state.bindingHash,
+        reviewReceipt: receipt,
+        publish: async () => {
+          throw new Error("Repair must not publish.");
+        },
+      });
+      if (
+        boundary === "successor-begin" ||
+        boundary === "successor-finish" ||
+        (boundary.startsWith("legacy-") && !boundary.endsWith("ready-finish"))
+      )
+        await owner.resume(
+          prepared.state.transactionId,
+          prepared.state.bindingHash,
+        );
+      if (boundary === "write-fails-begin") {
+        const failingStore = new FilePersonalRunStore({
+          runtimeRoot: rootBinding.runtimeRoot,
+        });
+        vi.spyOn(failingStore, "beginSuccessor").mockRejectedValueOnce(
+          new Error("interrupted successor commit"),
+        );
+        await expect(
+          lifecycle(failingStore).finish({ runId, reviewReceipt: receipt }),
+        ).rejects.toThrow("interrupted successor commit");
+        expect((await owner.readActive())?.state.generation).toBe(2);
+      }
+      expect((await store.read(runId)).generation).toBe(1);
+      if (boundary === "legacy-foreign" || boundary === "legacy-published" || boundary === "legacy-applying") {
+        const retained = [
+          await readFile(journalPath, "utf8"),
+          await readFile(markerPath, "utf8"),
+        ];
+        await expect(
+          lifecycle().begin({ mode: "update", wikiRoot: rootBinding.wikiRoot }),
+        ).rejects.toBeDefined();
+        expect([
+          await readFile(journalPath, "utf8"),
+          await readFile(markerPath, "utf8"),
+        ]).toEqual(retained);
+        return;
+      }
+      if (boundary === "successor-finish" || boundary.endsWith("ready-finish")) {
+        await expect(
+          lifecycle().finish({ runId, reviewReceipt: receipt }),
+        ).resolves.toMatchObject({ status: "repair_ready", generation: 2 });
+      } else {
+        await expect(
+          lifecycle().begin({ mode: "update", wikiRoot: rootBinding.wikiRoot }),
+        ).resolves.toMatchObject({ status: "resuming" });
+      }
+      const state = await store.read(runId);
+      const c7 = await new ExternalUpdateTransactionOwner(
+        fixture.options,
+      ).readActive();
+      expect(state.generation).toBe(2);
+      expect(state.candidate?.candidateBindingHash).toBe(c7?.state.bindingHash);
+      expect(state.candidate?.candidateRoot).toBe(c7?.state.candidateRoot);
+      expect(state.jobs.every((page) => page.status === "pending")).toBe(true);
+      expect((await snapshotMarkdownTree(rootBinding.wikiRoot)).rootHash).toBe(
+        prepared.state.beforeWikiRevision,
+      );
+      await expect(lstat(journalPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(lstat(markerPath)).rejects.toMatchObject({ code: "ENOENT" });
+      const nextJob = await store.nextPage(runId);
+      await writeFile(
+        path.join(state.candidate!.candidateRoot, "index.md"),
+        "---\ntype: Guide\n---\n# Home\nFixed boundary.\n",
+      );
+      await lifecycle().submitPage({ runId, jobId: nextJob!.jobId });
+      const candidateReceipt = {
+        ...prepared.candidateReceipt,
+        generation: 2 as const,
+        bindingHash: state.candidate!.candidateBindingHash,
+        writerExecutionId: "writer-next-generation-12345678",
+      };
+      const nextPrepared = await owner.prepareReview({
+        transactionId: state.candidate!.transactionId,
+        bindingHash: state.candidate!.candidateBindingHash,
+        candidateReceipt,
+        reviewResultContract: Buffer.from('{"version":1}\n'),
+      });
+      if (nextPrepared.kind !== "review_ready")
+        throw new Error("expected next review");
+      const pass = reviewReceiptFor(nextPrepared, {
+        verdict: "pass",
+        issues: [],
+      });
+      if (boundary === "published-state-write-begin") {
+        const failingStore = new FilePersonalRunStore({ runtimeRoot: rootBinding.runtimeRoot });
+        vi.spyOn(failingStore, "setWikiRevisions").mockRejectedValueOnce(new Error("interrupted published-state commit"));
+        await expect(lifecycle(failingStore).finish({ runId, reviewReceipt: pass })).rejects.toThrow("interrupted published-state commit");
+        await expect(lifecycle().begin({ mode: "update", wikiRoot: rootBinding.wikiRoot })).resolves.toMatchObject({ status: "noop" });
+      } else {
+        await expect(lifecycle().finish({ runId, reviewReceipt: pass })).resolves.toMatchObject({ status: "complete", published: true });
+      }
+      expect((await store.read(runId)).phase).toBe("complete");
+      expect(
+        (
+          await new FilePersonalClaimsResolver().load(
+            rootBinding.wikiRoot,
+            "index.md",
+          )
+        ).source,
+      ).toBe("authoritative");
+    },
+  );
+
   test.each([
     { version: 4, faultPoint: "after_plan" },
     { version: 4, faultPoint: "after_install" },
@@ -2680,6 +2959,7 @@ async function prepareMinorReview(
   owner: ExternalUpdateTransactionOwner,
   fixture: Awaited<ReturnType<typeof createFixture>>,
   twoPages = false,
+  unchanged = false,
 ) {
   await writeFile(
     path.join(fixture.options.formalWikiPath, "index.md"),
@@ -2697,11 +2977,12 @@ async function prepareMinorReview(
   const created = asWorkspace(
     await owner.start({ ...fixture.input, expectedWikiRevision }),
   );
-  await writeFile(
-    path.join(created.state.candidateRoot, "index.md"),
-    "---\ntype: Guide\n---\n\n# Home\n\nUpdated knowledge.\n",
-    "utf8",
-  );
+  if (!unchanged)
+    await writeFile(
+      path.join(created.state.candidateRoot, "index.md"),
+      "---\ntype: Guide\n---\n\n# Home\n\nUpdated knowledge.\n",
+      "utf8",
+    );
   if (twoPages)
     await writeFile(
       path.join(created.state.candidateRoot, "quickstart.md"),

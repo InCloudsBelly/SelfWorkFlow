@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as sourceManifest from "../scripts/parent-source-manifest.mjs";
 
 import {
   computeParentSourceManifestSync,
@@ -65,5 +66,29 @@ test("binds tracked, untracked, deleted, and conflict observations", () => {
     assert.ok(conflict.manifest.records.every((record) => record.path !== "docs/guide.md" || record.layer !== "index" || record.stage === 0));
   } finally {
     rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("async module verification preserves exact hashes and detects fresh nested bytes", async () => {
+  const root = fixture();
+  const nested = fixture();
+  try {
+    git(root, ["-c", "protocol.file.allow=always", "submodule", "add", nested, "upstream/openwiki"]);
+    git(root, ["commit", "-am", "nested fixture"]);
+    const verify = () => sourceManifest.computeModuleSourceManifest(root);
+    const baseline = await verify();
+    assert.deepEqual(baseline, sourceManifest.computeModuleSourceManifestSync(root));
+    writeFileSync(join(root, "upstream/openwiki/docs/guide.md"), "changed\n", "utf8");
+    writeFileSync(join(root, "docs/new.md"), "untracked\n", "utf8");
+    const changed = await verify();
+    assert.notEqual(changed.hash, baseline.hash);
+    assert.deepEqual(changed, sourceManifest.computeModuleSourceManifestSync(root));
+    git(root, ["add", "docs/new.md"]);
+    assert.equal((await verify()).hash, changed.hash);
+    rmSync(join(root, "docs/new.md"));
+    assert.notEqual((await verify()).hash, changed.hash);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+    rmSync(nested, { force: true, recursive: true });
   }
 });

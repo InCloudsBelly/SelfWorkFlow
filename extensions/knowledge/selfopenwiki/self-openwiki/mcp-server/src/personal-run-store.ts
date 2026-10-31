@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { withC7Locks } from "./config.js";
+import { toolInputSchemas } from "./contracts.js";
+import { readPersonalCandidateMarker } from "./personal-candidate-marker.js";
+import { snapshotMarkdownTree } from "./snapshot.js";
 import type {
   PersonalCandidateBinding,
   PersonalRunBeginInput,
@@ -442,6 +445,7 @@ export class FilePersonalRunStore implements PersonalRunStore {
   async beginSuccessor(
     runId: string,
     candidate: PersonalCandidateBinding,
+    repairPages?: readonly string[],
   ): Promise<{ readonly queueHash: string }> {
     return withPersonalLocks(this.runtimeRoot, async () => {
       const state = await this.read(runId);
@@ -463,20 +467,69 @@ export class FilePersonalRunStore implements PersonalRunStore {
           "The personal Wiki repair successor binding is invalid.",
         );
       }
-      const jobs = state.jobs.map(
-        ({
+      const reopen = repairPageClosure(state.jobs, repairPages);
+      const snapshot =
+        reopen.size < state.jobs.length
+          ? await snapshotMarkdownTree(candidate.candidateRoot)
+          : undefined;
+      const hashes = new Map(
+        snapshot?.files.map((file) => [file.relativePath, file.hash]),
+      );
+      const jobs: PersonalPageJob[] = [];
+      for (const job of state.jobs) {
+        if (
+          !reopen.has(job.path) &&
+          job.claimDecisions !== undefined &&
+          job.pageContentHash !== undefined &&
+          job.claimDecisionHash !== undefined
+        ) {
+          const marker = await readPersonalCandidateMarker(
+            path.join(
+              state.runtimeRoot,
+              "page-markers",
+              state.runId,
+              `${job.jobId}.json`,
+            ),
+          );
+          if (marker !== null) {
+            if (
+              marker.state !== "accepted" ||
+              marker.runId !== state.runId ||
+              marker.jobId !== job.jobId ||
+              marker.pagePath !== job.path ||
+              marker.pagePathHash !== personalHash(job.path) ||
+              marker.transactionId !== state.candidate.transactionId ||
+              marker.generation > state.generation ||
+              !isWithinPath(state.runtimeRoot, marker.candidateRoot) ||
+              (marker.generation === state.generation &&
+                (marker.candidateRoot !== state.candidate.candidateRoot ||
+                  marker.candidateBindingHash !==
+                    state.candidate.candidateBindingHash)) ||
+              marker.pageContentHash !== job.pageContentHash ||
+              marker.claimDecisionHash !== job.claimDecisionHash ||
+              personalStoredClaimDecisionHash(state.runId, job) !==
+                job.claimDecisionHash ||
+              hashes.get(job.path) !== job.pageContentHash
+            ) {
+              throw new PersonalRunStoreError(
+                "invalid_state",
+                "An unchanged repair page failed its durable acceptance checks.",
+              );
+            }
+            jobs.push(job);
+            continue;
+          }
+        }
+        const {
           claimDecisionHash: _claimDecisionHash,
           claimDecisions: _claimDecisions,
-          jobId: _jobId,
           pageContentHash: _pageContentHash,
           status: _status,
           ...page
-        }) => ({
-          ...page,
-          jobId: randomUUID(),
-          status: "pending" as const,
-        }),
-      );
+        } = job;
+        jobs.push({ ...page, status: "pending" });
+      }
+      // Stable job IDs keep historical markers attributable after cold restart.
       const queueHash = personalHash(
         jobs.map(({ jobId: _jobId, status: _status, ...page }) => page),
       );
@@ -519,6 +572,26 @@ export class FilePersonalRunStore implements PersonalRunStore {
     }
     await assertStatePathSafety(parsed);
     return parsed;
+  }
+
+  // Read-only: the C7 transaction owner holds operation/wiki locks while calling.
+  async verifyUnboundStart(
+    runId: string,
+    expectedStateHash: string,
+  ): Promise<boolean> {
+    const active = await this.readActivePointer();
+    if (active?.runId !== runId) return false;
+    const state = await this.read(runId);
+    return (
+      state.generation === 1 &&
+      state.phase === "queued" &&
+      state.candidate === undefined &&
+      state.planHash !== null &&
+      state.queueHash !== null &&
+      state.jobs.length > 0 &&
+      state.jobs.every((job) => job.status === "pending") &&
+      personalHash(state) === expectedStateHash
+    );
   }
 
   private runsRoot(): string {
@@ -614,6 +687,13 @@ export class PersonalRunStoreRouter implements PersonalRunStore {
     return this.requireStore(runId).then((store) => store.read(runId));
   }
 
+  async verifyUnboundStart(runId: string, expectedStateHash: string) {
+    return (await this.requireStore(runId)).verifyUnboundStart(
+      runId,
+      expectedStateHash,
+    );
+  }
+
   submitPlan(input: {
     readonly runId: string;
     readonly pages: readonly PersonalPagePlan[];
@@ -629,8 +709,8 @@ export class PersonalRunStoreRouter implements PersonalRunStore {
     return (await this.requireStore(runId)).attachCandidate(runId, candidate);
   }
 
-  async beginSuccessor(runId: string, candidate: PersonalCandidateBinding) {
-    return (await this.requireStore(runId)).beginSuccessor(runId, candidate);
+  async beginSuccessor(runId: string, candidate: PersonalCandidateBinding, repairPages?: readonly string[]) {
+    return (await this.requireStore(runId)).beginSuccessor(runId, candidate, repairPages);
   }
 
   async rollbackPlan(runId: string, planHash: string) {
@@ -693,6 +773,76 @@ export class PersonalRunStoreRouter implements PersonalRunStore {
       "Call personal begin before continuing this run.",
     );
   }
+}
+
+function repairPageClosure(
+  jobs: readonly PersonalPageJob[],
+  pages?: readonly string[],
+): Set<string> {
+  const all = new Set(jobs.map((job) => job.path));
+  if (!pages?.length || pages.some((page) => !all.has(page))) return all;
+  const changed = new Set(pages);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const job of jobs) {
+      for (const related of job.relatedPages ?? []) {
+        if (
+          !all.has(related) ||
+          (!changed.has(job.path) && !changed.has(related))
+        )
+          continue;
+        for (const page of [job.path, related]) {
+          if (!changed.has(page)) {
+            changed.add(page);
+            expanded = true;
+          }
+        }
+      }
+    }
+  }
+  return changed;
+}
+
+export function personalStoredClaimDecisionHash(
+  runId: string,
+  job: PersonalPageJob,
+): string | null {
+  if (job.claimDecisions === undefined) return null;
+  const claims: unknown[] = [];
+  const confirmedClaimIds: string[] = [];
+  const retractedClaimIds: string[] = [];
+  let phase = 0;
+  for (const decision of job.claimDecisions) {
+    if (
+      isRecord(decision) &&
+      (decision.action === "confirm" || decision.action === "retract")
+    ) {
+      if (Object.keys(decision).length !== 2 || typeof decision.id !== "string")
+        return null;
+      if (decision.action === "confirm") {
+        if (phase > 1) return null;
+        phase = 1;
+        confirmedClaimIds.push(decision.id);
+      } else {
+        phase = 2;
+        retractedClaimIds.push(decision.id);
+      }
+    } else {
+      if (phase !== 0) return null;
+      claims.push(decision);
+    }
+  }
+  const payload = { claims, confirmedClaimIds, retractedClaimIds };
+  if (
+    !toolInputSchemas.openwiki_submit_page.safeParse({
+      runId,
+      jobId: job.jobId,
+      ...payload,
+    }).success
+  )
+    return null;
+  return personalHash(payload);
 }
 
 function assertBeginInput(

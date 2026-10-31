@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -120,6 +120,121 @@ export function computeModuleSourceManifestSync(repositoryRoot) {
   };
 }
 
+// Read the same bytes as the synchronous provenance implementation. Independent
+// Git observations run concurrently; no filesystem metadata or result is cached.
+export async function computeModuleSourceManifest(repositoryRoot) {
+  const root = resolve(repositoryRoot);
+  const runGit = createAsyncGitRunner();
+  const [indexEntries, headEntries, worktreeEntries] = await Promise.all([
+    runGit(root, ["ls-files", "-s", "-z", "--", "."]),
+    runGit(root, ["ls-tree", "-r", "-z", "HEAD", "--", "."]),
+    runGit(root, [
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+      "-z",
+      "--",
+      ".",
+    ]),
+  ]);
+  const index = readIndex(root, indexEntries);
+  const head = readHead(root, headEntries);
+  const gitlinkPaths = new Set(
+    [...head, ...index].flatMap(([name, records]) =>
+      (Array.isArray(records) ? records : [records]).some(
+        (record) => record.mode === "160000",
+      )
+        ? [name]
+        : [],
+    ),
+  );
+  const paths = [
+    ...new Set([
+      ...readWorktreePaths(root, gitlinkPaths, worktreeEntries),
+      ...[...head.keys()].filter(
+        (name) =>
+          ![...gitlinkPaths].some((gitlink) => name.startsWith(`${gitlink}/`)),
+      ),
+      ...gitlinkPaths,
+    ]),
+  ].filter((name) => !DERIVED_PATHS.has(name));
+  paths.sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
+  const records = (
+    await Promise.all(
+      paths.map(async (sourcePath) => {
+        let observation;
+        let nestedEntries;
+        if (gitlinkPaths.has(sourcePath)) {
+          const nestedRoot = resolve(root, sourcePath);
+          const stat = lstatSync(nestedRoot, { throwIfNoEntry: false });
+          if (stat === undefined) return null;
+          assertNoReparsePath(root, nestedRoot);
+          if (stat.isSymbolicLink() || !stat.isDirectory())
+            throw new Error("The module gitlink must be a real directory.");
+          const [commit, tracked, nestedHead] = await Promise.all([
+            runGit(nestedRoot, ["rev-parse", "HEAD"]),
+            runGit(nestedRoot, [
+              "ls-files",
+              "--cached",
+              "--others",
+              "--exclude-standard",
+              "-z",
+              "--",
+              ".",
+            ]),
+            runGit(nestedRoot, ["ls-tree", "-r", "-z", "HEAD", "--", "."]),
+          ]);
+          // Dirty/staging status is not part of the module-content identity.
+          observation = { commit: commit.join("\0").trim(), dirty: false };
+          nestedEntries = [
+            ...new Set([
+              ...tracked,
+              ...nestedHead.map((entry) => {
+                const tab = entry.indexOf("\t");
+                if (tab < 0)
+                  throw new Error("The nested HEAD tree entry is invalid.");
+                return entry.slice(tab + 1);
+              }),
+            ]),
+          ];
+        }
+        const record = readWorktreeRecord(
+          root,
+          sourcePath,
+          gitlinkPaths.has(sourcePath) ? "160000" : null,
+          observation,
+        );
+        if (record.kind === "absent") return null;
+        const { layer, stage, worktreeDirty, ...content } = record;
+        if (nestedEntries !== undefined) {
+          nestedEntries.sort((left, right) =>
+            Buffer.from(left).compare(Buffer.from(right)),
+          );
+          const nested = nestedEntries
+            .map((name) =>
+              readWorktreeRecord(resolve(root, sourcePath), name, null),
+            )
+            .filter((entry) => entry.kind !== "absent");
+          content.byteHash = sha256(Buffer.from(canonicalJson(nested)));
+        }
+        return content;
+      }),
+    )
+  ).filter((record) => record !== null);
+  const manifest = {
+    version: 1,
+    scope: "selfopenwiki-module-content",
+    records,
+  };
+  return {
+    hash: sha256(
+      Buffer.from(`selfopenwiki-module-content-v1\0${canonicalJson(manifest)}`),
+    ),
+    manifest,
+  };
+}
+
 export function computeParentSourceManifestSync(repositoryRoot) {
   const root = resolve(repositoryRoot);
   const head = readHead(root);
@@ -164,9 +279,9 @@ export function parentSourceManifestHash(manifest) {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
-function readHead(root) {
+function readHead(root, entries = git(root, ["ls-tree", "-r", "-z", "HEAD", "--", "."])) {
   const result = new Map();
-  for (const entry of git(root, ["ls-tree", "-r", "-z", "HEAD", "--", "."])) {
+  for (const entry of entries) {
     const tab = entry.indexOf("\t");
     if (tab < 0) throw new Error("The parent HEAD tree entry is invalid.");
     const [mode, type, object] = entry.slice(0, tab).split(" ");
@@ -187,9 +302,9 @@ function readHead(root) {
   return result;
 }
 
-function readIndex(root) {
+function readIndex(root, entries = git(root, ["ls-files", "-s", "-z", "--", "."])) {
   const result = new Map();
-  for (const entry of git(root, ["ls-files", "-s", "-z", "--", "."])) {
+  for (const entry of entries) {
     const tab = entry.indexOf("\t");
     if (tab < 0) throw new Error("The parent index entry is invalid.");
     const [mode, object, stageText] = entry.slice(0, tab).split(" ");
@@ -224,9 +339,9 @@ function readIndex(root) {
   return result;
 }
 
-function readWorktreePaths(root, gitlinkPaths = new Set()) {
+function readWorktreePaths(root, gitlinkPaths = new Set(), entries) {
   return new Set(
-    git(root, [
+    (entries ?? git(root, [
       "ls-files",
       "--cached",
       "--others",
@@ -234,7 +349,7 @@ function readWorktreePaths(root, gitlinkPaths = new Set()) {
       "-z",
       "--",
       ".",
-    ])
+    ]))
       .map((value) => {
         const sourcePath = value.replaceAll("\\", "/").normalize("NFC");
         if (isOperationalPath(sourcePath)) return null;
@@ -263,7 +378,7 @@ function isOperationalPath(sourcePath) {
   );
 }
 
-function readWorktreeRecord(root, sourcePath, indexMode) {
+function readWorktreeRecord(root, sourcePath, indexMode, observation) {
   const absolute = resolve(root, ...sourcePath.split("/"));
   if (!isWithin(root, absolute))
     throw new Error("The parent source path escapes the repository.");
@@ -288,14 +403,14 @@ function readWorktreeRecord(root, sourcePath, indexMode) {
   }
   if (indexMode === "160000") {
     const nestedRoot = absolute;
-    const commit = gitText(nestedRoot, ["rev-parse", "HEAD"]);
+    const commit = observation?.commit ?? gitText(nestedRoot, ["rev-parse", "HEAD"]);
     if (!COMMIT.test(commit))
       throw new Error("The nested Submodule commit is invalid.");
-    const status = gitText(nestedRoot, [
+    const dirty = observation?.dirty ?? (gitText(nestedRoot, [
       "status",
       "--porcelain",
       "--untracked-files=all",
-    ]);
+    ]) !== "");
     return {
       byteHash: null,
       byteLength: 0,
@@ -305,7 +420,7 @@ function readWorktreeRecord(root, sourcePath, indexMode) {
       mode: "160000",
       path: sourcePath,
       stage: 0,
-      worktreeDirty: status !== "",
+      worktreeDirty: dirty,
     };
   }
   const bytes = readFileSync(absolute);
@@ -507,6 +622,42 @@ function git(root, args) {
     windowsHide: true,
   });
   return bytes.toString("utf8").split("\0").filter(Boolean);
+}
+
+function gitAsync(root, args) {
+  return new Promise((resolveResult, reject) => {
+    execFile(
+      "git",
+      ["-c", "core.quotepath=false", ...args],
+      {
+        cwd: root,
+        env: gitEnvironment(),
+        encoding: "utf8",
+        maxBuffer: 256 * 1024 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout) =>
+        error
+          ? reject(error)
+          : resolveResult(stdout.split("\0").filter(Boolean)),
+    );
+  });
+}
+
+function createAsyncGitRunner() {
+  let active = 0;
+  const waiting = [];
+  return async (root, args) => {
+    if (active >= 4) await new Promise((resume) => waiting.push(resume));
+    else active++;
+    try {
+      return await gitAsync(root, args);
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active--;
+    }
+  };
 }
 
 function gitBytes(root, args) {

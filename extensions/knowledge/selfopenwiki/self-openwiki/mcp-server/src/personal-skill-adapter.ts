@@ -273,7 +273,7 @@ export async function computeModuleSourceManifestHash(
     if (trustedHash !== expectedModuleHasherHash)
       throw new Error("The module hash helper changed after verification.");
     const invocation = Buffer.from(
-      `\nprocess.stdout.write(JSON.stringify({hash:computeModuleSourceManifestSync(${JSON.stringify(path.resolve(parentRoot))}).hash})+"\\n");\n`,
+      `\nprocess.stdout.write(JSON.stringify({hash:(await computeModuleSourceManifest(${JSON.stringify(path.resolve(parentRoot))})).hash})+"\\n");\n`,
     );
     const stdout = await new Promise<string>((resolve, reject) => {
       const child = spawn(process.execPath, ["--input-type=module", "-"], {

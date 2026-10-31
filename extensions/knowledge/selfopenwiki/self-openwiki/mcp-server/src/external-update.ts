@@ -188,7 +188,8 @@ export class OpenWikiExternalUpdateService {
     | "resume"
     | "start"
     | "submitAndPublish"
-  >;
+  > &
+    Partial<Pick<ExternalUpdateTransactionOwner, "recoverUncommittedStart">>;
 
   constructor(options: {
     sensitivePolicyPath: string;
@@ -204,7 +205,8 @@ export class OpenWikiExternalUpdateService {
       | "resume"
       | "start"
       | "submitAndPublish"
-    >;
+    > &
+      Partial<Pick<ExternalUpdateTransactionOwner, "recoverUncommittedStart">>;
   }) {
     if (!path.isAbsolute(options.sensitivePolicyPath)) {
       throw new C7ExternalUpdateServiceError(
@@ -231,6 +233,57 @@ export class OpenWikiExternalUpdateService {
     return parsed.data.action === "start"
       ? this.start(parsed.data)
       : this.resume(parsed.data);
+  }
+
+  // Internal personal-lifecycle recovery; this is not an additional MCP action.
+  async recoverUncommittedStart(
+    inputValue: unknown,
+    verifyUnboundStart: () => Promise<boolean>,
+  ): Promise<void> {
+    const parsed =
+      toolInputSchemas.openwiki_begin_external_update.safeParse(inputValue);
+    if (
+      !parsed.success ||
+      parsed.data.action !== "start" ||
+      !this.transactions.recoverUncommittedStart
+    ) {
+      throw new C7ExternalUpdateTransactionError(
+        "restore_required",
+        "The initialization cannot be recovered.",
+      );
+    }
+    const input = parsed.data;
+    await this.assertRequestNotSensitive(input);
+    const selected = this.skills.select(input.skills ?? []);
+    // An uncommitted initialization has no readable active state to reuse.
+    const sourceSnapshot =
+      input.sourceManifestId === undefined
+        ? undefined
+        : await this.sources.verify({
+            confirmation: input.sourceConfirmation!,
+            sourceManifestId: input.sourceManifestId,
+          });
+    try {
+      await this.transactions.recoverUncommittedStart(
+        {
+          candidateResultContract: CANDIDATE_RESULT_CONTRACT,
+          confirmedWikiPaths: input.confirmedWikiPaths,
+          expectedWikiRevision: input.expectedWikiRevision,
+          hardRulePackage: HARD_RULE_PACKAGE,
+          instruction: input.instruction,
+          materials: input.materials,
+          requestId: input.requestId,
+          sourceManifestId: input.sourceManifestId ?? null,
+          skills: selected,
+          ...(sourceSnapshot === undefined ? {} : { sourceSnapshot }),
+        },
+        verifyUnboundStart,
+      );
+    } catch (error) {
+      throw mapTransactionError(error);
+    } finally {
+      await sourceSnapshot?.cleanup();
+    }
   }
 
   async status(): Promise<{
