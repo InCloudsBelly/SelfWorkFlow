@@ -333,6 +333,17 @@ def load_jit_artifact(
     candidate = candidates.get(workflow_id)
     if candidate is None or candidate["support"]["adapterSupport"] != "supported":
         raise TeaAdapterError("tea-jit-workflow-unavailable")
+    if workflow_id in {"atdd", "test-review", "trace", "nfr"} and kind == "resource" and relative_path == "contracts/story-identity.md":
+        target = root / _SOURCE / "skills/bmod-tea/contracts/story-identity.md"
+        try:
+            _assert_no_reparse(target, root)
+            if not target.is_file() or target.stat().st_size > _MAX_ARTIFACT_BYTES:
+                raise ValueError
+            content = target.read_bytes()
+            text = content.decode("utf-8")
+        except (OSError, ValueError, UnicodeError):
+            raise TeaAdapterError("tea-jit-path-invalid") from None
+        return {"workflowId": workflow_id, "kind": kind, "path": target.relative_to(root).as_posix(), "content": text, "contentHash": hash_bytes(content)}
     if workflow_id in {"framework", "ci"} or (workflow_id == "atdd" and kind == "skill"):
         # These are local assessment adapters, never upstream scaffold entry points.
         if kind != "skill" or relative_path != "SKILL.md":
@@ -456,6 +467,13 @@ def _runtime_reference(runtime_root: str | Path, workflow_id: str) -> tuple[Path
         for relative in ("SKILL.md", "references/headless-contract.md"):
             path = skill_root / relative
             _assert_no_reparse(path, root)
+            entries.append({"path": relative, "hash": hash_bytes(path.read_bytes())})
+        if workflow_id in {"atdd", "test-review", "trace", "nfr"}:
+            relative = "references/bmod-tea/contracts/story-identity.md"
+            path = skill_root / relative
+            _assert_no_reparse(path, root)
+            if not path.is_file() or path.stat().st_size > _MAX_ARTIFACT_BYTES:
+                raise ValueError
             entries.append({"path": relative, "hash": hash_bytes(path.read_bytes())})
     except (OSError, ValueError):
         raise TeaAdapterError("tea-runtime-reference-invalid") from None

@@ -5,6 +5,8 @@ description: Use only when the user explicitly requests TEA test design, ATDD, t
 
 # TEA Quality Adapter
 
+Only for the SelfWorkflow source-tree entry identified by its sibling `references/atdd-entry.md` and `assessments/ci/SKILL.md`, continue instead at the already-bound `documentRoot/methods/tea-quality/METHOD.md` (its references use `METHOD.md`); do not reselect a revision. Packaged entries use their local `SKILL.md` references; missing or drifting resources remain `unverified`.
+
 Use this Skill only after an explicit user request selects the current TEA workflow. Mode, test level and project defaults are not authorization. Keep outputs inside approved paths; reuse the one existing Reviewer and never spawn another review team.
 
 ## Required inputs

@@ -26,6 +26,7 @@ import {
   parseUpdateCommit,
   verifyGeneratedRoot,
   validateManifest,
+  assertGeneratedRootIdentity,
 } from "./materialize-openwiki.mjs";
 import { computeModuleSourceManifestSync } from "./parent-source-manifest.mjs";
 
@@ -607,6 +608,7 @@ export function updateCompatibilityManifest(
   generatedRoot,
   commit,
 ) {
+  assertGeneratedRootIdentity(repositoryRoot, generatedRoot, commit);
   const compatibilityPath = join(
     repositoryRoot,
     "self-openwiki",

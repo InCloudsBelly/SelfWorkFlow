@@ -228,13 +228,14 @@ class DocumentPublicationTests(unittest.TestCase):
             selected = (tea / "references/bmad-testarch-test-design/METHOD.md").read_text(encoding="utf-8")
             self.assertIn("{tea-knowledge}/tea-index.csv.md", selected)
             atdd = (tea / "references/bmad-testarch-atdd/METHOD.md").read_text(encoding="utf-8")
-            canonical = tea / "references/bmad-testarch-automate"
-            for required in ("METHOD.md", "resources/test-generation-routing.md", "resources/run-and-heal.md", "red/steps-c/step-01-preflight-and-context.md"):
-                self.assertTrue((canonical / required).is_file(), required)
-            self.assertIn("`{skill-root}/METHOD.md`", atdd)
+            selected_atdd = tea / "references/bmad-testarch-atdd"
+            for required in ("METHOD.md", "resources/test-generation-routing.md", "resources/run-and-heal.md", "red/workflow.yaml.md", "red/steps-c/step-01-preflight-and-context.md"):
+                self.assertTrue((selected_atdd / required).is_file(), required)
+            self.assertTrue((tea / "references/bmod-tea/contracts/story-identity.md").is_file())
+            self.assertFalse((tea / "references/bmad-testarch-automate").exists())
+            self.assertIn("`{skill-root}/red/workflow.yaml.md`", (selected_atdd / "red/instructions.md").read_text(encoding="utf-8"))
             self.assertNotIn("npx skills add", atdd)
-            self.assertNotIn("npx skills add", (canonical / "METHOD.md").read_text(encoding="utf-8"))
-            preflight = (canonical / "red/steps-c/step-01-preflight-and-context.md").read_text(encoding="utf-8")
+            preflight = (selected_atdd / "red/steps-c/step-01-preflight-and-context.md").read_text(encoding="utf-8")
             self.assertIn("knowledgeIndex: '{tea-knowledge}/tea-index.csv.md'", preflight)
             index = (release / "methods/INDEX.md").read_text(encoding="utf-8")
             self.assertIn("[tea-quality]", index)

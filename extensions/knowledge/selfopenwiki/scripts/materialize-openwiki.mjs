@@ -370,11 +370,12 @@ function git(cwd, args, { allowFailure = false } = {}) {
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_CONFIG_SYSTEM: nullDevice,
     GIT_OPTIONAL_LOCKS: "0",
+    GIT_NO_REPLACE_OBJECTS: "1",
     GIT_TERMINAL_PROMPT: "0",
   });
   const result = spawnSync(
     "git",
-    ["-c", `core.hooksPath=${nullDevice}`, ...args],
+    ["-c", `core.hooksPath=${nullDevice}`, "-c", "core.fsmonitor=false", ...args],
     {
       cwd,
       encoding: "utf8",
@@ -616,6 +617,9 @@ export function verifyGeneratedRoot(
     return false;
   }
   try {
+    // Git diff may ignore changed files marked assume-unchanged or skip-worktree.
+    const index = git(canonicalGeneratedRoot, ["ls-files", "-v", "-z"]).stdout;
+    if (index && (!index.endsWith("\0") || index.slice(0, -1).split("\0").some((entry) => !entry.startsWith("H ")))) return false;
     const markerFile = canonicalRegularFile(
       markerPath,
       "materialization marker",
@@ -663,6 +667,13 @@ export function verifyGeneratedRoot(
     return false;
   }
   return true;
+}
+
+export function assertGeneratedRootIdentity(repositoryRoot, generatedRoot, expectedCommit) {
+  const binding = validateManifest(repositoryRoot, join(repositoryRoot, "patches/openwiki/manifest.json"), expectedCommit);
+  if (!verifyGeneratedRoot(generatedRoot, expectedCommit, binding.manifest, binding.manifestHash)) {
+    throw new Error("Generated OpenWiki checkout does not match the bound upstream commit.");
+  }
 }
 
 function writeJournal(path, manifestHash, phase) {

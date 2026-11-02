@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
+  copyFileSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -18,10 +19,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   MATERIALIZATION_MARKER,
+  FROZEN_UPSTREAM_COMMIT,
   canonicalManifestBytes,
   materializeOpenWiki,
   parseUpdateCommit,
   validateManifest,
+  verifyGeneratedRoot,
 } from "../scripts/materialize-openwiki.mjs";
 import { createUpstreamUpdatePlan } from "../scripts/update-upstream.mjs";
 
@@ -136,6 +139,83 @@ function runMaterializer(fixture, overrides = {}) {
     ...overrides,
   });
 }
+
+test("rejects tracked modifications hidden by Git index flags", async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
+    for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
+      git(fixture.generatedRoot, ["update-index", flag, "README.md"]);
+      writeFileSync(join(fixture.generatedRoot, "README.md"), "hidden modification\n");
+      assert.equal(verifyGeneratedRoot(fixture.generatedRoot, fixture.commit, binding.manifest, binding.manifestHash), false);
+      git(fixture.generatedRoot, ["update-index", flag === "--assume-unchanged" ? "--no-assume-unchanged" : "--no-skip-worktree", "README.md"]);
+      writeFileSync(join(fixture.generatedRoot, "README.md"), "upstream\n");
+    }
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("does not execute a generated checkout fsmonitor during verification", async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    const sentinel = join(fixture.root, "fsmonitor-executed");
+    const hook = join(fixture.root, "fsmonitor.sh");
+    writeFileSync(hook, `#!/bin/sh\nprintf executed > '${sentinel.replaceAll("\\", "/")}'\nprintf '\\000'\n`);
+    git(fixture.generatedRoot, ["config", "core.fsmonitor", hook.replaceAll("\\", "/")]);
+    const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
+    assert.equal(verifyGeneratedRoot(fixture.generatedRoot, fixture.commit, binding.manifest, binding.manifestHash), true);
+    assert.equal(existsSync(sentinel), false);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("rejects a replacement Git object that hides changed generated source", async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    writeFileSync(join(fixture.generatedRoot, "README.md"), "replacement contents\n");
+    git(fixture.generatedRoot, ["add", "README.md"]);
+    git(fixture.generatedRoot, ["commit", "-m", "replacement tree"]);
+    const replacement = git(fixture.generatedRoot, ["rev-parse", "HEAD"]);
+    git(fixture.generatedRoot, ["replace", fixture.commit, replacement]);
+    git(fixture.generatedRoot, ["update-ref", "--no-deref", "HEAD", fixture.commit]);
+    const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
+    assert.equal(verifyGeneratedRoot(fixture.generatedRoot, fixture.commit, binding.manifest, binding.manifestHash), false);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("capability verification invalidates evidence before rejecting an old checkout without building it", { skip: process.platform !== "win32" }, async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    const runtime = join(fixture.repositoryRoot, "self-openwiki", "runtime");
+    const verifierDir = join(fixture.repositoryRoot, "self-openwiki", "scripts");
+    const scriptsDir = join(fixture.repositoryRoot, "scripts");
+    const binDir = join(fixture.root, "bin");
+    for (const directory of [runtime, verifierDir, scriptsDir, binDir]) mkdirSync(directory, { recursive: true });
+    const evidence = join(runtime, "verified-capabilities.json");
+    const sentinel = join(fixture.root, "build-invoked");
+    writeFileSync(evidence, "old verified evidence");
+    writeFileSync(join(binDir, "corepack.cmd"), `@echo invoked > "${sentinel}"\r\n@exit /b 1\r\n`);
+    copyFileSync(fileURLToPath(new URL("../scripts/materialize-openwiki.mjs", import.meta.url)), join(scriptsDir, "materialize-openwiki.mjs"));
+    copyFileSync(fileURLToPath(new URL("../self-openwiki/scripts/verify-capabilities.mts", import.meta.url)), join(verifierDir, "verify-capabilities.mts"));
+    writeFileSync(fixture.manifestPath, canonicalManifestBytes({ ...fixture.manifest, upstream: { url: officialUrl, commit: FROZEN_UPSTREAM_COMMIT } }));
+    const result = spawnSync(process.execPath, [join(verifierDir, "verify-capabilities.mts")], { env: { ...process.env, PATH: `${binDir};${process.env.PATH}` }, encoding: "utf8", timeout: 15000, windowsHide: true });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /generated OpenWiki.*does not match/i);
+    assert.equal(existsSync(evidence), false);
+    assert.equal(existsSync(sentinel), false);
+    assert.equal(git(fixture.generatedRoot, ["rev-parse", "HEAD"]), fixture.commit);
+  } finally {
+    await cleanup(fixture);
+  }
+});
 
 test("materializes the exact upstream checkout without dirtying source", async () => {
   const fixture = createFixture();

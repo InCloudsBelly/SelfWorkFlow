@@ -1,10 +1,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
-import { LiveWikiPolicy, type WikiPolicySnapshot } from "../src/live-policy.js";
+import { promisify } from "node:util";
+import { afterEach, expect, test, vi } from "vitest";
+import {
+  createLiveWikiPolicy,
+  LiveWikiPolicy,
+  type WikiPolicySnapshot,
+} from "../src/live-policy.js";
+import * as capabilities from "../src/capabilities.js";
+import * as personal from "../src/personal-skill-adapter.js";
+import * as skillRegistry from "../src/skills.js";
 import { createC7McpServer } from "../src/server.js";
 import { computeSkillPackage, loadC7SkillRegistry } from "../src/skills.js";
 
@@ -17,8 +27,122 @@ function deferred() {
   return { promise, resolve };
 }
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+
+test("rejects a changed materialized HEAD on the next live admission and recovers", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "wiki-live-identity-"));
+  cleanup.push(() => rm(root, { force: true, recursive: true }));
+  const moduleRoot = path.join(root, "module");
+  const repositoryRoot = path.join(moduleRoot, "self-openwiki");
+  const openWikiRoot = path.join(moduleRoot, ".work", "openwiki");
+  await mkdir(path.join(repositoryRoot, "config"), { recursive: true });
+  await mkdir(path.join(moduleRoot, "patches", "openwiki"), {
+    recursive: true,
+  });
+  await mkdir(openWikiRoot, { recursive: true });
+  const execute = promisify(execFile);
+  const git = (...args: string[]) =>
+    execute("git", ["-C", openWikiRoot, ...args], { windowsHide: true });
+  const pin = personal.PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT;
+  await git("init", "--initial-branch=main");
+  await git(
+    "fetch",
+    "--no-tags",
+    path.resolve(import.meta.dirname, "../../../upstream/openwiki"),
+    pin,
+  );
+  await git("update-ref", "--no-deref", "HEAD", pin);
+  const patchManifest = Buffer.from("fixture patch manifest\n");
+  await writeFile(
+    path.join(moduleRoot, "patches", "openwiki", "manifest.json"),
+    patchManifest,
+  );
+  const marker = Buffer.from(
+    JSON.stringify({
+      schemaVersion: 1,
+      domain: "selfopenwiki:openwiki-materialization:v1",
+      upstreamCommit: pin,
+      manifestHash: createHash("sha256").update(patchManifest).digest("hex"),
+      affectedFiles: [],
+    }),
+  );
+  await writeFile(
+    path.join(openWikiRoot, ".selfopenwiki-materialization.json"),
+    marker,
+  );
+  const markerHash = `sha256:${createHash("sha256").update(marker).digest("hex")}`;
+  for (const name of [
+    "defaults.json",
+    "sensitive-files.json",
+    "personal-openwiki-compatibility.json",
+  ])
+    await writeFile(path.join(repositoryRoot, "config", name), "fixture");
+  const evidencePath = path.join(root, "evidence.json");
+  await writeFile(evidencePath, "fixture");
+  const fingerprint = {
+    buildHash: "build",
+    contractsHash: "contracts",
+    dependencyHash: "dependency",
+    matrixHash: "matrix",
+    moduleHasherHash: "hasher",
+    codeHash: "code",
+    skillHash: "skill",
+    testHash: "test",
+    verifierHash: "verifier",
+  };
+  const gate = {
+    fingerprint,
+    isToolVerified: () => true,
+    records: () => [],
+  } as unknown as capabilities.RuntimeCapabilityGate;
+  vi.spyOn(capabilities, "loadRuntimeCapabilityGate").mockResolvedValue(gate);
+  vi.spyOn(personal, "loadPersonalCompatibilityManifest").mockResolvedValue({
+    build: {
+      generatedMarkerHash: markerHash,
+      parentSourceManifestHash: "same",
+    },
+    skill: { packageHash: `sha256:${"a".repeat(64)}` },
+    upstream: { commit: pin },
+  } as unknown as personal.PersonalCompatibilityManifest);
+  vi.spyOn(personal, "assertPersonalCompatibility").mockResolvedValue(
+    undefined,
+  );
+  vi.spyOn(personal, "computeModuleSourceManifestHash").mockResolvedValue(
+    "same",
+  );
+  vi.spyOn(skillRegistry, "loadC7SkillRegistry").mockResolvedValue({
+    list: () => [{ packageHash: `sha256:${"b".repeat(64)}` }],
+    select: () => ({}),
+  } as unknown as skillRegistry.C7SkillRegistry);
+  const policy = await createLiveWikiPolicy({
+    repositoryRoot,
+    openWikiRoot,
+    evidencePath,
+    capabilityGate: gate,
+  });
+  const invoke = policy.wrap({ invoke: async () => ({ ok: true }) }).invoke;
+  expect(await invoke("openwiki_list_skills", {})).toMatchObject({ ok: true });
+  await git(
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Drift",
+  );
+  expect(await invoke("openwiki_list_skills", {})).toMatchObject({
+    ok: false,
+    error: { code: "capability_unverified" },
+  });
+  await git("update-ref", "--no-deref", "HEAD", pin);
+  expect(await invoke("openwiki_list_skills", {})).toMatchObject({ ok: true });
+}, 30_000);
 
 test("the same MCP connection loads a verified replacement Skill on its next call", async () => {
   const fixture = await connectPolicy();

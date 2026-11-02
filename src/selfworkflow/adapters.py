@@ -614,6 +614,11 @@ def _copy_tea_quality(source: Path, destination: Path) -> None:
     if not (knowledge / "tea-index.csv").is_file():
         raise AdapterError("tea-knowledge-missing")
     _copy_tree(knowledge, target / "bmod-tea/knowledge")
+    contract = upstream / "skills/bmod-tea/contracts/story-identity.md"
+    if any(path.is_symlink() or path.is_junction() for path in (contract, contract.parent, contract.parent.parent)) or not contract.is_file() or contract.stat().st_size > 1024 * 1024:
+        raise AdapterError("tea-source-invalid")
+    (target / "bmod-tea/contracts").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(contract, target / "bmod-tea/contracts/story-identity.md")
     for entry in target.glob("*/SKILL.md"):
         metadata = entry.parent / "agents/openai.yaml"
         metadata.parent.mkdir(parents=True, exist_ok=True)

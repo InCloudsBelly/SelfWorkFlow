@@ -15,10 +15,10 @@ domains:
 modules:
   - id: tea-framework
     ref: modules/tea-framework.yaml
-    hash: sha256:3c5f7d79c19fbb407b29fa481383e50d827451e181c650a44744425511b2eb79
+    hash: sha256:6ba3482f1a6f03262d1b6141a73c0b1f64e7235a356d70380e5de441b4422179
   - id: tea-ci
     ref: modules/tea-ci.yaml
-    hash: sha256:772520c55848a6691a6fc4b446ff5d7cf91eec3a31c1cf8eb31abb0642af26d8
+    hash: sha256:e387981b71a00c93d086381d7edc2206ca0c1477dd3b6d3086f1d11b537a5638
   - id: ponytail-debt
     ref: modules/ponytail-debt.yaml
     hash: sha256:bf975932fc77574fd494ffb10b31c52307c27ab7615187b288aa90ef462c35b9

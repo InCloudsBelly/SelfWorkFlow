@@ -43,6 +43,12 @@ export async function runCapabilityVerification(): Promise<void> {
         "The initial local-path capability verifier requires Windows.",
       );
     }
+    const materializer = await import("../../scripts/materialize-openwiki.mjs");
+    materializer.assertGeneratedRootIdentity(
+      path.resolve(repositoryRoot, ".."),
+      openWikiRoot,
+      materializer.FROZEN_UPSTREAM_COMMIT,
+    );
     await run(
       "pnpm",
       ["--config.enable-pre-post-scripts=false", "run", "build"],
@@ -391,7 +397,7 @@ async function run(
     : [...args];
   const child = spawn(executable, spawnArgs, {
     cwd,
-    env: environment,
+    env: { ...environment, GIT_NO_REPLACE_OBJECTS: "1" },
     shell: false,
     stdio: ["ignore", "inherit", "inherit"],
     windowsHide: true,

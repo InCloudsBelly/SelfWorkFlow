@@ -8,6 +8,7 @@ import {
 import { TOOL_NAMES } from "./contracts.js";
 import {
   assertPersonalCompatibility,
+  assertPersonalMaterializationIdentity,
   computeModuleSourceManifestHash,
   loadPersonalCompatibilityManifest,
   PersonalSkillAdapter as BoundPersonalSkillAdapter,
@@ -129,6 +130,16 @@ export async function createLiveWikiPolicy(options: {
     const moduleSourceHash = await computeModuleSourceManifestHash(
       path.resolve(options.repositoryRoot, ".."),
       gate.fingerprint.moduleHasherHash,
+    );
+    if (moduleSourceHash !== snapshot.moduleSourceHash) return false;
+    const compatibility = await loadPersonalCompatibilityManifest(
+      options.repositoryRoot,
+    );
+    await assertPersonalMaterializationIdentity(
+      options.openWikiRoot,
+      options.repositoryRoot,
+      PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT,
+      compatibility.build.generatedMarkerHash,
     );
     return moduleSourceHash === snapshot.moduleSourceHash;
   };

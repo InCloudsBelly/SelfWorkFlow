@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
-import { lstat, readFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
-import { TextDecoder } from "node:util";
+import { promisify, TextDecoder } from "node:util";
 import { z } from "zod";
 import { computeSkillPackage } from "./skills.js";
 import {
@@ -199,15 +199,12 @@ export async function assertPersonalCompatibility(
   if (manifest.build.adapterSetHash !== adapterSetHash) {
     throw new Error("Personal compatibility adapter source hash is stale.");
   }
-  const generatedMarkerHash = await hashFile(
-    path.join(
-      path.resolve(options.openWikiRoot),
-      ".selfopenwiki-materialization.json",
-    ),
+  await assertPersonalMaterializationIdentity(
+    options.openWikiRoot,
+    options.repositoryRoot,
+    expectedUpstreamCommit,
+    manifest.build.generatedMarkerHash,
   );
-  if (manifest.build.generatedMarkerHash !== generatedMarkerHash) {
-    throw new Error("Personal compatibility materialization marker is stale.");
-  }
   const lockfileHash = await hashFile(
     path.join(
       path.resolve(options.repositoryRoot),
@@ -355,6 +352,115 @@ async function hashFile(filePath: string): Promise<string> {
     .digest("hex")}`;
 }
 
+// Bind the marker to an actual detached checkout, including linked worktrees.
+export async function assertPersonalMaterializationIdentity(
+  openWikiRoot: string,
+  repositoryRoot: string,
+  expectedCommit: string,
+  expectedMarkerHash: string,
+): Promise<void> {
+  try {
+    const root = path.resolve(openWikiRoot);
+    const markerPath = path.join(root, ".selfopenwiki-materialization.json");
+    const markerStat = await lstat(markerPath);
+    if (
+      !markerStat.isFile() ||
+      markerStat.isSymbolicLink() ||
+      markerStat.size > 1024 * 1024
+    )
+      throw new Error();
+    const markerBytes = await readFile(markerPath);
+    if (
+      `sha256:${createHash("sha256").update(markerBytes).digest("hex")}` !==
+      expectedMarkerHash
+    )
+      throw new Error();
+    const marker = JSON.parse(textDecoder.decode(markerBytes)) as {
+      schemaVersion?: unknown;
+      domain?: unknown;
+      upstreamCommit?: unknown;
+      manifestHash?: unknown;
+      affectedFiles?: unknown;
+    };
+    if (
+      !marker ||
+      marker.schemaVersion !== 1 ||
+      marker.domain !== "selfopenwiki:openwiki-materialization:v1" ||
+      marker.upstreamCommit !== expectedCommit ||
+      !Array.isArray(marker.affectedFiles) ||
+      marker.affectedFiles.length !== 0 ||
+      `sha256:${marker.manifestHash}` !==
+        (await hashFile(
+          path.resolve(repositoryRoot, "../patches/openwiki/manifest.json"),
+        ))
+    )
+      throw new Error();
+    const dotGit = path.join(root, ".git");
+    const gitStat = await lstat(dotGit);
+    if (gitStat.isSymbolicLink()) throw new Error();
+    let gitDirectory = dotGit;
+    if (gitStat.isFile() && gitStat.size <= 4096) {
+      const match = /^gitdir: ([^\r\n]+)\r?\n?$/u.exec(
+        await readFile(dotGit, "utf8"),
+      );
+      if (!match) throw new Error();
+      gitDirectory = path.resolve(root, match[1]);
+      const backlink = (
+        await readFile(path.join(gitDirectory, "gitdir"), "utf8")
+      ).trim();
+      if (
+        (await realpath(path.resolve(gitDirectory, backlink))) !==
+        (await realpath(dotGit))
+      )
+        throw new Error();
+    } else if (!gitStat.isDirectory()) throw new Error();
+    const headPath = path.join(gitDirectory, "HEAD");
+    const headStat = await lstat(headPath);
+    if (
+      !headStat.isFile() ||
+      headStat.isSymbolicLink() ||
+      headStat.size > 128 ||
+      (await readFile(headPath, "utf8")).trim() !== expectedCommit
+    )
+      throw new Error();
+    const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
+    const { stdout } = await promisify(execFile)(
+      "git",
+      [
+        "-C",
+        root,
+        "-c",
+        `core.hooksPath=${nullDevice}`,
+        "-c",
+        "core.fsmonitor=false",
+        "rev-parse",
+        "--show-toplevel",
+        "--is-bare-repository",
+        "--verify",
+        "HEAD^{commit}",
+      ],
+      {
+        env: sanitizedGitEnvironment(),
+        windowsHide: true,
+        timeout: 5_000,
+        maxBuffer: 8192,
+      },
+    );
+    const [topLevel, bare, commit, ...extra] = stdout.trim().split(/\r?\n/u);
+    if (
+      extra.length ||
+      bare !== "false" ||
+      commit !== expectedCommit ||
+      (await realpath(topLevel)) !== (await realpath(root))
+    )
+      throw new Error();
+  } catch {
+    throw new Error(
+      "Personal compatibility materialization identity is stale or invalid.",
+    );
+  }
+}
+
 function hashCanonicalValue(value: unknown): string {
   return `sha256:${createHash("sha256")
     .update(canonicalPersonalJson(value), "utf8")
@@ -385,6 +491,7 @@ function sanitizedGitEnvironment(): NodeJS.ProcessEnv {
   environment.GIT_CONFIG_NOSYSTEM = "1";
   environment.GIT_CONFIG_SYSTEM = nullDevice;
   environment.GIT_OPTIONAL_LOCKS = "0";
+  environment.GIT_NO_REPLACE_OBJECTS = "1";
   environment.GIT_TERMINAL_PROMPT = "0";
   return environment;
 }

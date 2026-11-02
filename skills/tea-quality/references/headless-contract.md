@@ -7,6 +7,7 @@
 - `{skill-root}` 是本次选中的 `references/bmad-testarch-<workflow>`。
 - 公共文档模式先读本版 `references/bmad-testarch-atdd/METHOD.md`，`{skill-root}` 保持该 reference 根，只选其 `red/` 及所需共享资源。缺文档报告 `unverified`，不要求消费者运行 npx 或安装原生 Skill。
 - `{tea-knowledge}` 是当前 `tea-quality` 目录下的 `references/bmod-tea/knowledge`；`knowledgeIndex` 是其 `tea-index.csv`。禁止从项目 `_bmad` 或别的安装版本补文件。
+- `{tea-contracts}` 是 `references/bmod-tea/contracts`；ATDD、或 test-review/trace/nfr 已提供 story/epic 时按需读 `story-identity.md`。只用获准的故事内容或已提供的 resolver 结果，不执行 `tickets.py`、搜寻 companions 或扩域；必需内容缺失则 `unverified`。
 - `{project-root}` 只供读取用户批准的上下文。所有相对输入路径以此为基准；缺具体文件清单时不能猜测故事、PRD 或整个仓库的范围。
 - 唯一报告输出为调用者指定的 `outputRelative`（项目内安全相对路径）。`output_file_override` 绑定此路径；`test_artifacts` 仅表示其父目录，不授权创建其他文件。
 - 上游 checkpoint、progress、架构/QA/handoff 多报告以及 `run_key` 分支改为单份报告内的章节；不创建这些额外文件或目录。上游恢复只读取明确提供的旧报告。

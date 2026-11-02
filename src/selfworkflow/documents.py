@@ -166,9 +166,6 @@ def _collect(source: Path, staging: Path) -> dict[str, str | bytes]:
     ):
         if (locks / f"{lock}.lock.yaml").is_file():
             copier()
-    if (locks / "tea.lock.yaml").is_file():
-        # The pinned ATDD entry delegates to this canonical document library.
-        _copy_tree(source / "dependencies/upstream/tea/skills/bmad-testarch-automate", staging / "skills/tea-quality/references/bmad-testarch-automate")
     wiki = source / "extensions/knowledge/selfopenwiki"
     if wiki.is_dir():
         for path in (wiki / "WIKI_LAYOUT.md",):
@@ -265,7 +262,7 @@ def _collect(source: Path, staging: Path) -> dict[str, str | bytes]:
             if raw.startswith("{skill-root}/"):
                 selected = re.match(r"(skills/tea-quality/references/[^/]+)/", name)
                 if selected:
-                    canonical = selected[1].replace("/bmad-testarch-atdd", "/bmad-testarch-automate")
+                    canonical = selected[1]
                     resolved = posixpath.normpath(raw.replace("{skill-root}", canonical, 1))
                     if resolved in mapping:
                         target_root = canonical.replace("skills/", "methods/", 1)

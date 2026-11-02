@@ -12,8 +12,8 @@ import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { canonicalManifestBytes } from "../scripts/materialize-openwiki.mjs";
-import { applyUpstreamUpdate } from "../scripts/update-upstream.mjs";
+import { canonicalManifestBytes, materializeOpenWiki } from "../scripts/materialize-openwiki.mjs";
+import { applyUpstreamUpdate, updateCompatibilityManifest } from "../scripts/update-upstream.mjs";
 
 const officialUrl = "https://github.com/langchain-ai/openwiki.git";
 const bindingPaths = [
@@ -116,11 +116,13 @@ function createFixture({ embedded = false } = {}) {
   git(sourceRoot, ["init", "--initial-branch=main"]);
   git(sourceRoot, ["remote", "add", "origin", officialUrl]);
   writeFileSync(join(sourceRoot, "README.md"), "old upstream\n", "utf8");
-  git(sourceRoot, ["add", "README.md"]);
+  writeFileSync(join(sourceRoot, "package.json"), '{"version":"0.1.0"}\n');
+  git(sourceRoot, ["add", "README.md", "package.json"]);
   git(sourceRoot, ["commit", "-m", "old upstream"]);
   const previousCommit = git(sourceRoot, ["rev-parse", "HEAD"]);
   writeFileSync(join(sourceRoot, "README.md"), "new upstream\n", "utf8");
-  git(sourceRoot, ["add", "README.md"]);
+  writeFileSync(join(sourceRoot, "package.json"), '{"version":"0.6.0"}\n');
+  git(sourceRoot, ["add", "README.md", "package.json"]);
   git(sourceRoot, ["commit", "-m", "new upstream"]);
   const nextCommit = git(sourceRoot, ["rev-parse", "HEAD"]);
   git(sourceRoot, ["checkout", "--detach", previousCommit]);
@@ -200,23 +202,38 @@ function createFixture({ embedded = false } = {}) {
   };
 }
 
-function fixtureMaterialize({ generatedRoot }) {
-  return () => {
-    rmSync(generatedRoot, { recursive: true, force: true });
-    mkdirSync(generatedRoot, { recursive: true });
-    writeFileSync(
-      join(generatedRoot, "package.json"),
-      '{"version":"0.6.0"}\n',
-      "utf8",
-    );
-    writeFileSync(
-      join(generatedRoot, ".selfopenwiki-materialization.json"),
-      "new marker\n",
-      "utf8",
-    );
-    return { status: "materialized" };
-  };
+function fixtureMaterialize() {
+  return (options) => materializeOpenWiki(options);
 }
+
+test("rejects a stale generated checkout before changing compatibility metadata", () => {
+  const fixture = createFixture();
+  try {
+    assert.equal(realpathSync(join(fixture.root, "..")), realpathSync(tmpdir()));
+    rmSync(fixture.generatedRoot, { recursive: true });
+    materializeOpenWiki({ repositoryRoot: fixture.repositoryRoot, sourceRoot: fixture.sourceRoot, generatedRoot: fixture.generatedRoot, manifestPath: join(fixture.repositoryRoot, "patches/openwiki/manifest.json"), expectedUpstreamCommit: fixture.previousCommit });
+    const markerPath = join(fixture.generatedRoot, ".selfopenwiki-materialization.json");
+    const oldMarker = readFileSync(markerPath);
+    const oldPackage = readFileSync(join(fixture.generatedRoot, "package.json"));
+    writeRelative(fixture.repositoryRoot, "patches/openwiki/manifest.json", canonicalManifestBytes({
+      schemaVersion: 2, domain: "selfopenwiki:openwiki-patch-manifest:v2",
+      upstream: { url: officialUrl, commit: fixture.nextCommit }, patches: [],
+    }));
+    const config = join(fixture.repositoryRoot, "self-openwiki/config/personal-openwiki-compatibility.json");
+    const before = readFileSync(config);
+    assert.throws(
+      () => updateCompatibilityManifest(fixture.repositoryRoot, fixture.generatedRoot, fixture.nextCommit),
+      /generated OpenWiki.*does not match/i,
+    );
+    assert.deepEqual(readFileSync(config), before);
+    assert.deepEqual(readFileSync(markerPath), oldMarker);
+    assert.deepEqual(readFileSync(join(fixture.generatedRoot, "package.json")), oldPackage);
+    assert.equal(git(fixture.generatedRoot, ["rev-parse", "HEAD"]), fixture.previousCommit);
+  } finally {
+    assert.equal(realpathSync(join(fixture.root, "..")), realpathSync(tmpdir()));
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
 
 async function cleanup(fixture) {
   let lastError;

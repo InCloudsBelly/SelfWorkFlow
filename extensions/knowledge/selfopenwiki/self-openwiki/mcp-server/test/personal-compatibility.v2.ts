@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   assertPersonalCompatibility,
+  assertPersonalMaterializationIdentity,
   computeAdapterSetHash,
   computePersonalToolBindings,
   loadPersonalCompatibilityManifest,
@@ -48,12 +49,13 @@ describe("personal OpenWiki compatibility binding", () => {
     const copiedRepository = path.join(parentRoot, "self-openwiki");
     const openWikiRoot = path.join(parentRoot, ".work", "openwiki");
     const execute = promisify(execFile);
-    const git = async (...args: string[]) =>
+    const gitAt = async (root: string, ...args: string[]) =>
       (
-        await execute("git", ["-C", fixtureRoot, ...args], {
+        await execute("git", ["-C", root, ...args], {
           windowsHide: true,
         })
       ).stdout.trim();
+    const git = (...args: string[]) => gitAt(fixtureRoot, ...args);
     const commit = () =>
       git(
         "-c",
@@ -107,7 +109,37 @@ describe("personal OpenWiki compatibility binding", () => {
       path.join(openWikiRoot, "package.json"),
       JSON.stringify({ version: manifest.upstream.packageVersion }),
     );
-    const marker = Buffer.from("Verified materialization fixture\n");
+    await gitAt(openWikiRoot, "init", "--initial-branch=main");
+    await gitAt(openWikiRoot, "add", "package.json");
+    await gitAt(
+      openWikiRoot,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "Fixture upstream",
+    );
+    const upstreamCommit = await gitAt(openWikiRoot, "rev-parse", "HEAD");
+    await gitAt(openWikiRoot, "checkout", "--detach", upstreamCommit);
+    manifest.upstream.commit = upstreamCommit;
+    const patchRoot = path.join(parentRoot, "patches", "openwiki");
+    await mkdir(patchRoot, { recursive: true });
+    const patchManifest = Buffer.from(
+      `${JSON.stringify({ schemaVersion: 2, domain: "selfopenwiki:openwiki-patch-manifest:v2", upstream: { url: manifest.upstream.url, commit: upstreamCommit }, patches: [] }, null, 2)}\n`,
+    );
+    await writeFile(path.join(patchRoot, "manifest.json"), patchManifest);
+    const materialization = {
+      schemaVersion: 1,
+      domain: "selfopenwiki:openwiki-materialization:v1",
+      upstreamCommit,
+      manifestHash: hash(patchManifest).slice(7),
+      affectedFiles: [],
+    };
+    const marker = Buffer.from(`${JSON.stringify(materialization, null, 2)}\n`);
     await writeFile(
       path.join(openWikiRoot, ".selfopenwiki-materialization.json"),
       marker,
@@ -151,6 +183,91 @@ describe("personal OpenWiki compatibility binding", () => {
         },
       );
     await expect(verify()).resolves.toBeUndefined();
+
+    const wrongMarker = Buffer.from(
+      `${JSON.stringify({ ...materialization, upstreamCommit: "0".repeat(40) }, null, 2)}\n`,
+    );
+    await writeFile(
+      path.join(openWikiRoot, ".selfopenwiki-materialization.json"),
+      wrongMarker,
+    );
+    manifest.build.generatedMarkerHash = hash(wrongMarker);
+    await expect(verify()).rejects.toThrow(/materialization/i);
+    await writeFile(
+      path.join(openWikiRoot, ".selfopenwiki-materialization.json"),
+      marker,
+    );
+    manifest.build.generatedMarkerHash = hash(marker);
+    await gitAt(
+      openWikiRoot,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Unverified revision",
+    );
+    await expect(verify()).rejects.toThrow(/materialization/i);
+    await gitAt(openWikiRoot, "checkout", "--detach", upstreamCommit);
+    await expect(verify()).resolves.toBeUndefined();
+
+    const fake = path.join(fixtureRoot, "fake-checkout");
+    await mkdir(path.join(fake, ".git"), { recursive: true });
+    await writeFile(path.join(fake, ".git", "HEAD"), `${upstreamCommit}\n`);
+    await writeFile(
+      path.join(fake, ".selfopenwiki-materialization.json"),
+      marker,
+    );
+    const checkFake = () =>
+      assertPersonalMaterializationIdentity(
+        fake,
+        copiedRepository,
+        upstreamCommit,
+        hash(marker),
+      );
+    const priorGitDir = process.env.GIT_DIR;
+    const priorGitWorkTree = process.env.GIT_WORK_TREE;
+    try {
+      process.env.GIT_DIR = path.join(openWikiRoot, ".git");
+      process.env.GIT_WORK_TREE = fake;
+      await expect(checkFake()).rejects.toThrow(/materialization/i);
+    } finally {
+      if (priorGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = priorGitDir;
+      if (priorGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = priorGitWorkTree;
+    }
+    await rm(path.join(fake, ".git"), { recursive: true });
+    await writeFile(
+      path.join(fake, ".git"),
+      `gitdir: ${path.join(openWikiRoot, ".git")}\n`,
+    );
+    await expect(checkFake()).rejects.toThrow(/materialization/i);
+    const linked = path.join(fixtureRoot, "linked-worktree");
+    await gitAt(
+      openWikiRoot,
+      "worktree",
+      "add",
+      "--detach",
+      linked,
+      upstreamCommit,
+    );
+    await writeFile(
+      path.join(linked, ".selfopenwiki-materialization.json"),
+      marker,
+    );
+    await expect(
+      assertPersonalMaterializationIdentity(
+        linked,
+        copiedRepository,
+        upstreamCommit,
+        hash(marker),
+      ),
+    ).resolves.toBeUndefined();
 
     const helperPath = path.join(
       parentRoot,

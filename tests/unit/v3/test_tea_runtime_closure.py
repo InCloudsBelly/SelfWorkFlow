@@ -32,6 +32,7 @@ class TeaRuntimeClosureTests(unittest.TestCase):
         upstream = ROOT / "dependencies/upstream/tea/skills"
         shutil.copytree(upstream / "bmad-tea-test-design", references / "bmad-testarch-test-design")
         shutil.copytree(upstream / "bmod-tea/knowledge", references / "bmod-tea/knowledge")
+        shutil.copytree(upstream / "bmod-tea/contracts", references / "bmod-tea/contracts")
         self.knowledge = self.runtime / "skills/tea-quality/references/bmod-tea/knowledge"
 
     def invocation(self):
