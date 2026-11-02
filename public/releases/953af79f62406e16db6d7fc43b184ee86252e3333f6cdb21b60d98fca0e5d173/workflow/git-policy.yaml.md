@@ -1,0 +1,48 @@
+# 只读参考：git-policy.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 1
+forbiddenRoots: [.venv, build, dist, artifacts, logs, runtime, .pytest_cache, htmlcov]
+allowedSensitiveNames: [.env.example, .env.sample]
+databaseSuffixes: [.sqlite, .sqlite3, .db-wal, .sqlite-wal]
+sizeBytes: {warning: 1048576, failure: 5242880}
+allowlist:
+  - path: dependencies/upstream/anthropic-skills
+    objectHash: dbd4588f9e1033efb41dad4bef2f7947c8993d44
+    reason: Pinned official Anthropic skill-creator reference for workflow maintenance
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+  - path: dependencies/upstream/matt-pocock-skills
+    objectHash: 49dd158d1076134a641b33efb035946536778336
+    reason: Pinned Matt Pocock engineering skills foundation used by SelfWorkFlow
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+  - path: dependencies/upstream/tea
+    objectHash: 04cf65b03620c07f63e6af8f90023ea56fa0348e
+    reason: Pinned official TEA source used by the optional V3 test-quality adapter
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+  - path: dependencies/upstream/ponytail
+    objectHash: 2961b52fc1fe6a5a87c7a959a79512e5c2f3ffe5
+    reason: Pinned official Ponytail source used by the code-task workflow adapter
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+  - path: dependencies/upstream/ui-ux-pro-max
+    objectHash: 7246805992a42b7bba37d4cac83b01416f0c6c44
+    reason: Pinned UI UX Pro Max methods and search resources for interface design
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+  - path: dependencies/upstream/composio-skills
+    objectHash: be2a406907dbc61b73e6827ded415c96139d13a2
+    reason: Pinned Composio content research writer reference
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+  - path: dependencies/upstream/obsidian-skills
+    objectHash: 3ccff5338ea700537839b21900aa5358a0402c98
+    reason: Pinned Obsidian Markdown Bases and JSON Canvas format references
+    owner: SelfWorkFlow maintainers
+    expires: "2030-12-31"
+
+````

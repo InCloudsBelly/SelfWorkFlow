@@ -1,2 +1,2 @@
 <!-- selfworkflow:documents -->
-[读取本任务规则](releases/938c281b26651d06a67ab4ff889fd8908ce074ca010ca6accbbe05f7326a99f4/WORKFLOW.md)
+[读取本任务规则](releases/953af79f62406e16db6d7fc43b184ee86252e3333f6cdb21b60d98fca0e5d173/WORKFLOW.md)

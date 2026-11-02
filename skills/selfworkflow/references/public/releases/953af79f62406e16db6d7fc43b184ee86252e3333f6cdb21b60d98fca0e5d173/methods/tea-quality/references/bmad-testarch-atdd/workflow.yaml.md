@@ -1,0 +1,47 @@
+# 只读参考：workflow.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+# Test Architect workflow: bmad-testarch-atdd
+name: bmad-testarch-atdd
+# prettier-ignore
+description: 'Generate red-phase acceptance test scaffolds using TDD cycle. Use when the user says "lets write acceptance tests" or "I want to do ATDD"'
+
+# Config (test_artifacts, user_name, languages) is resolved at activation in SKILL.md from modules.tea and core.
+date: system-generated
+
+# Workflow components
+installed_path: "../bmad-testarch-automate/red"
+instructions: "../bmad-testarch-automate/red/instructions.md"
+validation: "../bmad-testarch-automate/red/checklist.md"
+template: "../bmad-testarch-automate/red/atdd-checklist-template.md"
+
+# Variables and inputs
+variables:
+  test_dir: "{project-root}/tests" # Root test directory
+
+# Output configuration
+default_output_file: "{test_artifacts}/atdd/atdd-checklist-{story_key}.md"
+
+# Required tools
+required_tools:
+  - read_file # Read story markdown, framework config
+  - write_file # Create test files, checklist, factory stubs
+  - create_directory # Create test directories
+  - list_files # Find existing fixtures and helpers
+  - search_repo # Search for similar test patterns
+
+tags:
+  - qa
+  - atdd
+  - test-architect
+  - tdd
+  - red-green-refactor
+
+execution_hints:
+  interactive: false # Minimize prompts
+  autonomous: true # Proceed without user input unless blocked
+  iterative: true
+
+````

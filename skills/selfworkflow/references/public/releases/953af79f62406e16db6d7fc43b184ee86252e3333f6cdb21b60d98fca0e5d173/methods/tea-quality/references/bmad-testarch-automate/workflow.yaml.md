@@ -1,0 +1,54 @@
+# 只读参考：workflow.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+# Test Architect workflow: bmad-testarch-automate
+name: bmad-testarch-automate
+# prettier-ignore
+description: 'Generate tests in red or expand mode and run-and-heal new tests. Use when the user says "lets expand test coverage", "I want to automate tests", "lets write acceptance tests", or "I want to do ATDD"'
+
+# Config (test_artifacts, user_name, languages) is resolved at activation in SKILL.md from modules.tea and core.
+date: system-generated
+
+# Workflow components
+installed_path: "."
+instructions: "./instructions.md"
+validation: "./checklist.md"
+template: false
+
+# Variables and inputs
+variables:
+  # Execution mode and targeting
+  standalone_mode: true # Can work without BMad artifacts (true) or integrate with BMad (false)
+  coverage_target: "critical-paths" # critical-paths, comprehensive, selective
+
+  # Directory paths
+  test_dir: "{project-root}/tests" # Root test directory
+  source_dir: "{project-root}" # Source code directory (customize if needed, e.g., {project-root}/src or {project-root}/lib)
+
+# Output configuration
+default_output_file: "{test_artifacts}/automate/automation-summary-{run_key}.md"
+
+# Required tools
+required_tools:
+  - read_file # Read source code, existing tests, BMad artifacts
+  - write_file # Create test files, fixtures, factories, summaries
+  - create_directory # Create test directories
+  - list_files # Discover features and existing tests
+  - search_repo # Find coverage gaps and patterns
+  - glob # Find test files and source files
+
+tags:
+  - qa
+  - automation
+  - test-architect
+  - regression
+  - coverage
+
+execution_hints:
+  interactive: false # Minimize prompts
+  autonomous: true # Proceed without user input unless blocked
+  iterative: true
+
+````
