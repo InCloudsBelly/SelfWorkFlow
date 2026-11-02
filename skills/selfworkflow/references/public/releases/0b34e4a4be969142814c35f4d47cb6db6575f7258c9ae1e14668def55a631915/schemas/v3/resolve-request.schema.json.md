@@ -1,0 +1,285 @@
+# 只读参考：resolve-request.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/resolve-request.schema.json",
+  "title": "SelfWorkFlow V3 resolve request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "operationType",
+    "complexity",
+    "risk",
+    "writeTask",
+    "ambiguity",
+    "explicitModuleIds",
+    "projectDefaultModuleIds",
+    "projectMinimums",
+    "capabilityEvidenceSnapshot",
+    "taskArchetype",
+    "requirementsMaturity",
+    "scopeShape",
+    "durableSpec",
+    "classificationConfidence",
+    "classificationEvidence",
+    "testLevelFloor"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "operationType": {"$ref": "#/$defs/operationType"},
+    "complexity": {"enum": ["C0", "C1", "C2", "C3"]},
+    "risk": {"enum": ["R0", "R1", "R2", "R3"]},
+    "writeTask": {"type": "boolean"},
+    "ambiguity": {"type": "boolean"},
+    "explicitModuleIds": {"$ref": "#/$defs/idList"},
+    "projectDefaultModuleIds": {"$ref": "#/$defs/idList"},
+    "projectMinimums": {"$ref": "#/$defs/projectMinimums"},
+    "capabilityEvidenceSnapshot": {"$ref": "#/$defs/capabilityEvidenceSnapshot"},
+    "taskArchetype": {
+      "enum": [
+        "mechanical-change",
+        "bounded-feature",
+        "bugfix",
+        "behavioral-refactor",
+        "exploratory-design",
+        "architecture-change",
+        "migration",
+        "spec-document",
+        "cross-project"
+      ]
+    },
+    "requirementsMaturity": {
+      "enum": ["exploratory", "defined", "approved"]
+    },
+    "scopeShape": {
+      "enum": ["single-file", "single-module", "cross-module", "cross-project"]
+    },
+    "durableSpec": {"type": "boolean"},
+    "implementSpecEvidence": {"$ref": "#/$defs/implementSpecEvidence"},
+    "classificationConfidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "classificationEvidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/classificationEvidence"}
+    },
+    "testLevelFloor": {"enum": ["T0", "T1", "T2", "T3"]},
+    "ponytailMode": {"enum": ["lite", "full", "ultra", "off"]},
+    "codeSignals": {"$ref": "#/$defs/codeSignals"}
+  },
+  "allOf": [
+    {"if": {"properties": {"operationType": {"enum": ["implement", "debug", "document", "install", "publish", "knowledge-write"]}}}, "then": {"properties": {"writeTask": {"const": true}}}},
+    {"if": {"properties": {"operationType": {"enum": ["analyze", "design", "plan", "review", "verify", "knowledge-read"]}}}, "then": {"properties": {"writeTask": {"const": false}}}},
+    {"if": {"properties": {"projectMinimums": {"properties": {"strength": {"const": "Full"}}}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
+    {"if": {"properties": {"projectMinimums": {"properties": {"strength": {"const": "Deep"}}}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
+    {"if": {"properties": {"complexity": {"const": "C2"}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
+    {"if": {"properties": {"risk": {"const": "R2"}}}, "then": {"properties": {"testLevelFloor": {"enum": ["T2", "T3"]}}}},
+    {"if": {"properties": {"complexity": {"const": "C3"}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
+    {"if": {"properties": {"risk": {"const": "R3"}}}, "then": {"properties": {"testLevelFloor": {"const": "T3"}}}},
+    {"if": {"properties": {"writeTask": {"const": true}, "taskArchetype": {"enum": ["bounded-feature", "bugfix", "behavioral-refactor", "architecture-change", "migration"]}}}, "then": {"properties": {"operationType": {"enum": ["implement", "debug"]}}}},
+    {"if": {"properties": {"explicitModuleIds": {"contains": {"const": "implement-spec"}}}}, "then": {"required": ["implementSpecEvidence"]}}
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$"
+    },
+    "positiveAttempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "operationType": {
+      "enum": [
+        "analyze",
+        "design",
+        "plan",
+        "implement",
+        "debug",
+        "review",
+        "verify",
+        "document",
+        "install",
+        "publish",
+        "knowledge-read",
+        "knowledge-write"
+      ]
+    },
+    "idList": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/stableId"}
+    },
+    "projectMinimums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strength"],
+      "properties": {
+        "strength": {"enum": ["Light", "Full", "Deep"]}
+      }
+    },
+    "capabilitySubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "version", "build", "sourceLock"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/stableId"},
+        "id": {"$ref": "#/$defs/nonEmptyString"},
+        "version": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/nonEmptyString"}]
+        },
+        "build": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/nonEmptyString"}]
+        },
+        "sourceLock": {
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]
+        }
+      }
+    },
+    "capabilityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "provider",
+        "subject",
+        "state",
+        "observedAt",
+        "validUntil",
+        "evidenceRef",
+        "evidenceHash"
+      ],
+      "properties": {
+        "name": {"$ref": "#/$defs/stableId"},
+        "provider": {"$ref": "#/$defs/nonEmptyString"},
+        "subject": {"$ref": "#/$defs/capabilitySubject"},
+        "state": {"enum": ["supported", "unsupported", "unverified"]},
+        "observedAt": {"$ref": "#/$defs/utcTimestamp"},
+        "validUntil": {"$ref": "#/$defs/utcTimestamp"},
+        "evidenceRef": {"$ref": "#/$defs/nonEmptyString"},
+        "evidenceHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "capabilityEvidenceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "capturedAt", "evidence"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "capturedAt": {"$ref": "#/$defs/utcTimestamp"},
+        "evidence": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/capabilityEvidence"}
+        }
+      }
+    },
+    "classificationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceRef",
+        "evidenceHash",
+        "classifierVersion",
+        "classifierHash"
+      ],
+      "properties": {
+        "evidenceRef": {"$ref": "#/$defs/nonEmptyString"},
+        "evidenceHash": {"$ref": "#/$defs/sha256"},
+        "classifierVersion": {"$ref": "#/$defs/nonEmptyString"},
+        "classifierHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "codeSignals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "languages",
+        "fileExtensions",
+        "taskSignals",
+        "explicitCppModuleIds",
+        "userConfirmedHeavy",
+        "projectAllowsExecution"
+      ],
+      "properties": {
+        "languages": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        },
+        "fileExtensions": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^\\.[A-Za-z0-9][A-Za-z0-9+_-]{0,15}$"
+          }
+        },
+        "taskSignals": {"$ref": "#/$defs/idList"},
+        "explicitCppModuleIds": {"$ref": "#/$defs/idList"},
+        "userConfirmedHeavy": {"type": "boolean"},
+        "projectAllowsExecution": {"type": "boolean"}
+      }
+    },
+    "implementSpecTicket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "dependencies", "acceptanceHash"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stableId"},
+        "dependencies": {"$ref": "#/$defs/idList"},
+        "acceptanceHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "implementSpecEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "specHash", "tickets", "ticketDagHash", "planReviewHash",
+        "implementationConfirmationHash", "independentAgentsHash",
+        "independentReviewHash", "gitPermissionsHash", "planReviewStatus",
+        "implementationConfirmationStatus", "independentAgentsStatus",
+        "independentReviewStatus", "gitPermissionsStatus"
+      ],
+      "properties": {
+        "specHash": {"$ref": "#/$defs/sha256"},
+        "tickets": {"type": "array", "minItems": 2, "maxItems": 256, "items": {"$ref": "#/$defs/implementSpecTicket"}},
+        "ticketDagHash": {"$ref": "#/$defs/sha256"},
+        "planReviewHash": {"$ref": "#/$defs/sha256"},
+        "implementationConfirmationHash": {"$ref": "#/$defs/sha256"},
+        "independentAgentsHash": {"$ref": "#/$defs/sha256"},
+        "independentReviewHash": {"$ref": "#/$defs/sha256"},
+        "gitPermissionsHash": {"$ref": "#/$defs/sha256"},
+        "planReviewStatus": {"const": "passed"},
+        "implementationConfirmationStatus": {"const": "confirmed"},
+        "independentAgentsStatus": {"const": "supported"},
+        "independentReviewStatus": {"const": "supported"},
+        "gitPermissionsStatus": {"const": "confirmed"}
+      }
+    }
+  }
+}
+
+````
