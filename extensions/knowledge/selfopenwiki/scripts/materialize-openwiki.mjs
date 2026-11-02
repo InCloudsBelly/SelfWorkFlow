@@ -37,6 +37,7 @@ export const MATERIALIZATION_MARKER = ".selfopenwiki-materialization.json";
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_PATCH_BYTES = 4 * 1024 * 1024;
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
+const MAX_GENERATED_FILE_BYTES = 64 * 1024 * 1024;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
 
@@ -371,11 +372,12 @@ function git(cwd, args, { allowFailure = false } = {}) {
     GIT_CONFIG_SYSTEM: nullDevice,
     GIT_OPTIONAL_LOCKS: "0",
     GIT_NO_REPLACE_OBJECTS: "1",
+    GIT_NO_LAZY_FETCH: "1",
     GIT_TERMINAL_PROMPT: "0",
   });
   const result = spawnSync(
     "git",
-    ["-c", `core.hooksPath=${nullDevice}`, "-c", "core.fsmonitor=false", ...args],
+    ["-c", `core.hooksPath=${nullDevice}`, "-c", "core.fsmonitor=false", "-c", `core.attributesFile=${nullDevice}`, "-c", "core.autocrlf=false", "-c", "core.eol=lf", ...args],
     {
       cwd,
       encoding: "utf8",
@@ -579,6 +581,50 @@ function ignoredGeneratedPathsAreAllowed(canonicalGeneratedRoot) {
   return true;
 }
 
+function generatedFilesMatchCommit(root) {
+  const tree = git(root, ["ls-tree", "-r", "-z", "--full-tree", "HEAD"]).stdout;
+  const index = git(root, ["ls-files", "--stage", "-z"]).stdout;
+  if (!tree.endsWith("\0") || !index.endsWith("\0")) return false;
+  const tracked = new Map();
+  for (const entry of tree.slice(0, -1).split("\0")) {
+    const match = /^(100644|100755) blob ([a-f0-9]{40})\t([\s\S]+)$/u.exec(entry);
+    if (!match) return false;
+    const name = strictRelativePath(match[3], "generated tracked path");
+    if (tracked.has(name)) return false;
+    tracked.set(name, { mode: match[1], hash: match[2] });
+  }
+  const staged = index.slice(0, -1).split("\0");
+  if (staged.length !== tracked.size) return false;
+  const checkedDirectories = new Set([root]);
+  for (const entry of staged) {
+    const match = /^(100644|100755) ([a-f0-9]{40}) 0\t([\s\S]+)$/u.exec(entry);
+    if (!match) return false;
+    const name = strictRelativePath(match[3], "generated index path");
+    const expected = tracked.get(name);
+    if (!expected || expected.mode !== match[1] || expected.hash !== match[2]) return false;
+    tracked.delete(name);
+    let current = root;
+    const parts = name.split("/");
+    for (const part of parts.slice(0, -1)) {
+      current = join(current, part);
+      if (!checkedDirectories.has(current)) {
+        const stat = lstatSync(current);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+        checkedDirectories.add(current);
+      }
+    }
+    const file = join(current, parts.at(-1));
+    if (!isWithin(root, file)) return false;
+    const stat = lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_GENERATED_FILE_BYTES) return false;
+    if (process.platform !== "win32" && Boolean(stat.mode & 0o100) !== (expected.mode === "100755")) return false;
+    const bytes = readFileSync(file);
+    const hash = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+    if (hash !== expected.hash) return false;
+  }
+  return tracked.size === 0;
+}
+
 export function verifyGeneratedRoot(
   generatedRoot,
   expectedCommit,
@@ -634,11 +680,9 @@ export function verifyGeneratedRoot(
       return false;
     }
 
-    const changedPaths = parseNullSeparatedPaths(
-      git(canonicalGeneratedRoot, ["diff", "--name-only", "-z", "HEAD"])
-        .stdout,
-      "generated changed path",
-    );
+    // Do not ask Git to diff untrusted worktree files: attributes can run
+    // repository-local clean filters before a preflight has approved the build.
+    if (manifest.patches.length !== 0 || !generatedFilesMatchCommit(canonicalGeneratedRoot)) return false;
     const untrackedPaths = parseNullSeparatedPaths(
       git(canonicalGeneratedRoot, [
         "ls-files",
@@ -648,7 +692,7 @@ export function verifyGeneratedRoot(
       ]).stdout,
       "generated untracked path",
     );
-    const actualPaths = [...new Set([...changedPaths, ...untrackedPaths])].sort(
+    const actualPaths = [...new Set(untrackedPaths)].sort(
       (left, right) => left.localeCompare(right, "en"),
     );
     const expectedPaths = [

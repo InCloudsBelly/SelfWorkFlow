@@ -129,6 +129,11 @@ captured artifacts; it never touches the external personal Wiki repository.
 The personal Skill remains an explicit semantic-review boundary for each
 upstream iteration.
 
+Materialization requires regular tracked files of at most 64 MiB whose checkout
+bytes match the pinned Git blobs (and POSIX executable bits). Tracked links, submodules, or
+content transformations such as LFS and CRLF attributes require adaptation;
+verification fails closed rather than building a transformed checkout.
+
 To bind this checkout to an existing personal Wiki, run:
 
 ```powershell

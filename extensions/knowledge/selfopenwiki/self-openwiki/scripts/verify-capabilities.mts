@@ -397,7 +397,11 @@ async function run(
     : [...args];
   const child = spawn(executable, spawnArgs, {
     cwd,
-    env: { ...environment, GIT_NO_REPLACE_OBJECTS: "1" },
+    env: {
+      ...environment,
+      GIT_NO_REPLACE_OBJECTS: "1",
+      GIT_NO_LAZY_FETCH: "1",
+    },
     shell: false,
     stdio: ["ignore", "inherit", "inherit"],
     windowsHide: true,

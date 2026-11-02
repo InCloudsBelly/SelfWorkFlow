@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   copyFileSync,
   lstatSync,
@@ -168,6 +169,70 @@ test("does not execute a generated checkout fsmonitor during verification", asyn
     const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
     assert.equal(verifyGeneratedRoot(fixture.generatedRoot, fixture.commit, binding.manifest, binding.manifestHash), true);
     assert.equal(existsSync(sentinel), false);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("does not execute a checkout-local clean filter during verification", async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    const sentinel = join(fixture.root, "filter-executed");
+    const hook = join(fixture.root, "filter.sh");
+    writeFileSync(hook, `#!/bin/sh\nprintf executed > '${sentinel.replaceAll("\\", "/")}'\ncat\n`);
+    writeFileSync(join(fixture.generatedRoot, ".git", "info", "attributes"), "README.md filter=fixture\n");
+    git(fixture.generatedRoot, ["config", "filter.fixture.clean", `sh '${hook.replaceAll("\\", "/")}'`]);
+    writeFileSync(join(fixture.generatedRoot, "README.md"), "unverified change\n");
+    const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
+    assert.equal(verifyGeneratedRoot(fixture.generatedRoot, fixture.commit, binding.manifest, binding.manifestHash), false);
+    assert.equal(existsSync(sentinel), false);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("accepts a legitimate detached linked worktree with the same materialization", async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    const linked = join(fixture.root, "linked");
+    git(fixture.generatedRoot, ["worktree", "add", "--detach", linked, fixture.commit]);
+    writeFileSync(join(linked, MATERIALIZATION_MARKER), readFileSync(join(fixture.generatedRoot, MATERIALIZATION_MARKER)));
+    const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
+    assert.equal(verifyGeneratedRoot(linked, fixture.commit, binding.manifest, binding.manifestHash), true);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("rejects tracked executable-bit drift on POSIX", { skip: process.platform === "win32" }, async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    chmodSync(join(fixture.generatedRoot, "README.md"), 0o755);
+    const binding = validateManifest(fixture.repositoryRoot, fixture.manifestPath, fixture.commit);
+    assert.equal(verifyGeneratedRoot(fixture.generatedRoot, fixture.commit, binding.manifest, binding.manifestHash), false);
+  } finally {
+    await cleanup(fixture);
+  }
+});
+
+test("fails closed on a future upstream checkout transformed by eol attributes", async () => {
+  const fixture = createFixture();
+  try {
+    runMaterializer(fixture);
+    git(fixture.sourceRoot, ["checkout", "-b", "eol-update"]);
+    writeFileSync(join(fixture.sourceRoot, ".gitattributes"), "*.txt text eol=crlf\n");
+    writeFileSync(join(fixture.sourceRoot, "example.txt"), "one\ntwo\n");
+    git(fixture.sourceRoot, ["add", ".gitattributes", "example.txt"]);
+    git(fixture.sourceRoot, ["commit", "-m", "future transformed checkout"]);
+    const next = git(fixture.sourceRoot, ["rev-parse", "HEAD"]);
+    git(fixture.sourceRoot, ["checkout", "--detach", next]);
+    writeFileSync(fixture.manifestPath, canonicalManifestBytes({ ...fixture.manifest, upstream: { url: officialUrl, commit: next } }));
+    assert.throws(() => runMaterializer(fixture, { expectedUpstreamCommit: next }), /generated checkout verification failed/i);
+    assert.equal(git(fixture.generatedRoot, ["rev-parse", "HEAD"]), fixture.commit);
+    assert.equal(readFileSync(join(fixture.generatedRoot, "README.md"), "utf8"), "upstream\n");
   } finally {
     await cleanup(fixture);
   }
