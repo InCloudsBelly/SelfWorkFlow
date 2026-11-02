@@ -6,7 +6,7 @@ description: 仅新增、改造或集成 Skill/工作流时使用；纯审查及
 # 工作流与 Skill 维护
 
 沿 SelfWorkflow 的范围、授权、阶段和 Review，只改命中的职责/路由/引用，不另起流程。日常规则维护只读本方法及受影响文件，不预载上游创建指南。
-新增实质 Skill 或确需创建/评测方法时，才按需读[创建指南](../../references/anthropic-skills/skill-creator/SKILL.md)；grader/comparator/analyzer/schemas 按具体评测再读。保持本任务版本，缺失/漂移 unverified，不找旧安装。明确维护源码时可从批准 repositoryRoot 的 `dependencies/locks/anthropic-skills.lock.yaml` 及固定 submodule `skills/skill-creator` 取对应材料，不更新/修改上游。
+新增实质 Skill 或确需创建/评测方法时，才从本任务绑定根的 `references/anthropic-skills/skill-creator/` 读指南：文档模式 `METHOD.md`，runtime 模式 `SKILL.md`；grader/comparator/analyzer/schemas 按具体评测再读。保持本任务版本，缺失/漂移 unverified，不找旧安装。明确维护源码时可从批准 repositoryRoot 的 `dependencies/locks/anthropic-skills.lock.yaml` 及固定 submodule `skills/skill-creator` 取对应材料，不更新/修改上游。
 
 1. 复用已有最窄 owner；专业方法不重做 Discover/Grill、Review 调度或相同确认。
 2. 定义意图、输入输出、职责/阶段、必要能力与排除场景；短 description 负责触发，条件细则放 references，保留许可与固定来源。

@@ -5,7 +5,7 @@ description: "用于数学推理与建模、算法设计及其约束/复杂度/�
 
 # 数学推理与建模
 
-沿 SelfWorkflow 已绑定的版本与职责；只补数学方法，不重启工程流程、知识发布或独立评分。从本任务已绑定的引用根（文档模式 documentRoot；显式契约用已核验 runtime 根）读取 `references/community-skills/scientific-agent-skills/skills/sympy/SKILL.md`，仅按当前计算读取其具体 references，不相对原生安装入口寻找上游。维护源码时固定来源为 `dependencies/locks/scientific-agent-skills.lock.yaml` 与对应 submodule；不切换上游版本，不加载整个科学技能库。
+沿 SelfWorkflow 已绑定的版本与职责；只补数学方法，不重启工程流程、知识发布或独立评分。从本任务绑定根（documentRoot 或显式契约的已核验 runtime）下 `references/community-skills/scientific-agent-skills/skills/sympy/` 读取入口：文档模式 `METHOD.md`，runtime 模式 `SKILL.md`，仅按当前计算读取其具体 references，不相对原生安装入口寻找上游。维护源码时固定来源为 `dependencies/locks/scientific-agent-skills.lock.yaml` 与对应 submodule；不切换上游版本，不加载整个科学技能库。
 
 先明确目标、输入输出、变量、定义域、单位/维度、约束与假设；图形学额外说明坐标系、左右手系、行列向量、变换顺序和角度单位。算法设计先建立数学关系、不变量或目标函数，再分析正确性、复杂度与数值稳定性；仅需离散/数值分析时不强行改成符号求解。
 

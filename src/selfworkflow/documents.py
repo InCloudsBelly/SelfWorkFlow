@@ -23,6 +23,10 @@ class DocumentError(RuntimeError):
 _MARKER = "<!-- selfworkflow:documents -->"
 _LINK = re.compile(r"\[[^\]\n]*\]\(([^)\n]+)\)")
 _ENTRY = re.compile(r"\[读取本任务规则\]\((releases/[0-9a-f]{64}/WORKFLOW\.md)\)")
+_AGENT_METHODS = frozenset(
+    f"references/anthropic-skills/skill-creator/agents/{role}.md"
+    for role in ("grader", "comparator", "analyzer")
+)
 
 
 def _safe(path: Path) -> Path:
@@ -181,7 +185,7 @@ def _collect(source: Path, staging: Path) -> dict[str, str | bytes]:
     for name in paths:
         if name.startswith("workflow/skills/"):
             continue  # Local entries were already published by the curated importer.
-        if "/agents/" in name:
+        if "/agents/" in name and name not in _AGENT_METHODS:
             continue
         if name.startswith("references/community-skills/ui-ux-pro-max/") and Path(name).suffix.lower() in {".py", ".csv", ".json", ".yaml", ".yml", ".txt"}:
             mapping[name] = name  # The UI search tool consumes the pinned original files.

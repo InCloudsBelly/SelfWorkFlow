@@ -10,6 +10,6 @@ SelfWorkflow 管理范围、授权、Review 和验证；本入口只提供当前
 
 先用已有症状、证据和已知原因判断是否需要系统诊断。普通错误说明、静态材料分析和原因已明确的修复直接由对应 owner 处理，不为满足诊断阶段创建复现工程、压测或临时工具。
 
-命中触发条件后，才读取 [固定上游诊断方法](references/upstream/guide.md)。只补当前问题所需的引用，复用已经取得的反馈与验证证据；领域 Skill 已覆盖的部分不重复执行。
+命中后沿本任务绑定根读取上游方法：文档模式 `methods/matt-pocock/diagnosing-bugs/references/upstream/guide.md`；runtime 模式 `skills/matt-pocock/diagnosing-bugs/` 下的 `references/upstream/guide.md`。只补当前问题所需引用，复用已有证据；领域 Skill 已覆盖的部分不重复执行。
 
 反馈环等方法门槛仅约束本次诊断，不作为其他模块的前置条件。环境或测试能力不可用时记录未验证项，保护已有授权与禁止动作；不得把静态推断冒充复现、测试通过或已确认根因。独立审查与后续修复继续由 SelfWorkflow 调度。

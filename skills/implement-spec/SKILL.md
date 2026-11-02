@@ -8,15 +8,15 @@ metadata:
 # Implement Spec 本地适配
 
 这是由 Host Agent 执行的指令 wrapper，不是自动编排引擎，也不提供 scheduler。
-先检查下述门禁，再读取当前 runtime 根目录下的
-`skills/matt-pocock/implement-spec/SKILL.md` 作为上游 reference。
+先检查门禁，再沿本任务绑定根读上游：文档模式 `methods/matt-pocock/implement-spec/METHOD.md`；
+runtime 模式 `skills/matt-pocock/implement-spec/` 下的 `SKILL.md`。
 其源码由 `dependencies/locks/matt-pocock-skills.lock.yaml` 的 selected skill 与 hash 绑定；不得修改上游。
 上游提供 tickets 依赖图、integration branch、worktrees、TDD、merge、review 的方法；
 本契约替代其 reset、默认 PR、ticket 关闭及清理指令。上游引用不授予 Git 或外部副作用权限。
 
 ## Adapter 契约
 
-以下 YAML 是供 Host 与 reviewer 阅读的约束，不是可执行调度配置。
+以下 YAML 供 Host 与 reviewer 阅读；upstreamReference 是 runtime 路径，文档路径见上文，不是可执行调度配置。
 
 ```yaml
 kind: instruction-wrapper
@@ -81,7 +81,7 @@ neverAutomatic:
    只并行派发无未满足依赖且写入边界互不冲突的任务；共享文件任务串行安排。并发数量受真实 Host 能力限制。
    每个 ticket 使用新实现上下文，不 fork 或复用前一 ticket；只传 spec/ticket 指针、允许路径、base commit 和验收条件，不扩大写入范围。
 3. 每个实现者使用独立 branch/worktree，记录路径与起始 commit，并核实来自指定 integration HEAD。
-   加载 runtime 的 Matt `tdd`，先取得目标行为的 RED，再最小 GREEN，并执行 ticket 的失败路径和相关回归验证。
+   按同一绑定读取 Matt TDD：文档模式 `methods/matt-pocock/tdd/METHOD.md`；runtime 模式 `skills/matt-pocock/tdd/` 下的 `SKILL.md`。先取得目标行为的 RED，再最小 GREEN，并执行 ticket 的失败路径和相关回归验证。
    报告命令、退出码、结果及 diff/commit；缺少真实执行证据即 `unverified`，测试失败不能报完成。
 4. integration branch 的写入与 merge 由单一协调者串行执行（可以是授权的 merger agent）。
    integration HEAD 已前进时，在既有授权内将其合入 ticket branch 并重新验证；存在冲突就保留现场，

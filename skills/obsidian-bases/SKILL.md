@@ -5,7 +5,7 @@ description: "在创建或编辑 Obsidian Bases/.base 文件、或明确为 Obsi
 
 # Obsidian Bases
 
-从本任务已绑定的引用根（文档模式 documentRoot；显式契约用已核验 runtime 根）读取 `references/community-skills/obsidian-skills/skills/obsidian-bases/SKILL.md`，复用当前版本与所需引用身份。此入口处理 Obsidian 笔记的 .base 视图，不接管电子表格、SQL 或任务平台查询。
+从本任务绑定根（documentRoot 或显式契约的已核验 runtime）下 `references/community-skills/obsidian-skills/skills/obsidian-bases/` 读取入口：文档模式 `METHOD.md`，runtime 模式 `SKILL.md`，复用当前版本与所需引用身份。此入口处理 Obsidian 笔记的 .base 视图，不接管电子表格、SQL 或任务平台查询。
 
 读取给定 .base、可用笔记属性与目标视图；保留现有 filters、formulas、properties、summaries 和 views。只按授权调整筛选、分组、公式或展示，不创建猜测的 vault 或重写笔记内容。
 
