@@ -724,53 +724,9 @@ describe("C7 production runtime recovery gates", () => {
         "fixture-capability-evidence.json",
       );
       await writeFile(evidencePath, '{"fixture":"verified"}\n');
-      const openWikiRoot = await mkdtemp(
-        path.join(os.tmpdir(), "openwiki-task7-"),
-      );
-      tempDirs.push(openWikiRoot);
-      await mkdir(path.join(openWikiRoot, "dist", "agent"), {
-        recursive: true,
-      });
-      await writeFile(
-        path.join(openWikiRoot, "package.json"),
-        JSON.stringify({
-          name: "openwiki",
-          version: (
-            JSON.parse(
-              await readFile(
-                path.resolve(
-                  repositoryRoot,
-                  "..",
-                  ".work",
-                  "openwiki",
-                  "package.json",
-                ),
-                "utf8",
-              ),
-            ) as { version: string }
-          ).version,
-        }),
-      );
-      await writeFile(
-        path.join(openWikiRoot, ".selfopenwiki-materialization.json"),
-        await readFile(
-          path.resolve(
-            repositoryRoot,
-            "..",
-            ".work",
-            "openwiki",
-            ".selfopenwiki-materialization.json",
-          ),
-        ),
-      );
-      await writeFile(
-        path.join(openWikiRoot, "dist", "cli.js"),
-        "export {};\n",
-      );
-      await writeFile(
-        path.join(openWikiRoot, "dist", "agent", "openai-chatgpt-oauth.js"),
-        "export {};\n",
-      );
+      // Only status and an unknown transaction resume are invoked below. Reuse
+      // the verified SDK read-only instead of inventing a marker-only checkout.
+      const openWikiRoot = path.resolve(repositoryRoot, "../.work/openwiki");
       const fingerprint = await capabilitiesModule.computeCapabilityFingerprint(
         {
           openWikiRoot,
@@ -811,6 +767,8 @@ describe("C7 production runtime recovery gates", () => {
       )) as { error?: { code: string } };
       if (!expectedReady) {
         expect(begin.error?.code).toBe("capability_unverified");
+      } else {
+        expect(begin.error?.code).toBe("restore_required");
       }
     },
     20_000,

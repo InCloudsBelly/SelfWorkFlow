@@ -215,7 +215,13 @@ describe("observable cross-process lock contract", () => {
     }
     const runtimeA = path.join(parent, "Runtime");
     const runtimeB = path.join(parent, "runtime");
-    await Promise.all([mkdir(runtimeA), mkdir(runtimeB)]);
+    await mkdir(runtimeA);
+    try {
+      await mkdir(runtimeB);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      context.skip("This Node process cannot create the distinct-case fixture.");
+    }
     let callbackCount = 0;
 
     await expect(
