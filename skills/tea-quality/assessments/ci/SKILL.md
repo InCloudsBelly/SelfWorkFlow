@@ -5,6 +5,8 @@ description: Explicit read-only validation of existing CI configuration and gate
 
 # CI assessment-only adapter
 
+仅在 SelfWorkflow 源码树 `skills/tea-quality/assessments/ci/SKILL.md`，且同树存在 `skills/tea-quality/references/atdd-entry.md` 时，转到已绑定的 `documentRoot/methods/tea-quality/references/bmad-testarch-ci/METHOD.md` 并停止执行本入口；不重选版本。打包入口缺 checklist 则 `unverified`。
+
 本地受限 TEA 入口；显式选择 `tea-ci`，用于 Verify 或发布前检查。发布前检查映射到 V3 verified/verify.ci，并在 verificationPlan 内保留 release 检查意图；不新增发布动作。
 
 输入：pipelineFiles、verificationPlan、projectRules、runEvidence。输入需说明证据来源；没有真实运行证据时明确填写 not supplied / unverified，不虚构 CI 成功。只读取用户提供的流水线及其关联本地脚本；引用缺失、动态条件不可判断时记录缺口。

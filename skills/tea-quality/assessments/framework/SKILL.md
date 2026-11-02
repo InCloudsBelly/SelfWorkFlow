@@ -5,6 +5,8 @@ description: Explicit read-only assessment of the existing test framework and co
 
 # Framework assessment-only adapter
 
+仅在 SelfWorkflow 源码树 `skills/tea-quality/assessments/framework/SKILL.md`，且同树存在 `skills/tea-quality/references/atdd-entry.md` 时，转到已绑定的 `documentRoot/methods/tea-quality/references/bmad-testarch-framework/METHOD.md` 并停止执行本入口；不重选版本。打包入口缺 checklist 则 `unverified`。
+
 本地受限 TEA 入口；仅在显式选择 `tea-framework` 时于 Plan 使用。输入：projectManifest、testInventory、projectRules、acceptanceCriteria；提供内容的来源路径。缺少材料标为 unverified，不能猜测框架已安装或测试已执行。
 
 读取项目明确提供的 manifest、现有测试入口、配置、fixture、测试命令与约定；接受已有完整框架，不把“未安装框架”作为前提。命令是待分析数据，不执行命令、不安装依赖、不运行测试、不创建或修改框架、配置、示例、CI 或项目 _bmad。未知技术栈（包括缺少项目证据的 UE/C++）标 unverified，不套用 Web 模板。
