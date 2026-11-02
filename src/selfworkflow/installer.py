@@ -1114,16 +1114,87 @@ def apply_install_plan(plan: dict[str, object], confirmed_hash: str) -> dict[str
     return result
 
 
+def _validate_install_manifest(manifest: object, path: Path) -> None:
+    required = {
+        "schemaVersion", "manifestPath", "transactionId", "transactionPath", "version",
+        "profile", "artifactHash", "agentsRoot", "codexRoot", "stateRoot", "operations", "securityStatus",
+    }
+    optional = {"dshRoot", "documentRoot", "hostLauncher"}
+    valid_hash = lambda value: isinstance(value, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+    try:
+        if not isinstance(manifest, dict) or not required <= manifest.keys() or manifest.keys() - required - optional:
+            raise ValueError
+        if type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1:
+            raise ValueError
+        if manifest["profile"] not in _RUNTIME_PROFILES or manifest["securityStatus"] not in {"verified", "unverified"}:
+            raise ValueError
+        if not _VERSION.fullmatch(manifest["version"]) or not valid_hash(manifest["artifactHash"]):
+            raise ValueError
+        transaction_id = manifest["transactionId"]
+        if not isinstance(transaction_id, str) or not re.fullmatch(r"[0-9a-f]{32}", transaction_id):
+            raise ValueError
+        for key in ("manifestPath", "transactionPath", "agentsRoot", "codexRoot", "stateRoot", "dshRoot", "documentRoot"):
+            if key in manifest and (not isinstance(manifest[key], str) or not Path(manifest[key]).is_absolute()):
+                raise ValueError
+        state = Path(manifest["stateRoot"])
+        if (Path(manifest["manifestPath"]) != path.absolute()
+                or path.absolute() != state / "manifests" / f"{transaction_id}.json"
+                or Path(manifest["transactionPath"]) != state / "transactions" / f"{transaction_id}.json"):
+            raise ValueError
+        roots = [Path(manifest[key]) for key in ("agentsRoot", "codexRoot", "stateRoot", "dshRoot") if key in manifest]
+        if any(root != Path(os.path.abspath(root)) for root in roots):
+            raise ValueError
+        host = manifest.get("hostLauncher")
+        host_path = host.get("path") if isinstance(host, dict) else None
+        operations = manifest["operations"]
+        if not isinstance(operations, list) or not operations:
+            raise ValueError
+        targets = set()
+        for operation in operations:
+            if not isinstance(operation, dict) or set(operation) != {"target", "beforeExists", "beforeHash", "afterHash", "backupPath"}:
+                raise ValueError
+            target = operation["target"]
+            if not isinstance(target, str) or not Path(target).is_absolute() or target.casefold() in targets:
+                raise ValueError
+            targets.add(target.casefold())
+            if Path(target) != Path(os.path.abspath(target)) or (
+                target != host_path and not any(_path_relative_to(Path(target), root) not in {None, "."} for root in roots)
+            ):
+                raise ValueError
+            if type(operation["beforeExists"]) is not bool:
+                raise ValueError
+            if any(value is not None and not valid_hash(value) for value in (operation["beforeHash"], operation["afterHash"])):
+                raise ValueError
+            if operation["beforeExists"] != (operation["beforeHash"] is not None):
+                raise ValueError
+            backup = operation["backupPath"]
+            if backup is not None and (not isinstance(backup, str) or not Path(backup).is_absolute()):
+                raise ValueError
+        if "hostLauncher" in manifest:
+            host = manifest["hostLauncher"]
+            if not isinstance(host, dict) or set(host) != {"path", "pythonExecutable", "pythonHash", "contentHash"}:
+                raise ValueError
+            if any(not isinstance(host[key], str) or not Path(host[key]).is_absolute() for key in ("path", "pythonExecutable")):
+                raise ValueError
+            if not valid_hash(host["pythonHash"]) or not valid_hash(host["contentHash"]):
+                raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise InstallerError("manifest-invalid") from None
+
+
 def verify_install(manifest_path: str | Path) -> dict[str, object]:
-    path = Path(manifest_path)
+    path = Path(os.path.abspath(manifest_path))
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise InstallerError("manifest-invalid") from None
-    for operation in manifest.get("operations", []):
+    _validate_install_manifest(manifest, path)
+    _safe_root(path, allow_missing=False)
+    for operation in manifest["operations"]:
         target = Path(operation["target"])
+        _safe_root(target)
         if operation.get("afterHash") is None:
-            if target.exists():
+            if os.path.lexists(target):
                 raise InstallerError("installed-file-drift")
         elif not target.is_file() or _path_hash(target) != operation["afterHash"]:
             raise InstallerError("installed-file-drift")

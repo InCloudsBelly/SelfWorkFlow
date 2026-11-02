@@ -45,6 +45,29 @@ class ProviderRunnerTests(unittest.TestCase):
         )
         return manager, lease
 
+    def test_caller_can_release_its_lease_after_runner_success_or_failure(self):
+        for query in (False, True):
+            for exit_code in (0, 1):
+                with self.subTest(query=query, exit_code=exit_code):
+                    bundle = query_bundle(self.temp.name, side_effects="local-write", operation_id="sync-incremental", action="sync") if query else operation_bundle(self.temp.name)
+                    plan, approval, registry, _machine, resolver = bundle
+                    manager, lease = self.write_context(plan)
+                    arguments = dict(approval=approval, effect_port=FakeEffectPort(exit_code=exit_code, mutation_evidence=(evidence_for(plan),)), now=NOW,
+                                     trusted_command_registry=registry, authorization_resolver=resolver, lease=lease, lease_manager=manager,
+                                     replay_store=FakeReplayStore(), test_mode=True)
+                    if query:
+                        observation = WorkspaceObservation(H, {"fingerprintHash": H})
+                        arguments.update(observer=Observer(observation, observation), returned_files=[], index_revision="r1", index_completeness="complete")
+                    invoke = run_query if query else run_operation
+                    if query and exit_code:
+                        with self.assertRaisesRegex(RunnerError, "effect-failed"):
+                            invoke(plan, **arguments)
+                    else:
+                        invoke(plan, **arguments)
+                    manager.release(lease)
+                    next_lease = manager.acquire(project_root=self.temp.name, provider_id=plan.document["providerId"], operation_id=plan.document["operationId"], nonce="next-caller")
+                    manager.release(next_lease)
+
     def test_success_executes_only_sealed_command_and_commits_terminal_success(self):
         plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
         manager, lease = self.write_context(plan)
@@ -66,6 +89,44 @@ class ProviderRunnerTests(unittest.TestCase):
         self.assertEqual(receipt["outcome"], "succeeded")
         self.assertEqual(receipt["replayState"], "terminal-succeeded")
         self.assertIn("terminal-succeeded", replay.states.values())
+
+    def test_caller_can_release_after_post_validation_exception(self):
+        plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
+        manager, lease = self.write_context(plan)
+        with self.assertRaises(RunnerError):
+            run_operation(plan, approval=approval, effect_port=FakeEffectPort(mutation_evidence=()), now=NOW,
+                          trusted_command_registry=registry, authorization_resolver=resolver, lease=lease,
+                          lease_manager=manager, replay_store=FakeReplayStore(), test_mode=True)
+        manager.release(lease)
+
+    def test_runner_does_not_adopt_or_release_a_replacement_owner(self):
+        from selfworkflow.v3.project_lease import LeaseError
+        plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)
+        manager, lease = self.write_context(plan)
+        key = manager._key(plan.document["providerId"], lease.document["canonicalProjectRootHash"])
+
+        def takeover():
+            replacement = clone(lease.document)
+            replacement["ownerNonce"] = "replacement-owner"
+            replacement["leaseHash"] = content_hash({key: value for key, value in replacement.items() if key != "leaseHash"})
+            manager.host_port.replace_with_takeover(key, replacement)
+
+        with self.assertRaises(RunnerError):
+            run_operation(plan, approval=approval, effect_port=FakeEffectPort(during_effect=takeover), now=NOW,
+                          trusted_command_registry=registry, authorization_resolver=resolver, lease=lease,
+                          lease_manager=manager, replay_store=FakeReplayStore(), test_mode=True)
+        with self.assertRaisesRegex(LeaseError, "lease-not-current"):
+            manager.release(lease)
+        self.assertEqual(manager.host_port.read(key)["ownerNonce"], "replacement-owner")
+
+    def test_independent_heartbeat_keeps_the_old_snapshot_stale(self):
+        from selfworkflow.v3.project_lease import LeaseError
+        plan, *_ = operation_bundle(self.temp.name)
+        manager, original = self.write_context(plan)
+        latest = manager.heartbeat(original)
+        with self.assertRaisesRegex(LeaseError, "lease-not-current"):
+            manager.release(original)
+        manager.release(latest)
 
     def test_missing_registry_resolver_lease_or_host_capability_fails_before_effect(self):
         plan, approval, registry, _machine, resolver = operation_bundle(self.temp.name)

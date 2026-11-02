@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import hashlib
 import re
@@ -17,13 +18,23 @@ class WikiModuleError(ValueError):
     pass
 
 
+def _is_link(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        raise WikiModuleError("path-inspection-failed") from None
+    return stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
+
+
 def _host_config_path(config_path: str | None) -> Path:
     path = Path(config_path) if config_path else Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "config.toml"
     if not path.is_absolute():
         raise WikiModuleError("host-config-must-be-absolute")
     path = Path(os.path.abspath(path))
     for ancestor in (path, *path.parents):
-        if ancestor.is_symlink() or ancestor.is_junction():
+        if _is_link(ancestor):
             raise WikiModuleError("host-config-link-rejected")
     return path
 
@@ -273,7 +284,7 @@ def inspect_wiki_module(repository_root: str) -> dict[str, object]:
     if not requested.is_absolute():
         raise WikiModuleError("source-repository-must-be-absolute")
     for ancestor in (requested, *requested.parents):
-        if ancestor.is_symlink() or ancestor.is_junction():
+        if _is_link(ancestor):
             raise WikiModuleError("source-repository-link-rejected")
     try:
         root = requested.resolve(strict=True)
@@ -281,7 +292,7 @@ def inspect_wiki_module(repository_root: str) -> dict[str, object]:
         raise WikiModuleError("source-repository-missing") from None
     module = root / "extensions/knowledge/selfopenwiki"
     for ancestor in (module, module.parent, module.parent.parent, module / "scripts"):
-        if ancestor.is_symlink() or ancestor.is_junction():
+        if _is_link(ancestor):
             raise WikiModuleError("source-module-link-rejected")
     report = {
         "status": "setup-required", "hostRegistration": "unverified",

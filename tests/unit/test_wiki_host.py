@@ -27,7 +27,9 @@ class WikiHostTests(unittest.TestCase):
                 before = prefix + (header + '\r\ncommand = "old"\r\nargs = ["old.js"]\r\ntool_timeout_sec = 72000\r\n').encode() + suffix
                 config.write_bytes(before)
                 ready = {"status": "source-ready", "moduleRoot": str(root / "extensions/knowledge/selfopenwiki")}
-                with patch.object(wiki_module, "inspect_wiki_module", return_value=ready):
+                with patch.object(wiki_module, "inspect_wiki_module", return_value=ready), patch.object(
+                    pathlib.Path, "is_junction", side_effect=AttributeError("Python 3.11 has no is_junction"), create=True,
+                ):
                     plan = wiki_module.register_wiki_mcp(str(root), str(config))
                     self.assertEqual(config.read_bytes(), before)
                     result = wiki_module.register_wiki_mcp(str(root), str(config), confirm_plan_hash=plan["planHash"])

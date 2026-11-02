@@ -1,4 +1,4 @@
-"""Host-side verification of clean post-Grill review inputs."""
+"""Host-side verification of clean review inputs and optional Grill completion."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _INPUT_TOKEN = object()
 
 
 class VerifiedReviewInput:
-    """Sealed summary whose clean provenance and Grill completion were checked."""
+    """Sealed summary whose provenance and any supplied Grill proof were checked."""
 
     __slots__ = ("_summary", "_summary_attestation_hash", "_completion_hash", "_token")
 
@@ -87,8 +87,8 @@ def verify_review_inputs(
     summary: object,
     *,
     summary_attestation_resolver: Callable[[str], object],
-    grill_completion_ref: str,
-    grill_completion_resolver: Callable[[str], object],
+    grill_completion_ref: str | None = None,
+    grill_completion_resolver: Callable[[str], object] | None = None,
     reviewer_policy_hash: str,
     plan_hash: str,
     attempt_ref: str,
@@ -115,10 +115,12 @@ def verify_review_inputs(
             "design-review-summary-attestation.schema.json",
             reference_is_attestation=False,
         )
-        completion = _resolve(
-            grill_completion_resolver, grill_completion_ref,
-            "grill-completion-attestation.schema.json",
-        )
+        completion = None
+        if grill_completion_ref is not None or grill_completion_resolver is not None:
+            completion = _resolve(
+                grill_completion_resolver, grill_completion_ref,
+                "grill-completion-attestation.schema.json",
+            )
         bindings = {
             "summaryHash": normalized["summaryHash"],
             "designHash": normalized["designHash"],
@@ -129,8 +131,10 @@ def verify_review_inputs(
         if (
             any(provenance[key] != value for key, value in bindings.items())
             or not _valid_window(provenance, now)
-            or any(completion[key] != value for key, value in bindings.items() if key != "reviewerPolicyHash")
-            or not _valid_window(completion, now)
+            or (completion is not None and (
+                any(completion[key] != value for key, value in bindings.items() if key != "reviewerPolicyHash")
+                or not _valid_window(completion, now)
+            ))
         ):
             raise ReviewInputError()
     except (HashingError, KeyError, ReviewInputError, TypeError, ValueError):
@@ -138,6 +142,6 @@ def verify_review_inputs(
     result = object.__new__(VerifiedReviewInput)
     object.__setattr__(result, "_summary", clone(normalized))
     object.__setattr__(result, "_summary_attestation_hash", provenance["attestationHash"])
-    object.__setattr__(result, "_completion_hash", completion["attestationHash"])
+    object.__setattr__(result, "_completion_hash", None if completion is None else completion["attestationHash"])
     object.__setattr__(result, "_token", _INPUT_TOKEN)
     return result

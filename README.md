@@ -58,7 +58,7 @@ git config core.longpaths true
 | C / C++ 与 UE | 先读取紧凑核心，再选择所有权、类型、并发、ABI、性能、构建或 UE 专项 | 普通文档和非 C++ 任务不加载整套 C++ 方法 |
 | CodeGraph 源码关系查询 | 使用项目图核对符号、调用和影响关系，再核对当前源码 | 需要已配置的 provider 和可查询索引；缺失或需重建时保留现状 |
 | 测试与验证 | 行为变更按 TDD 和最窄充分验证推进，区分静态、构建、运行与复现证据 | TEA、ATDD、NFR、框架和 CI 专项仅在明确请求时启用 |
-| Wiki 知识更新 | 区分 read / propose / update，核验来源、正文、图解和实施可用性；经独立审查与后端协议发布 | 当前完整 MCP 源码存在 helper 协议阻塞，见下文；普通 Markdown 不自动写 Wiki，可单独借用内容标准 |
+| Wiki 知识更新 | 区分 read / propose / update，核验来源、正文、图解和实施可用性；经独立审查与后端协议发布 | 需要已验证的 Wiki 服务与权限；普通 Markdown 不自动写 Wiki，可单独借用内容标准 |
 | 主题并行 | 同层、页面归属互斥的主题由独立 SubAgent 准备私稿与证据，每个主题覆盖其全部 Page | 不继承主历史；大主题再下钻；共享页和正式队列由主调度管理 |
 | 数学与公式 | 数学建模、推导、算法性质分析和 LaTeX 表达；可用 SymPy 做精确复核 | 真实计算需要兼容环境；普通文案不加载数学库 |
 | 研究写作 | 组织教程、技术文章和专题说明，核对来源、用途、因果与边界 | 短问答、翻译、内部审查记录和仅格式导出不触发完整写作流程 |
@@ -109,7 +109,7 @@ git config core.longpaths true
 
 入口为 [`Install_SelfWorkFlow.bat`](Install_SelfWorkFlow.bat)，实际委托 [`scripts/install-selfworkflow.ps1`](scripts/install-selfworkflow.ps1)。该流程会准备环境、固定来源和安装计划，并写入宿主绑定；它与复制 Skill 文档是不同的安装操作。
 
-先准备 Windows、Git、系统 Python 和 Node/npm；安装器不会替你安装系统 Python。当前可选 Wiki 路径使用 Python 3.12 以上。默认 UE 后端要求 Node 主版本至少 22、不能为 25，并且能加载 `node:sqlite`；具体选择见[CodeGraph 安装说明](extensions/codegraph/README.md#安装选择)。
+先准备 Windows、Git、Python 3.11 或以上及 Node/npm；安装器不会替你安装系统 Python。默认 UE 后端要求 Node 主版本至少 22、不能为 25，并且能加载 `node:sqlite`；具体选择见[CodeGraph 安装说明](extensions/codegraph/README.md#安装选择)。
 
 | Profile | 用途 |
 | --- | --- |
@@ -118,14 +118,13 @@ git config core.longpaths true
 | `maintainer` | 面向维护者的完整 Runtime 资源 |
 
 ```bat
-git submodule update --init -- dependencies/upstream/scientific-agent-skills
 Install_SelfWorkFlow.bat -Profile core
 Install_SelfWorkFlow.bat -Profile knowledge
 ```
 
-首行是当前固定依赖准备遗漏的绕行步骤，按 Gitlink 初始化数学方法来源；不要追随上游分支。后两行按实际需要选择一个 Profile。任一步失败时停止后续安装，先处理来源、权限或网络问题。安装器会展示计划并按提示确认，保留事务记录和回滚入口。本次审查还发现清单验证缺口，不能只凭 `verified` 判断损坏清单可信，详见[已知问题](#已知问题)。
+按实际需要选择一个 Profile。固定依赖准备已包含数学方法来源，按 Gitlink 初始化，不追随上游分支。任一步失败时停止后续安装，先处理来源、权限或网络问题。安装器会展示计划并按提示确认，保留事务记录和回滚入口；安装核验会检查清单身份、操作表及实际文件。
 
-可选 Wiki 路径当前应使用 **Python 3.12 或更高版本**：项目元数据仍声明 `>=3.11`，但 Wiki 模块使用了 3.12 才提供的 API。Node 版本按对应模块和来源锁核验；Wiki setup 要求 Node.js 22 或更高，official CodeGraph 的当前锁还限制 Node 主版本小于 25。
+Node 版本按对应模块和来源锁核验；Wiki setup 要求 Node.js 22 或更高，official CodeGraph 的当前锁还限制 Node 主版本小于 25。
 
 需要 DSH 指令根时可显式传 `-DshRoot`。已绑定的 DSH 根、文档根或自定义 provider 的迁移与回滚应沿原安装事务执行，不通过覆盖或删除本地状态完成。
 
@@ -148,9 +147,7 @@ Manage_SelfWorkFlow_Wiki.bat setup
 Manage_SelfWorkFlow_Wiki.bat visualize --wiki-root "<独立 Wiki Git 仓库的绝对路径>"
 ```
 
-**当前限制**：已提交的原生 helper 与 TS 桥接协议不兼容，完整 MCP 初始化存在阻塞，详见[整体审查](docs/reviews/2026-11-02-overall-workflow-review.md)。它不影响普通 Skill、Viewer 或最小状态诊断分支。应先修复并验证这个缺口，再把新构建用于完整 MCP 部署；保留已有可用的冻结产物。
-
-下面列出完整接入次序，适用于上述阻塞已修复并验证的版本。先按上节部署 `knowledge` Runtime，再完成三步：
+完整接入需要先按上节部署 `knowledge` Runtime，再完成三步：
 
 1. **构建服务**：执行 `Manage_SelfWorkFlow_Wiki.bat setup --with-mcp`。该 Windows 流程还构建自有 MCP 及目标为 `net9.0 / win-x64` 的 Win32 helper，需要相应 .NET SDK；执行前核对工具链。
 2. **绑定本机 Wiki**：确认目录写入授权与备份后执行：
@@ -174,14 +171,11 @@ Wiki 正文、长期 Claims 和可分享来源位于独立 Git 仓库；运行�
 
 ## 已知问题
 
-[2026-11-02 整体审查](docs/reviews/2026-11-02-overall-workflow-review.md)确认了 **1 项 P1、7 项 P2**，本次文档更新没有修复这些运行时代码：
+[2026-11-02 整体审查与修复](docs/reviews/2026-11-02-overall-workflow-review.md)中的有效问题（1 项 P1、6 项 P2）已修复。原 helper 协议问题为误报：MCP 使用兼容工程输出的 `dist` 产物，另一套 framed helper 输出独立的 bootstrap 目录。
 
-- 可选工作产物的清理流程可能沿 junction 操作托管目录之外的文件；修复前避免执行 `artifact reconcile` 的 apply。
-- 其余问题涉及工作产物 Review 严重级别别名、普通契约 Review 与 Grill 的耦合、契约 runner 的租约续接、安装清单验证和 Python 3.11 的 Wiki 兼容性。
-- 干净 clone 的 Runtime 依赖准备遗漏数学方法来源；上文给出固定 Gitlink 初始化的绕行步骤。
-- 原生 helper 与 TS 桥接的请求 / 响应协议不兼容，阻塞已验证能力后的完整 Wiki MCP 初始化。
-
-报告列出触发条件、受影响入口、源码位置与建议。契约 Host 的问题不应外推为普通 Skill 或 CLI provider 都受影响。外部服务尚未部署时，也不能将规则文档的存在当作服务已经可运行的证明。
+- 清理计划绑定文件身份；旧计划须重新生成。Windows apply 仅支持盘符根，遇到链接、占用或状态变化会拒绝处理。清理批次不是原子事务，运行中失败后须重新生成计划，核对已清理项。
+- 旧版曾因严重级别别名误放行的任务不会自动重写历史凭据；应创建新代次，重新执行 Review、post-Review 和验证。
+- 仓库修复不自动更新已安装 Runtime 或宿主服务。契约 Host 的实现问题不应外推为普通 Skill 或 CLI provider 都受影响；外部服务仍须用真实就绪证据验收。
 
 ## 维护与验证
 
@@ -198,10 +192,10 @@ Wiki 正文、长期 Claims 和可分享来源位于独立 Git 仓库；运行�
 | [`src/selfworkflow/`](src/selfworkflow/) | 可选 Runtime、契约与安装工具实现 |
 | [`dependencies/locks/`](dependencies/locks/) | 固定第三方来源、资源身份与许可记录 |
 
-首次维护才创建 Python 环境；已有 `.venv` 时复用：
+首次维护使用 Python 3.11 或以上创建环境；已有 `.venv` 时复用：
 
 ```powershell
-if (-not (Test-Path -LiteralPath '.venv')) { py -3.12 -m venv .venv }
+if (-not (Test-Path -LiteralPath '.venv')) { py -3 -m venv .venv }
 .venv/Scripts/python.exe -m pip install -e .
 ```
 
@@ -209,10 +203,9 @@ if (-not (Test-Path -LiteralPath '.venv')) { py -3.12 -m venv .venv }
 
 ```powershell
 .venv/Scripts/python.exe -m selfworkflow.v3.submodule_profiles --repository . --profile normal --runtime-profile core
-git submodule update --init -- dependencies/upstream/scientific-agent-skills
 ```
 
-两步均成功后再生成。来源路径缺失、Gitlink / hash 不符或含本地修改时，应先核对锁文件与实际差异，保留已有修改；不直接切到上游最新版本或绕过校验。
+该步骤成功后再生成。来源路径缺失、Gitlink / hash 不符或含本地修改时，应先核对锁文件与实际差异，保留已有修改；不直接切到上游最新版本或绕过校验。
 
 规则、方法、来源锁或随包资源变化后，在根目录执行生成与检查：
 

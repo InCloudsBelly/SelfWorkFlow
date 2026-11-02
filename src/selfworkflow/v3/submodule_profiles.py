@@ -17,7 +17,7 @@ _ANTHROPIC_PATH = "dependencies/upstream/anthropic-skills"
 _NORMAL_PATHS = (
     _TEA_PATH, _MATT_SKILLS_PATH, _PONYTAIL_PATH, _ANTHROPIC_PATH,
     "dependencies/upstream/ui-ux-pro-max", "dependencies/upstream/composio-skills",
-    "dependencies/upstream/obsidian-skills",
+    "dependencies/upstream/obsidian-skills", "dependencies/upstream/scientific-agent-skills",
 )
 _WIKI_PATHS = (
     "extensions/knowledge/selfopenwiki/upstream/openwiki",

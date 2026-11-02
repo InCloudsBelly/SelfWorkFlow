@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+import yaml
+
 from jsonschema import Draft202012Validator
 
 from selfworkflow.work_artifacts import (
@@ -34,6 +36,26 @@ def _doc(doc_id="design", content="# Design\n"):
 
 class WorkArtifactUnitTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
+
+    def test_severity_aliases_block_review_and_post_review_until_disposed(self):
+        for severity in ("Critical", "blocker", "Important", "high", "medium"):
+            for event in ("review-recorded", "post-review-recorded"):
+                with self.subTest(severity=severity, event=event), tempfile.TemporaryDirectory() as temporary:
+                    manager = WorkArtifactManager(temporary, "aliases")
+                    state = manager.transition(0, 0, None, "documents-captured", [_doc()], operation_nonce="capture")
+                    if event == "post-review-recorded":
+                        state = manager.transition(1, 1, state["manifestHash"], "review-recorded", review={"receiptId": "clean", "packageHash": state["packageHash"], "findings": [], "independent": True}, operation_nonce="clean")
+                    state = manager.transition(1, state["stateRevision"], state["manifestHash"], event, review={"receiptId": "blocked", "packageHash": state["packageHash"], "findings": [{"id": "f", "severity": severity}], "independent": True}, operation_nonce="blocked")
+                    if event == "review-recorded":
+                        self.assertEqual(state["artifactStatus"], "candidate")
+                    else:
+                        with self.assertRaisesRegex(WorkArtifactError, "verification-blocked"):
+                            manager.transition(1, state["stateRevision"], state["manifestHash"], "verification-recorded", verification={"receiptId": "v", "packageHash": state["packageHash"], "fresh": True, "passed": True}, operation_nonce="verify")
+                    saved = yaml.safe_load(manager.manifest_path.read_text(encoding="utf-8"))
+                    if event == "review-recorded":
+                        expected = "Critical" if severity.lower() in {"critical", "blocker"} else "Important"
+                        self.assertEqual(saved["review"]["findings"][0]["severity"], expected)
+                        self.assertEqual(saved["review"]["findings"][0]["status"], "open")
 
     def test_hash_vectors_are_stable(self):
         artifact = [{"id": "design", "kind": "design", "contentHash": "sha256:bbb"}]

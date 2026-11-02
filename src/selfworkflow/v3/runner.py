@@ -245,7 +245,10 @@ class _RunnerLeaseGuard:
                 operation_id=self.plan_document["operationId"],
                 nonce=self.plan_document["executionNonce"],
             )
-            self.lease = self.manager.heartbeat(self.lease)
+            renewed = self.manager.heartbeat(self.lease)
+            # The runner borrows the caller's lease; keep its continuation current
+            # so the caller can release it even when execution subsequently fails.
+            self.lease.document.update(clone(renewed.document))
         except LeaseError as error:
             raise RunnerError(error.reason) from None
         if self._inside_effect:

@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -46,6 +47,39 @@ def _hold_file_without_delete_sharing(path):
 
 
 class InstallApplyTests(unittest.TestCase):
+    def test_verify_rejects_empty_and_damaged_install_manifests(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = create_artifact(root)
+            plan = create_install_plan(artifact, root / "agents", root / "codex", root / "state", "0.1.0")
+            result = apply_install_plan(plan, plan["planHash"])
+            path = Path(result["manifestPath"])
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            damaged = [None, [], {}, {**manifest, "operations": []},
+                       {key: value for key, value in manifest.items() if key != "operations"},
+                       {**manifest, "schemaVersion": 99}, {**manifest, "artifactHash": "broken"},
+                       {**manifest, "transactionId": ""}, {**manifest, "manifestPath": str(root / "other.json")},
+                       {**manifest, "operations": [{"target": str(root / "missing")}]}]
+            damaged.extend([
+                {**manifest, "schemaVersion": True}, {**manifest, "profile": []},
+                {**manifest, "operations": manifest["operations"] * 2},
+                {**manifest, "operations": [{**manifest["operations"][0], "target": str(root / "outside.md")}]},
+                {**manifest, "hostLauncher": {}},
+            ])
+            for index, value in enumerate(damaged):
+                with self.subTest(damage=index):
+                    path.write_text(json.dumps(value), encoding="utf-8")
+                    with self.assertRaisesRegex(InstallerError, "manifest-invalid"):
+                        verify_install(path)
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertEqual(verify_install(path)["status"], "verified")
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                self.assertEqual(verify_install(path.relative_to(root))["status"], "verified")
+            finally:
+                os.chdir(previous)
+
     def test_missing_shared_policy_is_not_mistaken_for_a_legacy_codex_artifact(self):
         from selfworkflow import installer
 
@@ -237,24 +271,14 @@ class InstallApplyTests(unittest.TestCase):
 
             self.assertEqual(result["status"], "applied")
             installed = (codex / "AGENTS.md").read_text(encoding="utf-8")
-            for phrase in (
-                "SelfWorkflow active: <profile>",
-                "mode: <Light|Full|Deep>",
-                "阶段/总阶段",
-                "当前",
-                "剩余",
-                "预计",
-                "粗略进度",
-                "独立 SubAgent",
-                "所有模式禁止双 Reviewer",
-                "侵入预算",
-                "测试不能反向扩张生产架构",
-                "实施契约",
-                "首次编辑测试/生产代码前",
-                "已有同范围授权复用",
-                "关键风险变化需重新确认",
-            ):
-                self.assertIn(phrase, installed)
+            snapshot = agents / "selfworkflow/versions/0.1.0.dev0" / plan["artifactHash"].removeprefix("sha256:")
+            self.assertIn(plan["artifactHash"], installed)
+            self.assertIn(str(snapshot), installed)
+            self.assertIn((artifact / "WORKFLOW.md").read_text(encoding="utf-8").strip(), installed)
+            for relative in ("WORKFLOW.md", "workflow/core.md", "workflow/modules/review.md", "skills/code-quality/SKILL.md"):
+                with self.subTest(policy=relative):
+                    self.assertEqual((snapshot / relative).read_bytes(), (artifact / relative).read_bytes())
+            self.assertEqual(verify_install(result["manifestPath"])["status"], "verified")
 
     def test_apply_preserves_unmanaged_content_and_verify_is_idempotent(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
@@ -605,7 +629,7 @@ class InstallApplyTests(unittest.TestCase):
                 if not swapped:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.parent.rmdir()
-                    os.symlink(foreign, target.parent, target_is_directory=True)
+                    subprocess.run(["cmd", "/d", "/c", "mklink", "/J", str(target.parent), str(foreign)], check=True, capture_output=True)
                     swapped = True
                 return operation
 

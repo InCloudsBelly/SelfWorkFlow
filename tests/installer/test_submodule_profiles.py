@@ -42,6 +42,14 @@ def _commit_file(repository: Path, value: str) -> str:
 
 
 class SubmoduleProfileTests(unittest.TestCase):
+    def test_every_runtime_profile_prepares_required_math_source(self):
+        required = "dependencies/upstream/scientific-agent-skills"
+        for profile in ("core", "knowledge", "maintainer"):
+            with self.subTest(profile=profile):
+                commands = commands_for_profile("normal", runtime_profile=profile)
+                self.assertIn(("git", "submodule", "sync", "--", required), commands)
+                self.assertIn(("git", "submodule", "update", "--init", "--", required), commands)
+
     def test_native_git_scrubs_repository_locator_environment(self):
         from subprocess import CompletedProcess
 
@@ -164,7 +172,7 @@ class SubmoduleProfileTests(unittest.TestCase):
             _git(parent / "dependencies/upstream/ponytail", "checkout", "--detach", first)
             _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), "dependencies/upstream/anthropic-skills")
             _git(parent / "dependencies/upstream/anthropic-skills", "checkout", "--detach", first)
-            community = ("ui-ux-pro-max", "composio-skills", "obsidian-skills")
+            community = ("ui-ux-pro-max", "composio-skills", "obsidian-skills", "scientific-agent-skills")
             for name in community:
                 relative = f"dependencies/upstream/{name}"
                 _git(parent, "-c", "protocol.file.allow=always", "submodule", "add", str(tea_remote), relative)

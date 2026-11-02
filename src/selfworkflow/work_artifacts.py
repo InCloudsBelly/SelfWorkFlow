@@ -7,7 +7,7 @@ transition/reconcile boundary used by the workflow adapters.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import tempfile
 import unicodedata
@@ -235,6 +236,148 @@ def _os_lock(path: Path) -> Iterator[None]:
         handle.close()
 
 
+class _ReconcileHandles:
+    """Pin every ancestor and delete only the inspected Windows file handle."""
+
+    def __init__(self, stack: ExitStack):
+        import ctypes
+        from ctypes import wintypes as w
+
+        class FileInfo(ctypes.Structure):
+            _fields_ = [("attributes", w.DWORD), ("created", w.FILETIME),
+                       ("accessed", w.FILETIME), ("written", w.FILETIME),
+                       ("volume", w.DWORD), ("size_high", w.DWORD), ("size_low", w.DWORD),
+                       ("links", w.DWORD), ("index_high", w.DWORD), ("index_low", w.DWORD)]
+
+        class Overlapped(ctypes.Structure):
+            _fields_ = [("internal", ctypes.c_size_t), ("internal_high", ctypes.c_size_t),
+                       ("offset", w.DWORD), ("offset_high", w.DWORD), ("event", w.HANDLE)]
+
+        class UnicodeString(ctypes.Structure):
+            _fields_ = [("length", w.USHORT), ("maximum", w.USHORT), ("buffer", w.LPVOID)]
+
+        class ObjectAttributes(ctypes.Structure):
+            _fields_ = [("length", w.ULONG), ("root", w.HANDLE), ("name", ctypes.POINTER(UnicodeString)),
+                       ("attributes", w.ULONG), ("security", w.LPVOID), ("quality", w.LPVOID)]
+
+        class IoStatus(ctypes.Structure):
+            _fields_ = [("status", w.LPVOID), ("information", ctypes.c_size_t)]
+
+        self.name_type, self.attributes_type, self.status_type = UnicodeString, ObjectAttributes, IoStatus
+        self.nt_open = ctypes.WinDLL("ntdll").NtCreateFile
+        self.nt_open.argtypes = [ctypes.POINTER(w.HANDLE), w.DWORD, ctypes.POINTER(ObjectAttributes),
+                                 ctypes.POINTER(IoStatus), w.LPVOID, w.DWORD, w.DWORD, w.DWORD, w.DWORD, w.LPVOID, w.DWORD]
+        self.nt_open.restype = ctypes.c_long
+        self.ctypes, self.info_type, self.overlapped_type = ctypes, FileInfo, Overlapped
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        signatures = {
+            "CreateFileW": ([w.LPCWSTR, w.DWORD, w.DWORD, w.LPVOID, w.DWORD, w.DWORD, w.HANDLE], w.HANDLE),
+            "CloseHandle": ([w.HANDLE], w.BOOL),
+            "GetFileInformationByHandle": ([w.HANDLE, ctypes.POINTER(FileInfo)], w.BOOL),
+            "ReadFile": ([w.HANDLE, w.LPVOID, w.DWORD, ctypes.POINTER(w.DWORD), w.LPVOID], w.BOOL),
+            "SetFilePointerEx": ([w.HANDLE, ctypes.c_longlong, w.LPVOID, w.DWORD], w.BOOL),
+            "SetFileInformationByHandle": ([w.HANDLE, ctypes.c_int, w.LPVOID, w.DWORD], w.BOOL),
+            "LockFileEx": ([w.HANDLE, w.DWORD, w.DWORD, w.DWORD, w.DWORD, ctypes.POINTER(Overlapped)], w.BOOL),
+            "UnlockFileEx": ([w.HANDLE, w.DWORD, w.DWORD, w.DWORD, ctypes.POINTER(Overlapped)], w.BOOL),
+        }
+        for name, (arguments, result) in signatures.items():
+            function = getattr(self.kernel, name)
+            function.argtypes, function.restype = arguments, result
+        self.stack, self.directories = stack, {}
+
+    def _info(self, handle):
+        info = self.info_type()
+        if not self.kernel.GetFileInformationByHandle(handle, self.ctypes.byref(info)):
+            raise WorkArtifactError("reconcile-target-unavailable")
+        return info
+
+    def _open(self, path: Path, *, directory=False, delete=False, lock=False):
+        from ctypes import wintypes as w
+        access = (0xA0 if directory else 0x80000000) | 0x100000
+        access |= 0x10000 if delete else 0
+        access |= 0x40000000 if lock else 0
+        if path.parent == path:
+            if len(path.anchor) != 3 or path.anchor[1] != ":":
+                raise WorkArtifactError("reconcile-root-unsupported")
+            handle = self.kernel.CreateFileW(str(path), access, 1, None, 3, 0x02200000, None)
+            if handle == self.ctypes.c_void_p(-1).value:
+                raise WorkArtifactError("reconcile-target-unavailable")
+        else:
+            parent = self.directories[path.parent]
+            if self._info(parent).attributes & 0x400:
+                raise WorkArtifactError("path-reparse")
+            buffer = self.ctypes.create_unicode_buffer(path.name)
+            length = len(path.name.encode("utf-16-le"))
+            name = self.name_type(length, length + 2, self.ctypes.cast(buffer, w.LPVOID))
+            attributes = self.attributes_type(self.ctypes.sizeof(self.attributes_type), parent,
+                                               self.ctypes.pointer(name), 0x1040, None, None)
+            opened, status = w.HANDLE(), self.status_type()
+            # RootDirectory + a single component avoids looking ancestors up by
+            # path again; OBJ_DONT_REPARSE also rejects in-place junction changes.
+            options = 0x204020 | (1 if directory else 0x40)
+            result = self.nt_open(self.ctypes.byref(opened), access, self.ctypes.byref(attributes),
+                                  self.ctypes.byref(status), None, 0, 3 if lock else 1, 1, options, None, 0)
+            if result < 0:
+                raise WorkArtifactError("reconcile-target-unavailable")
+            handle = opened.value
+        self.stack.callback(self.kernel.CloseHandle, handle)
+        info = self._info(handle)
+        if info.attributes & 0x400:
+            raise WorkArtifactError("path-reparse")
+        if (bool(info.attributes & 0x10) != directory or (not directory and info.links != 1)
+                or (delete and info.attributes & 1)):
+            raise WorkArtifactError("reconcile-target-invalid")
+        return handle
+
+    def directory(self, path: Path) -> None:
+        # OPEN_REPARSE_POINT covers only the final component. Open from the
+        # volume root down, using each pinned parent for the next component.
+        for ancestor in reversed((path, *path.parents)):
+            if ancestor not in self.directories:
+                self.directories[ancestor] = self._open(ancestor, directory=True)
+
+    def file(self, path: Path, *, delete=False, lock=False):
+        self.directory(path.parent)
+        return self._open(path, delete=delete, lock=lock)
+
+    @contextmanager
+    def task_lock(self, path: Path):
+        handle = self.file(path, lock=True)
+        overlap = self.overlapped_type()
+        if not self.kernel.LockFileEx(handle, 3, 0, 1, 0, self.ctypes.byref(overlap)):
+            raise WorkArtifactError("task-locked")
+        try:
+            yield
+        finally:
+            if not self.kernel.UnlockFileEx(handle, 0, 1, 0, self.ctypes.byref(overlap)):
+                raise WorkArtifactError("task-unlock-failed")
+
+    def snapshot(self, handle) -> tuple[bytes, str]:
+        from ctypes import wintypes as w
+
+        before = self._info(handle)
+        size = (before.size_high << 32) | before.size_low
+        if size > WDLC_LIMITS_V1["maxDocumentBytes"]:
+            raise WorkArtifactError("reconcile-target-invalid")
+        if not self.kernel.SetFilePointerEx(handle, 0, None, 0):
+            raise WorkArtifactError("reconcile-target-unavailable")
+        buffer, read = self.ctypes.create_string_buffer(size + 1), w.DWORD()
+        if not self.kernel.ReadFile(handle, buffer, size + 1, self.ctypes.byref(read), None):
+            raise WorkArtifactError("reconcile-target-unavailable")
+        after = self._info(handle)
+        identity = lambda info: (info.volume, info.index_high, info.index_low, info.created.dwHighDateTime, info.created.dwLowDateTime)
+        if (read.value != size or identity(before) != identity(after)
+                or (before.size_high, before.size_low, before.written.dwHighDateTime, before.written.dwLowDateTime)
+                != (after.size_high, after.size_low, after.written.dwHighDateTime, after.written.dwLowDateTime)):
+            raise WorkArtifactError("reconcile-target-drift")
+        return buffer.raw[:size], _hash_value(identity(after))
+
+    def delete(self, handle) -> None:
+        disposition = self.ctypes.c_ubyte(1)
+        if not self.kernel.SetFileInformationByHandle(handle, 4, self.ctypes.byref(disposition), self.ctypes.sizeof(disposition)):
+            raise WorkArtifactError("reconcile-delete-failed")
+
+
 class WorkArtifactManager:
     """Bounded local manager for a single workflow task."""
 
@@ -261,13 +404,14 @@ class WorkArtifactManager:
                 raise WorkArtifactError("path-escape")
             current = parent
         for item in chain:
-            if item.exists() or item.is_symlink():
-                try:
-                    metadata = item.lstat()
-                except OSError:
-                    raise WorkArtifactError("path-invalid") from None
-                if item.is_symlink() or bool(getattr(metadata, "st_file_attributes", 0) & 0x400):
-                    raise WorkArtifactError("path-reparse")
+            try:
+                metadata = item.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                raise WorkArtifactError("path-invalid") from None
+            if stat.S_ISLNK(metadata.st_mode) or bool(getattr(metadata, "st_file_attributes", 0) & 0x400):
+                raise WorkArtifactError("path-reparse")
 
     def _git_info_exclude(self) -> Path | None:
         environment = os.environ.copy()
@@ -427,7 +571,7 @@ class WorkArtifactManager:
             records.append(record)
         return records
 
-    def _store_review(self, receipt: dict[str, Any], *, generation: int, package_hash: str, manifest_hash: str) -> str:
+    def _store_review(self, receipt: dict[str, Any], *, generation: int, package_hash: str, manifest_hash: str) -> dict[str, Any]:
         value = deepcopy(receipt)
         receipt_id = _bounded_id(value.get("receiptId"), "receipt-id-invalid")
         if value.get("packageHash") != package_hash:
@@ -474,7 +618,7 @@ class WorkArtifactManager:
         directory = self.task_root / "receipts" / "reviews" / _physical_id(receipt_id)
         _atomic_write(directory / "receipt.json", (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"), fail_if_exists=True)
         _atomic_write(directory / "summary.md", summary.encode("utf-8"), fail_if_exists=True)
-        return receipt_hash
+        return value
 
     def _review_has_blocking(self, receipt: dict[str, Any]) -> bool:
         return any(str(item.get("severity", "")).casefold() in {"critical", "important"} and item.get("status", "open") == "open" for item in receipt.get("findings", []))
@@ -590,7 +734,8 @@ class WorkArtifactManager:
                     raise WorkArtifactError("review-missing")
                 if not any(item["status"] == "candidate" for item in manifest["artifacts"]):
                     raise WorkArtifactError("review-not-allowed")
-                receipt_hash = self._store_review(review, generation=manifest["contentGeneration"], package_hash=manifest["packageHash"], manifest_hash=manifest["manifestHash"])
+                review = self._store_review(review, generation=manifest["contentGeneration"], package_hash=manifest["packageHash"], manifest_hash=manifest["manifestHash"])
+                receipt_hash = review["receiptHash"]
                 manifest["stateRevision"] += 1
                 manifest["review"]["receiptHashes"].append(receipt_hash)
                 manifest["review"]["findings"] = deepcopy(review.get("findings", []))
@@ -612,7 +757,8 @@ class WorkArtifactManager:
                     raise WorkArtifactError("post-review-not-allowed")
                 if any(item.get("event") == "post-review-recorded" and item.get("generation") == manifest["contentGeneration"] and item.get("success") for item in manifest["review"].get("postReviews", [])):
                     raise WorkArtifactError("review-conflict")
-                receipt_hash = self._store_review(review, generation=manifest["contentGeneration"], package_hash=manifest["packageHash"], manifest_hash=manifest["manifestHash"])
+                review = self._store_review(review, generation=manifest["contentGeneration"], package_hash=manifest["packageHash"], manifest_hash=manifest["manifestHash"])
+                receipt_hash = review["receiptHash"]
                 manifest["stateRevision"] += 1
                 manifest["review"].setdefault("postReviews", []).append({"event": "post-review-recorded", "generation": manifest["contentGeneration"], "receiptHash": receipt_hash, "success": not self._review_has_blocking(review)})
                 if self._review_has_blocking(review):
@@ -702,21 +848,61 @@ class WorkArtifactManager:
     ) -> dict[str, Any]:
         if mode not in {"dry-run", "apply"}:
             raise WorkArtifactError("reconcile-mode-invalid")
+        self._check_no_reparse_chain(self.task_root)
+        try:
+            with ExitStack() as stack:
+                handles = _ReconcileHandles(stack) if os.name == "nt" else None
+                if handles is not None:
+                    handles.directory(self.task_root)
+                    if mode == "apply":
+                        stack.enter_context(handles.task_lock(self.task_root / ".task.lock"))
+                    handles.file(self.manifest_path)
+                return self._reconcile_locked(mode, expected_content_generation, expected_state_revision,
+                                              expected_manifest_hash, plan_hash, handles)
+        except OSError:
+            raise WorkArtifactError("reconcile-target-unavailable") from None
+
+    def _reconcile_locked(self, mode, expected_content_generation, expected_state_revision,
+                          expected_manifest_hash, plan_hash, handles):
         manifest = self._load_manifest()
         if manifest is None:
             raise WorkArtifactError("manifest-missing")
         if (manifest["contentGeneration"], manifest["stateRevision"], manifest["manifestHash"]) != (expected_content_generation, expected_state_revision, expected_manifest_hash):
             raise WorkArtifactError("cas-conflict")
         targets: list[dict[str, Any]] = []
+        pinned_files = {}
         generation_root = self.task_root / "generations"
         current_generation = manifest["contentGeneration"]
+
+        def collect(directory):
+            self._check_no_reparse_chain(directory)
+            if handles is not None:
+                handles.directory(directory)
+            for file in sorted(directory.iterdir()):
+                self._check_no_reparse_chain(file)
+                metadata = file.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    collect(file)
+                elif stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1:
+                    if handles is not None:
+                        handle = handles.file(file, delete=mode == "apply")
+                        data, identity = handles.snapshot(handle)
+                        pinned_files[file] = handle
+                    else:
+                        data = file.read_bytes()
+                        identity = _hash_value((metadata.st_dev, metadata.st_ino, metadata.st_ctime_ns))
+                    targets.append({"path": file.relative_to(self.task_root).as_posix(), "contentHash": "sha256:" + hashlib.sha256(data).hexdigest(), "size": len(data), "identityHash": identity})
+                else:
+                    raise WorkArtifactError("reconcile-target-invalid")
+
+        self._check_no_reparse_chain(generation_root)
         if generation_root.exists():
+            if handles is not None:
+                handles.directory(generation_root)
             for child in sorted(generation_root.iterdir()):
-                if child.is_dir() and child.name.isdigit() and int(child.name) < max(1, current_generation - 1):
-                    for file in child.rglob("*"):
-                        if file.is_file() and not file.is_symlink():
-                            data = file.read_bytes()
-                            targets.append({"path": file.relative_to(self.task_root).as_posix(), "contentHash": "sha256:" + hashlib.sha256(data).hexdigest(), "size": len(data)})
+                self._check_no_reparse_chain(child)
+                if child.is_dir() and child.name.isascii() and child.name.isdigit() and int(child.name) < max(1, current_generation - 1):
+                    collect(child)
         plan = {"schemaVersion": 1, "taskId": self.task_id, "contentGeneration": expected_content_generation, "stateRevision": expected_state_revision, "manifestHash": expected_manifest_hash, "targets": targets, "platformApply": os.name == "nt"}
         computed_plan_hash = _hash_value(plan)
         report = {"status": "dry-run", "taskId": self.task_id, "planHash": computed_plan_hash, "targets": targets, "recovery": {"action": "none"}, "taskState": manifest["status"]}
@@ -726,19 +912,14 @@ class WorkArtifactManager:
             raise WorkArtifactError("reconcile-plan-mismatch")
         if os.name != "nt":
             raise WorkArtifactError("platform-apply-unsupported")
-        # First release is intentionally conservative: only manager-owned old generations
-        # are eligible.  The preflight hash is rechecked immediately before quarantine.
+        # Every candidate and ancestor remains pinned through deletion. Re-read
+        # the same identity handle; never resolve the target path again to delete.
         for item in targets:
             path = self.task_root / Path(item["path"])
-            if not path.exists() or path.is_symlink():
+            data, identity = handles.snapshot(pinned_files[path])
+            if ("sha256:" + hashlib.sha256(data).hexdigest(), len(data), identity) != (item["contentHash"], item["size"], item["identityHash"]):
                 raise WorkArtifactError("reconcile-target-drift")
-            first_read = path.read_bytes()
-            current_hash = "sha256:" + hashlib.sha256(first_read).hexdigest()
-            if current_hash != item["contentHash"]:
-                raise WorkArtifactError("reconcile-target-drift")
-            if path.read_bytes() != first_read:
-                raise WorkArtifactError("reconcile-target-drift")
-            path.unlink()
+            handles.delete(pinned_files[path])
         return {**report, "status": "applied"}
 
     def knowledge_package(self) -> dict[str, Any]:

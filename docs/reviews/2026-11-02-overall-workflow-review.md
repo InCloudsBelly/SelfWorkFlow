@@ -1,6 +1,40 @@
 # 工作流整体审查与 README 更新
 
-日期：2026-11-02。代码阶段已完成静态审查，README 内容与呈现检查在本报告末尾记录。
+日期：2026-11-02。保留最初静态审查，并记录随后授权的代码修复、回归及误报更正。原始源码定位使用修复前基线行号。
+
+## 修复结果
+
+修复基线为 `889b0f0c1022bb9f7573be2884e5cb628a0a12e3`，沿用原任务规则绑定。有效问题为 **1 项 P1、6 项 P2**；第八项 helper 问题经完整构建链复核撤销，没有改动原生协议或二进制。
+
+| 问题 | 修复与验证边界 |
+| --- | --- |
+| P1 清理越界 | 从盘符卷根逐级绑定父句柄；单组件 `NtCreateFile` 使用 `RootDirectory / OBJ_DONT_REPARSE`，锁覆盖 CAS、计划及 apply；同一文件句柄核验并标记删除。计划增加文件身份绑定。真实 Windows fixture 覆盖 junction、原地 reparse、替换、占用、锁和正常保留。 |
+| P2 Review 别名 | receipt 存储、普通 gate 与 post-Review 结果消费同一次标准化后的 findings，涵盖 blocker/high/medium 及默认 open。 |
+| P2 Grill 耦合 | 普通计划 / 代码 Review 可只验证干净 provenance；completion 两参数只要出现其一就须完整验证。显式 post-Grill 路径仍拒绝缺失、过期或绑定错误的证明。 |
+| P2 租约续接 | runner 在 heartbeat CAS 成功后更新原借入句柄；成功、失败及后置验证异常后，调用者仍能 release。独立 heartbeat 的旧快照与 takeover 防护保持严格。 |
+| P2 安装清单 | 校验格式、版本、身份、路径、非空操作表、哈希、布尔与可选 Host 绑定，再检查实际文件。损坏样本及真实临时安装回读纳入回归。 |
+| P2 Python 3.11 | 用一次 lstat 的类型 / reparse 属性检测链接，保留拒绝链接与 I/O 失败边界。测试模拟缺少 3.12 API；本机只有 3.14，未宣称实际运行过 3.11。 |
+| P2 固定来源闭包 | normal 清单加入 scientific Gitlink，三个 Runtime profile 均覆盖；本地 bare remote 的干净 clone、重复准备、更新、离线回滚与重依赖隔离纳入验证。 |
+
+清理仅支持 Windows 盘符根，UNC 失败关闭；不保证整批删除原子性，运行中失败后应重算计划并核对已清理项。旧版已经误放行的 Review 状态不自动迁移：创建新代次并重跑 Review、post-Review 与 Verify。既有安装、Wiki 草稿、宿主和全局 Skill 未被升级或重启。
+
+本地 RED/GREEN 与回归日志存于 `out/workflow-priority-fixes-20261102/`，只用于本机证据。清理 RED 在隔离进程加载修复前快照，没有回退共享工作树；原地 reparse 另有真实 Win32 反例及修复后原生拒绝证据，该取证只检查打开；RED apply 只删除完全自有夹具中的文件。所有链接和目标均由测试创建，不触及用户数据。
+
+修复同时维护两处受影响的测试：安装验收改为核对实际安装的绑定规则字节，避免依赖旧文案；目录链接夹具改为 junction，避免把缺少 symlink 权限误当作生产拒绝测试通过。
+
+### 修复验收
+
+- 主回归执行 12 个相关模块、132 项测试：130 通过，2 处测试预期失败；修正后定向复跑 24 项全部通过。没有宣称整组重新运行通过。清理的原地 reparse 测试另外直接验证了原生相对打开拒绝外部文件。
+- 主回归范围为 installer apply / submodule / Wiki profile，Wiki inspect / host，以及 V3 dispatch / post-Grill / runner / locking / security kernel、工作产物与清理；定向复跑命令如下。
+- `skill sync` 返回 synchronized，`skill check` 返回 verified，均为原 `e7e4a2b8cf27…` revision；本次没有改动被收集的规则、模块或随包资源，不产生新规则版本。已有 10 份 dirty 文件的字节 hash 均保持，另有 Viewer submodule 原有 dirty 状态保留。
+- 紧凑性复核：Skill 入口 **1,405 → 1,405 字符，增量 0**。既有按需路由、触发与复用规则未变，没有新增全局加载或重复 Skill 引用；静态字符统计不作为 token / 触发率实测。
+- 最终 README 在 `out/workflow-priority-fixes-20261102/visual-evidence.json` 绑定新 hash；1000 / 390 宽度均无整页横向溢出，11 个代码块原文一致、3 张表格受控滚动。已复用未改配图证据，并检查新截图。GitHub 字体 / 最终页面仍未核实，V3 与总分继续 null，不另起评分轮。
+
+```powershell
+.venv/Scripts/python.exe -m unittest tests.installer.test_apply.InstallApplyTests.test_verify_rejects_empty_and_damaged_install_manifests tests.installer.test_apply.InstallApplyTests.test_real_knowledge_runtime_installs_progress_and_integrated_review_policy tests.unit.v3.test_provider_runner tests.unit.test_work_artifact_reconcile -v
+```
+
+句柄相对打开的实现依据 [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)与 [OBJECT_ATTRIBUTES](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes) 的 RootDirectory / no-reparse 契约；实际拒绝行为另有本机 Win32 测试，未外推到其他平台。
 
 ## 基线、范围与证据
 
@@ -11,11 +45,11 @@
 - 官方已安装桥接实际执行 CodeGraph query，返回 `provider-operation-failed:codegraph-rebuild-required-preserving-existing-index`。原索引保留；没有初始化或重建。后续结论来自直接源码与手工调用追踪，图证据保持未核实。
 - 一个独立 Reviewer 在相同材料上检查四个轴并补查相邻分支；未运行测试、provider 或修改文件。主 Agent 查询了真实 CLI 帮助，并在完全自有的临时目录中观察 junction 枚举行为；未执行清理删除或真实安装。
 
-## 已确认问题
+## 修复前的原始发现
 
 ### P1：旧代次清理未阻止目录 junction 越界
 
-定位：[work_artifacts.py:714–741](../../src/selfworkflow/work_artifacts.py#L714)。
+定位：[work_artifacts.py:714–741](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/work_artifacts.py#L714)。
 
 有合法 Manifest 且 `contentGeneration >= 3` 时，旧 generation 会进入 `reconcile` 的清理范围。枚举只检查子目录 `is_dir()` 和叶子 `is_symlink()`；apply 同样只复核叶子和内容 hash，未执行完整祖先目录的 reparse 检查。
 
@@ -25,7 +59,7 @@
 
 ### P2：Review 严重级别别名绕过本地阻塞判断
 
-定位：[严重级别标准化](../../src/selfworkflow/work_artifacts.py#L446)、[阻塞判断](../../src/selfworkflow/work_artifacts.py#L479)。
+定位：[严重级别标准化](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/work_artifacts.py#L446)、[阻塞判断](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/work_artifacts.py#L479)。
 
 输入校验接受 `blocker/high/medium` 并标准化为 Critical / Important，但 transition 保存、判断的是原始 findings。`_review_has_blocking` 只识别 `critical/important`，因此这些合法别名的 open finding 可被误认为无阻塞，并继续到 `local-final`。
 
@@ -33,7 +67,7 @@
 
 ### P2：普通契约 Review 输入被强制绑定 Grill 完成凭据
 
-定位：[review_inputs.py:86–143](../../src/selfworkflow/v3/review_inputs.py#L86)、[review_dispatch.py:352](../../src/selfworkflow/v3/review_dispatch.py#L352)。
+定位：[review_inputs.py:86–143](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/v3/review_inputs.py#L86)、[review_dispatch.py:352](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/v3/review_dispatch.py#L352)。
 
 普通契约代码 / 计划 Review 要求封闭的 `VerifiedReviewInput`，唯一公开发行入口却强制读取、验证 Grill completion attestation。未显式选择 Grill 的 Host 无法诚实构造普通 Review 输入，只能额外 Grill 或停住，与普通 Review 的按需规则不一致。
 
@@ -41,7 +75,7 @@
 
 ### P2：契约 runner 续期后没有交回可释放的最新租约
 
-定位：[runner.py:248](../../src/selfworkflow/v3/runner.py#L248)、[project_lease.py:295–321](../../src/selfworkflow/v3/project_lease.py#L295)。
+定位：[runner.py:248](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/v3/runner.py#L248)、[project_lease.py:295–321](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/v3/project_lease.py#L295)。
 
 `guard.check()` 的 heartbeat 更新持久化 `leaseHash/storeVersion`，只将最新租约保存在 guard 内。runner 不释放或返回这个最新句柄。标准 `acquire → run → finally release(原 lease)` 在执行产生 heartbeat 后失败，后续同项目操作可能被遗留租约阻塞。
 
@@ -49,7 +83,7 @@
 
 ### P2：损坏或空安装清单被报告为验证通过
 
-定位：[installer.py:1117–1136](../../src/selfworkflow/installer.py#L1117)。
+定位：[installer.py:1117–1136](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/installer.py#L1117)。
 
 `verify_install` 对 JSON 解析后的对象不做必需字段、身份和结构校验，使用 `manifest.get('operations', [])`。`{}`、缺 operations 或空表可跳过逐文件核验，返回 `status=verified`，CLI 随之退出 0。
 
@@ -57,29 +91,25 @@
 
 ### P2：Python 版本声明与 Wiki API 使用不一致
 
-定位：[pyproject.toml:10](../../pyproject.toml#L10)、[wiki_module.py:26](../../src/selfworkflow/wiki_module.py#L26)。
+定位：[pyproject.toml:10](../../pyproject.toml#L10)、[wiki_module.py:26](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/wiki_module.py#L26)。
 
 包声明支持 `Python >= 3.11`，安装器也保留 3.11 下限；Wiki 路径却无保护调用 `Path.is_junction()`。该 API [在 Python 3.12 加入](https://docs.python.org/3.12/library/pathlib.html#pathlib.Path.is_junction)，因此 3.11 的 Wiki inspect / register / doctor 会遇到 `AttributeError`。
 
-建议：提供兼容的 reparse 检测，或统一包声明、安装器与文档的最低版本。本次没有切换全局 Python 或执行 3.11 环境测试；README 对当前可选 Wiki 路径明确要求 3.12 以上。
+建议：提供兼容的 reparse 检测，或统一包声明、安装器与文档的最低版本。本次没有切换全局 Python 或执行 3.11 环境测试；最初 README 曾为该缺口要求 3.12 以上，现已移除该绕行。
 
 ### P2：干净 clone 的固定依赖准备清单不闭合
 
-定位：[submodule_profiles.py:17–20](../../src/selfworkflow/v3/submodule_profiles.py#L17)、[adapters.py:130](../../src/selfworkflow/adapters.py#L130)、[固定资源复制](../../src/selfworkflow/adapters.py#L482)。
+定位：[submodule_profiles.py:17–20](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/v3/submodule_profiles.py#L17)、[adapters.py:130](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/adapters.py#L130)、[固定资源复制](https://github.com/InCloudsBelly/SelfWorkFlow/blob/da26e5653dad91def347bd44c30a834ca747fe14/src/selfworkflow/adapters.py#L482)。
 
 普通依赖 profile 仅初始化 TEA、Matt、Ponytail、Anthropic、UI、Composio 和 Obsidian 来源，未列入 `scientific-agent-skills`。三个 Runtime profile 的构建却都会通过 `_copy_community_sources` 强制读取该来源的固定资源；安装脚本先执行同一准备清单，再进入 build。因此干净 clone 缺少数学来源时会构建失败，本机已有 submodule 会掩盖问题。
 
-建议：将数学来源加入完整的固定依赖准备闭包，并检查三个 Runtime profile 与文档生成路径。本轮只改 README，提供 `git submodule update --init -- dependencies/upstream/scientific-agent-skills` 的固定版本绕行及首次维护准备步骤。本结论由调用链和来源锁确认，未运行联网安装或修改生产代码。
+建议：将数学来源加入完整的固定依赖准备闭包，并检查三个 Runtime profile 与文档生成路径。最初文档提供了手工初始化的绕行，修复清单后已撤去。本结论由调用链和来源锁确认，未运行联网安装或修改生产代码。
 
-### P2：原生 helper 与 TS 桥接协议不兼容
+### 已撤销：原生 helper 与 TS 桥接协议不兼容
 
-定位：[TS 启动与解析](../../extensions/knowledge/selfopenwiki/self-openwiki/mcp-server/src/win32-helper.ts#L264)、[原生参数与协议](../../extensions/knowledge/selfopenwiki/self-openwiki/win32-helper/Program.cs#L33)。
+初次审查把两个同名 exe 的来源混为同一条链。实际 [MCP package 构建脚本](../../extensions/knowledge/selfopenwiki/self-openwiki/mcp-server/package.json)将 [compat 工程](../../extensions/knowledge/selfopenwiki/self-openwiki/win32-helper-compat/Program.cs)发布到 `win32-helper/dist`；setup 与 capability 验证均调用此脚本，bootstrap 读取该产物。compat 已实现空参数启动与 TS 所用的三种 JSON operation。
 
-TS 桥接以空参数启动同一路径的 exe，发送按行 JSON 的 `operation=inspect-path/inspect-copy/secure-path`，并期待含 `ok/version` 等字段的响应。构建脚本实际从该 C# 工程产出 exe；其入口要求 `--root`，使用四字节长度帧和 `op=handshake/read/write/...` 协议。缺少参数时先退出，即使仅补参数，两端的帧格式、操作与响应字段仍不一致。
-
-可达条件是相关能力已验证后进入完整 bootstrap，调用 `securePrivatePath` 时无法完成。全未验证时的 `MinimalStatusRuntime`、Viewer 和普通 Skill 不走该完整初始化，不应外推为它们均不可用。该不兼容在已提交的 source 中已经存在，不能归因于开始时的 dirty 草稿。
-
-建议：统一可执行协议及其契约，联测安全路径、来源检查和稳定复制能力，不只补启动参数。本次未构建、运行 helper，也未覆盖现有二进制；README 在完整 MCP 接入步骤之前披露该阻塞。
+另一个 [bootstrap 构建脚本](../../extensions/knowledge/selfopenwiki/scripts/build-win32-helper.mjs)产出的是 `bootstrap/win-x64` 中的 framed helper。两套源码在原基线都已跟踪，协议差异不构成所报 MCP 启动缺陷。本项为审查误报，已撤销并移除 README 中的错误阻塞说明；未因此修改生产协议。
 
 ## 覆盖与未确认项
 
@@ -111,9 +141,9 @@ Win32 helper 的路径段拒绝、逐级 reparse 检查、句柄和卷 / 文件�
 | Deep 维护示例链 | 6,338 | 入口、Deep、维护方法、操作质量、Review |
 | Deep 跨文件代码审查示例链 | 7,227 | 入口、Deep、代码方法、图谱读取、Review |
 
-这些是命中条件后的示例，不要求每个任务加载所有文件。普通问答 / 精确配置查询不加载维护或知识评分链；Wiki 读取不默认加载 Writer、源码探索或评分；工作流文本变更才走维护紧凑性审查。普通 Skill 的 TEA / Grill 明确按需，契约 Review 的 Grill 耦合例外已列为缺陷。
+这些是命中条件后的示例，不要求每个任务加载所有文件。普通问答 / 精确配置查询不加载维护或知识评分链；Wiki 读取不默认加载 Writer、源码探索或评分；工作流文本变更才走维护紧凑性审查。普通 Skill 的 TEA / Grill 明确按需，契约 Review 的 Grill 耦合缺陷已在本轮修复。
 
-本轮只修改 README、配图和本报告，没有修改 Skill 入口、模块路由或专业方法。README 从 41,031 字符重组为约一万字符；这是说明文档整理，不代表 token 或触发率实测。当前已有随包 Skill 的 `skill check` 实际返回 `verified`，revision 与任务绑定一致；没有为 README 重发其他对话的规则草稿。
+最初文档更新只修改 README、配图和本报告；本轮另修复 Runtime owner，没有修改 Skill 入口、模块路由或专业方法。README 从 41,031 字符重组为约一万字符；这是说明文档整理，不代表 token 或触发率实测。当前已有随包 Skill 的 `skill check` 实际返回 `verified`，revision 与任务绑定一致；没有为 README 重发其他对话的规则草稿。
 
 ## README 内容与呈现评价
 
@@ -130,7 +160,7 @@ Win32 helper 的路径段拒绝、逐级 reparse 检查、句柄和卷 / 文件�
 | V2 图文一致 | 5 | PNG、可编辑 SVG 与 Light / 知识可选条件一致 |
 | V3 呈现 | null / unverified | 本地图文与宽度检查已有证据，GitHub 实际字体及最终呈现未核 |
 | A1 契约 | 5 | 路径、版本身份、计划 hash、状态、产物和前置要求可定位 |
-| A2 边界 | 5 | 普通 / 契约、源码构建 / 宿主注册 / 服务就绪，以及未修问题分开 |
+| A2 边界 | 5 | 普通 / 契约、源码构建 / 宿主注册 / 服务就绪，以及修复 / 部署状态分开 |
 | A3 实施与复现 | 4 | 完成静态搭建 / 失败 / 恢复走查，未进行真实安装、注册或完整 MCP 迁移复现 |
 | A4 语义抽取 | 5 | 标题、条件、命令、占位输入和停止位置明确；代码块保持原文 |
 | E1 来源 | 5 | 以本次代码 / 规则、锁和实际帮助为依据，区分静态、图和运行证据 |
@@ -138,8 +168,8 @@ Win32 helper 的路径段拒绝、逐级 reparse 检查、句柄和卷 / 文件�
 
 维度结果：**H=100，A=94.285714，E=100；V=null，总分=null**。十二项全部适用，已评分 11/12（91.6667%），适用权重 100%、已评分权重 95%；维度分母仍为 30/20/35/15。不将未核的 V3 权重删除或重新归一化，**不报告达到个人 Wiki 的总分 95 门槛**。
 
-主要证据共用六组：安装与更新 / 在途绑定；模式与按需边界；Runtime / Viewer / MCP 三类状态及已知阻塞；固定来源与维护闭包；流程图与无图说明；来源 / 链接 / 实际呈现。修订只复核影响项，复用既有代码审查和未变化的图证据。
+主要证据共用六组：安装与更新 / 在途绑定；模式与按需边界；Runtime / Viewer / MCP 三类状态及部署前提；固定来源与维护闭包；流程图与无图说明；来源 / 链接 / 实际呈现。修订只复核影响项，复用既有代码审查和未变化的图证据。
 
 本地预览采用 bundled marked 与 headless Chromium，检查 1000 / 390 两种宽度：无页面横向溢出，11 个代码块原文保持一致，3 张表格使用受控横向滚动。本地相对链接 / 锚点已逐个检查。图内 8 个文本节点均在边界内，实际字体为 FangSong 与 Times New Roman；PNG 和 SVG 的 hash 与记录绑定。GitHub 目标字体和最终页面仍未核实，本地预览不作为其通过证据。
 
-本轮没有运行完整测试套件、真实安装、原生 helper 或 Wiki 发布；产品行为的发现保持静态审查性质。代码问题未修复，文档关键内容缺口已关闭；呈现未核项如上保留。
+初次审查只提供静态行为结论；本轮修复增加了 RED/GREEN、隔离安装及相关回归。没有执行完整仓库测试、真实宿主安装、原生 helper 构建或 Wiki 发布；实际外部服务与 GitHub 最终呈现仍未核实。

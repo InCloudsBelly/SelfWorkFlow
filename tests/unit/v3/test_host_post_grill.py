@@ -708,6 +708,21 @@ class HostPostGrillGateTests(unittest.TestCase):
                 grill_completion_ref=self.grill_completion["attestationHash"],
             )
 
+    def test_explicit_post_grill_review_still_rejects_missing_completion_reference(self):
+        from selfworkflow.v3.host import HostError
+        for reference in (None, ""):
+            with self.subTest(reference=reference):
+                host = self._host_with_port(self.port)
+                with self.assertRaisesRegex(HostError, "post-grill-review-input-invalid"):
+                    host.dispatch_post_grill_review(
+                        self.ledger, self.summary["summaryHash"],
+                        implementation_agent_identity="implementation-agent",
+                        implementation_context_identity="implementation-context",
+                        independent_context_available=True,
+                        now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
+                        grill_completion_ref=reference,
+                    )
+
     def test_review_policy_hash_is_loaded_from_authoritative_policy(self):
         from selfworkflow.v3.host import HostError
 

@@ -32,7 +32,7 @@ def _summary():
     return value
 
 
-def _verified(summary=None, *, plan_hash=PLAN_HASH):
+def _verified(summary=None, *, plan_hash=PLAN_HASH, with_grill=True):
     from selfworkflow.v3.review_inputs import verify_review_inputs
 
     value = _summary() if summary is None else summary
@@ -65,8 +65,9 @@ def _verified(summary=None, *, plan_hash=PLAN_HASH):
     return verify_review_inputs(
         value,
         summary_attestation_resolver=lambda ref: provenance if ref == value["summaryHash"] else None,
-        grill_completion_ref=completion["attestationHash"],
-        grill_completion_resolver=lambda ref: completion if ref == completion["attestationHash"] else None,
+        **({"grill_completion_ref": completion["attestationHash"],
+            "grill_completion_resolver": lambda ref: completion if ref == completion["attestationHash"] else None}
+           if with_grill else {}),
         reviewer_policy_hash=value["reviewerPolicyHash"], plan_hash=plan_hash,
         attempt_ref="attempt-designed",
         now=datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc),
@@ -245,6 +246,19 @@ class _DroppingReviewBoundaryPort(_SpyPort):
 
 
 class ReviewDispatchTests(unittest.TestCase):
+    def test_ordinary_plan_and_code_review_need_no_grill_completion(self):
+        from selfworkflow.v3.review_dispatch import dispatch_code_review, dispatch_independent_review
+
+        for dispatch in (dispatch_independent_review, dispatch_code_review):
+            with self.subTest(dispatch=dispatch.__name__):
+                port = _SpyPort()
+                dispatch(
+                    _verified(with_grill=False), implementation_agent_identity="implementation-agent",
+                    implementation_context_identity="implementation-context", port=port,
+                    plan_hash=PLAN_HASH, attempt_ref="attempt-designed",
+                )
+                self.assertEqual(len(port.calls), 1)
+
     def test_dispatch_returns_bounded_report_and_ephemeral_lifecycle(self):
         from selfworkflow.v3.review_dispatch import dispatch_independent_review
 
