@@ -6,6 +6,8 @@ export const SETUP_PNPM_VERSION = "10.33.2";
 
 const HELP_TEXT = `SelfOpenWiki setup (Windows)
 
+Requires Node.js 22.22.0 or newer.
+
 Usage:
   Setup.bat
   Setup.bat --with-mcp
@@ -179,13 +181,20 @@ const productionDependencies = Object.freeze({
   writeStderr: (text) => process.stderr.write(text),
 });
 
+export function isSupportedNodeVersion(nodeVersion) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(nodeVersion);
+  if (match === null) return false;
+  const [major, minor, patch] = match.slice(1).map(Number);
+  return [major, minor, patch].every(Number.isSafeInteger)
+    && (major > 22 || (major === 22 && minor >= 22));
+}
+
 function requireSupportedHost({ platform, nodeVersion }) {
   if (platform !== "win32") {
     throw new SetupError("Windows is required to run Setup.bat.");
   }
-  const major = Number.parseInt(nodeVersion.split(".", 1)[0] ?? "", 10);
-  if (!Number.isInteger(major) || major < 22) {
-    throw new SetupError("Node.js 22 or newer is required.");
+  if (!isSupportedNodeVersion(nodeVersion)) {
+    throw new SetupError("Node.js 22.22.0 or newer is required.");
   }
 }
 

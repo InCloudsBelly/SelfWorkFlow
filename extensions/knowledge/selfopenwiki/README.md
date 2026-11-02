@@ -107,8 +107,8 @@ writable navigation entry is rejected before candidate creation and can be
 corrected in the same run. Accepted queues remain immutable, and final link,
 Claims, review, and CAS checks still apply.
 
-The official Submodule is pinned to OpenWiki `0.7.1` at commit
-`d1c7fc75a6a906da258cd94dbcb1602f98516480`. The active materialization
+The official Submodule is pinned to OpenWiki `0.7.2` at commit
+`d3b953e6ed14fcc90e2cc4eec2396bce7970f69b`. The active materialization
 manifest is v2 with `patches: []`; personal behavior is maintained in the
 SelfOpenWiki adapter and Skill rather than patched into `upstream/openwiki`.
 

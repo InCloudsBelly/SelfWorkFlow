@@ -163,7 +163,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
         for skill_id, item in selected.items():
             skill = source / item["path"] / "SKILL.md"
             self.assertTrue(skill.is_file(), skill_id)
-            digest = "sha256:" + hashlib.sha256(skill.read_bytes()).hexdigest()
+            digest = "sha256:" + hashlib.sha256(skill.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
             self.assertEqual(digest, item["hash"], skill_id)
 
     def test_runtime_contains_only_curated_matt_skills(self):

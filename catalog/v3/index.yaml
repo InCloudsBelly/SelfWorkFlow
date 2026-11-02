@@ -24,7 +24,7 @@ modules:
     hash: sha256:bf975932fc77574fd494ffb10b31c52307c27ab7615187b288aa90ef462c35b9
   - id: implement-spec
     ref: modules/implement-spec.yaml
-    hash: sha256:c895de9cc82014c59833f883a256a49f48ab15ecefa9eda9da63d26160fbea3e
+    hash: sha256:71d0056aabfd26a4cd65aaf3fd22cd6dada6e52aed9bb1fdb999e4f3137aee92
   - id: cpp-core
     ref: modules/cpp-core.yaml
     hash: sha256:01f5e8825e404d639633b57315bc3adc972644385891e3cfa4f20c4185145025
@@ -57,13 +57,13 @@ modules:
     hash: sha256:19071b0275c1454f9a07ce5fd50f179d7310fe782145d6b7f9dd637fbeccac2c
   - id: ponytail-coding
     ref: modules/ponytail-coding.yaml
-    hash: sha256:5290dd620bf7a3eb87605bddcb4a6ea4a1d559027098688c3e5bbf735cce0d9e
+    hash: sha256:5e83bed5c2346fcca464a60bd68584f23c0dc355712de71e03939e44ab978d4e
   - id: ponytail-review
     ref: modules/ponytail-review.yaml
     hash: sha256:87bdd842cd96d367a09f11f7e3663ea1de02d9da8e2fbab491797827d22599e3
   - id: ponytail-audit
     ref: modules/ponytail-audit.yaml
-    hash: sha256:00bf10a97127dfb2681721289b7f088631f0bd65d4a9ca8c569f373f5ffeb1ed
+    hash: sha256:dbc70fe282fad1e364fc970ea8a6495a1a84117aa07c212c7c88028da867d85c
   - id: ponytail-help
     ref: modules/ponytail-help.yaml
     hash: sha256:e798a2bdb469d56f8cc52d66597bb2f4142f47f19a38ec69d2fdca1f9d8d3bbf

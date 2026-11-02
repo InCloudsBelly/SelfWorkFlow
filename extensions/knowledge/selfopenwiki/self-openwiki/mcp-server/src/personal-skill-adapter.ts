@@ -25,7 +25,7 @@ const REGISTERED_PERSONAL_SKILLS = new Set([
   "personal-wiki",
 ]);
 export const PINNED_PERSONAL_OPENWIKI_UPSTREAM_COMMIT =
-  "d1c7fc75a6a906da258cd94dbcb1602f98516480";
+  "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b";
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const compatibilityHashSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
 const toolBindingSchema = z.strictObject({

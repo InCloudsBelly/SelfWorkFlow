@@ -28,7 +28,7 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const FROZEN_UPSTREAM_COMMIT =
-  "d1c7fc75a6a906da258cd94dbcb1602f98516480";
+  "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b";
 export const OFFICIAL_UPSTREAM_URL =
   "https://github.com/langchain-ai/openwiki.git";
 export const MANIFEST_DOMAIN = "selfopenwiki:openwiki-patch-manifest:v2";

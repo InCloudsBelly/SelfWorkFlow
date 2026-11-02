@@ -171,7 +171,7 @@ describe("personal Wiki authoritative Claims", () => {
         rootResolver: {} as never,
         skillAdapter: {} as never,
         claimsResolver: new FilePersonalClaimsResolver(),
-        upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+        upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
         c7: { start: vi.fn(), submitReview },
         runStore: {
           begin: vi.fn(),

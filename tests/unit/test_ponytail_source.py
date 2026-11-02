@@ -21,6 +21,30 @@ from selfworkflow.ponytail_source import (
 class PonytailSourceTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
 
+    def test_source_and_runtime_entries_are_independent_of_checkout_endings(self):
+        lock = load_ponytail_lock(self.ROOT)
+        entries = {self.ROOT / lock["path"] / item["path"] / "SKILL.md" for item in lock["selectedSkills"]}
+        read = Path.read_bytes
+        for crlf in (False, True):
+            def checkout(path):
+                data = read(path)
+                if path in entries:
+                    data = data.replace(b"\r\n", b"\n")
+                    return data.replace(b"\n", b"\r\n") if crlf else data
+                return data
+            with self.subTest(crlf=crlf), mock.patch.object(Path, "read_bytes", checkout), tempfile.TemporaryDirectory() as temporary:
+                copy_ponytail_skills(self.ROOT, temporary)
+                for item in lock["selectedSkills"]:
+                    data = read(Path(temporary) / "skills" / item["id"] / "SKILL.md")
+                    self.assertFalse(b"\r\n" in data, item["id"] + ": noncanonical newlines")
+                    self.assertEqual("sha256:" + hashlib.sha256(data).hexdigest(), item["runtimeHash"])
+        target = sorted(entries)[0]
+        def changed(path):
+            data = read(path)
+            return data + b"\ncontent drift\n" if path == target else data
+        with mock.patch.object(Path, "read_bytes", changed), self.assertRaisesRegex(PonytailSourceError, "ponytail-source-drift"):
+            verify_ponytail_source(self.ROOT)
+
     def test_pinned_upstream_and_selected_skills_are_verified(self):
         report = verify_ponytail_source(self.ROOT)
 
@@ -67,7 +91,7 @@ class PonytailSourceTests(unittest.TestCase):
             self.assertFalse((Path(temporary) / "skills/ponytail-gain").exists())
         selected = load_ponytail_lock(self.ROOT)["selectedSkills"]
         debt = next(item for item in selected if item["id"] == "ponytail-debt")
-        self.assertEqual(debt["hash"], "sha256:" + hashlib.sha256(source).hexdigest())
+        self.assertEqual(debt["hash"], "sha256:" + hashlib.sha256(source.replace(b"\r\n", b"\n")).hexdigest())
         self.assertEqual(debt["runtimeHash"], "sha256:" + hashlib.sha256(adapted).hexdigest())
 
     def test_debt_adaptation_fails_closed_when_boundary_changes(self):

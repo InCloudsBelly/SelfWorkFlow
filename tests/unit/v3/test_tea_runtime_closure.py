@@ -30,7 +30,7 @@ class TeaRuntimeClosureTests(unittest.TestCase):
         references = skill / "references"
         references.mkdir(exist_ok=True)
         upstream = ROOT / "dependencies/upstream/tea/skills"
-        shutil.copytree(upstream / "bmad-testarch-test-design", references / "bmad-testarch-test-design")
+        shutil.copytree(upstream / "bmad-tea-test-design", references / "bmad-testarch-test-design")
         shutil.copytree(upstream / "bmod-tea/knowledge", references / "bmod-tea/knowledge")
         self.knowledge = self.runtime / "skills/tea-quality/references/bmod-tea/knowledge"
 
@@ -115,7 +115,12 @@ class TeaRuntimeClosureTests(unittest.TestCase):
             with self.subTest(workflow=workflow):
                 reference = self.runtime / "skills/tea-quality/references" / f"bmad-testarch-{workflow}"
                 if not reference.exists():
-                    shutil.copytree(ROOT / "dependencies/upstream/tea/skills" / reference.name, reference)
+                    upstream = ROOT / "dependencies/upstream/tea/skills"
+                    if workflow == "atdd":
+                        shutil.copytree(upstream / "bmad-tea-automate/red", reference / "red")
+                        shutil.copyfile(ROOT / "skills/tea-quality/references/atdd-entry.md", reference / "SKILL.md")
+                    else:
+                        shutil.copytree(upstream / f"bmad-tea-{workflow}", reference)
                 fragment = self.knowledge / name
                 original_fragment = fragment.read_bytes()
                 index.write_bytes(b"\n".join(line for line in original_index.splitlines() if name.encode() not in line))

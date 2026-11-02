@@ -2,8 +2,8 @@ schemaVersion: 1
 sourceId: ui-ux-pro-max
 canonicalUrl: https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git
 path: dependencies/upstream/ui-ux-pro-max
-gitlinkCommit: 7246805992a42b7bba37d4cac83b01416f0c6c44
-gitTree: 314cf196f07ca25114aef7582210db79282fe54e
+gitlinkCommit: 3a13158ff1f32156cbe144108de48eda2ecaed9a
+gitTree: 6a65685cc09448108c8519efd19992c3db92deed
 resources:
 - LICENSE
 - src/ui-ux-pro-max/data
@@ -20,7 +20,7 @@ license:
 files:
   LICENSE: sha256:738f69dfa83db5c347c678fb9d90e560877059f0de93a327c39001bff92dc014
   src/ui-ux-pro-max/data/app-interface.csv: sha256:331e7cf2c0b222d80c566c5f255c63cb339f65bfd02e471a720f28e4864a9f08
-  src/ui-ux-pro-max/data/catalog-summary.json: sha256:6638da97231c07fb5cef3cd9d3ce483ca7b2f9748980f8c27490eb03968d8894
+  src/ui-ux-pro-max/data/catalog-summary.json: sha256:4ca9ee8697984ed678a69a3bfbb788fb7f826d564f22cae5d094df8879517217
   src/ui-ux-pro-max/data/charts.csv: sha256:4115cf1120680f2cedef0676cb648f30c7ef4699e2a947535d4113e71ed3b12a
   src/ui-ux-pro-max/data/colors.csv: sha256:8162429222bce22df62b564085946a30d07cc9722c58d0a3a494bd0d1d00841c
   src/ui-ux-pro-max/data/data-provenance.json: sha256:e82fb33ed49375a300e93d9c11ccd1c1493c999e84ee7ee295e527634786e2e0
@@ -41,7 +41,7 @@ files:
   src/ui-ux-pro-max/data/stacks/jetpack-compose.csv: sha256:699de218b286948eaec7d15767b6e1350ee299167e49bf476d82e3ff58724e0a
   src/ui-ux-pro-max/data/stacks/laravel.csv: sha256:854ea4daa5fc61292d22235ad33b49ba3fe22423c3de8d3cb03758ffed3b59f9
   src/ui-ux-pro-max/data/stacks/nextjs.csv: sha256:ecd2c27b2ea0127d203ae726060efcdd7335b5e83f96b99e4f3befbbfeebd5a4
-  src/ui-ux-pro-max/data/stacks/nuxt-ui.csv: sha256:fce682a338cfcdbf35d318d20e5befbe7b5d81b05abc37f87677a6d9cde84dc6
+  src/ui-ux-pro-max/data/stacks/nuxt-ui.csv: sha256:9c0179d559abe39ad63b958b54cb29c82be1dd20706430476096ea8967bfa328
   src/ui-ux-pro-max/data/stacks/nuxtjs.csv: sha256:3d9b54ed2d151bd9c86e9e5609b8a6f88a00c4c52fa601a30af96c49b2c4d176
   src/ui-ux-pro-max/data/stacks/react-native.csv: sha256:ba31dd9c0c04da6bc02a74448bf121f9c0728ae5ba3b4d47b487778b0a1135b5
   src/ui-ux-pro-max/data/stacks/react.csv: sha256:4dd176a9787e5c6306b5df94158d75955adcdc6edab41ce5286641a5842303c1
@@ -58,8 +58,8 @@ files:
   src/ui-ux-pro-max/data/typography.csv: sha256:321fc446e89024488ebae96dda93efc4d2307bd8bddb240857ad51364f6782c8
   src/ui-ux-pro-max/data/ui-reasoning.csv: sha256:f0774dd741cecdad5eec842034bd6d5e9ea50e9f220a1910069748daa0bb8e9a
   src/ui-ux-pro-max/data/ux-guidelines.csv: sha256:ff81ec613f70ba9fc3fcce52dbe4ae35d44b2079dbe6dc066d2d6e38c28facd5
-  src/ui-ux-pro-max/scripts/core.py: sha256:c3be4b23e7150e6b45095213158cfa3c8ad96502f01dde3f6ffff9de64a4f481
+  src/ui-ux-pro-max/scripts/core.py: sha256:7a4a109c200ab363c0e0fd9a5545f03dc665d5e15e4ab28fef893d5663cd30b4
   src/ui-ux-pro-max/scripts/design_system.py: sha256:e7d1c94c4b2eada17c5551157668362659ccf9626d34dbd58e68142410f90103
   src/ui-ux-pro-max/scripts/reasoning_contract.py: sha256:b8bac1af82aa280d3e06f00aabaeac4337e632996b07fed874e2b6ee6e9c5913
-  src/ui-ux-pro-max/scripts/search.py: sha256:d54e648fe0ec2932cac66684220cc17be4bd4b4eba1d23d3195d509d398db374
-  src/ui-ux-pro-max/templates/base/skill-content.md: sha256:4956ab03fcf850fbd05ea658cb694cea767ff8e42aaf59ccf59fef0172271394
+  src/ui-ux-pro-max/scripts/search.py: sha256:d6aeb52ed42b158cb0c1bb47c9ef931f3bb4daf413bcf2390320b13f887e69fd
+  src/ui-ux-pro-max/templates/base/skill-content.md: sha256:ab0de4caa32198a5945308a17c7afa4d8f38aa403c8cad14f7d723e947ac2c2f

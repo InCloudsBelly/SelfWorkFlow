@@ -333,11 +333,12 @@ def load_jit_artifact(
     candidate = candidates.get(workflow_id)
     if candidate is None or candidate["support"]["adapterSupport"] != "supported":
         raise TeaAdapterError("tea-jit-workflow-unavailable")
-    if workflow_id in {"framework", "ci"}:
+    if workflow_id in {"framework", "ci"} or (workflow_id == "atdd" and kind == "skill"):
         # These are local assessment adapters, never upstream scaffold entry points.
         if kind != "skill" or relative_path != "SKILL.md":
             raise TeaAdapterError("tea-jit-path-invalid")
-        target = root / "skills/tea-quality/assessments" / workflow_id / "SKILL.md"
+        target = (root / "skills/tea-quality/references/atdd-entry.md" if workflow_id == "atdd"
+                  else root / "skills/tea-quality/assessments" / workflow_id / "SKILL.md")
         try:
             _assert_no_reparse(target, root)
             if not target.is_file() or target.stat().st_size > _MAX_ARTIFACT_BYTES:
@@ -351,15 +352,21 @@ def load_jit_artifact(
         raise TeaAdapterError("tea-jit-path-invalid")
     try:
         relative = PurePosixPath(relative_path)
-        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        if not relative.parts or relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
             raise ValueError
+        atdd = workflow_id == "atdd"
+        if atdd and kind in {"workflow", "step"} and relative.parts[0] != "red":
+            relative = PurePosixPath("red") / relative
         if kind == "skill" and relative.as_posix() != "SKILL.md":
             raise ValueError
-        if kind == "workflow" and relative.as_posix() != "workflow.yaml":
+        if kind == "workflow" and relative.as_posix() != ("red/workflow.yaml" if atdd else "workflow.yaml"):
             raise ValueError
-        if kind == "step" and (not relative.parts or relative.parts[0] != "steps-c"):
+        if kind == "step" and (relative.parts[:2] != ("red", "steps-c") if atdd else relative.parts[0] != "steps-c"):
             raise ValueError
-        if kind == "resource" and (not relative.parts or relative.parts[0] != "resources"):
+        red_resource = atdd and (relative.parts[:2] == ("red", "resources") or relative.as_posix() in {
+            "red/instructions.md", "red/checklist.md", "red/atdd-checklist-template.md",
+        })
+        if kind == "resource" and relative.parts[0] != "resources" and not red_resource:
             raise ValueError
         workflow_root = (root / _SOURCE / candidate["root"]).resolve(strict=True)
         target = (workflow_root / Path(*relative.parts)).resolve(strict=True)

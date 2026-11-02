@@ -50,8 +50,8 @@ entries:
     source:
       kind: skill
       path: skills/implement-spec/SKILL.md
-      revision: git:a5446a10e1c281c4fee6a75986e3f93f56a7a1a8
-      contentHash: sha256:d961a0a811325510e32491f99a40365f825d7b77e2f108f5e4ec5408c93094c5
+      revision: git:9013e2aac739a313c6b9c28448e4b72cd290baae
+      contentHash: sha256:02cddc79f694cf7db45f781a77bdd5b5493da11311fd2871b90c5b7fd17b9940
     aliases: []
     triggers: []
     exclusions: [implicit selection]
@@ -178,8 +178,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/tea.lock.yaml
-      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
-      contentHash: sha256:5d665482c69f4b6edccfdf1d606a53eee0d69021372ccca608fb58c551b4b997
+      revision: git:9013e2aac739a313c6b9c28448e4b72cd290baae
+      contentHash: sha256:e1386e516be1b6fe2539e239e0f763f4f2b732b4281da4cb75e8972daa8b9e89
     aliases:
       - name: tea-quality
         target: tea-quality-foundation
@@ -209,8 +209,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/matt-pocock-skills.lock.yaml
-      revision: git:fa59a362b7b566acfb4e40c008df1e37a33c0e36
-      contentHash: sha256:6712dc991295968773e26bb0c73385d79f7339ad152d2d9fbe0fc1ce5cdad8fe
+      revision: git:9013e2aac739a313c6b9c28448e4b72cd290baae
+      contentHash: sha256:c1e54da4afcdd04c9d988dca872d0b546a8c5e5f61db5d53519614d3c78ca292
     aliases:
       - name: matt-skills
         target: matt-skills-foundation

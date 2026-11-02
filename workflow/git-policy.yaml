@@ -5,27 +5,27 @@ databaseSuffixes: [.sqlite, .sqlite3, .db-wal, .sqlite-wal]
 sizeBytes: {warning: 1048576, failure: 5242880}
 allowlist:
   - path: dependencies/upstream/anthropic-skills
-    objectHash: dbd4588f9e1033efb41dad4bef2f7947c8993d44
+    objectHash: ca45fc496a3436251f191354091d557da31c15b5
     reason: Pinned official Anthropic skill-creator reference for workflow maintenance
     owner: SelfWorkFlow maintainers
     expires: "2030-12-31"
   - path: dependencies/upstream/matt-pocock-skills
-    objectHash: 49dd158d1076134a641b33efb035946536778336
+    objectHash: 4ae2317ddb22b046e26455e4f9c9b3aaaf62212d
     reason: Pinned Matt Pocock engineering skills foundation used by SelfWorkFlow
     owner: SelfWorkFlow maintainers
     expires: "2030-12-31"
   - path: dependencies/upstream/tea
-    objectHash: 04cf65b03620c07f63e6af8f90023ea56fa0348e
+    objectHash: a2819f62fc1b56486d223895eaa50578b490f2f5
     reason: Pinned official TEA source used by the optional V3 test-quality adapter
     owner: SelfWorkFlow maintainers
     expires: "2030-12-31"
   - path: dependencies/upstream/ponytail
-    objectHash: 2961b52fc1fe6a5a87c7a959a79512e5c2f3ffe5
+    objectHash: 96608e078b2d5ea607c5c3b8b5a54d1c1fba6846
     reason: Pinned official Ponytail source used by the code-task workflow adapter
     owner: SelfWorkFlow maintainers
     expires: "2030-12-31"
   - path: dependencies/upstream/ui-ux-pro-max
-    objectHash: 7246805992a42b7bba37d4cac83b01416f0c6c44
+    objectHash: 3a13158ff1f32156cbe144108de48eda2ecaed9a
     reason: Pinned UI UX Pro Max methods and search resources for interface design
     owner: SelfWorkFlow maintainers
     expires: "2030-12-31"

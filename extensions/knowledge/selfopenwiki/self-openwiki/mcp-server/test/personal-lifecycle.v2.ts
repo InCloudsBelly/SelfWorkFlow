@@ -79,7 +79,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver,
       runStore,
       skillAdapter,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(
@@ -98,13 +98,13 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
         markdownWikiRevision,
         runtimeRoot: `${wikiRoot}.selfopenwiki`,
         skillAggregateHash,
-        upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+        upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
         wikiRevision,
         wikiRoot,
       },
       skillAggregateHash,
       status: "planning",
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
       wikiRevision,
       wikiRoot,
     });
@@ -140,7 +140,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
     );
     const adapter = new PersonalSkillAdapter({
       skillPath,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(adapter.resolve([])).resolves.toEqual({
@@ -205,7 +205,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
           skillIds: ["self-openwiki"],
         })),
       },
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(
@@ -287,7 +287,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver: {} as never,
       runStore,
       skillAdapter: {} as never,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(lifecycle.nextPage({ runId })).resolves.toEqual({
@@ -358,7 +358,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver: {} as never,
       runStore,
       skillAdapter: {} as never,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     const result = await lifecycle.inspectPageClaims({ runId, jobId });
@@ -440,7 +440,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
         rootResolver: {} as never,
         runStore,
         skillAdapter: {} as never,
-        upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+        upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
       });
 
       const submitted = lifecycle.submitPage({
@@ -546,7 +546,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver: {} as never,
       runStore,
       skillAdapter: {} as never,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(lifecycle.finish({ runId })).resolves.toEqual({
@@ -628,7 +628,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver: {} as never,
       runStore,
       skillAdapter: {} as never,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(
@@ -728,7 +728,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver: {} as never,
       runStore,
       skillAdapter: {} as never,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(lifecycle.finish({ reviewReceipt, runId })).resolves.toEqual(
@@ -880,7 +880,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
         rootResolver: {} as never,
         runStore,
         skillAdapter: {} as never,
-        upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+        upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
       }).finish({
         reviewReceipt: {
           bindingHash: candidate.candidateBindingHash,
@@ -1172,7 +1172,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
         rootResolver,
         runStore,
         skillAdapter,
-        upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+        upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
       }).begin({
         mode: "update",
         skills: ["personal-wiki"],
@@ -1292,7 +1292,7 @@ describe("SelfOpenWiki adapted personal lifecycle", () => {
       rootResolver: {} as never,
       runStore,
       skillAdapter: {} as never,
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     });
 
     await expect(lifecycle.finish({ reviewReceipt, runId })).resolves.toEqual(

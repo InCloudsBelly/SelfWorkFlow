@@ -17,11 +17,11 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 const upstreamPath = join(repositoryRoot, "upstream", "openwiki");
 const visualizerPath = join(repositoryRoot, "visualizer", "zxh_wiki_viewer");
-const frozenUpstreamCommit = "d1c7fc75a6a906da258cd94dbcb1602f98516480";
+const frozenUpstreamCommit = "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b";
 const officialUpstreamUrl = "https://github.com/langchain-ai/openwiki.git";
 const personalVisualizerUrl =
   "https://github.com/InCloudsBelly/zxh_wiki_viewer.git";
-const personalVisualizerBranch = "codex/selfopenwiki-local-source";
+const personalVisualizerBranch = "main";
 
 function requirePath(path, description) {
   assert.equal(existsSync(path), true, `missing ${description}: ${path}`);
@@ -225,21 +225,21 @@ test("OpenWiki production and personal visualizer submodules are configured", ()
   const gitFileDirectory = realpathSync.native(
     resolve(dirname(gitFile), gitFileMatch[1]),
   );
+  const parentCommonDirectory = realpathSync.native(
+    resolve(parentRoot, git(["rev-parse", "--git-common-dir"], parentRoot)),
+  );
   const expectedParentGitDirectory = realpathSync.native(
-    join(parentRoot, ".git", "modules", prefix, "upstream", "openwiki"),
+    join(parentCommonDirectory, "modules", prefix, "upstream", "openwiki"),
   );
   assert.equal(
     gitFileDirectory,
-    expectedParentGitDirectory,
-    "submodule gitfile must resolve to parent-owned metadata",
+    realpathSync.native(resolve(upstreamPath, git(["rev-parse", "--git-dir"], upstreamPath))),
+    "submodule gitfile must resolve to its actual metadata",
   );
   assert.equal(
-    realpathSync.native(git(["rev-parse", "--git-dir"], upstreamPath)),
+    realpathSync.native(resolve(upstreamPath, git(["rev-parse", "--git-common-dir"], upstreamPath))),
     expectedParentGitDirectory,
-  );
-  assert.equal(
-    realpathSync.native(git(["rev-parse", "--git-common-dir"], upstreamPath)),
-    expectedParentGitDirectory,
+    "submodule common metadata must remain parent-owned",
   );
   assert.equal(git(["rev-parse", "HEAD"], upstreamPath), frozenUpstreamCommit);
   assert.equal(
@@ -266,9 +266,12 @@ test("OpenWiki production and personal visualizer submodules are configured", ()
     realpathSync.native(
       resolve(dirname(visualizerGitFile), visualizerGitFileMatch[1]),
     ),
-    realpathSync.native(
-      join(parentRoot, ".git", "modules", prefix, "visualizer", "zxh_wiki_viewer"),
-    ),
+    realpathSync.native(resolve(visualizerPath, git(["rev-parse", "--git-dir"], visualizerPath))),
+  );
+  assert.equal(
+    realpathSync.native(resolve(visualizerPath, git(["rev-parse", "--git-common-dir"], visualizerPath))),
+    realpathSync.native(join(parentCommonDirectory, "modules", prefix, "visualizer", "zxh_wiki_viewer")),
+    "visualizer common metadata must remain parent-owned",
   );
   assert.equal(
     git(["remote", "get-url", "origin"], visualizerPath),

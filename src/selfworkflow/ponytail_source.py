@@ -94,7 +94,7 @@ def _hash_bytes(content: bytes) -> str:
 
 def _hash_file(path: Path) -> str:
     try:
-        return _hash_bytes(path.read_bytes())
+        return _hash_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
     except (OSError, UnicodeError):
         raise PonytailSourceError("ponytail-source-invalid") from None
 
@@ -273,8 +273,7 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
     if skill_id == "ponytail-debt":
         old_boundary = (
             "Reads and reports only, changes nothing. To persist it, ask and it writes the\n"
-            "ledger to a file (e.g. `PONYTAIL-DEBT.md`). One-shot. \"stop ponytail-debt\" or\n"
-            "\"normal mode\" to revert."
+            "ledger to a file (e.g. `PONYTAIL-DEBT.md`). One-shot."
         )
         new_boundary = (
             "Reads and reports only, changes nothing. This is an explicit one-shot\n"
@@ -284,13 +283,13 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
             "does not grant it. Do not modify code, markers, host configuration, or\n"
             "mode state. SelfWorkFlow controls scope and authorization."
         )
-        if old_boundary not in text:
+        if text.count(old_boundary) != 1:
             raise PonytailSourceError("ponytail-source-adaptation-invalid")
         return text.replace(old_boundary, new_boundary).encode("utf-8")
     if skill_id == "ponytail-help":
-        marker_start = "## Configure Default Mode\n"
+        marker_start = "## Band (Claude Code)\n"
         marker_end = "## More\n"
-        if marker_start not in text or marker_end not in text:
+        if text.count(marker_start) != 1 or text.count(marker_end) != 1:
             raise PonytailSourceError("ponytail-source-adaptation-invalid")
         start = text.index(marker_start)
         end = text.index(marker_end, start)
@@ -305,7 +304,7 @@ def _adapt_ponytail_skill(content: bytes, skill_id: str) -> bytes:
         text = text[:start] + local_help + text[end:]
         return text.encode("utf-8")
     if skill_id != "ponytail":
-        return content
+        return text.encode("utf-8")
     old_persistence = (
         "## Persistence\n\n"
         "ACTIVE EVERY RESPONSE. No drift back to over-building. Still active if\n"
@@ -377,7 +376,7 @@ def copy_ponytail_skills(
                 output.mkdir(parents=True, exist_ok=True)
             elif path.is_file():
                 output.parent.mkdir(parents=True, exist_ok=True)
-                if path.name == "SKILL.md" and item["id"] in {"ponytail", "ponytail-review", "ponytail-help", "ponytail-debt"}:
+                if path.name == "SKILL.md":
                     output.write_bytes(
                         _adapt_ponytail_skill(path.read_bytes(), item["id"])
                     )

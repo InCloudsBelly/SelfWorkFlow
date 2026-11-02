@@ -124,7 +124,7 @@ Install_SelfWorkFlow.bat -Profile knowledge
 
 按实际需要选择一个 Profile。固定依赖准备已包含数学方法来源，按 Gitlink 初始化，不追随上游分支。任一步失败时停止后续安装，先处理来源、权限或网络问题。安装器会展示计划并按提示确认，保留事务记录和回滚入口；安装核验会检查清单身份、操作表及实际文件。
 
-Node 版本按对应模块和来源锁核验；Wiki setup 要求 Node.js 22 或更高，official CodeGraph 的当前锁还限制 Node 主版本小于 25。
+Node 版本按对应模块和来源锁核验；Wiki setup 要求 Node.js 22.22.0 或更高，official CodeGraph 的当前锁还限制 Node 主版本小于 25。
 
 需要 DSH 指令根时可显式传 `-DshRoot`。已绑定的 DSH 根、文档根或自定义 provider 的迁移与回滚应沿原安装事务执行，不通过覆盖或删除本地状态完成。
 

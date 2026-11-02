@@ -1,0 +1,23 @@
+# 只读参考：routing.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 3
+minimumLevelAfterGrillMe: T2
+rules:
+  - {stage: plan, minimumLevel: T0, workflowIds: [framework], requiresExplicitSelection: true, mode: assessment-only}
+  - {stage: verify, minimumLevel: T0, workflowIds: [ci], requiresExplicitSelection: true, mode: assessment-only}
+  - {stage: release, minimumLevel: T0, workflowIds: [ci], requiresExplicitSelection: true, mode: assessment-only}
+  - {stage: plan, minimumLevel: T2, workflowIds: [test-design]}
+  - {stage: review, minimumLevel: T2, workflowIds: [test-review]}
+  - {stage: implementation, minimumLevel: T2, workflowIds: [atdd], requiresAcceptanceRed: true}
+  - {stage: verify, minimumLevel: T3, workflowIds: [trace, nfr]}
+  - {stage: release, minimumLevel: T3, workflowIds: [trace, nfr]}
+jitKinds:
+  skill: SKILL.md
+  workflow: workflow.yaml
+  step: steps-c
+  resource: resources
+
+````

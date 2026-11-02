@@ -4,7 +4,7 @@ import { existsSync, realpathSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
-import { runSetup } from "./setup.mjs";
+import { isSupportedNodeVersion, runSetup } from "./setup.mjs";
 import { runInstall } from "./install.mjs";
 import { runVisualize } from "./visualize.mjs";
 import { FROZEN_UPSTREAM_COMMIT } from "./materialize-openwiki.mjs";
@@ -20,6 +20,7 @@ Manage_SelfWorkFlow_Wiki.bat register [--confirm-plan-hash <returned-hash>]
 Manage_SelfWorkFlow_Wiki.bat doctor
 
 阅读 Wiki 不依赖旧运行区。setup 构建工具；install 绑定本机已有 Wiki。
+setup 要求 Node.js 22.22.0 或更高。
 inspect 只检查源码区，不代表宿主 MCP 已切换。
 `;
 
@@ -29,7 +30,7 @@ function git(root, args) {
   return execFileSync("git", args, { cwd: root, env, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-export async function inspectModule() {
+export async function inspectModule({ nodeVersion = process.versions.node } = {}) {
   const report = {
     moduleRoot, status: "setup-required", hostRegistration: "unverified",
     paths: {
@@ -39,6 +40,7 @@ export async function inspectModule() {
       mcpEntry: path.join(moduleRoot, "self-openwiki/mcp-server/dist/index.js"),
     },
   };
+  if (!isSupportedNodeVersion(nodeVersion)) return { ...report, reason: "node-version-unsupported" };
   try {
     const sourceRoot = realpathSync(git(moduleRoot, ["rev-parse", "--show-toplevel"]));
     const prefix = path.relative(sourceRoot, moduleRoot).split(path.sep).join("/");

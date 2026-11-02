@@ -132,11 +132,11 @@ _COMMUNITY_SOURCES = {
     ), "MIT", "verified"),
 }
 _TEA_RUNTIME_WORKFLOWS = {
-    "bmad-testarch-test-design": "skills/bmad-testarch-test-design",
-    "bmad-testarch-atdd": "skills/bmad-testarch-atdd",
-    "bmad-testarch-test-review": "skills/bmad-testarch-test-review",
-    "bmad-testarch-trace": "skills/bmad-testarch-trace",
-    "bmad-testarch-nfr": "skills/bmad-testarch-nfr",
+    "bmad-testarch-test-design": "skills/bmad-tea-test-design",
+    "bmad-testarch-atdd": "skills/bmad-tea-automate",
+    "bmad-testarch-test-review": "skills/bmad-tea-test-review",
+    "bmad-testarch-trace": "skills/bmad-tea-trace",
+    "bmad-testarch-nfr": "skills/bmad-tea-nfr",
 }
 
 
@@ -561,13 +561,13 @@ def _copy_community_sources(source: Path, destination: Path) -> None:
 
 
 def _resolve_tea_checklist(upstream: Path, workflow_id: str) -> Path:
-    """Resolve a pinned TEA checklist while accepting the TEA 2.x CI layout."""
+    """Resolve the selected TEA checklist without importing its scaffold flow."""
 
-    checklist = upstream / "skills" / f"bmad-testarch-{workflow_id}" / "checklist.md"
+    checklist = upstream / "skills" / f"bmad-tea-{workflow_id}" / "checklist.md"
     if workflow_id == "ci" and not checklist.is_file():
-        # TEA 2.x keeps the CI checklist beside the framework's CI setup
+        # TEA keeps the CI checklist beside the framework's CI setup
         # materials instead of at the former top-level skill path.
-        checklist = upstream / "skills" / "bmad-testarch-framework" / "ci" / "checklist.md"
+        checklist = upstream / "skills" / "bmad-tea-framework" / "ci" / "checklist.md"
     if not checklist.is_file() or checklist.is_symlink():
         raise AdapterError("tea-source-invalid")
     return checklist
@@ -588,6 +588,16 @@ def _copy_tea_quality(source: Path, destination: Path) -> None:
         workflow = upstream / relative
         if workflow.is_symlink() or not (workflow / "SKILL.md").is_file():
             raise AdapterError("tea-source-invalid")
+        if workflow_id == "bmad-testarch-atdd":
+            reference = target / workflow_id
+            _copy_tree(workflow / "red", reference / "red")
+            _copy_tree(workflow / "resources", reference / "resources")
+            entry = source / "skills/tea-quality/references/atdd-entry.md"
+            if not entry.is_file() or entry.is_symlink():
+                raise AdapterError("tea-source-invalid")
+            shutil.copyfile(entry, reference / "SKILL.md")
+            (destination / "skills/tea-quality/references/atdd-entry.md").unlink(missing_ok=True)
+            continue
         _copy_tree(workflow, target / workflow_id)
     for workflow_id in ("framework", "ci"):
         reference = target / f"bmad-testarch-{workflow_id}"

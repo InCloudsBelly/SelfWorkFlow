@@ -5,7 +5,7 @@
 ## 路径与输入
 
 - `{skill-root}` 是本次选中的 `references/bmad-testarch-<workflow>`。
-- 公共文档模式的 ATDD 以当前 `tea-quality` 目录为基准，先读 `references/bmad-testarch-atdd/METHOD.md`，再将 `{skill-root}` 固定为同版 sibling `references/bmad-testarch-automate`，只选 red 流程。其 canonical `METHOD.md`、路由、run-and-heal 与 red 步骤均由维护者随包发布；本契约继续覆盖上游 activation、hooks、菜单、自动修复和命令执行。缺文档报告 `unverified`，不要求消费者运行 npx 或安装原生 Skill。
+- 公共文档模式先读本版 `references/bmad-testarch-atdd/METHOD.md`，`{skill-root}` 保持该 reference 根，只选其 `red/` 及所需共享资源。缺文档报告 `unverified`，不要求消费者运行 npx 或安装原生 Skill。
 - `{tea-knowledge}` 是当前 `tea-quality` 目录下的 `references/bmod-tea/knowledge`；`knowledgeIndex` 是其 `tea-index.csv`。禁止从项目 `_bmad` 或别的安装版本补文件。
 - `{project-root}` 只供读取用户批准的上下文。所有相对输入路径以此为基准；缺具体文件清单时不能猜测故事、PRD 或整个仓库的范围。
 - 唯一报告输出为调用者指定的 `outputRelative`（项目内安全相对路径）。`output_file_override` 绑定此路径；`test_artifacts` 仅表示其父目录，不授权创建其他文件。
@@ -15,7 +15,9 @@
 
 `headless=true`；`communication_language=中文`；`tea_use_playwright_utils=false`；`tea_use_pactjs_utils=false`；`tea_pact_mcp=none`；`tea_browser_automation=none`。`test_stack_type=auto` 只从已提供的上下文和批准读取的文件判断，无法判断则记录 unknown，不扫描无关范围。
 
-这些值来自本地适配契约，不读取 `_bmad` config、用户覆盖或团队覆盖；不调用 `_bmad/scripts/resolve_config.py`。不启动交互菜单、浏览器/MCP、脚本、测试命令或依赖安装。上游命令只能作为建议写入报告。用户显式选择新的集成需先明确输入和权限，当前默认契约不能假装已启用。
+这些值来自本地适配契约，不读取 `_bmad` config、用户覆盖或团队覆盖；不调用 `_bmad/scripts/resolve_config.py`。同样跳过上游 TOML customization、activation_steps、persistent_facts 与文件通配加载，以及自动 run/heal；只用给定输入。不启动交互菜单、浏览器/MCP、脚本、测试命令或依赖安装。上游命令只能作为建议写入报告。用户显式选择新的集成需先明确输入和权限，当前默认契约不能假装已启用。
+
+TEA 3.x 的 `{workflow-skill-root}` 与 `{skill-root}` 均指选中 reference 根。ATDD 保留 `red/` 子树及共享 resources，仅选 RED；旧 JIT step/workflow 路径在接口边界映射到 `red/`，不改上游正文或进入普通 automate。
 
 ## 按工作流映射
 

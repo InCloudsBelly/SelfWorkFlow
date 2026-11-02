@@ -1092,14 +1092,14 @@ function personalBeginOutcome(runtimeDir: string) {
     runtimeRoot: path.join(runtimeDir, "personal-wiki.selfopenwiki"),
     wikiRevision: hash("a"),
     skillAggregateHash: hash("b"),
-    upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+    upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     binding: {
       wikiRoot: path.join(runtimeDir, "personal-wiki"),
       runtimeRoot: path.join(runtimeDir, "personal-wiki.selfopenwiki"),
       wikiRevision: hash("a"),
       markdownWikiRevision: hash("a"),
       skillAggregateHash: hash("b"),
-      upstreamCommit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      upstreamCommit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
     },
   };
 }

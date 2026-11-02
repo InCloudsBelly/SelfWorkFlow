@@ -810,7 +810,7 @@ function Invoke-SelfWorkflow($Arguments,$OutputPath) {
             self.assertEqual(summary["cleanupPending"], [])
             self.assertEqual(
                 summary["mattSkills"]["commit"],
-                "49dd158d1076134a641b33efb035946536778336",
+                "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d",
             )
             self.assertTrue(
                 (root / "agents/skills/matt-pocock/grill-me/SKILL.md").is_file()

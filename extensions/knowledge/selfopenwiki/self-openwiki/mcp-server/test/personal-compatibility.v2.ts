@@ -311,7 +311,7 @@ describe("personal OpenWiki compatibility binding", () => {
 
     expect(manifest.schemaVersion).toBe(2);
     expect(manifest.upstream).toEqual({
-      commit: "d1c7fc75a6a906da258cd94dbcb1602f98516480",
+      commit: "d3b953e6ed14fcc90e2cc4eec2396bce7970f69b",
       packageVersion: upstreamPackage.version,
       url: "https://github.com/langchain-ai/openwiki.git",
     });

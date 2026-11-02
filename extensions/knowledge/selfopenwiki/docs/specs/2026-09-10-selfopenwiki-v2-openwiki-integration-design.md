@@ -51,7 +51,7 @@ publication, recovery, and explicit user-controlled Git operations.
 ## 3. Evidence and current incompatibilities
 
 - `upstream/openwiki` is currently `v0.5.1` at commit
-  `d1c7fc75a6a906da258cd94dbcb1602f98516480`.
+  `d3b953e6ed14fcc90e2cc4eec2396bce7970f69b`.
 - The current patch manifest and materializer still bind
   `355f4f68e71bd024631cdcff7aa871c3e72435da`.
 - The old patch fails `git apply --check` against the current upstream in

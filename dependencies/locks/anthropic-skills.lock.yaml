@@ -2,8 +2,8 @@ schemaVersion: 1
 sourceId: anthropic-skills
 canonicalUrl: https://github.com/anthropics/skills.git
 path: dependencies/upstream/anthropic-skills
-gitlinkCommit: dbd4588f9e1033efb41dad4bef2f7947c8993d44
-gitTree: 73374b8632b6c29c41ac7641e58bf97743f0aeb9
+gitlinkCommit: ca45fc496a3436251f191354091d557da31c15b5
+gitTree: 3b83fb7a7255ef97c3ce8657bd0a3a4d667bd7be
 license:
   path: skills/skill-creator/LICENSE.txt
   spdx: Apache-2.0

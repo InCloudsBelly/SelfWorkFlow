@@ -123,7 +123,7 @@ test("setup ignores an inherited COMSPEC override", async () => {
   const calls = [];
   const dependencies = {
     platform: "win32",
-    nodeVersion: "22.0.0",
+    nodeVersion: "22.22.0",
     repositoryRoot,
     environment: {
       COMSPEC: "C:\\attacker\\cmd.exe",
@@ -158,4 +158,25 @@ test("production capture rejects oversized child output without retaining it", a
     ),
     /65536-byte capture limit/,
   );
+});
+
+test("setup enforces the upstream Node minimum before starting child processes", async () => {
+  for (const nodeVersion of ["22.0.0", "22.21.99", "21.99.0", "invalid", "22.22"]) {
+    let starts = 0;
+    await assert.rejects(runSetup([], {
+      platform: "win32", nodeVersion, repositoryRoot, environment: process.env,
+      spawnProcess: async () => { starts += 1; return { exitCode: 0 }; },
+      writeStdout: () => {}, writeStderr: () => {},
+    }), /Node\.js 22\.22\.0 or newer is required/, nodeVersion);
+    assert.equal(starts, 0, nodeVersion);
+  }
+  for (const nodeVersion of ["22.22.0", "22.23.0", "23.0.0", "24.19.0"]) {
+    let starts = 0;
+    assert.equal(await runSetup([], {
+      platform: "win32", nodeVersion, repositoryRoot, environment: process.env,
+      spawnProcess: async () => { starts += 1; return { exitCode: 0 }; },
+      writeStdout: () => {}, writeStderr: () => {},
+    }), 0, nodeVersion);
+    assert.ok(starts > 0, nodeVersion);
+  }
 });
