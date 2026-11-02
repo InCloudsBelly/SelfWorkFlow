@@ -79,7 +79,7 @@ neverAutomatic:
    可以在既有授权范围内另建从正确 commit 开始的工作树，否则停在该操作的确认边界。
 2. 根据依赖结果计算 frontier：只有所有前置 ticket 已合入 integration branch 且对应验证通过的 ticket 才 ready。
    只并行派发无未满足依赖且写入边界互不冲突的任务；共享文件任务串行安排。并发数量受真实 Host 能力限制。
-   向实现者传递 spec/ticket 指针、允许路径、base commit 和验收条件；不得扩大写入范围。
+   每个 ticket 使用新实现上下文，不 fork 或复用前一 ticket；只传 spec/ticket 指针、允许路径、base commit 和验收条件，不扩大写入范围。
 3. 每个实现者使用独立 branch/worktree，记录路径与起始 commit，并核实来自指定 integration HEAD。
    加载 runtime 的 Matt `tdd`，先取得目标行为的 RED，再最小 GREEN，并执行 ticket 的失败路径和相关回归验证。
    报告命令、退出码、结果及 diff/commit；缺少真实执行证据即 `unverified`，测试失败不能报完成。

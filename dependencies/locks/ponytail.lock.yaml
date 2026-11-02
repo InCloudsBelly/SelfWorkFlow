@@ -2,31 +2,31 @@ schemaVersion: 1
 sourceId: ponytail
 canonicalUrl: https://github.com/DietrichGebert/ponytail.git
 path: dependencies/upstream/ponytail
-gitlinkCommit: 2961b52fc1fe6a5a87c7a959a79512e5c2f3ffe5
-gitTree: ce7bdb1a8ff7666d8040f34a673598b823fc32ef
-upstreamVersion: 5.2.0
+gitlinkCommit: 96608e078b2d5ea607c5c3b8b5a54d1c1fba6846
+gitTree: 6bdee088de8ae2cfa05468b30291baa6f5faa62c
+upstreamVersion: 5.3.3
 license:
   path: LICENSE
   spdx: MIT
   hash: sha256:fb1bc6909ac3ef82d5c22106e32ef682b0cff66788fa915fb9b53b15c9d2f3ab
 selectedSkills:
-  - id: ponytail
-    path: skills/ponytail
-    hash: sha256:fc12a0b9588a7fa3543d31ddc41541f735a5626105781643873110f2da1bd52a
-    runtimeHash: sha256:6f6923cdb31d13e707936b6a2a985c226918e3f668e2e8ef004829b6819877f0
-  - id: ponytail-review
-    path: skills/ponytail-review
-    hash: sha256:affa0eedca467b58699fafbea28f6f85352aa3e7f23785964bf42f029a291504
-    runtimeHash: sha256:4f9876191aa44510d424d0acddedebec83df2250fb1032782003a53eebcdf98d
-  - id: ponytail-audit
-    path: skills/ponytail-audit
-    hash: sha256:3ab632ce4695de214dafe4db13d6f939e1c4be328bd0754ea751dc28b70be554
-    runtimeHash: sha256:3ab632ce4695de214dafe4db13d6f939e1c4be328bd0754ea751dc28b70be554
-  - id: ponytail-help
-    path: skills/ponytail-help
-    hash: sha256:d677ee12119d1d7531a93162a97a585e2a33d9ca4b5b70d2f62a2fad4cee2f29
-    runtimeHash: sha256:6db4ea2a6d6dcdb00b675fc5eed1ce154dc7b91b0a3aecf5a66317a3a98fdbf6
-  - id: ponytail-debt
-    path: skills/ponytail-debt
-    hash: sha256:4666dfd5fbab7b8b4a6a0d8f5ccae20603fe773443e958d47aa00845d888c0c4
-    runtimeHash: sha256:01ec34f20e78f12913263949c6d3848721cdec031e3c617c11b0018bcca0116c
+- id: ponytail
+  path: skills/ponytail
+  hash: sha256:9badd22a32e19cb884e46dfa8d3aae82bb81dfa5484105b8b4f0262df823a509
+  runtimeHash: sha256:f898487eb6e68ece913a411f65278a9dee5b6a611a8a66566401b38e25ffbd86
+- id: ponytail-review
+  path: skills/ponytail-review
+  hash: sha256:33fe4ebe22a460924e5d4a261e223df22e409cc94ab76182bee9fb91a3ef022e
+  runtimeHash: sha256:4f9876191aa44510d424d0acddedebec83df2250fb1032782003a53eebcdf98d
+- id: ponytail-audit
+  path: skills/ponytail-audit
+  hash: sha256:2b3223a02c386d1263e1b08343cb8eb3a53e444cdafb1d79e26c8ec2a8fcad28
+  runtimeHash: sha256:2b3223a02c386d1263e1b08343cb8eb3a53e444cdafb1d79e26c8ec2a8fcad28
+- id: ponytail-help
+  path: skills/ponytail-help
+  hash: sha256:86ab0ce0af70cbeeeef499d5c884873b393f87f86401dcc45553662ce2c1eff9
+  runtimeHash: sha256:6db4ea2a6d6dcdb00b675fc5eed1ce154dc7b91b0a3aecf5a66317a3a98fdbf6
+- id: ponytail-debt
+  path: skills/ponytail-debt
+  hash: sha256:b5ec2762f6ba8c4af9ea7173aa6c9f91b88655a25e43f9de0264f6ce8722b25f
+  runtimeHash: sha256:01ec34f20e78f12913263949c6d3848721cdec031e3c617c11b0018bcca0116c
