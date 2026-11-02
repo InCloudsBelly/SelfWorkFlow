@@ -1,14 +1,14 @@
 ---
 name: selfworkflow
-description: 按 SelfWorkflow 执行工程任务；选用或设为默认时启用，闲聊和概念讨论不触发。
+description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概念讨论不触发。
 ---
 
 [兼容入口](skills/selfworkflow/references/public/WORKFLOW.md)
 
-规则版本：`0b34e4a4be96`
+规则版本：`79c8aac4fc4e`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](skills/selfworkflow/references/public/releases/0b34e4a4be969142814c35f4d47cb6db6575f7258c9ae1e14668def55a631915/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](skills/selfworkflow/references/public/releases/79c8aac4fc4edf78df73a5fcea6be4190f6220a5a919cf2d07f448b09bba2428/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 

@@ -50,8 +50,8 @@ entries:
     source:
       kind: skill
       path: skills/implement-spec/SKILL.md
-      revision: git:9013e2aac739a313c6b9c28448e4b72cd290baae
-      contentHash: sha256:02cddc79f694cf7db45f781a77bdd5b5493da11311fd2871b90c5b7fd17b9940
+      revision: git:c2c6f29daf855087286608ebeed8f55ed2f4b7a7
+      contentHash: sha256:e86f6109f818f7f0777213a01616153c89c446a3ce5e1857a56b5c840d0a2f33
     aliases: []
     triggers: []
     exclusions: [implicit selection]
@@ -147,8 +147,8 @@ entries:
     source:
       kind: skill
       path: skills/testing-review-quality/SKILL.md
-      revision: git:603405193f4536c7c7a9981ac103a604f46608c2
-      contentHash: sha256:1f7258044392fe92ebee5d50285ffeacc1f7546dbb06c3e1ad01f67013234375
+      revision: git:c2c6f29daf855087286608ebeed8f55ed2f4b7a7
+      contentHash: sha256:c75cf5d7825bcc716b2ad66eca694cc6d41c593ff932be1d736b43331d06e2ff
     aliases:
       - name: testing-review-gate
         target: testing-review-quality

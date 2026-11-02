@@ -24,7 +24,7 @@ modules:
     hash: sha256:bf975932fc77574fd494ffb10b31c52307c27ab7615187b288aa90ef462c35b9
   - id: implement-spec
     ref: modules/implement-spec.yaml
-    hash: sha256:71d0056aabfd26a4cd65aaf3fd22cd6dada6e52aed9bb1fdb999e4f3137aee92
+    hash: sha256:51428456e755f5c8b894bb8f62ea730b463816ed2524de1ff36b6a1e0999afeb
   - id: cpp-core
     ref: modules/cpp-core.yaml
     hash: sha256:01f5e8825e404d639633b57315bc3adc972644385891e3cfa4f20c4185145025
@@ -90,7 +90,7 @@ modules:
     hash: sha256:2545c9d445c807f4b182c85b200fdde868b200ce6cef57e37ab9cee0cd44ed18
   - id: plan-integrated-review
     ref: modules/plan-integrated-review.yaml
-    hash: sha256:a8d605a3db323f27b026272ee531b49e912bd22a2053395514335e19df2547e7
+    hash: sha256:9f6fc5074c5d7c53f984482c0b57562db6cb806a702c327a946fafffd717f241
   - id: implement-matt
     ref: modules/implement-matt.yaml
     hash: sha256:6b8d3d70cd0244a20df6eca610a1772a282b35c37597588bb9de9fb0a3578550
@@ -102,16 +102,16 @@ modules:
     hash: sha256:b592f0ec9235f3d10dce9f9defb4f4d16080694bab402ee0a5f05fffcdb8da0b
   - id: review-self
     ref: modules/review-self.yaml
-    hash: sha256:e17a59ece3a8454b3290309889079f663d97f62b93bdafb59e5622115ea9abdf
+    hash: sha256:28204cd97fd83099eb80fdfad6eb9116b1f018cf2b0e8a6766a3c241fd200672
   - id: review-code-review
     ref: modules/review-code-review.yaml
-    hash: sha256:95c5aec2b8d22ebf52cc60e44a35fe1d0b3ff2ceb70019db56a509c5099e98a7
+    hash: sha256:96e965728719760304c923a8a5cf3bec4846545e84e9744fb2a75c636f62b8bb
   - id: verify-execution
     ref: modules/verify-execution.yaml
-    hash: sha256:77345724b4a6677757d7c4460f01e8613e858c48f714e7e0d5513fc1265aa50e
+    hash: sha256:b2d6c35c77635ac410cbef128f5b9d20fdcb3cb19d99c679c366453e60b683f2
   - id: complete-gate
     ref: modules/complete-gate.yaml
-    hash: sha256:6eb148ea364a42fc40571302d0647a62ac39d02fbead2aa424d32a3c8f278712
+    hash: sha256:7ab4ee721e3f6f0605153c2ab4d991fab047be7ff18b633d662c354358700df7
   - id: tea-test-design
     ref: modules/tea-test-design.yaml
     hash: sha256:e63ba6bd76a4618cba678dec93731ec4a9e98382cbfd0b08636c6614bee8f045
