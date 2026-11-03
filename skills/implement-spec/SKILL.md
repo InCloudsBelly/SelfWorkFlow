@@ -1,17 +1,19 @@
 ---
 name: implement-spec
-description: 显式要求按 spec 与至少两个依赖 tickets 整体实施时使用；普通实现、单票、规划或代码审查不触发。
+description: 仓库实施中，用户明确选用，或主 Agent 判断目标明确、多个独立验收且低写冲突的工作包具有并行/上下文隔离收益时使用。已有领域分工不叠加；小任务、单票、高耦合、仅规划或审查不自动触发，维护/审查技能本身不触发。
 metadata:
-  activation: explicit
+  activation: task-conditional
 ---
 
 # Implement Spec 本地适配
 
 Host 执行的指令 wrapper，不是 scheduler。沿现有 SelfWorkflow 阶段与授权；本规则替代上游默认 reset、额外 merger、PR、关单和清理步骤。仅编排细节确有缺口时参考同版上游：文档模式 `methods/matt-pocock/implement-spec/METHOD.md`；runtime 模式 `skills/matt-pocock/implement-spec/` 下的 `SKILL.md`。来源由 Matt 锁与 hash 绑定，不加载默认 implement 或重开完整 TDD 方法。
 
+普通 agent-policy 的选用由主 Agent 在既有方案中完成，不要求用户再点名技能。既有紧凑计划可承载本地 spec/tickets；复用已有材料，缺票据时将明确需求最小拆成验收、写入边界与依赖，再派发。不为命中门槛制造票据、调用 to-spec/to-tickets、外发 issue 或另开访谈；边界仍不明确或缺少分工收益时留在常规流程。用户明确选用也不能绕过派发门禁。
+
 ## 契约
 
-以下为 Host/Reviewer 的声明，不是自动执行配置；结构化证据校验仅契约 Host 使用。
+以下显式激活契约仅供 contract-managed Host/Reviewer 校验，不是自动执行配置。普通模式按任务选用；契约模式仍须提供显式 module ID 与真实证据，不从任务大小自动生成门禁或伪造回执。
 
 ```yaml
 kind: instruction-wrapper
@@ -60,7 +62,7 @@ neverAutomatic:
 ## 执行
 
 1. 保留现有 checkout/dirty，选择或创建基于批准 commit 的 integration branch；同名或 base 冲突时保留现场，不 reset 校正。
-2. 仅前置已合入且验证通过的票进入 frontier；共享文件串行，互不冲突的 ready 票才可并行。每票用独立 branch/worktree 和新上下文，只传绑定、spec/ticket 指针、integration HEAD、允许路径、验收与证据；不 fork 完整作者历史。
+2. 仅前置已合入且验证通过的票进入 frontier；按实际槽位派发，共享文件串行，互不冲突的 ready 票才可并行。每票用独立 branch/worktree 和新上下文，只传绑定、授权/禁止动作、可达 spec/ticket 指针、integration HEAD、允许路径、验收与证据；指针不可达时只补必要正文，不 fork 完整作者历史。
 3. 沿既有测试方法取得 RED→最小 GREEN、失败路径与最窄回归，报告实际命令/退出状态/diff 或 commit。禁运行或证据缺失记 not-run/unverified，不报完成。仅测试方法无法覆盖时补读同版 Matt TDD。
 4. 主协调者串行集成，不逐票另建 merger。HEAD 前进后先合入最新 integration tip、处理范围内冲突并重验影响项；不 reset/覆盖 dirty。验证失败保留工作树与失败 frontier，阻断依赖票；无影响的有效测试复用。
 5. 全票集成后沿 review 模块由一个独立 Reviewer 核对最终 HEAD；关闭相关 Critical/Important，Minor 有处置。必要修复与复核复用原 Reviewer，只失效变化及首次漏检所影响的覆盖，不每票重做整套 Review。
