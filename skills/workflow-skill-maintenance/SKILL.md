@@ -5,14 +5,12 @@ description: 仅新增、改造或集成 Skill/工作流时使用；纯审查及
 
 # 工作流与 Skill 维护
 
-沿 SelfWorkflow 的范围、授权、阶段和 Review，只改命中的职责/路由/引用，不另起流程。日常规则维护只读本方法及受影响文件，不预载上游创建指南。
-新增实质 Skill 或确需创建/评测方法时，才从本任务绑定根的 `references/anthropic-skills/skill-creator/` 读指南：文档模式 `METHOD.md`，runtime 模式 `SKILL.md`；grader/comparator/analyzer/schemas 按具体评测再读。保持本任务版本，缺失/漂移 unverified，不找旧安装。明确维护源码时可从批准 repositoryRoot 的 `dependencies/locks/anthropic-skills.lock.yaml` 及固定 submodule `skills/skill-creator` 取对应材料，不更新/修改上游。
+沿既有范围/授权/阶段/Review，只改命中职责、路由与引用。日常维护只读本方法及受影响文件。
+新增实质 Skill 或确需创建/评测方法才读绑定根 `references/anthropic-skills/skill-creator/`：文档模式 `METHOD.md`，runtime 模式 `SKILL.md`；评测角色/schemas 再按需读。缺失/漂移记 unverified，不找旧安装。源码维护可从获准 repositoryRoot 的 `dependencies/locks/anthropic-skills.lock.yaml` 与固定 submodule `skills/skill-creator` 取同版材料，不改/更新上游。
 
-1. 复用已有最窄 owner；专业方法不重做 Discover/Grill、Review 调度或相同确认。
-2. 定义意图、输入输出、职责/阶段、必要能力与排除场景；短 description 负责触发，条件细则放 references，保留许可与固定来源。
-3. 少量正例、邻近负例、同名易混淆例覆盖“创建能力”与“使用能力”，含中文；不因改一条触发器自动做成对模型评测或额外 Agent。
-4. 已批准范围内修改，沿现有设计/TDD/Review/验证。宿主支持时保留窄隐式触发，仅用户要求手动点名时关闭 implicit invocation。
-5. 改工作流/Skill 文本必做紧凑性审查：对照源码与最终文本，记录入口及命中加载链改前后字符数，核对按需路由、触发/排除与同版复用；删除冗余、无关/重复/循环加载，必要增量说明用途。不通过先修正，合并本轮自审/同一 Reviewer，不增角色或全包扫描。静态核验不冒称 token/误触发实测，实测须有真实能力与授权。
+1. 复用最窄 owner，不重做 Discover/Grill、Review 调度或确认。定义意图、输入输出、职责/阶段、能力及排除；短 description 管触发，细则按需读，保留许可/固定来源。
+2. 用少量中文正例、邻近负例、同名易混淆例区分创建与使用；改触发器不自动追加模型对评/Agent。宿主支持时保留窄隐式触发，仅用户要求才关闭 implicit invocation。
+3. 沿既有设计/TDD/Review/验证。文本变更必做紧凑性审查：记录入口与命中加载链改前后字符数，核对触发/排除、按需路由、同版复用；消除冗余/无关/重复/循环加载，必要增量说明用途。不通过先修正，并入本轮自审/同一 Reviewer，不增角色或全包扫描；静态字符/路由核验不冒称 token/误触发实测。
 
-厂商CLI/API、Task、评测命令和模型不能假设当前可用；只核对必要能力，安装/发布/消息发送分别核对授权，不重走全部接入。交付固定来源、职责/复用、触发样例、改动与已验证/缺口；不额外生成模板包或扩散维护规则到日常任务。
-触发：优化Skill description、接入新方法；不触发：用现有能力写报告、画图、修复C++、只读审查工作流。
+CLI/API、Task、评测命令/模型须真实可用，只核必要能力；实测、安装、发布、消息各核授权，不重走接入。交付来源、职责/复用、触发样例、改动及证据/缺口，不额外产模板包或把维护规则扩散到日常任务。
+触发：优化 Skill description、接入方法；不触发：用现有能力写报告/画图/修复 C++、只读审查工作流。

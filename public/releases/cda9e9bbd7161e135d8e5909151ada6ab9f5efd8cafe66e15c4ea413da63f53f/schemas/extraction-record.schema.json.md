@@ -1,0 +1,38 @@
+# 只读参考：extraction-record.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "source", "selectedFiles", "generalizedPrinciples", "publicationStatus"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "source": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "selectedFiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "generalizedPrinciples": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}
+    },
+    "publicationStatus": {"enum": ["candidate", "published", "rejected"]}
+  }
+}
+
+````
