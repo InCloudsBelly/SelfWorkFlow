@@ -35,6 +35,17 @@ class NativeSkillReferenceTests(unittest.TestCase):
         cls.runtime = folder / "runtime"
         build_runtime(ROOT, cls.runtime, "native-route-test", profile="core")
 
+    def test_runtime_preserves_task_selected_spec_and_lazy_pr_entries(self):
+        for source, target in (
+            ("skills/implement-spec/SKILL.md", "skills/implement-spec/SKILL.md"),
+            ("workflow/skills/pr/SKILL.md", "skills/matt-pocock/pr/SKILL.md"),
+        ):
+            with self.subTest(entry=target):
+                self.assertEqual(
+                    (ROOT / source).read_text(encoding="utf-8"),
+                    (self.runtime / target).read_text(encoding="utf-8"),
+                )
+
     def test_community_entries_name_both_bound_entry_formats(self):
         for name, relative in COMMUNITY.items():
             with self.subTest(entry=name):

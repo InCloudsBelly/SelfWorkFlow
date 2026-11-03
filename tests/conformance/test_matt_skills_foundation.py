@@ -22,6 +22,8 @@ class MattSkillsFoundationTests(unittest.TestCase):
         "codebase-design",
         "implement",
         "implement-spec",
+        "pr",
+        "retro",
         "tdd",
         "diagnosing-bugs",
         "code-review",
@@ -189,7 +191,7 @@ class MattSkillsFoundationTests(unittest.TestCase):
             text = entry.read_text(encoding="utf-8")
             self.assertFalse("Runs both reviews in parallel sub-agents" in text)
             self.assertFalse("Spawn both sub-agents" in text)
-            self.assertIn("一个独立 Reviewer", text)
+            self.assertIn("../../../workflow/modules/review.md", text)
             self.assertIn("Standards/Spec", text)
             self.assertEqual(entry.read_bytes(), (self.ROOT / "workflow/skills/code-review/SKILL.md").read_bytes())
             # Retain all locked upstream source and licensing checks; only the

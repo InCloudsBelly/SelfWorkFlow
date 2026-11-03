@@ -163,7 +163,10 @@ class DocumentPublicationTests(unittest.TestCase):
             minimal = len(skill)
             self.assertEqual(skill.count("<!-- selfworkflow:core -->"), 1)
             self.assertIn("无需再读公共转发页", skill)
-            self.assertLessEqual(minimal, 1_400)
+            # Include authorization/binding and dependent environment validity.
+            # Still below the previous delivered entry (1,644 characters).
+            # This is a static load guard, not measured token savings.
+            self.assertLessEqual(minimal, 1_600)
             self.assertNotIn("workflow/modes/light.md", workflow)
             self.assertNotIn("](DOCUMENTS.md)", workflow)
             for method in ("workflow-quality", "workflow-skill-maintenance"):

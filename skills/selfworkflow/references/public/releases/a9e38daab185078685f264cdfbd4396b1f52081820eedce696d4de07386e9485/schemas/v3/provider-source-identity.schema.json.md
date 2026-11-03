@@ -1,0 +1,58 @@
+# 只读参考：provider-source-identity.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-source-identity.schema.json",
+  "title": "SelfWorkFlow V3 provider source identity",
+  "oneOf": [
+    {"$ref": "#/$defs/gitTree"},
+    {"$ref": "#/$defs/packageBuild"},
+    {"$ref": "#/$defs/service"},
+    {"$ref": "#/$defs/hostNative"}
+  ],
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "gitTree": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "remote", "commit", "treeHash", "dirty", "dirtyContentHash", "untrackedContentHash"],
+      "properties": {
+        "kind": {"const": "git-tree"}, "remote": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"}, "treeHash": {"$ref": "#/$defs/hash"},
+        "dirty": {"type": "boolean"}, "dirtyContentHash": {"$ref": "#/$defs/hash"},
+        "untrackedContentHash": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "packageBuild": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "packageIdentity", "version", "integrity", "executableHash", "buildIdentity"],
+      "properties": {
+        "kind": {"const": "binary-or-package-build"}, "packageIdentity": {"$ref": "#/$defs/id"},
+        "version": {"type": "string", "pattern": "^\\S(?:.*\\S)?$", "maxLength": 256}, "integrity": {"$ref": "#/$defs/hash"},
+        "executableHash": {"$ref": "#/$defs/hash"}, "buildIdentity": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "service": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "endpointIdentity", "protocol", "serverAttestation", "dataBoundary"],
+      "properties": {
+        "kind": {"const": "service"}, "endpointIdentity": {"$ref": "#/$defs/hash"},
+        "protocol": {"enum": ["mcp", "https", "grpc", "local-ipc"]},
+        "serverAttestation": {"$ref": "#/$defs/hash"}, "dataBoundary": {"enum": ["local-only", "remote-approved"]}
+      }
+    },
+    "hostNative": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "hostCapability", "hostVersion", "attestation"],
+      "properties": {
+        "kind": {"const": "host-native"}, "hostCapability": {"$ref": "#/$defs/id"},
+        "hostVersion": {"type": "string", "minLength": 1, "maxLength": 128}, "attestation": {"$ref": "#/$defs/hash"}
+      }
+    }
+  }
+}
+
+````

@@ -50,8 +50,8 @@ entries:
     source:
       kind: skill
       path: skills/implement-spec/SKILL.md
-      revision: git:c2c6f29daf855087286608ebeed8f55ed2f4b7a7
-      contentHash: sha256:e86f6109f818f7f0777213a01616153c89c446a3ce5e1857a56b5c840d0a2f33
+      revision: git:86c72e7782e9a7ed71b8f7cdcaf4f3681d2d1d60
+      contentHash: sha256:a0b85b3388703da79e641d26dfd4ca4506ea55679bac4b9e026c3929964423b6
     aliases: []
     triggers: []
     exclusions: [implicit selection]
@@ -209,8 +209,8 @@ entries:
     source:
       kind: workflow
       path: dependencies/locks/matt-pocock-skills.lock.yaml
-      revision: git:9013e2aac739a313c6b9c28448e4b72cd290baae
-      contentHash: sha256:c1e54da4afcdd04c9d988dca872d0b546a8c5e5f61db5d53519614d3c78ca292
+      revision: git:1763733bd8b42eab31c8ad948b3b8edc5a7b6b72
+      contentHash: sha256:ddb6f5e6a542548dcbc41d35d8d6ad6b62626d1c7a545bee6ae871e05415233c
     aliases:
       - name: matt-skills
         target: matt-skills-foundation

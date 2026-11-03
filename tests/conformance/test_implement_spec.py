@@ -20,13 +20,14 @@ ROOT = Path(__file__).resolve().parents[2]
 class ImplementSpecContractTests(unittest.TestCase):
     """Validate the published adapter contract, not agent execution or scheduling."""
 
-    def test_explicit_adapter_contract_preserves_entry_and_completion_gates(self):
+    def test_task_selection_preserves_explicit_host_contract_and_completion_gates(self):
         path = ROOT / "skills/implement-spec/SKILL.md"
         self.assertTrue(path.is_file(), "Missing local implement-spec wrapper")
         text = path.read_text(encoding="utf-8")
         frontmatter = yaml.safe_load(text.split("---", 2)[1])
         self.assertEqual(frontmatter["name"], "implement-spec")
-        self.assertEqual(frontmatter["metadata"]["activation"], "explicit")
+        self.assertEqual(frontmatter["metadata"]["activation"], "task-conditional")
+        self.assertFalse(frontmatter.get("disable-model-invocation", False))
         blocks = re.findall(r"```yaml\n(.*?)\n```", text, re.DOTALL)
         self.assertEqual(len(blocks), 1, "One reviewable adapter contract is required")
         contract = yaml.safe_load(blocks[0])
@@ -63,7 +64,8 @@ class ImplementSpecContractTests(unittest.TestCase):
         item = selected[0]
         self.assertEqual(item["path"], "skills/engineering/implement-spec")
         reference = ROOT / lock["path"] / item["path"] / "SKILL.md"
-        self.assertEqual(item["hash"], "sha256:" + hashlib.sha256(reference.read_bytes()).hexdigest())
+        canonical = reference.read_bytes().replace(b"\r\n", b"\n")
+        self.assertEqual(item["hash"], "sha256:" + hashlib.sha256(canonical).hexdigest())
 
     def test_evidence_validator_accepts_two_ticket_dag_and_rejects_cycles(self):
         tickets = [

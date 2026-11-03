@@ -57,6 +57,7 @@ _CORE_PATHS = (
     "workflow/modules/build.md",
     "workflow/modules/code.md",
     "workflow/modules/optional-integrations.md",
+    "workflow/modules/delivery.md",
     "workflow/modules/codegraph-read.md",
     "workflow/modules/codegraph-update.md",
     "workflow/modules/review.md",
@@ -351,13 +352,13 @@ def _copy_matt_skills(
             raise AdapterError("matt-skills-source-invalid")
         locked_entry = locked_text_bytes(entry.read_bytes(), expected_hash, "matt-skills-source-drift")
         target = destination / "skills" / "matt-pocock" / skill_id
-        if skill_id in {"code-review", "diagnosing-bugs"}:
+        if skill_id in {"code-review", "diagnosing-bugs", "pr", "retro"}:
             # Publish workflow-owned entries while retaining pinned source checks.
             local_entry = source / "workflow/skills" / skill_id / "SKILL.md"
             if not local_entry.is_file() or local_entry.is_symlink():
                 raise AdapterError("runtime-source-invalid")
             _copy_tree(local_entry.parent, target)
-            if skill_id == "code-review":
+            if skill_id != "diagnosing-bugs":
                 continue
             target = target / "references/upstream"
         _copy_tree(skill_root, target)

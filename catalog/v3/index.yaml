@@ -24,7 +24,7 @@ modules:
     hash: sha256:bf975932fc77574fd494ffb10b31c52307c27ab7615187b288aa90ef462c35b9
   - id: implement-spec
     ref: modules/implement-spec.yaml
-    hash: sha256:51428456e755f5c8b894bb8f62ea730b463816ed2524de1ff36b6a1e0999afeb
+    hash: sha256:9ddc1ce0ff580d299205baff221b61664b5330727a2b2b6f706f26884ef05121
   - id: cpp-core
     ref: modules/cpp-core.yaml
     hash: sha256:01f5e8825e404d639633b57315bc3adc972644385891e3cfa4f20c4185145025
