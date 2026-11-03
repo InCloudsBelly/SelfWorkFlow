@@ -1,22 +1,17 @@
 ---
 name: implement-spec
-description: 仅在用户显式要求 implement-spec 大型多任务实施编排，且 spec、至少两个 tickets 的依赖图、计划 Review 和实施确认齐备时使用。普通 implement、单 ticket、仅规划或仅审查不触发。
+description: 显式要求按 spec 与至少两个依赖 tickets 整体实施时使用；普通实现、单票、规划或代码审查不触发。
 metadata:
   activation: explicit
 ---
 
 # Implement Spec 本地适配
 
-这是由 Host Agent 执行的指令 wrapper，不是自动编排引擎，也不提供 scheduler。
-先检查门禁，再沿本任务绑定根读上游：文档模式 `methods/matt-pocock/implement-spec/METHOD.md`；
-runtime 模式 `skills/matt-pocock/implement-spec/` 下的 `SKILL.md`。
-其源码由 `dependencies/locks/matt-pocock-skills.lock.yaml` 的 selected skill 与 hash 绑定；不得修改上游。
-上游提供 tickets 依赖图、integration branch、worktrees、TDD、merge、review 的方法；
-本契约替代其 reset、默认 PR、ticket 关闭及清理指令。上游引用不授予 Git 或外部副作用权限。
+Host 执行的指令 wrapper，不是 scheduler。沿现有 SelfWorkflow 阶段与授权；本规则替代上游默认 reset、额外 merger、PR、关单和清理步骤。仅编排细节确有缺口时参考同版上游：文档模式 `methods/matt-pocock/implement-spec/METHOD.md`；runtime 模式 `skills/matt-pocock/implement-spec/` 下的 `SKILL.md`。来源由 Matt 锁与 hash 绑定，不加载默认 implement 或重开完整 TDD 方法。
 
-## Adapter 契约
+## 契约
 
-以下 YAML 供 Host 与 reviewer 阅读；upstreamReference 是 runtime 路径，文档路径见上文，不是可执行调度配置。
+以下为 Host/Reviewer 的声明，不是自动执行配置；结构化证据校验仅契约 Host 使用。
 
 ```yaml
 kind: instruction-wrapper
@@ -54,66 +49,23 @@ neverAutomatic:
   - worktree-cleanup
 ```
 
-## 输入与触发判定
+## 输入与授权
 
-- `spec`：可读取的规格路径或引用及其版本/hash、验收条件、修改范围和非目标。
-- `ticket-dag`：至少两个唯一 ticket ID，各自的验收条件、允许修改路径、依赖 ID 和结果位置。
-  依赖必须指向已知 ticket，无自依赖和环；允许显式空依赖集合。校验整张图后才能计算 frontier。
-  issue tracker 可选，本地 tickets 可用；外部 tracker 不可读且无完整本地材料时，标记 `unverified`。
-- `plan-review` 与 `implementation-confirmation`：已通过的计划 Review 及用户实施确认，绑定当前 spec、tickets、范围与计划版本。
-  先 Review，再实施确认，最后才能启动实现。既有有效授权可以复用；文件、依赖、范围或计划改变使证据失效时重新 Review/确认。
-- `independent-agents` 与 `independent-review`：Host 实际可创建独立实现上下文、等待并取得执行结果，以及创建与实现者不同的 reviewer。
-  检查实际工具和回执能力，不凭角色名称推断能力。当前对话自称多个角色不构成独立 agent。
-- `git-permissions`：仓库绝对路径、当前 HEAD、dirty 清单、integration base 的确定 commit、目标分支/工作树位置，
-  以及现有 Git 策略和本次授权中允许的创建分支、worktree、commit、merge 等操作。
-  不能从“实现 spec”推导出全部 Git 权限；缺少某项权限只准备该操作的具体计划并请求所需确认。
+- spec 指针/版本/hash、验收、范围及非目标；至少两票唯一 ID、各自验收与允许路径、依赖和结果位置。先核整张 DAG：依赖已知、无自依赖/环；本地 tickets 可用，tracker 可选。
+- 复用绑定当前 spec/DAG/范围的计划审查与实施授权。普通计划合并自审，高风险才按 review 模块前置独立审查；用户整体实施请求可提供实施授权，不为 Agent 自拟计划或等价细节重复确认。实质范围/风险变化才重新核对。
+- 核实际独立实现/审查能力、仓库绝对路径、HEAD/dirty、integration base 与 Git 授权；不把当前对话角色名当独立 Agent。必要且可逆的本地分支/worktree/commit/merge 沿任务及仓库既有授权，不默认 reset、push、PR、关单或清理。
 
-用户显式请求且全部门禁满足，才进入本适配。普通“实现这个功能”、自动识别大型任务、单 ticket、仅写 spec 或 review 均不触发；
-保持原工作流，不伪称已执行本编排。显式请求但缺失上下文、reference/hash 验证、授权或独立能力时，
-返回 `unverified`、缺失项和下一步；不创建工作树、不派发实现、不用串行自审冒充独立编排。
+缺输入、来源完整性、独立能力或必要授权时记 unverified，只停依赖的编排；继续独立且已授权工作，不用串行自审冒充已执行本编排。
 
-## 执行规则
+## 执行
 
-1. 记录基线和已有 dirty；在授权范围内创建或选择 integration branch，确认它对应批准的 base commit。
-   保留用户现有 checkout 与修改。分支名冲突、来源不明或 base 不符时先报告；不得 reset 已有分支或工作树。
-   可以在既有授权范围内另建从正确 commit 开始的工作树，否则停在该操作的确认边界。
-2. 根据依赖结果计算 frontier：只有所有前置 ticket 已合入 integration branch 且对应验证通过的 ticket 才 ready。
-   只并行派发无未满足依赖且写入边界互不冲突的任务；共享文件任务串行安排。并发数量受真实 Host 能力限制。
-   每个 ticket 使用新实现上下文，不 fork 或复用前一 ticket；只传 spec/ticket 指针、允许路径、base commit 和验收条件，不扩大写入范围。
-3. 每个实现者使用独立 branch/worktree，记录路径与起始 commit，并核实来自指定 integration HEAD。
-   按同一绑定读取 Matt TDD：文档模式 `methods/matt-pocock/tdd/METHOD.md`；runtime 模式 `skills/matt-pocock/tdd/` 下的 `SKILL.md`。先取得目标行为的 RED，再最小 GREEN，并执行 ticket 的失败路径和相关回归验证。
-   报告命令、退出码、结果及 diff/commit；缺少真实执行证据即 `unverified`，测试失败不能报完成。
-4. integration branch 的写入与 merge 由单一协调者串行执行（可以是授权的 merger agent）。
-   integration HEAD 已前进时，在既有授权内将其合入 ticket branch 并重新验证；存在冲突就保留现场，
-   不用 reset、强制覆盖或丢弃 dirty 来继续。解决冲突若超出批准范围，返回计划确认。
-   确认票据范围与证据后才 merge；每次合入后复跑受影响验证，失败则阻断依赖此 ticket 的 frontier，记录部分完成状态。
-5. 全部 ticket 合入后，对最终 integration HEAD/diff 执行独立 Review，遵循当前模式和项目 Review 规则；
-   Full/Deep 由一个独立 Reviewer 综合核对 Standards/Spec，不创建双 Reviewer。修复 Critical/Important，记录 Minor 处置；变化只失效受影响结论，必要复核复用同一 Reviewer，并持续推进到验收。
-   没有独立 Review 能力或回执则为 `unverified`，不能用自身检查声明通过。
-6. 在同一最终 HEAD 上取得整体验收、失败路径和最窄回归证据，再报告结果。
-   完成指代码集成和验收完成，不代表 tracker 已关闭、PR 已发布或工作树已清理。
+1. 保留现有 checkout/dirty，选择或创建基于批准 commit 的 integration branch；同名或 base 冲突时保留现场，不 reset 校正。
+2. 仅前置已合入且验证通过的票进入 frontier；共享文件串行，互不冲突的 ready 票才可并行。每票用独立 branch/worktree 和新上下文，只传绑定、spec/ticket 指针、integration HEAD、允许路径、验收与证据；不 fork 完整作者历史。
+3. 沿既有测试方法取得 RED→最小 GREEN、失败路径与最窄回归，报告实际命令/退出状态/diff 或 commit。禁运行或证据缺失记 not-run/unverified，不报完成。仅测试方法无法覆盖时补读同版 Matt TDD。
+4. 主协调者串行集成，不逐票另建 merger。HEAD 前进后先合入最新 integration tip、处理范围内冲突并重验影响项；不 reset/覆盖 dirty。验证失败保留工作树与失败 frontier，阻断依赖票；无影响的有效测试复用。
+5. 全票集成后沿 review 模块由一个独立 Reviewer 核对最终 HEAD；关闭相关 Critical/Important，Minor 有处置。必要修复与复核复用原 Reviewer，只失效变化及首次漏检所影响的覆盖，不每票重做整套 Review。
+6. 最终 HEAD 的整体验收与最窄回归有效后交付 integration-head、ticket-results、TDD/Review/验证证据、retained-worktrees、pending-actions、limitations。代码集成完成与 PR/关单/清理分别记录；失败或缺门禁不报整份 spec 完成。
 
-## Git 与外部副作用替代
+创建 PR 已获授权时才按需使用 pr；不因本编排自动发布、标 ready、关闭 tracker 或发送消息。保留工作树；仅明确清理授权下核绝对路径、所有权、dirty/未合入提交并复读结果，不删除其他任务产物。恢复时核对 HEAD/dirty/票状态，复用仍有效的证据。
 
-遵循现有仓库 Git 权限和 `plan → review → confirm → apply → reread` 边界；已有授权只覆盖其明确对象和动作。
-本 skill 不增加 Git 权限，不绕过 Host 审批，不因上游步骤或 tracker 惯例自动执行下列动作：
-
-- `reset`：禁止作为 base 校正、冲突恢复或任务重试的默认操作；保留原状态并提供可审查的恢复方案。
-- `push` / `pull-request`：默认仅交付 integration branch 与 diff。push、创建 draft PR、标记 ready 各自检查授权，
-  不默认添加会关闭 spec/tickets 的 PR 文本。
-- `ticket-close`：默认输出 ticket ID 与实现/验证状态映射；外部关闭、改状态或发送消息需明确授权。
-- `worktree-cleanup`：默认保留并列出工作树。清理前确认具体绝对路径、所有权、dirty 和未合入提交，
-  在授权范围内执行并复读结果；不得清理用户或其他任务的工作树，不使用强制删除掩盖失败。
-
-失败保留分支、worktree、已取得的证据和未完成 frontier，报告冲突/失败命令及可恢复位置。
-恢复前重读 HEAD、dirty、ticket 状态与授权，失效的 Review/验证不得复用。
-
-## 输出与交付
-
-输出 `integration-head`（分支与最终 commit）、`ticket-results`（每票依赖、状态、commit 和验收结果）、
-`tdd-evidence`、`review-evidence`、`verification-evidence`（均关联实际代码版本、执行者/命令与结果）、
-`retained-worktrees`（路径及 dirty/合入状态）、`pending-actions`（待授权或失败的 Git/外部动作）、`limitations`。
-区分 passed、failed 和 `unverified`；存在缺失门禁、失败验证或阻塞发现时，不报告完整 spec 已实现。
-
-本地契约 conformance 测试只能证明 wrapper 与锁文件约束存在，不能证明模型遵循、真实独立执行或自动调度。
-catalog 的 explicit 路由和 runtime reference copy 由集成方提供并另行测试；未取得其证据时记为 `unverified`。
+声明/打包测试不证明模型遵循、独立执行或调度性能；缺实测标 unverified。
