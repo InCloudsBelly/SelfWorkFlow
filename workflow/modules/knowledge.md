@@ -1,6 +1,6 @@
 # 知识模块
 
-仅约束 knowledge.read/propose/update 与 Wiki，普通代码/Markdown/方案留痕不触发。知识可选，不阻代码交付；稳定结论每任务仅提示一次，不因 profile/链接启动。
+仅约束 knowledge.read/propose/update 与 Wiki，普通代码/Markdown/方案留痕不触发。知识可选，不阻代码交付；稳定结论每任务仅提示一次，不因 profile/链接启动。多轮/跨源检索沿[通用搜索](search.md)，后端门槛保留；纯排版不加载。
 
 ## 操作与后端
 

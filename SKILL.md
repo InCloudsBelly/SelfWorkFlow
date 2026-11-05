@@ -5,10 +5,10 @@ description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概
 
 [兼容入口](skills/selfworkflow/references/public/WORKFLOW.md)
 
-规则版本：`a9e38daab185`
+规则版本：`ed2bba2acf2a`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](skills/selfworkflow/references/public/releases/a9e38daab185078685f264cdfbd4396b1f52081820eedce696d4de07386e9485/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](skills/selfworkflow/references/public/releases/ed2bba2acf2a7f822da1e2e65d5b9e1c83620fe0c905ceb200ff32d45dd82fc6/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 
@@ -35,5 +35,5 @@ Light：低风险小任务、窄自审；其余 Full（`workflow/modes/full.md`�
 
 只补影响方案/验收/风险的必要缺口，证据充分即推进。交接留目标/授权/绑定、范围/输入版本、相关环境/消费者、结论/证据与缺口/待办；依赖/证据有效才复用，变化补影响项，换阶段不重启。计数不代替验收/收益证据，必要工作不因预算放弃。
 
-检索限范围/源码/绑定版，查历史/生成/输出副本须点名。工具内投影，独立查询批量合计守外层预算；截断补缺，无新依据不重扫/重审/重测。后台沿原作业报主对话进度，等待/长命令可中断。
+检索先定事实缺口、用途、范围及来源/工具；多轮/歧义/跨源/扩围见通用搜索（`workflow/modules/search.md`）。扩围须有新线索或必要缺口；工具内投影，批量合计守预算，无新依据不重扫/重审/重测。后台沿原作业报主对话进度，等待/长命令可中断。
 <!-- /selfworkflow:core -->
