@@ -1,0 +1,84 @@
+# 只读参考：adapter.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 3
+sourceId: tea
+sourcePath: dependencies/upstream/tea
+artifactRoot: artifacts/test-quality
+workflows:
+- id: teach-me-testing
+  upstreamId: bmad-tea-teach-me-testing
+  root: skills/bmad-tea-teach-me-testing
+  support:
+    sourceIntegrity: supported
+    adapterSupport: unverified
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: atdd
+  upstreamId: bmad-tea-automate/red
+  root: skills/bmad-tea-automate
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: automate
+  upstreamId: bmad-tea-automate
+  root: skills/bmad-tea-automate
+  support:
+    sourceIntegrity: supported
+    adapterSupport: unverified
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: ci
+  upstreamId: bmad-tea-framework/ci
+  root: skills/bmad-tea-framework/ci
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: framework
+  upstreamId: bmad-tea-framework
+  root: skills/bmad-tea-framework
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: nfr
+  upstreamId: bmad-tea-nfr
+  root: skills/bmad-tea-nfr
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: test-design
+  upstreamId: bmad-tea-test-design
+  root: skills/bmad-tea-test-design
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: test-review
+  upstreamId: bmad-tea-test-review
+  root: skills/bmad-tea-test-review
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+- id: trace
+  upstreamId: bmad-tea-trace
+  root: skills/bmad-tea-trace
+  support:
+    sourceIntegrity: supported
+    adapterSupport: supported
+    runtimeCapability: unverified
+    behaviorEvidence: unverified
+
+````
