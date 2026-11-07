@@ -137,10 +137,10 @@ class WorkflowCompressionTests(unittest.TestCase):
 
     def test_cli_query_includes_the_read_boundary_check(self):
         text = (ROOT / "workflow/modules/codegraph-read.md").read_text(encoding="utf-8")
-        self.assertIn("CLI 路径", text)
-        self.assertIn("它已包含核对，不先另跑 preflight", text)
-        self.assertIn("成功核对且 fresh 后才查询", text)
-        self.assertIn("独立 CLI 调用不共享阶段缓存", text)
+        query = next(line for line in text.splitlines() if "`provider query --provider-id codegraph " in line)
+        for boundary in ("每次", "核验后查询", "无需另跑 preflight"):
+            self.assertIn(boundary, query)
+        self.assertIn("确认 fresh 后仍须实际查询", text)
         code = (ROOT / "workflow/modules/code.md").read_text(encoding="utf-8")
         self.assertNotIn("`provider preflight`", code)
 

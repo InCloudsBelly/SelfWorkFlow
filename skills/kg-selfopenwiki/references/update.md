@@ -1,12 +1,10 @@
 # 个人 Wiki 候选与发布
 
-只在生成更新候选或已确认知识写入时加载。SelfWorkflow 已有的设计、实施授权和独立 Review 门禁复用；通用生命周期为 `knowledge.read → knowledge.propose → knowledge.update`，propose 不发布。
+候选与已授权写入按本页。propose 止于候选。
 
-内容验收按[质量标准](../../knowledge-backend/references/wiki-quality.md)。沿同一份范围、候选、来源、覆盖和缺口记录。Writer 自检，独立 Reviewer 结合正式候选和已有证据核对阻断项，返修只复核影响范围。候选阶段的有效证据复用到发布 Review，回执仍绑定实际发布候选。
+写作与内容验收按[质量标准](../../knowledge-backend/references/wiki-quality.md)。在 `PagePlan.instructions` 留规则绑定及覆盖引用，按角色交接可达的同版规则、候选和证据。同专题跨 PageJob 复用，不可达时补一次必要正文。独立 Reviewer 复用有效证据，取得生命周期 binding 与 C7 reviewPackage，回执绑定实际发布候选。
 
-PagePlan.instructions 留规则绑定和覆盖引用。Host 把角色当前需要的同版规则、候选及证据入口放入可达交接，隔离导致不可达时补一次必要正文。同专题跨 PageJob 复用。发布 Reviewer 另取得生命周期 binding 与 C7 reviewPackage。后端回执与内容验收分别判定。
-
-默认协议为 `selfopenwiki:personal-openwiki-v1`，六工具是本模块的官方能力适配，不宣称与 upstream schema 字节一致。第一次 `openwiki_status` 必须确认 schema 2、external mode、OAuth-free、`externalAgent.ready=true`、恢复闭环、旧 external capability 对，以及下列个人能力全部 verified：
+默认使用 `selfopenwiki:personal-openwiki-v1` 的实时 schema。首次 `openwiki_status` 确认 schema 2、external mode、OAuth-free、`externalAgent.ready=true`、恢复闭环及以下能力均 verified。
 
 ```text
 update.external-agent.begin
@@ -26,31 +24,27 @@ personal.lifecycle.finish
 personal.c7-review-cas-publish
 ```
 
-用户直接要求总结到 Wiki、更新或发布，即授权对应主题、目标和明确来源；已有同范围授权复用。先读当前 revision、展示紧凑方案并继续，不让用户手工批准 Agent 选择的每个页面或 hash。必要来源页和导航纳入计划；跨主题重组、删除知识、来源许可或数据暴露范围变化才重新确认。
+沿用既有主题、目标与来源授权。读当前 revision，给出紧凑方案后继续，把必要来源页和导航纳入计划。跨主题重组、删除知识或来源许可/暴露范围变化须确认。
 
-本地来源用获授权的绝对本机路径按实时协议 prepare，核对 manifest 完全落在已批准的来源/版本内；符合时把既有授权映射到协议确认字段，记录依据，不重复询问。未授权的新路径、敏感/拒绝来源或超出批准版本的变化不能旁路；缺失授权才展示有界清单并确认。协议字段与精确绑定仍必须真实，不把 Agent 自己选择的任意来源说成用户已批准。
+用已授权的绝对本机路径按实时协议 prepare，核实 manifest 的全部来源与版本。匹配时将授权映射到确认字段并留依据。超范围时列必要来源确认，拒绝或敏感来源不得绕过。
 
-revision 冲突先刷新并比较受影响页面：授权主题、来源和结果未变且无语义冲突时，自行重算绑定、候选及受影响 Review；不因 revision/hash 变化重问写入授权。真正内容冲突或超范围才合并提问。已冻结事务只使用协议支持的恢复/重建路径，不改旧 receipt，不覆盖并发修改。基于返回的 Skill/work package 读取本阶段必要 Writer 规则和精确协议；这些材料不扩散到普通读取。
+revision 冲突先刷新并比较受影响页面。主题、来源和结果未变且无语义冲突时自行重算绑定、候选并复核影响项，内容冲突或超范围才集中确认。冻结事务走协议恢复/重建，保留旧回执与并发修改。按返回的 Skill/work package 读取当前阶段所需规则及协议。
 
-同一 Wiki 由主调度串行提交写调用。原生 MCP 可用时沿用。批量或需重连 SDK 时，用显式 SelfWorkflow 源仓库的 `scripts/personal-wiki-mcp.mjs` 的 `openPersonalWikiMcp()`。每连接读取 status 和工具表，按实际 Wiki 根核对既有绑定。call 接收绝对路径的 .request.json，格式为 {name,args}，按实时 schema 检查后调用。同一任务目录保留完整 .result.json，主对话只接收状态、下一步及路径。真实执行身份按 schema 表示，回执内容和绑定由原角色提供。
-
-结果绑定 Wiki、运行目录和上游根。同目标且同请求可复读，旧回执只证明原操作。`pending` 表示结果未知，沿[恢复规则](recovery.md)核对已接受阶段后推进。新动作使用新的请求文件，避免重新发送已接受操作。结束后关闭 session。
+同一 Wiki 由主调度串行写入。沿用可用的原生 MCP，批量或需用 SDK 重连时读[SDK 调用](sdk.md)。
 
 按以下顺序推进，每个 PageJob 循环步骤 3–5。
 
 1. `openwiki_begin`：由 adapter 注入 status 已绑定的 `wikiRoot`，绑定 Wiki revision、Skill 和 upstream revision。传入不同根必须拒绝。
-2. `openwiki_submit_plan`：只提交页面/删除计划，生成持久化队列。新增页面前先读取现有入口与主题导航，计划须包含把新页接入 `quickstart.md` 可达链路所需的导航页；可以更新已可达的主题索引，不要求每页直接链接到 quickstart。手工维护的导航 Markdown 需要显式 PageJob，不能误当成自动生成的索引而遗漏。
+2. `openwiki_submit_plan`：只提交页面/删除计划，生成持久化队列。新增页先查入口和主题导航，规划从 `quickstart.md` 可达的链路，可经主题索引。手工导航页须列为 PageJob。
 3. `openwiki_next_page`：一次一个 PageJob；Writer 只写返回的 candidate package 分配路径。
 4. `openwiki_inspect_page_claims`：修改或撤回已有 Claim 前读取绑定页面的完整 Claim 集，不猜 Claim、证据或 hash。
 5. `openwiki_submit_page`：提交候选页面与 sparse Claim decisions；不写正式 Wiki。不能覆盖已 accepted 的不同 payload。
 6. `openwiki_finish`：按 candidate receipt → 独立 Review receipt → C7 CAS publish 推进；只接受真实绑定字段，不自行补算 C7-owned hash。
 
-新页计划缺少可写的可达导航入口时，`submit_plan` 会在创建 C7 候选前拒绝并提示补充导航页；该次计划未接受，可在同一 run 更正后重交，无需 abort。此检查只判断范围是否允许接通，候选完成后仍检查实际链接与全页可达性。已接受的队列保持冻结，之后扩大范围仍走现有恢复与授权流程；导航页的 Claims 漂移不能通过直接修改正式文件绕过。
+导航范围不足会在建 C7 候选前拒绝。未接受的计划可在同一 run 更正重交。候选完成后验证实际链接和页面可达性。已接受队列冻结，扩围走授权与恢复，导航 Claims 漂移也须经候选处理。
 
-仅当 finish 返回结构化 `status: complete` 且 `published: true` 才报告正式 Wiki/Claims 更新完成。`review_required`、`publish_pending`、`repair_ready`、`needs_clarification` 都未完成；按返回 nextAction 处理，故障时加载 recovery 引用。
+只凭结构化 `status: complete` 且 `published: true` 报 Wiki/Claims 更新完成。其他状态按 `nextAction` 处理，故障才读[恢复](recovery.md)。`needs_clarification` 时先修授权内的技术问题，非核心事实缺口按协议标 provisional，缺来源/语义/授权决策才提问。修复上限触达后保留候选与回执，报告具体未解项及允许的下一步。
 
-`needs_clarification` 先区分来源/语义/授权决策与技术故障。链接、格式、证据引用等能在批准范围内修复的先自主修复；不影响核心事实的缺口按协议标 provisional。只有确实缺用户决策才集中提问，不自动启动 Grill-me。修复次数上限不是“用户必须作决定”的证据；触达后保留候选和回执，说明具体未解决问题及协议允许的下一步，不盲目重试、不冒充完成。
+发布要求实现 ≥0.1.2。保留正式根和既有主题目录，只替换变更 Markdown。所有写者用同一 MCP 锁协议。发布期间允许监听与只读预览，外部工具不得并发写。独占锁阻塞时保留回执，沿恢复流程，勿强关其他进程。按请求浏览或切换目录。
 
-实现至少 0.1.2 才能发布。新版保留正式根与既有主题目录，逐个替换变更 Markdown；目录监听和只读预览可继续打开。所有 Wiki 写者必须使用同一 MCP 锁协议，提交期间外部工具不得同时改写正式文件。发布完成后不自动打开正式文件预览或切换工作目录；用户明确要浏览时再加载 visualize 引用。文件独占锁仍可能阻止单个文件替换，此时保留原回执和恢复义务，不强关其他进程。
-
-官方 OpenWiki 和 Viewer 是 SelfWorkflow 根固定的 submodule，自有适配层不得修改或猜 upstream 未冻结接口。格式迁移只在候选包生成，展示 byte/hash/diff 后按确认、Review、CAS 发布；不直接重写原始 Wiki 或 `.git`。六阶段不执行个人 Wiki commit、push、fetch 或 ref 操作。
+只用固定 OpenWiki、Viewer 和已核适配契约。格式迁移在候选包展示 byte/hash/diff，按确认、Review、CAS 发布。六阶段走 MCP，个人 Wiki 的 Git 操作另核授权。

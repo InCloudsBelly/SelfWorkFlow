@@ -60,6 +60,7 @@ _CORE_PATHS = (
     "workflow/modules/delivery.md",
     "workflow/modules/codegraph-read.md",
     "workflow/modules/codegraph-update.md",
+    "workflow/modules/codegraph-recovery.md",
     "workflow/modules/review.md",
     "workflow/modules/knowledge.md",
     "workflow/modules/artifacts.md",

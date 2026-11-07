@@ -1,8 +1,9 @@
 # CodeGraph 更新模块
 
-主 Agent 合并本批实际纳入索引的源码新增/修改/删除/重命名/撤回路径，在后续结构化读取或交付前调用一次 `provider sync --project-root <绝对repo> --changed-path <path>`；重命名传新旧路径，部分失败/中止/回滚留下的改动也计入。UE 后端把路径作为提示，从已验证范围找出本批及外部变更。子 Agent 汇报路径，由主 Agent 合并同步。
-先查发布保护/忙碌；只对明确初始化且完整的已有库做官方增量 sync，再核验 fresh。缺失/未知/损坏/不完整库保留并报显式初始化/恢复，不自动 init；fresh status 不豁免核对，watcher 已更新的未变文件由 SDK 跳过。updated 只表示维护动作，不保证节点变化。
-失败或仍 stale 时保留原库，按[读取模块](codegraph-read.md)共用忙碌/重试预算，不竞争维护；禁止自动 init/index/index --force/recreate/删库。初始化/全量重建另需明确授权，独立候选验证后替换，保留旧库。
-仅计划、文档/日志、无实际变化或未纳入的文件不触发；用户编辑与 Git 操作由读取漂移边界捕获，不要求另发更新指令。相关旧证据失效，fresh 后重查受影响结论。
-`.codegraph/` 是再生缓存，不自动 add/commit/push；不手工删来模拟同步。仅明确清理旧缓存时才删旧 `<repo>\graft\`。官方 watcher/daemon 管进程/锁/并发，不另建事件队列。
-维护失败报告阶段/动作/状态并停止失败维护；无关工作继续。普通任务可据源码/适用测试交付并列缺口，旧图/文本不冒充 fresh 或全部通过；不可替代的图验收与显式契约仍待验证。
+源码批次确有索引内变化时，主 Agent 汇总路径，在后续结构化读取或交付前调用一次 `provider sync --project-root <绝对repo> --changed-path <path>`。重命名传新旧路径，含部分失败、中止、回滚或撤回留下的变化。UE 后端以路径为提示，从已验证范围识别实际变更。
+
+用该调用内置的发布保护、忙碌与库完整性门禁。仅对已初始化的完整库增量 sync，核验返回的 fresh。watcher 已处理的未变文件由 SDK 跳过，updated 只表示执行了维护。失败或仍 stale 按[异常与恢复](codegraph-recovery.md)，和读取共用重试预算。
+
+计划、文档/日志、无变化或索引外文件跳过。用户编辑和 Git 操作由[读取](codegraph-read.md)核对漂移，fresh 后仅复查受影响结论。
+
+`.codegraph/` 是再生缓存，勿 add/commit/push 或删库代替同步。旧 `<repo>\graft\` 仅按明确清理要求删除。进程、锁和并发沿官方 watcher/daemon。

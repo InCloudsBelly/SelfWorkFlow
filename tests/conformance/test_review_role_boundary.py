@@ -29,16 +29,19 @@ class ReviewRoleBoundaryTests(unittest.TestCase):
 
     def test_code_review_loads_applicable_method_without_change_rules(self):
         review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
-        self.assertIn("行为代码审查补读", review)
+        self.assertIn("行为代码审查补", review)
         self.assertIn("../../skills/code-quality/references/review-rules.md", review)
         method = (ROOT / "skills/code-quality/references/review-rules.md").read_text(encoding="utf-8")
-        for boundary in ("已支持场景", "证伪", "被调函数", "持有时间", "优先级/标签/历史", "删除/内联"):
+        for boundary in (
+            "支持场景", "证伪", "实际入口", "同一可达输入", "受影响消费者的实际结果",
+            "跨调用", "持有时间", "优先级、标签和历史", "删除或内联",
+        ):
             with self.subTest(boundary=boundary):
                 self.assertIn(boundary, method)
         self.assertNotIn("change-rules.md", method)
         self.assertNotIn("modules/review.md", method)
         self.assertIn("不启动 TDD、构建或写入", method)
-        self.assertIn("普通解释分析不加载本页", method)
+        self.assertIn("普通解释分析跳过", method)
 
     def test_review_evidence_and_followup_preserve_existing_boundaries(self):
         review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")

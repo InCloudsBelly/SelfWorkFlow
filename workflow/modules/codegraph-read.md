@@ -1,21 +1,17 @@
 # CodeGraph 读取模块
 
-主 Agent 只用项目唯一 `.codegraph/`；不查 conversation/Topic/Deep/跨仓库图。跨文件行为理解、符号/调用/依赖分析先查询已计算图；配置、文档、日志及精确源码路径复核直接读。图不替代最终源码核对。
+主 Agent 只查项目唯一图（默认 `.codegraph/`），排除 Topic、会话、Deep 和跨仓库图。跨文件行为、符号、调用或依赖先定向查图，再核源码。配置、文档、日志和精确源码路径直接读。
 
-## 核对边界
+## 调用与复用
 
-只用实际可用且绑定项目的 MCP/CLI。优先官方 MCP，给绝对 projectPath、文件/符号及 maxFiles。已核实 UE 入口在查询内自动同步和验证时，直接发一次查询。其他 MCP 入口首次、换项目或核对失效时先 preflight。只有已验证且健康的 watcher 能复用无漂移核对。缺少该证据时，每次新查询前核对。阶段名变化不单独触发。
-CLI 路径：`provider query --provider-id codegraph --project-root <绝对repo> --query <text>`；这一调用负责维护和核验。复用成功的查询结果。各次独立调用分别核验。
-未暴露 MCP 时用已安装 Windows 桥接 `$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd`，始终给绝对 --project-root；桥接也缺失才报告。不扫描替代入口、不猜 Python、不用 PATH 的其他副本，不自动安装或创建 watcher/supervisor。
-分支/HEAD、外部编辑、dirty/未跟踪、stale/pending/degraded 使相关证据失效；下次重核对并复查影响结论，不依赖提交或 git add。
+- 优先使用已绑定项目的官方 MCP，传绝对 `projectPath`、文件/符号与 `maxFiles`。已验证能在查询内同步并核验的 UE 入口只调用一次。其他 MCP 首次、换项目或证据失效先预检。有已验证且健康的 watcher 才复用无漂移核验，否则每次新查询先核对。换阶段沿用有效证据。
+- MCP 未暴露时只用已安装的 `$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd`。每次 `provider query --provider-id codegraph --project-root <绝对repo> --query <text>` 自行维护并核验后查询，无需另跑 preflight。入口缺失报缺口，不另装工具或创建 watcher/supervisor。
+- 同项目、同输入的成功查询直接复用。分支/HEAD、外部编辑、dirty/未跟踪变化或 stale/pending/degraded 使受影响证据失效，重查影响项，无需提交或暂存。宽查询收窄，输出截断只补缺。
 
-## Freshness 与失败
+## 核验门禁
 
-- preflight 仅对 `initialized=true` 且 `indexState=complete` 的已有库做官方增量 sync 后查状态；未变文件跳过解析，不能只信可能漏掉 clean checkout 的 status。缺失/未知/损坏/不完整库保留并报需显式初始化/恢复，首次使用也不自动 init。
-- `<索引目录名>.publication.json`/`.publication.lock` 存在、不可读或异常即停止普通访问；正式目录暂缺也不能初始化。默认与 CODEGRAPH_DIR 候选分别保护；跟踪表/节点表一侧非空同样停止。初始化/发布共用独占租约，残留显式恢复，不按超时删锁。
-- stale/partial/failed/pending 或需重建：保留原库、报 not-fresh/unverified。禁止自动 init/index/index --force/recreate/删库；初始化/重建需明确授权，独立候选验证后才替换，保留可恢复旧库。fresh 不等于查询成功。
-- 覆盖与新鲜度分开：仅 `inputsVerified=true` 且无漂移时可带 `cpp-include-coverage-incomplete` 限制查询；未知旧 provider、输入不可读/未核验/变化不放行。fresh 不证明 UE Build.cs/include 全覆盖。
-- indexing/busy/锁占用不并发 init/sync/rebuild。可中断等5秒、15秒，最多追加两次，每次先查状态；preflight/query/sync 按已核实的阻塞对象、原因和状态共享已知预算，换对话/主题/阶段/版本名不重置，不同阻塞不混用。独立会话缺少旧状态时，不宣称计数已共享。耗尽报 busy/unverified，不删缓存；阻塞解除、原因实质变化、有可重试证据或用户明确要求才再试，其他可恢复故障最多一次有据重试。必要进度观察沿原作业跟踪，不重复启动维护。
-- 失败仅阻依赖图的动作。普通任务可用直接源码、手工追踪和测试继续，rg 只定位文本，不冒充图证据；缺口 unverified，不请求安装/重建/豁免。显式契约图门禁保留。完整证据复用，截断补缺，宽查询收窄。
+- 仅对 `initialized=true`、`indexState=complete` 的已有库预检。执行官方增量 sync 后查状态，未变文件跳过解析。status 可能漏掉 clean checkout。确认 fresh 后仍须实际查询。
+- 发布保护覆盖默认目录和 `CODEGRAPH_DIR`。相应 `<索引目录名>.publication.json` / `.publication.lock` 存在、不可读或异常，或文件跟踪表与节点表仅一侧非空，均停止普通访问。禁止自动初始化或重建。
+- 新鲜度与覆盖分开。只有 `inputsVerified=true` 且无漂移时可带 `cpp-include-coverage-incomplete` 限制查询。未知旧 provider、输入不可读/未核验/变化均拒绝，UE Build.cs/include 覆盖另核。
 
-size/mtime 人为恢复属盲点，有线索提出保留旧库的重验方案，不自动重建；扫描/ignore/扩展名遵官方配置。provider-source-identity-drift 先 inspect/审查，再于已有授权内重绑，不自动换 bindingHash。只读任务仅允许图索引维护副作用。
+遇入口缺失、调用失败、忙碌、发布保护、索引/绑定异常或疑似漏检时才读[异常与恢复](codegraph-recovery.md)。扫描范围、忽略和扩展名按官方配置。只读任务仅允许图索引维护副作用。

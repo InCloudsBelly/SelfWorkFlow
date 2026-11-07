@@ -303,8 +303,10 @@ class MattSkillsFoundationTests(unittest.TestCase):
         self.assertIn("CodeGraph", workflow)
         self.assertIn("modules/codegraph-read.md", workflow)
         graph = (self.ROOT / "workflow/modules/codegraph-read.md").read_text(encoding="utf-8")
-        for boundary in ("indexState=complete", "不自动 init", "不冒充图证据"):
+        for boundary in ("indexState=complete", "禁止自动初始化或重建", "(codegraph-recovery.md)"):
             self.assertIn(boundary, graph)
+        recovery = (self.ROOT / "workflow/modules/codegraph-recovery.md").read_text(encoding="utf-8")
+        self.assertIn("不冒充图证据", recovery)
         self.assertIn("Ponytail", workflow)
         self.assertIn("非代码任务不自动加载", workflow)
         self.assertNotIn("Caveman", workflow)
