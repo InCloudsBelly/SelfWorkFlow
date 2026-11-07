@@ -9,7 +9,9 @@ from dataclasses import dataclass
 import hashlib
 import json
 import ntpath
+import os
 import re
+import subprocess
 from typing import Any, Callable, Protocol
 
 
@@ -18,7 +20,8 @@ _SYNC_LOCK_ERROR = re.compile(
     r"(?:✗|\[ERR\]) Failed to sync: "
     r"(?:Sync could not acquire the file lock; retry when the index is available\. )?"
     r"CodeGraph database is locked by another process"
-    r"(?: \(PID [0-9]+\))?\. If this is stale, run 'codegraph unlock' or delete .+"
+    r"(?: \(PID [0-9]+\))?\."
+    r"(?: If this is stale, run 'codegraph unlock' or delete .+)?"
 )
 _MAINTENANCE_COMMANDS = {
     "initialize": ("init",),
@@ -162,6 +165,7 @@ class CodeGraphAdapter:
         ownership: str,
         pre_dispatch_validator: Callable[[], None] | None = None,
         allow_metadata_only_status: bool = False,
+        allow_ue_reconcile: bool = False,
     ) -> None:
         if not callable(getattr(command_port, "run", None)):
             raise CodeGraphAdapterError("codegraph-command-port-invalid")
@@ -179,6 +183,9 @@ class CodeGraphAdapter:
             "codegraph_dispatch_guards", default=(),
         )
         self._allow_metadata_only_status = allow_metadata_only_status
+        if type(allow_ue_reconcile) is not bool:
+            raise CodeGraphAdapterError("codegraph-ue-reconcile-capability-invalid")
+        self.allow_ue_reconcile = allow_ue_reconcile
         self._issued_maintenance_plans: set[str] = set()
         self._consumed_maintenance_plans: set[str] = set()
 
@@ -204,7 +211,10 @@ class CodeGraphAdapter:
                 self._pre_dispatch_validator()
             for validator in self._dispatch_guards.get():
                 validator()
-            result = self._port.run(self._prefix + tuple(arguments), cwd=None)
+            runner = self._port.run
+            if arguments and arguments[0] == "reconcile-ue":
+                runner = getattr(self._port, "run_with_progress", runner)
+            result = runner(self._prefix + tuple(arguments), cwd=None)
         except CodeGraphAdapterError:
             raise
         except Exception:
@@ -222,12 +232,81 @@ class CodeGraphAdapter:
         ):
             raise CodeGraphAdapterError("codegraph-command-output-too-large")
         if result.exit_code != 0:
+            if arguments and arguments[0] == "reconcile-ue" and result.failure_kind == "timeout":
+                raise CodeGraphAdapterError("codegraph-reconcile-timeout")
             if arguments and arguments[0] == "sync":
                 stderr = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", result.stderr)
                 if any(_SYNC_LOCK_ERROR.fullmatch(line) for line in stderr.splitlines()):
                     raise CodeGraphAdapterError("codegraph-project-busy")
             raise CodeGraphAdapterError("codegraph-command-failed")
         return result
+
+    def reconcile_ue(
+        self, project_root: str, *, query: str | None = None, query_kind: str = "ask",
+        changed_paths: Sequence[str] = (),
+    ) -> dict[str, Any] | None:
+        root = _validate_project_root(project_root)
+        args = ["reconcile-ue", root, "--progress"]
+        if query is not None:
+            query = _validate_text(query, "codegraph-query-invalid")
+            query_kind = _validate_text(query_kind, "codegraph-query-kind-invalid")
+            args.append("--query=" + query)
+        hints = ["--changed-path=" + path for path in changed_paths]
+        # Windows CreateProcess accepts 32,767 UTF-16 code units including
+        # the terminator. Leave room for the backend's Node re-exec flags.
+        # Dropping hints preserves the verified delta and the caller's count.
+        if os.name != "nt" or len(subprocess.list2cmdline([*self._prefix, *args, *hints]).encode("utf-16-le", errors="surrogatepass")) // 2 < 32_639:
+            args.extend(hints)
+        try:
+            value = json.loads(self._run(args).stdout)
+        except (TypeError, json.JSONDecodeError):
+            raise CodeGraphAdapterError("codegraph-ue-reconcile-invalid") from None
+        if not isinstance(value, dict) or type(value.get("protocol")) is not int or value["protocol"] != 1:
+            raise CodeGraphAdapterError("codegraph-ue-reconcile-invalid")
+        if value.get("status") == "not-applicable":
+            return None
+        if value.get("status") == "unverified":
+            reasons = {
+                "cancelled": "codegraph-reconcile-cancelled",
+                "index-incomplete": "codegraph-index-state-not-complete",
+                "index-lock-error": "codegraph-index-lock-error",
+                "project-busy": "codegraph-project-busy",
+                "index-data-inconsistent": "codegraph-index-data-inconsistent",
+                "index-replaced": "codegraph-index-not-fresh",
+                "rebuild-required": "codegraph-rebuild-required-preserving-existing-index",
+                "publication-recovery-required": "codegraph-publication-recovery-required",
+                "indexing-config-invalid": "codegraph-indexing-config-invalid",
+                "explicit-initialization-required": "codegraph-explicit-initialization-required",
+            }
+            reason = value.get("reason")
+            raise CodeGraphAdapterError(reasons.get(reason, "codegraph-index-not-fresh")
+                                        if isinstance(reason, str) else "codegraph-ue-reconcile-invalid")
+        revision, changes = value.get("revision"), value.get("changes")
+        if (
+            value.get("status") != "fresh" or not isinstance(revision, str)
+            or re.fullmatch(r"[0-9a-f]{64}", revision) is None
+            or not isinstance(changes, dict)
+            or any(type(changes.get(key)) is not int or changes[key] < 0
+                   for key in ("filesChecked", "filesAdded", "filesModified", "filesRemoved"))
+            or (query is not None and not isinstance(value.get("text"), str))
+        ):
+            raise CodeGraphAdapterError("codegraph-ue-reconcile-invalid")
+        project_hash = _hash({"projectRoot": root.casefold()})
+        index = {
+            "providerId": "codegraph", "operation": "status", "readOnly": True,
+            "supportStatus": "unverified", "initialized": True, "indexState": "complete",
+            "freshness": "fresh", "revision": revision, "projectRootHash": project_hash,
+        }
+        if query is None:
+            return {"providerId": "codegraph", "status": "succeeded", "freshness": "fresh",
+                    "updated": True, "actions": ["sync"], "index": index, "changes": changes}
+        return {
+            "providerId": "codegraph", "operation": "query", "readOnly": True,
+            "supportStatus": "unverified", "freshness": "fresh", "queryKind": query_kind,
+            "queryHash": _hash({"query": query}), "projectRootHash": project_hash,
+            "revision": revision, "data": value["text"], "updated": True,
+            "maintenanceActions": ["sync"], "changes": changes,
+        }
 
     def status(self, project_root: str) -> dict[str, Any]:
         return self._status(project_root, metadata_only=False)
@@ -290,8 +369,15 @@ class CodeGraphAdapter:
         indexing_config = value.get("indexingConfig")
         if isinstance(indexing_config, Mapping) and indexing_config.get("error") is not None:
             result["indexingConfigInvalid"] = True
+        if value.get("ueProfile") is True:
+            result["ueProfile"] = True
+        if type(value.get("dataConsistent")) is bool:
+            result["dataConsistent"] = value["dataConsistent"]
         index = value.get("index")
         if isinstance(index, Mapping):
+            stored_state = index.get("storedState")
+            if isinstance(stored_state, str) and stored_state in {"complete", "partial", "indexing", "failed"}:
+                result["storedIndexState"] = stored_state
             if isinstance(index.get("state"), str) and index["state"]:
                 result["indexState"] = index["state"]
             if type(index.get("reindexRecommended")) is bool:

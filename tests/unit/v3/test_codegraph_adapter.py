@@ -220,6 +220,8 @@ class CodeGraphAdapterTests(unittest.TestCase):
             self._result(1, stderr='"' + line + '"'),
             self._result(1, stdout=line),
             self._result(1, stderr="✗ Failed to sync: EACCES C:/private/codegraph.lock"),
+            self._result(1, stderr="[ERR] Failed to sync: Sync could not acquire the file lock: "
+                         "CodeGraph database is locked by another process or the lock owner is unknown."),
         )
         for result in results:
             with self.subTest(result=result):
@@ -230,19 +232,20 @@ class CodeGraphAdapterTests(unittest.TestCase):
                 self.assertEqual(caught.exception.reason, "codegraph-command-failed")
                 self.assertNotIn("private", str(caught.exception))
 
-    def test_official_162_sync_lock_routes_to_bounded_busy_handling(self):
+    def test_sync_lock_routes_to_bounded_busy_handling_with_or_without_the_legacy_suffix(self):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError
 
-        message = (
+        prefix = (
             "[ERR] Failed to sync: Sync could not acquire the file lock; retry when the index is available. "
-            "CodeGraph database is locked by another process (PID 123). "
-            "If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock\n"
+            "CodeGraph database is locked by another process (PID 123)."
         )
-        adapter = self._adapter(FakeCommandPort(self._result(1, stderr=message)))
-        plan = adapter.plan_maintenance("sync", "C:/work/project")
-        with self.assertRaises(CodeGraphAdapterError) as caught:
-            adapter.execute_maintenance(plan, "C:/work/project", confirmed_plan_hash=plan["planHash"])
-        self.assertEqual(caught.exception.reason, "codegraph-project-busy")
+        for suffix in ("", " If this is stale, run 'codegraph unlock' or delete C:/private/codegraph.lock"):
+            with self.subTest(suffix=suffix):
+                adapter = self._adapter(FakeCommandPort(self._result(1, stderr=prefix + suffix + "\n")))
+                plan = adapter.plan_maintenance("sync", "C:/work/project")
+                with self.assertRaises(CodeGraphAdapterError) as caught:
+                    adapter.execute_maintenance(plan, "C:/work/project", confirmed_plan_hash=plan["planHash"])
+                self.assertEqual(caught.exception.reason, "codegraph-project-busy")
 
     def test_query_and_status_lock_text_do_not_become_sync_busy(self):
         from selfworkflow.v3.providers.codegraph import CodeGraphAdapterError

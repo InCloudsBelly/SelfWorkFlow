@@ -381,6 +381,12 @@ export async function bootstrapC7Runtime(
     });
   };
   const personalRunStore = new PersonalRunStoreRouter({
+    canSupersedePlanningSource: async (run) =>
+      (await new ExternalUpdateTransactionOwner({
+        formalWikiPath: run.wikiRoot,
+        runtimeDir: run.runtimeRoot,
+        security,
+      }).readActive()) === null,
     isRunAborted: (run) =>
       new ExternalUpdateTransactionOwner({
         formalWikiPath: run.wikiRoot,

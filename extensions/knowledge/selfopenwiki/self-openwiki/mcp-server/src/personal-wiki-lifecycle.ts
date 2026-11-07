@@ -432,87 +432,98 @@ export class PersonalWikiLifecycle {
 
   async submitPlan(inputValue: unknown): Promise<unknown> {
     const parsed = toolInputSchemas.openwiki_submit_plan.parse(inputValue);
-    if (
-      this.runStore.submitPlan === undefined ||
-      this.runStore.read === undefined ||
-      this.runStore.attachCandidate === undefined ||
-      this.c7 === undefined
-    ) {
+    if (this.runStore.read === undefined) {
       throw codedPersonalError("capability_unverified");
     }
-    const stateBeforePlan = await this.runStore.read(parsed.runId);
-    const claimSnapshots: Record<string, PersonalClaimsSnapshot> = {};
-    if (this.claimsResolver !== undefined) {
-      for (const page of parsed.pages) {
-        claimSnapshots[page.path] = await this.claimsResolver.load(
-          stateBeforePlan.wikiRoot,
-          page.path,
+    const lockState = await this.runStore.read(parsed.runId);
+    // Keep queue, C7 start, attachment and rollback atomic with begin.
+    return withC7Locks(
+      lockState.runtimeRoot,
+      ["operation", "wiki"],
+      async () => {
+        if (
+          this.runStore.submitPlan === undefined ||
+          this.runStore.read === undefined ||
+          this.runStore.attachCandidate === undefined ||
+          this.c7 === undefined
+        ) {
+          throw codedPersonalError("capability_unverified");
+        }
+        const stateBeforePlan = await this.runStore.read(parsed.runId);
+        const claimSnapshots: Record<string, PersonalClaimsSnapshot> = {};
+        if (this.claimsResolver !== undefined) {
+          for (const page of parsed.pages) {
+            claimSnapshots[page.path] = await this.claimsResolver.load(
+              stateBeforePlan.wikiRoot,
+              page.path,
+            );
+          }
+        }
+        const plan = await this.runStore.submitPlan({
+          ...parsed,
+          ...(this.claimsResolver === undefined ? {} : { claimSnapshots }),
+        });
+        let state = await this.runStore.read(parsed.runId);
+        const unboundStartStateHash = personalHash(state);
+        let candidate: PersonalCandidateBinding;
+        try {
+          candidate =
+            state.candidate ??
+            (await this.c7.start({
+              confirmedByUser: parsed.confirmedByUser,
+              deletePages: parsed.deletePages,
+              pages: state.jobs ?? parsed.pages,
+              runId: parsed.runId,
+              requestedSkills: state.requestedSkills,
+              skillAggregateHash: state.skillAggregateHash,
+              compatibilityManifestHash: state.compatibilityManifestHash,
+              sourceConfirmation: state.sourceConfirmation,
+              sourceManifestId: state.sourceManifestId,
+              markdownWikiRevision:
+                state.markdownWikiRevision ?? state.wikiRevision,
+              wikiRevision: state.markdownWikiRevision ?? state.wikiRevision,
+              wikiRoot: state.wikiRoot,
+              ...(!stateBeforePlan.planHash ||
+              this.runStore.verifyUnboundStart === undefined
+                ? {}
+                : {
+                    verifyUnboundStart: () =>
+                      this.runStore.verifyUnboundStart!(
+                        parsed.runId,
+                        unboundStartStateHash,
+                      ),
+                  }),
+            }));
+        } catch (error) {
+          // A failed replay must not erase a plan accepted before this call.
+          if (!stateBeforePlan.planHash) {
+            await this.runStore.rollbackPlan?.(parsed.runId, plan.planHash);
+          }
+          throw error;
+        }
+        if (state.candidate === undefined) {
+          await this.runStore.attachCandidate(parsed.runId, candidate);
+          state = await this.runStore.read(parsed.runId);
+        }
+        const binding = personalBinding(
+          parsed.runId,
+          plan.planHash,
+          plan.queueHash,
+          candidate,
         );
-      }
-    }
-    const plan = await this.runStore.submitPlan({
-      ...parsed,
-      ...(this.claimsResolver === undefined ? {} : { claimSnapshots }),
-    });
-    let state = await this.runStore.read(parsed.runId);
-    const unboundStartStateHash = personalHash(state);
-    let candidate: PersonalCandidateBinding;
-    try {
-      candidate =
-        state.candidate ??
-        (await this.c7.start({
-          confirmedByUser: parsed.confirmedByUser,
-          deletePages: parsed.deletePages,
-          pages: state.jobs ?? parsed.pages,
+        return {
+          binding,
+          ok: true,
+          pageCount: plan.pageCount,
+          planHash: plan.planHash,
+          protocol: "selfopenwiki:personal-openwiki-v1",
+          queueHash: plan.queueHash,
+          recovery: { action: "none" },
           runId: parsed.runId,
-          requestedSkills: state.requestedSkills,
-          skillAggregateHash: state.skillAggregateHash,
-          compatibilityManifestHash: state.compatibilityManifestHash,
-          sourceConfirmation: state.sourceConfirmation,
-          sourceManifestId: state.sourceManifestId,
-          markdownWikiRevision:
-            state.markdownWikiRevision ?? state.wikiRevision,
-          wikiRevision: state.markdownWikiRevision ?? state.wikiRevision,
-          wikiRoot: state.wikiRoot,
-          ...(!stateBeforePlan.planHash ||
-          this.runStore.verifyUnboundStart === undefined
-            ? {}
-            : {
-                verifyUnboundStart: () =>
-                  this.runStore.verifyUnboundStart!(
-                    parsed.runId,
-                    unboundStartStateHash,
-                  ),
-              }),
-        }));
-    } catch (error) {
-      // A failed replay must not erase a plan accepted before this call.
-      if (!stateBeforePlan.planHash) {
-        await this.runStore.rollbackPlan?.(parsed.runId, plan.planHash);
-      }
-      throw error;
-    }
-    if (state.candidate === undefined) {
-      await this.runStore.attachCandidate(parsed.runId, candidate);
-      state = await this.runStore.read(parsed.runId);
-    }
-    const binding = personalBinding(
-      parsed.runId,
-      plan.planHash,
-      plan.queueHash,
-      candidate,
+          status: "plan_accepted",
+        };
+      },
     );
-    return {
-      binding,
-      ok: true,
-      pageCount: plan.pageCount,
-      planHash: plan.planHash,
-      protocol: "selfopenwiki:personal-openwiki-v1",
-      queueHash: plan.queueHash,
-      recovery: { action: "none" },
-      runId: parsed.runId,
-      status: "plan_accepted",
-    };
   }
 
   async nextPage(inputValue: unknown): Promise<unknown> {

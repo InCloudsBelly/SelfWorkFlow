@@ -76,6 +76,18 @@ class ProviderSourceRepairTests(unittest.TestCase):
             dependency.write_text("module.exports=2;\n", encoding="utf-8")
             self.assertNotEqual(before["sourceHash"], self._inspect(source)["sourceHash"])
 
+    def test_reconcile_capability_requires_registration_in_the_actual_entrypoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = self._managed_runtime(Path(temporary).resolve())
+            entry = source / "lib/dist/bin/codegraph.js"
+            (entry.parent / "ue-reconcile.js").write_text("module.exports = {};\n", encoding="utf-8")
+            self.assertNotIn("ueReconcileProtocol", self._inspect(source))
+            entry.write_text(
+                "program.command('reconcile-ue <path>', { hidden: true })\n"
+                "  .description('SelfWorkflow UE reconcile protocol 1');\n", encoding="utf-8",
+            )
+            self.assertEqual(self._inspect(source)["ueReconcileProtocol"], 1)
+
     def test_ignored_local_sdk_changes_invalidate_an_otherwise_clean_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary).resolve()

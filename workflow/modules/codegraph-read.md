@@ -4,8 +4,8 @@
 
 ## 核对边界
 
-只用实际可用且绑定项目的 MCP/CLI，不因配置/进程存在宣称可调用。优先官方 MCP，给绝对 projectPath、文件/符号及 maxFiles；首次/换项目或核对失效时 preflight，阶段名变化不单独触发。健康且已验证的默认 watcher 可复用无漂移核对，否则新 MCP 查询前核对。
-CLI 路径：`provider query --provider-id codegraph --project-root <绝对repo> --query <text>`；它已包含核对，不先另跑 preflight。成功核对且 fresh 后才查询，不再用 MCP 重复。独立 CLI 调用不假定共享核对缓存。
+只用实际可用且绑定项目的 MCP/CLI。优先官方 MCP，给绝对 projectPath、文件/符号及 maxFiles。已核实 UE 入口在查询内自动同步和验证时，直接发一次查询。其他 MCP 入口首次、换项目或核对失效时先 preflight。只有已验证且健康的 watcher 能复用无漂移核对。缺少该证据时，每次新查询前核对。阶段名变化不单独触发。
+CLI 路径：`provider query --provider-id codegraph --project-root <绝对repo> --query <text>`；这一调用负责维护和核验。复用成功的查询结果。各次独立调用分别核验。
 未暴露 MCP 时用已安装 Windows 桥接 `$env:LOCALAPPDATA\SelfWorkFlow\bin\selfworkflow.cmd`，始终给绝对 --project-root；桥接也缺失才报告。不扫描替代入口、不猜 Python、不用 PATH 的其他副本，不自动安装或创建 watcher/supervisor。
 分支/HEAD、外部编辑、dirty/未跟踪、stale/pending/degraded 使相关证据失效；下次重核对并复查影响结论，不依赖提交或 git add。
 

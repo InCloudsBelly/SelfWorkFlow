@@ -76,18 +76,23 @@ export class PersonalRunStoreError extends Error {
 }
 
 type RunAbortLookup = (run: PersonalRunState) => Promise<boolean>;
+type PlanningSourceSupersessionLookup = (run: PersonalRunState) => Promise<boolean>;
 
 export class FilePersonalRunStore implements PersonalRunStore {
   private readonly createRunId: () => string;
   private readonly now: () => Date;
   private readonly runtimeRoot: string;
   private readonly isRunAborted: RunAbortLookup | undefined;
+  private readonly canSupersedePlanningSource:
+    | PlanningSourceSupersessionLookup
+    | undefined;
 
   constructor(options: {
     runtimeRoot: string;
     createRunId?(): string;
     now?(): Date;
     isRunAborted?: RunAbortLookup;
+    canSupersedePlanningSource?: PlanningSourceSupersessionLookup;
   }) {
     if (!path.isAbsolute(options.runtimeRoot)) {
       throw new PersonalRunStoreError(
@@ -99,6 +104,7 @@ export class FilePersonalRunStore implements PersonalRunStore {
     this.now = options.now ?? (() => new Date());
     this.runtimeRoot = path.resolve(options.runtimeRoot);
     this.isRunAborted = options.isRunAborted;
+    this.canSupersedePlanningSource = options.canSupersedePlanningSource;
   }
 
   async begin(input: PersonalRunBeginInput): Promise<PersonalRunBeginResult> {
@@ -129,10 +135,17 @@ export class FilePersonalRunStore implements PersonalRunStore {
             await this.writeState(refreshed);
             return { runId: state.runId, status: "resuming" };
           }
-          throw new PersonalRunStoreError(
-            "invalid_state",
-            "The active personal Wiki run is bound to a different Wiki or Skill revision; its candidate was retained.",
-          );
+          // An explicit source refresh supersedes only an empty, unfrozen plan.
+          // The original run stays immutable and receives no more planning work.
+          if (
+            !canSupersedePlanningSource(state, input) ||
+            (await this.canSupersedePlanningSource?.(state)) !== true
+          ) {
+            throw new PersonalRunStoreError(
+              "invalid_state",
+              "The active personal Wiki run is bound to a different Wiki or Skill revision; its candidate was retained.",
+            );
+          }
         }
       }
 
@@ -180,6 +193,15 @@ export class FilePersonalRunStore implements PersonalRunStore {
   }> {
     return withPersonalLocks(this.runtimeRoot, async () => {
       const state = await this.read(input.runId);
+      if (state.phase === "planning" && state.planHash === null) {
+        const active = await this.readActivePointer();
+        if (active?.runId !== state.runId) {
+          throw new PersonalRunStoreError(
+            "invalid_state",
+            "The unstarted planning run was superseded; begin with the current source binding.",
+          );
+        }
+      }
       const deletePages = [...(input.deletePages ?? [])];
       assertPagePlan(input.pages, deletePages);
       const planHash = personalHash({
@@ -667,6 +689,7 @@ export class PersonalRunStoreRouter implements PersonalRunStore {
   constructor(
     private readonly options: {
       isRunAborted?: RunAbortLookup;
+      canSupersedePlanningSource?: PlanningSourceSupersessionLookup;
     } = {},
   ) {}
 
@@ -860,6 +883,39 @@ function assertBeginInput(
       "The personal run root binding is invalid.",
     );
   }
+}
+
+function canSupersedePlanningSource(
+  state: PersonalRunState,
+  input: PersonalRunBeginInput,
+): boolean {
+  if (
+    input.force !== true ||
+    state.phase !== "planning" ||
+    state.planHash !== null ||
+    state.queueHash !== null ||
+    state.jobs.length !== 0 ||
+    state.deletePages.length !== 0 ||
+    state.candidate !== undefined ||
+    state.sourceManifestId === undefined ||
+    input.sourceManifestId === undefined ||
+    state.sourceManifestId === input.sourceManifestId ||
+    input.sourceConfirmation === undefined
+  ) {
+    return false;
+  }
+  return sameBinding(
+    {
+      ...state,
+      skillAggregateHash: input.skillAggregateHash,
+      ...(input.compatibilityManifestHash === undefined
+        ? {}
+        : { compatibilityManifestHash: input.compatibilityManifestHash }),
+      sourceManifestId: input.sourceManifestId,
+      sourceConfirmation: input.sourceConfirmation,
+    },
+    input,
+  );
 }
 
 function refreshPlanningRules(

@@ -69,6 +69,12 @@ class _SubprocessCommandPort:
     """Shell-free process boundary used only by the explicit Provider CLI."""
 
     def run(self, argv, *, cwd=None):
+        return self._run(argv, cwd=cwd, output_options={"capture_output": True})
+
+    def run_with_progress(self, argv, *, cwd=None):
+        return self._run(argv, cwd=cwd, output_options={"stdout": subprocess.PIPE})
+
+    def _run(self, argv, *, cwd, output_options):
         from selfworkflow.v3.providers.codegraph import CommandResult
 
         started = time.monotonic()
@@ -77,7 +83,7 @@ class _SubprocessCommandPort:
             if entry.suffix.casefold() in {".cmd", ".bat"} or entry.name.casefold() in {"cmd", "cmd.exe"}:
                 raise OSError("Batch provider entries are not supported; rebind the native runtime.")
             result = subprocess.run(
-                list(argv), cwd=cwd, check=False, capture_output=True,
+                list(argv), cwd=cwd, check=False, **output_options,
                 text=True, encoding="utf-8", errors="replace", timeout=3600,
             )
         except subprocess.TimeoutExpired as error:
@@ -100,7 +106,7 @@ class _SubprocessCommandPort:
         return CommandResult(
             exit_code=result.returncode,
             stdout=result.stdout,
-            stderr=result.stderr,
+            stderr=result.stderr or "",
             duration_ms=int((time.monotonic() - started) * 1000),
             timeout_ms=3600000,
         )
@@ -315,6 +321,19 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
     if managed_submodule:
         verify_codegraph_ue_build(source, runtime)
         source_type = "managed-submodule"
+    ue_protocol = False
+    if script.with_name("ue-reconcile.js").relative_to(source).as_posix() in runtime["files"]:
+        with script.open("rb") as stream:
+            entry = stream.read(16 * 1024 * 1024 + 1)
+        if hashlib.sha256(entry).hexdigest() != runtime["files"].get(script.relative_to(source).as_posix()):
+            raise ValueError("codegraph-source-inspection-failed")
+        # A checkout can retain a stale helper after rebuilding an older
+        # branch. The actual hashed entry must register the versioned command.
+        ue_protocol = bool(re.search(
+            rb"""\.command\(\s*['"]reconcile-ue <path>['"]\s*,\s*\{\s*hidden:\s*true\s*\}\s*\)"""
+            rb"""\s*\.description\(\s*['"]SelfWorkflow UE reconcile protocol 1['"]\s*\)""",
+            entry,
+        ))
     return {
         "source": source,
         "script": script,
@@ -326,6 +345,7 @@ def _inspect_codegraph_source_identity(source_value: str) -> dict[str, object]:
             "sourceHash": source_hash,
             "version": version or "unverified",
             "commandPrefix": command_prefix,
+            **({"ueReconcileProtocol": 1} if ue_protocol else {}),
             "supportStatus": "unverified",
         },
     }

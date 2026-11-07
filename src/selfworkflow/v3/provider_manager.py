@@ -700,6 +700,7 @@ class ProviderManager:
                     and provider["source"]["kind"] == "managed-submodule"
                     and source_report.get("sourceType") == "managed-submodule"
                 ),
+                allow_ue_reconcile=source_report.get("ueReconcileProtocol") == 1,
             )
         except CodeGraphAdapterError:
             raise ProviderManagerError("provider-adapter-invalid") from None

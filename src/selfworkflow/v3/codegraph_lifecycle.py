@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from selfworkflow.v3.providers.codegraph import (
     CodeGraphAdapter,
@@ -38,12 +39,12 @@ def _safe_project_root(project_root: object) -> Path:
         raise CodeGraphProjectError("codegraph-project-root-invalid") from None
 
 
-def _changed_path_count(changed_paths: Sequence[str] | None) -> int:
+def _checked_changed_paths(changed_paths: Sequence[str] | None) -> tuple[str, ...]:
     if changed_paths is None:
-        return 0
+        return ()
     if isinstance(changed_paths, (str, bytes)):
         raise CodeGraphProjectError("codegraph-changed-paths-invalid")
-    values: set[str] = set()
+    values: dict[str, None] = {}
     try:
         for value in changed_paths:
             if (
@@ -53,19 +54,23 @@ def _changed_path_count(changed_paths: Sequence[str] | None) -> int:
                 or any(ord(character) < 32 for character in value)
             ):
                 raise CodeGraphProjectError("codegraph-changed-paths-invalid")
-            values.add(value)
+            values[value] = None
     except TypeError:
         raise CodeGraphProjectError("codegraph-changed-paths-invalid") from None
-    return len(values)
+    return tuple(values)
 
 
-def _assert_no_pending_publication(root: Path) -> None:
+def _index_dir_names() -> tuple[str, ...]:
     name = os.environ.get("CODEGRAPH_DIR", "").strip()
     # Without an override the provider may choose either platform default.
     names = (name,) if name else (".codegraph", ".codegraph-wsl")
     if name == "." or ".." in name or "/" in name or "\\" in name or Path(name).is_absolute():
         names = (".codegraph",)
-    for selected in names:
+    return names
+
+
+def _assert_no_pending_publication(root: Path) -> None:
+    for selected in _index_dir_names():
         for suffix in (".publication.json", ".publication.lock"):
             try:
                 (root / f"{selected}{suffix}").lstat()
@@ -75,6 +80,9 @@ def _assert_no_pending_publication(root: Path) -> None:
                 raise CodeGraphProjectError("codegraph-publication-state-unknown") from None
             raise CodeGraphProjectError("codegraph-publication-recovery-required")
 
+_T = TypeVar('_T')
+
+
 class CodeGraphProjectLifecycle:
     """Execute one automatic boundary; CodeGraph owns process/DB locking."""
 
@@ -83,7 +91,7 @@ class CodeGraphProjectLifecycle:
             raise CodeGraphProjectError("codegraph-adapter-invalid")
         self._adapter = adapter
 
-    def _guarded_call(self, root: Path, operation: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    def _guarded_call(self, root: Path, operation: Callable[[], _T]) -> _T:
         _assert_no_pending_publication(root)
 
         def validate_dispatch() -> None:
@@ -116,6 +124,37 @@ class CodeGraphProjectLifecycle:
     def _initial_status(self, root: Path) -> dict[str, Any]:
         return self._guarded_call(root, lambda: self._adapter.maintenance_status(str(root)))
 
+    def _automatic_route(self, root: Path, **options: Any) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        def native() -> dict[str, Any] | None:
+            return self._guarded_call(root, lambda: self._adapter.reconcile_ue(str(root), **options))
+
+        if self._adapter.allow_ue_reconcile:
+            _assert_no_pending_publication(root)
+            # This is a startup hint, not the authority for the active profile.
+            # On Windows a dormant WSL config cannot select the native route.
+            names = _index_dir_names()
+            for name in names[:1] if os.name == "nt" else names:
+                try:
+                    with (root / name / "indexing.json").open("rb") as stream:
+                        data = stream.read(1024 * 1024 + 1)
+                    config = json.loads(data) if len(data) <= 1024 * 1024 else None
+                except (OSError, ValueError, RecursionError):
+                    continue
+                if isinstance(config, dict) and "ueEngine" in config:
+                    result = native()
+                    if result is not None:
+                        return result, {}
+                    break
+
+        initial = self._initial_status(root)
+        if (self._adapter.allow_ue_reconcile and initial.get("ueProfile") is True
+                and initial.get("indexingConfigInvalid") is not True):
+            result = native()
+            if result is None:
+                raise CodeGraphProjectError("codegraph-ue-profile-changed")
+            return result, initial
+        return None, initial
+
     def _ensure_from_status(
         self, root: Path, initial: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -123,15 +162,21 @@ class CodeGraphProjectLifecycle:
         current = dict(initial)
         if current.get("indexingConfigInvalid") is True:
             raise CodeGraphProjectError("codegraph-indexing-config-invalid")
+        if current.get("ueProfile") is True and self._adapter.allow_ue_reconcile:
+            # A UE generation without a declared native route needs explicit
+            # diagnosis. Do not fall through to the permissive legacy writer.
+            raise CodeGraphProjectError("codegraph-ue-profile-changed")
         if current.get("indexState") == "indexing":
             raise CodeGraphProjectError("codegraph-project-busy")
         if current.get("initialized") is not True:
             raise CodeGraphProjectError("codegraph-explicit-initialization-required")
         # Missing/unknown state can be an interrupted publication or partial bake.
-        if current.get("indexState") != "complete":
+        if current.get("storedIndexState", current.get("indexState")) != "complete":
             raise CodeGraphProjectError("codegraph-index-state-not-complete")
         files, nodes = current.get("fileCount"), current.get("nodeCount")
-        if type(files) is int and type(nodes) is int and (files == 0) != (nodes == 0):
+        if current.get("dataConsistent") is False or (
+            type(files) is int and type(nodes) is int and (files == 0) != (nodes == 0)
+        ):
             raise CodeGraphProjectError("codegraph-index-data-inconsistent")
         # An extraction-version upgrade needs a separately verified candidate.
         if current.get("reindexRecommended") is True:
@@ -160,24 +205,28 @@ class CodeGraphProjectLifecycle:
 
     def ensure(self, project_root: str) -> dict[str, Any]:
         root = _safe_project_root(project_root)
-        initial = self._initial_status(root)
-        return self._ensure_from_status(root, initial)
+        result, initial = self._automatic_route(root)
+        return result if result is not None else self._ensure_from_status(root, initial)
 
     def sync(
         self, project_root: str, changed_paths: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         root = _safe_project_root(project_root)
-        count = _changed_path_count(changed_paths)
-        initial = self._initial_status(root)
-        result = self._ensure_from_status(root, initial)
-        result["changedPathCount"] = count
+        paths = _checked_changed_paths(changed_paths)
+        result, initial = self._automatic_route(root, changed_paths=paths)
+        if result is None:
+            result = self._ensure_from_status(root, initial)
+        result["changedPathCount"] = len(paths)
         return result
 
     def query(
         self, project_root: str, query: str, *, query_kind: str = "ask",
     ) -> dict[str, Any]:
         root = _safe_project_root(project_root)
-        ensured = self._ensure_from_status(root, self._initial_status(root))
+        native, initial = self._automatic_route(root, query=query, query_kind=query_kind)
+        if native is not None:
+            return native
+        ensured = self._ensure_from_status(root, initial)
         result = self._guarded_call(root, lambda: self._adapter.query(
             str(root), query, query_kind=query_kind,
         ))
