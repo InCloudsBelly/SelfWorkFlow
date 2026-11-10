@@ -8,13 +8,13 @@
 
 按操作读：
 - [知识](workflow/modules/knowledge.md)。
-- [行为/测试](skills/code-quality/SKILL.md)。
+- [行为/测试](skills/code-quality/SKILL.md)。用户或项目规则选用 CodeGraph、任务明确要求图查询证据，或已知当前项目有图谱绑定时，才启用代码方法的图谱分支。查询按图关系需要，写后限已启用索引内的源码变化。其余查源码和已有导航，跳过图谱模块与探测。
 - [数学/算法](skills/sympy/SKILL.md)。
 - [变更/副作用](skills/workflow-quality/SKILL.md)。
 - [审查](workflow/modules/review.md)：明确审查或项目 Review 匹配。
 - [交付](workflow/modules/delivery.md)：可拆分且有分工收益的仓库实施/PR正文/复盘。
 - [维护](skills/workflow-skill-maintenance/SKILL.md)：工作流/Skill 变更。
-- [缓存保护](workflow/modules/build.md)：编译/共享头/新模块/构建环境。
+- 编译验证或变更影响编译的共享头、模块、环境时，读[缓存保护](workflow/modules/build.md)。
 - [接入](workflow/onboarding.md)：安装/迁移/能力变化；[契约](workflow/legacy-host.md)：显式契约/契约 Host。
 
 路由不足才查 `methods/INDEX.md`；只读最窄命中项，引用不触发。TEA/grilling/Superpowers 仅显式；不另起流程/安装/hooks/菜单、遍历引用树或探测未用服务。

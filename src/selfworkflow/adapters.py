@@ -55,6 +55,7 @@ _CORE_PATHS = (
     "workflow/modes/deep.md",
     "workflow/legacy-host.md",
     "workflow/modules/build.md",
+    "workflow/modules/build-unreal.md",
     "workflow/modules/code.md",
     "workflow/modules/optional-integrations.md",
     "workflow/modules/delivery.md",

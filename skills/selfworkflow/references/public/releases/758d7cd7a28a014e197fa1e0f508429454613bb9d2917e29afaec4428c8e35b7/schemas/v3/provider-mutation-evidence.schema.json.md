@@ -1,0 +1,49 @@
+# 只读参考：provider-mutation-evidence.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-mutation-evidence.schema.json",
+  "title": "SelfWorkFlow V3 provider mutation evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "evidenceHash", "subjectKind", "subjectPlanHash", "executionNonce", "attemptRef", "providerBindingHash", "providerId", "canonicalProjectRootHash", "startedAt", "completedAt", "observedAt", "preStateIdentity", "postStateIdentity", "mutationTargetHash", "payloadHash", "evidenceKind", "actualTargets", "before", "after"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "evidenceHash": {"$ref": "#/$defs/hash"},
+    "subjectKind": {"enum": ["operation-plan", "query-plan"]},
+    "subjectPlanHash": {"$ref": "#/$defs/hash"},
+    "executionNonce": {"$ref": "#/$defs/id"},
+    "attemptRef": {"$ref": "#/$defs/id"},
+    "providerBindingHash": {"$ref": "#/$defs/hash"},
+    "providerId": {"$ref": "#/$defs/id"},
+    "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
+    "startedAt": {"type": "string", "format": "utc-date-time"},
+    "completedAt": {"type": "string", "format": "utc-date-time"},
+    "observedAt": {"type": "string", "format": "utc-date-time"},
+    "preStateIdentity": {"$ref": "#/$defs/hash"},
+    "postStateIdentity": {"$ref": "#/$defs/hash"},
+    "mutationTargetHash": {"$ref": "#/$defs/hash"},
+    "payloadHash": {"$ref": "#/$defs/hash"},
+    "evidenceKind": {"enum": ["filesystem-manifest", "managed-state-manifest", "process-state-delta", "service-state-delta"]},
+    "actualTargets": {"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/actual"}},
+    "before": {},
+    "after": {}
+  },
+  "allOf": [
+    {"if": {"properties": {"evidenceKind": {"const": "filesystem-manifest"}}}, "then": {"properties": {"before": {"$ref": "#/$defs/manifest"}, "after": {"$ref": "#/$defs/manifest"}}}},
+    {"if": {"properties": {"evidenceKind": {"enum": ["managed-state-manifest", "process-state-delta", "service-state-delta"]}}}, "then": {"properties": {"before": {"$ref": "#/$defs/state"}, "after": {"$ref": "#/$defs/state"}}}}
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "projectPath": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*[ .](?:/|$))[^\\u0000-\\u001f<>:\"|?*]+$"},
+    "manifest": {"type": "array", "maxItems": 200000, "items": {"type": "object", "additionalProperties": false, "required": ["path", "type", "size", "contentHash", "reparseIdentityHash"], "properties": {"path": {"$ref": "#/$defs/projectPath"}, "type": {"enum": ["file", "directory", "reparse"]}, "size": {"type": "integer", "minimum": 0}, "contentHash": {"$ref": "#/$defs/hash"}, "reparseIdentityHash": {"$ref": "#/$defs/hash"}}}},
+    "state": {"type": "object", "additionalProperties": false, "required": ["identityHash", "revision"], "properties": {"identityHash": {"$ref": "#/$defs/hash"}, "revision": {"type": "string", "minLength": 1, "maxLength": 256}}},
+    "actual": {"type": "object", "additionalProperties": false, "required": ["targetKind", "targetId", "action"], "properties": {"targetKind": {"enum": ["filesystem", "managed-state", "process", "service"]}, "targetId": {"type": "string", "minLength": 1, "maxLength": 1024}, "action": {"$ref": "#/$defs/id"}}}
+  }
+}
+
+````

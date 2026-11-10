@@ -25,6 +25,7 @@ class WorkflowCompressionTests(unittest.TestCase):
         "workflow/modes/deep.md",
     )
     MODULES = (
+        "workflow/modules/build-unreal.md",
         "workflow/modules/code.md",
         "workflow/modules/codegraph-read.md",
         "workflow/modules/codegraph-update.md",
@@ -156,9 +157,15 @@ class WorkflowCompressionTests(unittest.TestCase):
     def test_build_cache_rules_are_loaded_at_the_build_boundary(self):
         bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
         build = (ROOT / "workflow/modules/build.md").read_text(encoding="utf-8")
+        unreal = (ROOT / "workflow/modules/build-unreal.md").read_text(encoding="utf-8")
         self.assertIn("workflow/modules/build.md", bootstrap)
-        for boundary in ("Clean/Rebuild", "-NoLiveCoding", "共享 Intermediate/PCH", "隔离输出", "取得用户确认"):
+        self.assertNotIn("build-unreal.md", bootstrap)
+        self.assertIn("(build-unreal.md)", build)
+        for boundary in ("Clean/Rebuild", "隔离输出", "取得用户确认"):
             self.assertIn(boundary, build)
+        for boundary in ("-NoLiveCoding", "共享 Intermediate/PCH", "WITH_LIVE_CODING"):
+            self.assertNotIn(boundary, build)
+            self.assertIn(boundary, unreal)
         self.assertNotIn("Clean/Rebuild", bootstrap)
 
     def test_module_restrictions_are_scoped_to_their_operations_and_artifacts(self):

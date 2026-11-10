@@ -7,6 +7,8 @@
 read 只读，propose 只产候选；update 须写入授权、版本/来源核验、独立 Review 与可恢复发布，CAS/恢复归所选 adapter。直接要求“总结到 Wiki/更新/审核后发布”即对应范围授权；草稿/方案/意图不明不发布。正文/来源用中文，排除凭据、私人推理、临时事务、完整敏感原文和无效结论。
 显式后端优先；已选 selfopenwiki 或 knowledge profile、个人 Wiki 未另选后端时用 [SelfWiki 入口](../../skills/kg-selfopenwiki/SKILL.md)，只读当前操作引用，不预载内部 Writer/MCP 全契约。status、路径、读/Viewer、恢复、运行身份归后端；其他 adapter 不调用 SelfWiki。缺能力/漂移记 unverified，继续普通交付并列待同步，不猜模型/数据库/OAuth/路径。
 
+明确以 DocHub 为目标导出、提交或修复发布稿时，加载 [DocHub 发布适配](../../skills/knowledge-backend/references/dochub-publish.md)。来源独立路由，选定 SelfWiki 来源时沿其安全读取流程。
+
 ## 代码类 Wiki 的源码理解
 
 新增、实质更新或审查代码类 Wiki 涉及行为时，在授权来源内按 [CodeGraph 读取](codegraph-read.md)核验项目与新鲜度并定向查询，再查当前源码的入口、调用、状态/数据流、生产/消费及失败。状态、计数和旧文不能替代查询。

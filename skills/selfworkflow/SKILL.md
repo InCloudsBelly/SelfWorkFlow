@@ -5,10 +5,10 @@ description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概
 
 [兼容入口](references/public/WORKFLOW.md)
 
-规则版本：`90aba1851b58`
+规则版本：`758d7cd7a28a`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](references/public/releases/90aba1851b58c462ee5c33b339f9aea0bcccfc5cbbe6d83192e6305aec415d55/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](references/public/releases/758d7cd7a28a014e197fa1e0f508429454613bb9d2917e29afaec4428c8e35b7/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 
@@ -20,13 +20,13 @@ description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概
 
 按操作读：
 - 知识（`workflow/modules/knowledge.md`）。
-- 行为/测试（`methods/code-quality/METHOD.md`）。
+- 行为/测试（`methods/code-quality/METHOD.md`）。用户或项目规则选用 CodeGraph、任务明确要求图查询证据，或已知当前项目有图谱绑定时，才启用代码方法的图谱分支。查询按图关系需要，写后限已启用索引内的源码变化。其余查源码和已有导航，跳过图谱模块与探测。
 - 数学/算法（`methods/sympy/METHOD.md`）。
 - 变更/副作用（`methods/workflow-quality/METHOD.md`）。
 - 审查（`workflow/modules/review.md`）：明确审查或项目 Review 匹配。
 - 交付（`workflow/modules/delivery.md`）：可拆分且有分工收益的仓库实施/PR正文/复盘。
 - 维护（`methods/workflow-skill-maintenance/METHOD.md`）：工作流/Skill 变更。
-- 缓存保护（`workflow/modules/build.md`）：编译/共享头/新模块/构建环境。
+- 编译验证或变更影响编译的共享头、模块、环境时，读缓存保护（`workflow/modules/build.md`）。
 - 接入（`workflow/onboarding.md`）：安装/迁移/能力变化；契约（`workflow/legacy-host.md`）：显式契约/契约 Host。
 
 路由不足才查 `methods/INDEX.md`；只读最窄命中项，引用不触发。TEA/grilling/Superpowers 仅显式；不另起流程/安装/hooks/菜单、遍历引用树或探测未用服务。

@@ -7,7 +7,7 @@ description: Use for reading, designing, implementing, debugging, maintaining, o
 
 提供不依赖任何本地工具或厂商 Agent 的 C++ 推理核心。CodeGraph、LSP、编译器、Sanitizer、调试器和深度审计器是辅助能力；缺失时不得伪造其结果。
 
-图谱绑定、新鲜度、失败与生命周期统一遵循 [workflow/modules/codegraph-read.md](../../workflow/modules/codegraph-read.md)；本方法不另做状态检查、初始化或询问偏好。只读已绑定项目图并复核源码，工具缺失如实 unverified；不将 rg、AST 或图谱当构建/运行证据。
+按任务入口选用 CodeGraph 后，按[图谱读取](../../workflow/modules/codegraph-read.md)核对绑定和新鲜度，本方法不另做状态检查、初始化或询问偏好。以源码复核结构证据，缺失如实标 unverified；rg、AST 或图谱均不代替构建/运行证据。
 
 只读分析只应用推理核心和直接命中的按需参考；不会因此进入修改、构建、调试器或完整 Design/Plan/Review 流程。
 

@@ -10,7 +10,7 @@ SelfWorkFlow 是一套面向 AI 编程 Agent 的中文工程工作流。它帮�
 
 ### 方式一：clone 后引用入口
 
-适合希望直接使用仓库规则、让后续 `git pull` 更新来源的用户。需要 Git，以及能够读取本地文件并支持项目或个人指令的 Agent 宿主。
+适合希望直接使用仓库规则、让后续 `git pull` 更新来源的用户。需要 Git 和能读取本地文件的 Agent 宿主。
 
 ```powershell
 git -c core.longpaths=true clone https://github.com/InCloudsBelly/SelfWorkFlow.git SelfWorkFlow
@@ -18,14 +18,14 @@ cd SelfWorkFlow
 git config core.longpaths true
 ```
 
-在宿主支持的项目或个人指令中加入，替换其中的绝对路径：
+在自己的任务项目中让 Agent 读取 clone 的根 `SKILL.md`。可直接在会话中指定，或把以下指令加到宿主支持的项目或个人指令里。
 
 ```text
 默认工程流程使用 <仓库绝对路径>/SKILL.md。
 新任务绑定入口给出的 revision/documentRoot；子任务和续接继承这份绑定。
 ```
 
-普通使用无需创建 `.venv`、运行生成命令或初始化 submodule。完整方法、引用及所需静态资源已经包含在 [`skills/selfworkflow/`](skills/selfworkflow/SKILL.md) 中。clone 完成只代表文件可用，宿主是否启用这份指令仍需确认。
+普通使用直接读取随包文档，无需安装运行时、创建 `.venv`、运行生成命令或初始化 submodule。完整方法、引用及静态资源已经包含在 [`skills/selfworkflow/`](skills/selfworkflow/SKILL.md) 中。任务所需的专项按条件加载，普通代码分析可以直接查源码和项目已有导航。
 
 首次使用时，可让 Agent 读取入口并报告 `revision`、`documentRoot`、所选任务深度及需要加载的模块。入口可读而绑定正文不可读时，应报告具体路径与权限问题。
 
@@ -56,7 +56,7 @@ git config core.longpaths true
 | 工程实施与诊断 | 沿责任层追踪数据、状态、失效与消费者；约束改动范围，保留失败和边界证据 | 行为代码才加载代码方法；复杂诊断按实际问题启用 |
 | 代码审查 | 检查规格、行为风险、兼容性和测试证据；发现问题后继续覆盖剩余范围 | Full/Deep 使用一个独立 Reviewer；修订复核沿原 Reviewer |
 | C / C++ 与 UE | 先读取紧凑核心，再选择所有权、类型、并发、ABI、性能、构建或 UE 专项 | 普通文档和非 C++ 任务不加载整套 C++ 方法 |
-| CodeGraph 源码关系查询 | 使用项目图核对符号、调用和影响关系，再核对当前源码 | 需要已配置的 provider 和可查询索引；缺失或需重建时保留现状 |
+| CodeGraph 源码关系查询 | 使用项目图核对符号、调用和影响关系，再核对当前源码 | 需要图关系且已选用或已知项目绑定时加载。查询需要 provider 和可用索引 |
 | 测试与验证 | 行为变更按 TDD 和最窄充分验证推进，区分静态、构建、运行与复现证据 | TEA、ATDD、NFR、框架和 CI 专项仅在明确请求时启用 |
 | Wiki 知识更新 | 区分 read / propose / update，核验来源、正文、图解和实施可用性；经独立审查与后端协议发布 | 需要已验证的 Wiki 服务与权限；普通 Markdown 不自动写 Wiki，可单独借用内容标准 |
 | 主题并行 | 同层、页面归属互斥的主题由独立 SubAgent 准备私稿与证据，每个主题覆盖其全部 Page | 不继承主历史；大主题再下钻；共享页和正式队列由主调度管理 |
@@ -168,6 +168,10 @@ Manage_SelfWorkFlow_Wiki.bat visualize --wiki-root "<独立 Wiki Git 仓库的�
 `source-ready` 表示源码构建就绪，`host-registered` 表示宿主配置已注册，`wiki-ready` 才表示真实 status 与安全读取通过。配置已更新但原生工具列表尚未刷新时，需要按宿主机制刷新；不把注册成功当作工具已暴露。某步失败时保留日志与候选，从报告的缺口处理，不跳过前置状态。
 
 Wiki 正文、长期 Claims 和可分享来源位于独立 Git 仓库；运行状态与凭据不混入正文。读取、候选准备、独立审查和正式发布分别判断。完整导入和恢复入口见 [WIKI_LAYOUT 的“拉取后的阅读与导入”](extensions/knowledge/selfopenwiki/WIKI_LAYOUT.md#拉取后的阅读与导入)。
+
+### DocHub
+
+可以请求「把这几篇 Wiki 或 Markdown 导出为 DocHub 发布稿」。[DocHub 发布适配](skills/knowledge-backend/references/dochub-publish.md)负责保留全文、图和公式，转换附件和锚点。正式发布使用宿主提供的 DocHub MCP，按具体稿件确认后提交，并分别验收接口读回与网页呈现。
 
 ## 已知问题
 
