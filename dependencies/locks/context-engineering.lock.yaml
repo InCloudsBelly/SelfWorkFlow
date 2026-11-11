@@ -1,0 +1,20 @@
+schemaVersion: 1
+sourceId: context-engineering
+sourceType: maintenance-reference
+canonicalUrl: https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering.git
+path: dependencies/upstream/context-engineering
+gitlinkCommit: 9ff0c99108b36d3b886defd825d8ac1f47dba374
+gitTree: 404babfb9b3434440162e06286b8da05a5b16139
+license:
+  path: LICENSE
+  spdx: MIT
+  status: verified
+  hash: sha256:65bc33b0759a48b980962833b12bcb820404da9f5256bff39c00e89471bcf209
+resources:
+- LICENSE
+- skills/context-compression/SKILL.md
+- skills/context-compression/references/evaluation-framework.md
+files:
+  LICENSE: sha256:65bc33b0759a48b980962833b12bcb820404da9f5256bff39c00e89471bcf209
+  skills/context-compression/SKILL.md: sha256:ab4fd1e1046db339d83ead5089d4cb9d9c487232945d4ff6be90e08a03f6cfea
+  skills/context-compression/references/evaluation-framework.md: sha256:2584d5ab6c1322c0df7a581a6f5354be052bae077e16f76ef7c772f750ef81d2

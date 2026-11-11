@@ -5,10 +5,10 @@ description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概
 
 [兼容入口](references/public/WORKFLOW.md)
 
-规则版本：`758d7cd7a28a`
+规则版本：`0825f348e39b`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](references/public/releases/758d7cd7a28a014e197fa1e0f508429454613bb9d2917e29afaec4428c8e35b7/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](references/public/releases/0825f348e39be67d2d01284e94d8cfce5322ad361fb4a24289d7533c45ccc2d8/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 
@@ -33,7 +33,7 @@ description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概
 
 保护既有修改/凭据，沿用授权；越权/并发冲突只停受影响动作确认，无关修复另获授权。缺口/未执行标 unverified，失败只阻依赖项，先解决相关 Critical/Important。
 
-证据充分即推进，只补影响方案/验收/风险的缺口。既有交接状态保留目标/授权、revision/documentRoot、范围/输入版本、环境/消费者、结论/证据/缺口/待办及准确路径/标识；合并新增、替换失效项。续接核绑定/输入/未关闭项/下一步，直达原路径，不重选规则/重启阶段。计数不替代验收/收益证据，必要工作不因预算放弃。
+证据充分即推进。既有交接状态保留目标/授权、revision/documentRoot、范围/输入版本、环境/消费者、结论/证据/缺口/待办及路径/标识；合并新增、替换失效。保存/压缩上下文、交接恢复或宿主报压力读续接（`workflow/modules/context.md`）。计数不替代验收/收益证据，必要工作不因预算放弃。
 
 检索先定缺口/用途/范围/来源；多轮/歧义/跨源/扩围或输出量不明读通用搜索（`workflow/modules/search.md`）。工具内投影，批量合计限量，无新依据不重扫/重审/重测。后台进度沿原作业回主对话，等待/长命令可中断。
 <!-- /selfworkflow:core -->

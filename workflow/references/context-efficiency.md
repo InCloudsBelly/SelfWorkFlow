@@ -26,6 +26,14 @@
 
 吸纳新摘要与既有状态增量合并、准确路径/标识、恢复问题核对；失效授权/版本/结论须替换，不只追加。不新建平行账本，不套窗口阈值、压缩比例或自动派 Agent。
 
+2026-11-11 将同版上游登记为维护用 submodule，未升级此前核验的 commit。以下路径相对维护仓库根：`dependencies/upstream/context-engineering`；来源身份、Git tree、所选原文与许可 SHA-256 固定在 `dependencies/locks/context-engineering.lock.yaml`。另核验[评测参考](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering/blob/9ff0c99108b36d3b886defd825d8ac1f47dba374/skills/context-compression/references/evaluation-framework.md)，hash 为 `2584d5ab6c1322c0df7a581a6f5354be052bae077e16f76ef7c772f750ef81d2`。SelfWorkflow 的适配由[上下文模块](../modules/context.md)和[效果验证](context-compaction-evaluation.md)单独负责，不加载/分发上游整包，不引入自动 hooks 或第二套交接文件。
+
+维护升级按需进行：
+
+1. `git submodule update --init -- dependencies/upstream/context-engineering` 恢复仓库固定来源。核对 `.gitmodules` URL、gitlink、干净工作树、commit/tree、选定文件与许可的 UTF-8/LF hash。此研究来源不进入普通初始化/导出复制清单，`skill sync/check` 不代验其 Git 身份。
+2. 需要升级时只在该 submodule fetch；先比较锁定 commit 与明确候选 commit 的选定原文、评测参考、许可及必要引用变化，再选用完整 commit。上游更新仅提供候选方法，不自动替换当前规则或授权。
+3. 在干净来源切到已审候选，更新 gitlink、锁和本节版本/hash；仅将相关变化合并到现有 owner，不照搬上游触发阈值、压缩率、安装或调度。按效果验证与紧凑性审查验收，再执行仓库 `skill sync/check`，交付完整新 release；在途任务沿原绑定。
+
 ## rtk-ai/rtk（Apache-2.0）
 
 [输出恢复文档](https://github.com/rtk-ai/rtk/blob/8268663fac0ba7e92e3a9e1f6e2cf943b659c07a/docs/guide/getting-started/configuration.md) · [LICENSE](https://github.com/rtk-ai/rtk/blob/8268663fac0ba7e92e3a9e1f6e2cf943b659c07a/LICENSE)

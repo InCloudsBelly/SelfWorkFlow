@@ -32,3 +32,6 @@
 [submodule "dependencies/upstream/scientific-agent-skills"]
 	path = dependencies/upstream/scientific-agent-skills
 	url = https://github.com/K-Dense-AI/scientific-agent-skills.git
+[submodule "dependencies/upstream/context-engineering"]
+	path = dependencies/upstream/context-engineering
+	url = https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering.git

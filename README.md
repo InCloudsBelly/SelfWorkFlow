@@ -211,6 +211,8 @@ if (-not (Test-Path -LiteralPath '.venv')) { py -3 -m venv .venv }
 
 该步骤成功后再生成。来源路径缺失、Gitlink / hash 不符或含本地修改时，应先核对锁文件与实际差异，保留已有修改；不直接切到上游最新版本或绕过校验。
 
+上下文方法的维护来源固定在 `dependencies/upstream/context-engineering` submodule；仅研究/升级时按[来源记录](workflow/references/context-efficiency.md)初始化与核对。运行端使用 SelfWorkflow 的[按需压缩与恢复规则](workflow/modules/context.md)，不加载整个上游 Skill 集；普通消费和文档生成不依赖该研究来源已初始化。效果验证按需读取，不增加常驻摘要或评测流程。
+
 规则、方法、来源锁或随包资源变化后，在根目录执行生成与检查：
 
 ```powershell
