@@ -30,7 +30,7 @@ class KnowledgeContractTests(unittest.TestCase):
             document["defaultRouting"],
             {
                 "profile": "knowledge",
-                "backend": "selfopenwiki",
+                "backend": None,
                 "intents": [
                     "wiki-visualize",
                     "wiki-summary",

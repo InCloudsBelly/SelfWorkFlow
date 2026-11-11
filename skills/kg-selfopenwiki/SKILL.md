@@ -3,9 +3,9 @@ name: kg-selfopenwiki
 description: 已选 SelfWiki 后读取/提议/更新/恢复/绑定/浏览个人Wiki，或Relay/代理/iframe预览加载、空白、静态脚本403的知识查询；另选后端时服从。普通代码/Markdown/Obsidian不触发。
 ---
 
-# SelfOpenWiki 操作入口
+# SelfOpenWiki 可选后端接线
 
-SelfWorkflow 管阶段/授权/Review，本方法只路由；下述限制不约束其他模块或 SelfWorkflow 源 Git。只读当前操作引用，换操作补缺，同版已读复用；不因profile/链接预载全部引用、内部Writer或完整MCP契约。
+仅在已选择 SelfOpenWiki 来源或发布目标时承接下列后端操作；SelfWorkflow 管宿主阶段/授权/Review。生成或审查内容复用 [Wiki 工作流](../wiki-workflow/SKILL.md)，状态/恢复/Viewer 不启动写作链。本方法不拥有通用写作质量；下述限制不约束其他模块或 SelfWorkflow 源 Git。只读当前操作引用，换操作补缺，同版已读复用；不因profile/链接预载全部引用、内部Writer或完整MCP契约。
 
 | 本轮操作 | 必需引用 |
 | --- | --- |

@@ -129,10 +129,10 @@ modules:
     hash: sha256:7a288d866aa4be1201d345c802a307e58127ce83e9abe6bd3d72de9958160bb2
   - id: knowledge-read
     ref: modules/knowledge-read.yaml
-    hash: sha256:5f4a51f09423fe01a960d95f22ec227b3e518423299ad50c4cc5b8a632e4763d
+    hash: sha256:d169b4ac313f7792b4cf2f70024e900316c864b449c8607a2682140d3ff5e163
   - id: knowledge-propose
     ref: modules/knowledge-propose.yaml
-    hash: sha256:f94829bfb79164befc8d82ded314192935a7b95e5f2aa96655ddb9ae50447ce8
+    hash: sha256:55bca4a724966a2ba9d5f5afc40b2051652e81fead7b6f86de5101504a69b261
   - id: knowledge-update
     ref: modules/knowledge-update.yaml
-    hash: sha256:f5d0d522b41cdcd0f552d647edffa8bc3fcb485f87916c68f8071fdca4aa2f03
+    hash: sha256:743f3c02d6c9a188d23b6bcce441b8069b1089ec45a757ea026687bfea070030

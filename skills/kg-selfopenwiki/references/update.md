@@ -2,7 +2,7 @@
 
 候选与已授权写入按本页。propose 止于候选。
 
-写作与内容验收按[质量标准](../../knowledge-backend/references/wiki-quality.md)。在 `PagePlan.instructions` 留规则绑定及覆盖引用，按角色交接可达的同版规则、候选和证据。同专题跨 PageJob 复用，不可达时补一次必要正文。独立 Reviewer 复用有效证据，取得生命周期 binding 与 C7 reviewPackage，回执绑定实际发布候选。
+写作流程与内容验收复用 [Wiki 工作流](../../wiki-workflow/SKILL.md)，本页只承接所选后端生命周期。在 `PagePlan.instructions` 留规则绑定及覆盖引用，按角色交接可达的同版规则、候选和证据。同专题跨 PageJob 复用，不可达时补一次必要正文。独立 Reviewer 复用有效证据，取得生命周期 binding 与 C7 reviewPackage，回执绑定实际发布候选。
 
 默认使用 `selfopenwiki:personal-openwiki-v1` 的实时 schema。首次 `openwiki_status` 确认 schema 2、external mode、OAuth-free、`externalAgent.ready=true`、恢复闭环及以下能力均 verified。
 

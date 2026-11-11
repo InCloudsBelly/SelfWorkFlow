@@ -95,6 +95,7 @@ _CORE_PATHS = (
     "skills/obsidian-bases",
     "skills/json-canvas",
     "skills/sympy",
+    "skills/wiki-workflow",
     "capabilities/code-quality",
     "capabilities/workflow-quality",
     "dependencies/locks/matt-pocock-skills.lock.yaml",

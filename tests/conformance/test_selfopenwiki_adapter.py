@@ -38,7 +38,7 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
             "ok": True,
             "executionMode": "external_agent",
             "authRequired": False,
-            "version": {"contractSchema": 2},
+            "version": {"contractSchema": 2, "mcpServer": "0.1.2"},
             "externalAgent": {"ready": True, "activeTransaction": None},
             "paths": {
                 "openWikiRoot": "D:/SelfOpenWiki/.work/openwiki",
@@ -100,6 +100,64 @@ class SelfOpenWikiAdapterTests(unittest.TestCase):
         self.assertEqual(adapter.recovery_status(), status)
         self.assertEqual(adapter.override_wiki_root(), status["paths"]["wikiRoot"])
         self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_status", {})])
+
+    @staticmethod
+    def version_operation(adapter, operation):
+        if operation == "read":
+            return adapter.read()
+        if operation == "personal-status":
+            return adapter.personal_status()
+        if operation == "begin":
+            return adapter.personal_call("openwiki_begin", {})
+        if operation == "finish":
+            return adapter.personal_call("openwiki_finish", {"runId": "version-test-run"})
+        return adapter.abort_external_update("external-12345678", 1, "sha256:" + "a" * 64,
+                                             confirmed_by_user=True)
+
+    def version_status(self, version, operation):
+        status = self.personal_status()
+        status["capabilities"].append({"id": "knowledge.read.safe"})
+        status["version"] = {"contractSchema": 2}
+        if version is not None:
+            status["version"]["mcpServer"] = version
+        status["externalAgent"]["ready"] = operation not in {"finish", "abort"}
+        return status
+
+    def test_version_floor_blocks_unsupported_operations_before_forwarding(self):
+        failure = {"ok": False, "error": {"code": "busy", "message": "In-memory endpoint.", "retryable": True},
+                   "recovery": {"action": "retry"}}
+        for version in (None, "0.1.1", "0.1", "0.1.2-dev", True):
+            for operation in ("read", "personal-status", "begin", "finish", "abort"):
+                with self.subTest(version=version, operation=operation):
+                    client = _FakeClient([self.version_status(version, operation), failure])
+                    with self.assertRaisesRegex(SelfOpenWikiError, "mcp-version"):
+                        self.version_operation(SelfOpenWikiAdapter(client), operation)
+                    self.assertEqual(client.calls, [("openwiki_status", {})])
+
+    def test_supported_versions_allow_the_existing_operation_gates(self):
+        failure = {"ok": False, "error": {"code": "busy", "message": "In-memory endpoint.", "retryable": True},
+                   "recovery": {"action": "retry"}}
+        targets = {"read": "openwiki_read", "begin": "openwiki_begin", "finish": "openwiki_finish", "abort": "openwiki_finalize_external_update"}
+        for version in ("0.1.2", "0.1.3", "0.2.0", "1.0.0"):
+            for operation in ("read", "personal-status", "begin", "finish", "abort"):
+                with self.subTest(version=version, operation=operation):
+                    status = self.version_status(version, operation)
+                    client = _FakeClient([status, failure])
+                    result = self.version_operation(SelfOpenWikiAdapter(client), operation)
+                    expected = ["openwiki_status"] if operation == "personal-status" else ["openwiki_status", targets[operation]]
+                    self.assertEqual([name for name, _ in client.calls], expected)
+                    self.assertEqual(result, status if operation == "personal-status" else failure)
+
+    def test_old_or_missing_versions_still_allow_diagnostics_and_root_lookup(self):
+        for version in (None, "0.1.1"):
+            with self.subTest(version=version):
+                status = self.version_status(version, "finish")
+                status["capabilities"] = []
+                client = _FakeClient([status, status])
+                adapter = SelfOpenWikiAdapter(client)
+                self.assertEqual(adapter.recovery_status(), status)
+                self.assertEqual(adapter.override_wiki_root(), status["paths"]["wikiRoot"])
+                self.assertEqual(client.calls, [("openwiki_status", {}), ("openwiki_status", {})])
 
     def test_recovery_abort_remains_accessible_when_publishing_is_not_ready(self):
         status = self.status(externalAgent={"ready": False, "activeTransaction": None})

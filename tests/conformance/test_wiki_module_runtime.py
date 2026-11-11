@@ -1,16 +1,46 @@
 from pathlib import Path
 import hashlib
 import os
+import re
 import subprocess
 import tempfile
 import unittest
 from uuid import uuid4
 
 from selfworkflow.adapters import AdapterError, _copy_tree, build_runtime
+from selfworkflow.v3.catalog import compile_catalog as compile_v3_catalog
 
 
 class WikiModuleRuntimeTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
+
+    def test_wiki_workflow_references_are_complete_in_consumer_profiles(self):
+        source = self.ROOT / "skills/wiki-workflow"
+        authored = {path.relative_to(source) for path in source.rglob("*.md")}
+        self.assertTrue(authored)
+        with tempfile.TemporaryDirectory() as temporary:
+            for profile in ("core", "knowledge"):
+                with self.subTest(profile=profile):
+                    output = Path(temporary) / profile
+                    manifest = build_runtime(self.ROOT, output, "wiki-workflow-closure", profile=profile)
+                    compile_v3_catalog(output / "catalog/v3/index.yaml")
+                    packaged = output / "skills/wiki-workflow"
+                    self.assertTrue((packaged / "SKILL.md").is_file())
+                    hashes = {item["path"]: item["sha256"] for item in manifest["files"]}
+                    for relative in authored:
+                        target = packaged / relative
+                        self.assertEqual(target.read_bytes(), (source / relative).read_bytes())
+                        key = target.relative_to(output).as_posix()
+                        self.assertEqual(hashes[key], hashlib.sha256(target.read_bytes()).hexdigest())
+                        for link in re.findall(r"\]\(([^)\n]+)\)", target.read_text(encoding="utf-8")):
+                            if re.match(r"[a-z][\w+.-]*:|#", link, re.I):
+                                continue
+                            destination = (target.parent / link.split("#", 1)[0]).resolve()
+                            self.assertTrue(destination.is_relative_to(packaged.resolve()), link)
+                            self.assertTrue(destination.is_file(), link)
+                    math_bridge = output / "skills/sympy/references/wiki-math.md"
+                    link = re.search(r"\]\(([^)]+)\)", math_bridge.read_text(encoding="utf-8"))[1]
+                    self.assertEqual((math_bridge.parent / link).resolve(), (packaged / "references/wiki-math.md").resolve())
 
     def test_knowledge_artifact_packages_backend_reference_bytes(self):
         references = self.ROOT / "skills/kg-selfopenwiki/references"

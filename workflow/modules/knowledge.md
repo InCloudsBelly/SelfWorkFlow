@@ -1,31 +1,26 @@
 # 知识模块
 
-仅约束 knowledge.read/propose/update 与 Wiki，普通代码/Markdown/方案留痕不触发。知识可选，不阻代码交付；稳定结论每任务仅提示一次，不因 profile/链接启动。多轮/跨源检索沿[通用搜索](search.md)，后端门槛保留；纯排版不加载。
+仅约束 knowledge.read/propose/update 与用户要求的 Wiki 生成、维护、审查和发布，普通代码/Markdown/方案留痕不触发。知识可选，不阻代码交付；稳定结论每任务仅提示一次，不因 profile/链接启动。多轮/跨源检索沿[通用搜索](search.md)。
 
-## 操作与后端
+## 加载 Wiki 流程
 
-read 只读，propose 只产候选；update 须写入授权、版本/来源核验、独立 Review 与可恢复发布，CAS/恢复归所选 adapter。直接要求“总结到 Wiki/更新/审核后发布”即对应范围授权；草稿/方案/意图不明不发布。正文/来源用中文，排除凭据、私人推理、临时事务、完整敏感原文和无效结论。
-显式后端优先；已选 selfopenwiki 或 knowledge profile、个人 Wiki 未另选后端时用 [SelfWiki 入口](../../skills/kg-selfopenwiki/SKILL.md)，只读当前操作引用，不预载内部 Writer/MCP 全契约。status、路径、读/Viewer、恢复、运行身份归后端；其他 adapter 不调用 SelfWiki。缺能力/漂移记 unverified，继续普通交付并列待同步，不猜模型/数据库/OAuth/路径。
+生成、实质修订或内容审查加载独立的 [Wiki 工作流](../../skills/wiki-workflow/SKILL.md)，由其管理生成步骤、正文/公式/图表质量与内容审查；局部修复只核影响项，纯查询/后端运维不预载写作链。沿用宿主阶段、授权及同一 Reviewer，不重启流程或重复审查；同版已读规则和有效证据复用。
 
-明确以 DocHub 为目标导出、提交或修复发布稿时，加载 [DocHub 发布适配](../../skills/knowledge-backend/references/dochub-publish.md)。来源独立路由，选定 SelfWiki 来源时沿其安全读取流程。
+来源与发布目标分别选择，沿用用户、项目或会话已明确的绑定。未选发布后端时交付完整本地候选；knowledge profile 只提供可选能力，不默认选择 SelfWiki，也不探测未用服务。正文、来源与证据边界沿 Wiki 工作流，不把候选默认写入某个服务。
 
-## 代码类 Wiki 的源码理解
+## 可选后端操作
 
-新增、实质更新或审查代码类 Wiki 涉及行为时，在授权来源内按 [CodeGraph 读取](codegraph-read.md)核验项目与新鲜度并定向查询，再查当前源码的入口、调用、状态/数据流、生产/消费及失败。状态、计数和旧文不能替代查询。
+read 只读，propose 不发布；update 绑定已选后端、写入授权、来源/版本与独立 Review，CAS/恢复归对应 adapter。直接更新要求沿用同范围授权；草稿或意图不明不发布，普通本地编辑不伪造后端回执。
 
-- 同专题按问题查询。记录项目、查询/输入版本、符号/路径/源码范围、已核关系、覆盖警告与缺口，Writer/Reviewer 共用。只补未覆盖或变化的定义、调用与分支，避免逐页重复查询。
-- 覆盖和新鲜度按读取模块分验。补核缺失或可疑关系，图边、同名或缺边不足以断定完整行为或无消费者。覆盖警告和单次失败只影响相关范围。
-- 图异常沿读取与恢复规则，保留图依赖缺口。可用源码和手工追踪得出有证据的结论，继续遵守来源与授权。
+选定 SelfOpenWiki 作为来源或发布目标后，才加载 [SelfWiki 后端接线](../../skills/kg-selfopenwiki/SKILL.md)及当前操作引用；它只承接安全读取、候选/发布、恢复、Viewer 与运行身份，不拥有通用写作标准。已读 Wiki 可选适配约束复用，不预载内部 Writer/MCP 全契约。
 
-浏览、文案/链接/排版及非行为维护不触发源码探索；非代码专题用各自方法。写入仍沿对应生命周期。
+DocHub 等其他目标沿 Wiki 工作流的对应扩展，不调用 SelfWiki。缺能力/漂移仅对应动作 unverified，保留本地候选或待同步项并继续独立交付；不猜协议、模型、数据库、OAuth 或根目录，不默切后端。
 
-## 数学推理与公式
+## 工程补充
 
-涉及数学/模型/算法/LaTeX 时读[数学方法](../../skills/sympy/SKILL.md)及[公式与参数约定](../../skills/sympy/references/wiki-math.md)，Writer/Reviewer 复用同版规则、来源与计算证据。纯浏览/无数学不加载；数学正确性与页面渲染分验，不接管生命周期或评分。
+代码类 Wiki 按主工程规则和 Wiki 生成流程核实授权源码的行为与边界。仅在已选用或已知当前项目有图谱绑定时读 [CodeGraph 读取](codegraph-read.md)，核验项目/新鲜度并定向查询；其余查实际源码与既有导航，不把图谱当通用 Wiki 的前提。已核关系、输入版本与覆盖缺口供 Writer/Reviewer 共用，只补变化或未覆盖范围。
 
-## 写作与评价
-
-新增、实质更新或内容审查按[质量标准](../../skills/knowledge-backend/references/wiki-quality.md)。局部改动仅核影响项。
+实际数学推理/计算按[数学方法](../../skills/sympy/SKILL.md)，公式写作沿 Wiki 工作流的数学约定。纯浏览/无数学不加载；数学正确性、源端和目标端呈现分验，不接管后端生命周期或评分。
 
 ## 批量调度与开销
 

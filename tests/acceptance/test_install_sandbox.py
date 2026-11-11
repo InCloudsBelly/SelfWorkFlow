@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import re
 import tempfile
 import unittest
 
@@ -17,6 +18,34 @@ from selfworkflow.installer import (
 
 class InstallSandboxAcceptanceTests(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
+
+    def test_native_knowledge_entry_can_bootstrap_its_bound_module(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            root = Path(temporary)
+            artifact = root / "runtime"
+            build_runtime(self.ROOT, artifact, "knowledge-entry-test", profile="knowledge")
+            agents, codex, state = root / "agents", root / "codex", root / "state"
+            plan = create_install_plan(artifact, agents, codex, state, "knowledge-entry-test")
+            applied = apply_install_plan(plan, plan["planHash"])
+            self.assertEqual(verify_install(applied["manifestPath"])["status"], "verified")
+            pointer = json.loads((agents / "selfworkflow/current.json").read_text(encoding="utf-8"))
+            bootstrap = (codex / "AGENTS.md").read_text(encoding="utf-8")
+            declared = Path(re.search(r"(?m)^- snapshot: `([^`]+)`$", bootstrap)[1])
+            self.assertEqual(declared, Path(pointer["snapshot"]))
+            entry = agents / "skills/knowledge-backend/SKILL.md"
+            text = entry.read_text(encoding="utf-8")
+            for href in re.findall(r"\]\(([^)\n]+)\)", text):
+                if not re.match(r"[a-z][\w+.-]*:|#", href, re.I):
+                    self.assertTrue((entry.parent / href).resolve().is_file(), href)
+            modules = re.findall(r"`(workflow/modules/[^`]+\.md)`", text)
+            self.assertEqual(modules, ["workflow/modules/knowledge.md"])
+            module = declared / modules[0]
+            self.assertEqual(module.read_bytes(), (self.ROOT / modules[0]).read_bytes())
+            wiki_href = next(href for href in re.findall(r"\]\(([^)\n]+)\)", module.read_text(encoding="utf-8"))
+                             if href.endswith("wiki-workflow/SKILL.md"))
+            wiki_entry = (module.parent / wiki_href).resolve()
+            self.assertTrue(wiki_entry.is_relative_to(declared.resolve()))
+            self.assertEqual(wiki_entry.read_bytes(), (self.ROOT / "skills/wiki-workflow/SKILL.md").read_bytes())
 
     def test_full_lifecycle_preserves_unmanaged_bytes_is_idempotent_and_rolls_back(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:

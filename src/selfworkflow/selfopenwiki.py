@@ -168,6 +168,20 @@ def _validate_status(value: object) -> dict[str, object]:
     return dict(value)
 
 
+def _require_current_mcp(status: dict[str, object]) -> None:
+    """Gate consistent reads and personal/write recovery, not diagnostics."""
+    version = status["version"]
+    assert isinstance(version, dict)
+    value = version.get("mcpServer")
+    match = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)", value) if isinstance(value, str) else None
+    try:
+        supported = match is not None and tuple(map(int, match.groups())) >= (0, 1, 2)
+    except ValueError:
+        supported = False
+    if not supported:
+        raise SelfOpenWikiError("mcp-version-unverified")
+
+
 def validate_external_status(value: object, *, require_ready: bool = True) -> dict[str, object]:
     """Require the external publication pair, including for write recovery."""
 
@@ -183,6 +197,7 @@ def _validate_personal_status(value: object, *, require_ready: bool) -> dict[str
     """Require the personal capability set, including for finish recovery."""
 
     result = validate_external_status(value, require_ready=require_ready)
+    _require_current_mcp(result)
     capabilities = result["capabilities"]
     capability_ids = {
         item["id"]
@@ -297,6 +312,7 @@ class SelfOpenWikiAdapter:
 
     def read(self, paths: list[str] | None = None, *, expected_revision: str | None = None) -> dict[str, object]:
         status = self._status_snapshot()
+        _require_current_mcp(status)
         if "knowledge.read.safe" not in {item["id"] for item in status["capabilities"]}:
             raise SelfOpenWikiError("wiki-read-capability-missing")
         if paths is not None and (
@@ -381,7 +397,8 @@ class SelfOpenWikiAdapter:
             or re.fullmatch(r"sha256:[0-9a-f]{64}", binding_hash) is None
         ):
             raise SelfOpenWikiError("external-abort-input-invalid")
-        validate_external_status(self._status_snapshot(), require_ready=False)
+        status = validate_external_status(self._status_snapshot(), require_ready=False)
+        _require_current_mcp(status)
         try:
             value = self._client.call_tool("openwiki_finalize_external_update", {
                 "action": "abort", "transactionId": transaction_id,
