@@ -51,7 +51,7 @@
       "required": ["profile", "backend", "intents", "fallback"],
       "properties": {
         "profile": {"const": "knowledge"},
-        "backend": {"const": "selfopenwiki"},
+        "backend": {"const": null},
         "intents": {
           "const": ["wiki-visualize", "wiki-summary", "wiki-organize", "wiki-update"]
         },
