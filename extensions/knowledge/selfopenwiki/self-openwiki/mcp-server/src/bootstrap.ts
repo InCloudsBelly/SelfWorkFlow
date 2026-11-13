@@ -283,12 +283,14 @@ export async function bootstrapC7Runtime(
       service: modelService,
       verifier: modelVerifier,
     });
+    const childScriptPath = path.resolve(
+      import.meta.dirname,
+      "../dist/process-child.js",
+    );
     processRunner = new OpenWikiProcessRunner({
-      childScriptPath: path.join(import.meta.dirname, "process-child.js"),
+      childScriptPath,
       cliPath: adapterPaths.cliPath,
-      expectedChildHash: await hashFile(
-        path.join(import.meta.dirname, "process-child.js"),
-      ),
+      expectedChildHash: await hashFile(childScriptPath),
       expectedCliHash: await hashFile(adapterPaths.cliPath),
     });
   } else {

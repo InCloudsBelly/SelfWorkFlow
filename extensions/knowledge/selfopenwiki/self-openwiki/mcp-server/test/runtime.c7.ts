@@ -703,6 +703,7 @@ describe("C7 production runtime recovery gates", () => {
   });
 
   test.each([
+    ["verified setup", ["openwiki_setup"], false],
     [
       "verified pair",
       ["openwiki_begin_external_update", "openwiki_finalize_external_update"],
@@ -710,7 +711,7 @@ describe("C7 production runtime recovery gates", () => {
     ],
     ["partial pair", ["openwiki_begin_external_update"], false],
   ] as const)(
-    "bootstrap composes external availability from a %s without setup",
+    "bootstrap composes external availability from a %s",
     async (_label, verified, expectedReady) => {
       const repositoryRoot = path.resolve(import.meta.dirname, "../..");
       const runtimeRoot = path.join(repositoryRoot, "runtime");
