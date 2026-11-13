@@ -1,0 +1,22 @@
+# 只读参考：adapter.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "supportStatus", "entryFile", "capabilities", "coreOverride", "overrideBehavior"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"},
+    "supportStatus": {"enum": ["experimental-unverified", "instructions-only", "bootstrap-only"]},
+    "entryFile": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "capabilities": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"}},
+    "coreOverride": {"const": "forbidden"},
+    "overrideBehavior": {"enum": ["pause-and-confirm-target", "managed-file", "instructions-only", "bootstrap-only"]}
+  }
+}
+
+````

@@ -2,6 +2,8 @@
 
 仅在用户选择该知识库为来源或发布目标时读取；生成与审查普通本地 Wiki 不依赖此服务。宿主没有该连接时继续本地候选，服务相关动作标未核实。
 
+建立 PageJob 前按[选稿规则](../../references/backends.md)核对拟发布页与所选原稿的用途、章节和细节完整性，再进入后端协议。
+
 ## 已连接的 SelfOpenWiki
 
 首次调用 `openwiki_status`，按返回路径与版本确定唯一正式根、可用能力及恢复状态。当前一致性读取／个人发布要求 MCP ≥0.1.2、schema 2 和 external-agent 协议；读操作只需已验证的安全读取能力，发布才要求 `externalAgent.ready=true` 及完整生命周期能力。旧版或漂移只做状态／故障诊断，不默切 legacy 或 provider。

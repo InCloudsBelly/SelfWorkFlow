@@ -5,10 +5,10 @@ description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概
 
 [兼容入口](references/public/WORKFLOW.md)
 
-规则版本：`3f3d282daab3`
+规则版本：`488c67620466`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](references/public/releases/3f3d282daab3a95cdfa2a6da24665a49d51429e514fe98f064e66f539aa72b80/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](references/public/releases/488c67620466eb33a52ea2e87d0b4417ff50f8865c47523451f79aae674642d5/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 
