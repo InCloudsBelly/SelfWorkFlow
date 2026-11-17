@@ -1,25 +1,16 @@
 ---
 name: code-quality
-description: 追踪行为代码的责任层、状态与失效关系，用于解释、诊断或变更行为；纯文档和配置文本维护不触发。
+description: 在需要理解代码行为、定位责任层或分析状态失效关系时提供指导；不因普通编辑、配置或文档维护自动开启完整流程。
 ---
 
 # Code Quality
 
-SelfWorkflow 管理阶段、授权与 Review；本 Skill 仅管代码责任层、变更边界和证据，不重新启动流程。
+帮助判断实际行为、责任和状态关系；以下思路按问题采用，不另起流程，也不自动要求 TDD、独立 Reviewer 或首次编辑契约。
 
-## 只读
+从真实目标、入口和观察结果定位问题；需要时沿数据/状态的生产、转换和消费关系追踪不变量与失效，区分 last-good / first-bad。不为无持久化环节的任务制造持久化链路；内存生效、落盘和恢复分别以对应结果为据。
 
-沿最小完整切片追踪 producer → persisted state → transform → consumer/detection point，识别不变量、失败责任层与证据缺口。区分 last-good / first-bad；日志、退出码、dirty 或内存状态不等于持久化成功。只读分析不启动 TDD、构建、写入或完整设计。
+修改优先落在真正违反约定的责任层，选择满足目标且影响适当的方案。需要更多取舍指导时参考[变更建议](references/change-rules.md)；需要设计或评估验证时参考[测试与验证](../testing-review-quality/SKILL.md)，实际审查按[审查指导](../../workflow/modules/review.md)。阅读这些资料不等于采用其整套方法。
 
-## 按实际操作加载
+图谱仅在用户/项目选用、任务明确要求图证据或已知项目有绑定时启用；未启用不读图模块或探测服务。启用后，所需关系查询按[图谱读取](../../workflow/modules/codegraph-read.md)，配置/文档/日志及精确源码可直接读；索引内源码批次有变化才由主 Agent 按[更新协议](../../workflow/modules/codegraph-update.md)维护。实际能力、版本和缓存更新限制不因方法自主选择而放宽。
 
-- 跨文件行为理解、符号/依赖查询：先用[图谱读取](../../workflow/modules/codegraph-read.md)；配置/文档/日志和已给定精确源码路径不启动图核对。
-- 行为变更、测试设计/执行证据：[测试方法](../testing-review-quality/SKILL.md)；普通分析/Review 不因阶段名称加载。
-- 实际纳入索引的源码批次后：[图谱更新](../../workflow/modules/codegraph-update.md)，只由主 Agent 合并维护。
-- C++、项目 Review、Ponytail 只按实际信号加载，不因引用预读；Review 调度不重复。
-
-## 变更
-
-仅诊断需要验证的故障或准备变更时，完整读取 [变更规则](references/change-rules.md)；当前任务同版本正文仍完整时复用。不得为只读任务预载实施规则。最窄 owner-layer 修复优先，不将应用策略泄漏到稳定公共层；保护用户修改，验收看实际消费者结果而非进程成功。
-
-TDD/验证由 testing-review-quality 管理，独立审查由 workflow/modules/review.md 管理。TEA 与完整 grilling 只按显式请求启用。代码首次编辑前需实施契约和已有范围内的明确授权；必要测试不能反向扩张生产架构。
+C++、项目标准和其他专业方法按真实问题及明确要求选择，不为引用预读整包；只读分析不自行扩为代码修改、构建或其他副作用。
