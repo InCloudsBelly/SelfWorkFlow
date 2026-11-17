@@ -90,7 +90,7 @@ modules:
     hash: sha256:2545c9d445c807f4b182c85b200fdde868b200ce6cef57e37ab9cee0cd44ed18
   - id: plan-integrated-review
     ref: modules/plan-integrated-review.yaml
-    hash: sha256:9f6fc5074c5d7c53f984482c0b57562db6cb806a702c327a946fafffd717f241
+    hash: sha256:9704116509facf3e06c9564193e05ee176b6d6e056ae394545d81ce4117b2e4b
   - id: implement-matt
     ref: modules/implement-matt.yaml
     hash: sha256:6b8d3d70cd0244a20df6eca610a1772a282b35c37597588bb9de9fb0a3578550
@@ -102,16 +102,16 @@ modules:
     hash: sha256:b592f0ec9235f3d10dce9f9defb4f4d16080694bab402ee0a5f05fffcdb8da0b
   - id: review-self
     ref: modules/review-self.yaml
-    hash: sha256:28204cd97fd83099eb80fdfad6eb9116b1f018cf2b0e8a6766a3c241fd200672
+    hash: sha256:654bd41ee0bd96ad1a0cbe51a1c0c386fbff5ca73e0fb14e9de40dde97b5813b
   - id: review-code-review
     ref: modules/review-code-review.yaml
-    hash: sha256:96e965728719760304c923a8a5cf3bec4846545e84e9744fb2a75c636f62b8bb
+    hash: sha256:a2b2f1e5048c38ab8177c1cd61e4264f6fe574787147d4d7a405365420211e11
   - id: verify-execution
     ref: modules/verify-execution.yaml
-    hash: sha256:b2d6c35c77635ac410cbef128f5b9d20fdcb3cb19d99c679c366453e60b683f2
+    hash: sha256:725ee44454b2f0d2a150f473b190eb19c6dd1185bbbe13262eb5f6b331a104d7
   - id: complete-gate
     ref: modules/complete-gate.yaml
-    hash: sha256:7ab4ee721e3f6f0605153c2ab4d991fab047be7ff18b633d662c354358700df7
+    hash: sha256:5973c7fb63ff58631f2707958958607a434995f3ca3f8efd9f05dff2fa0e105f
   - id: tea-test-design
     ref: modules/tea-test-design.yaml
     hash: sha256:e63ba6bd76a4618cba678dec93731ec4a9e98382cbfd0b08636c6614bee8f045
@@ -129,10 +129,10 @@ modules:
     hash: sha256:7a288d866aa4be1201d345c802a307e58127ce83e9abe6bd3d72de9958160bb2
   - id: knowledge-read
     ref: modules/knowledge-read.yaml
-    hash: sha256:d169b4ac313f7792b4cf2f70024e900316c864b449c8607a2682140d3ff5e163
+    hash: sha256:6cf098cae7448ea43fc062d01eba5b928d7b0947e7c725e0e4b28a27e28ac0f2
   - id: knowledge-propose
     ref: modules/knowledge-propose.yaml
-    hash: sha256:55bca4a724966a2ba9d5f5afc40b2051652e81fead7b6f86de5101504a69b261
+    hash: sha256:c7afcf9b079160622ef1719ea57e58f18b03d38ffae7d2cba653cfb7ab091fe9
   - id: knowledge-update
     ref: modules/knowledge-update.yaml
-    hash: sha256:743f3c02d6c9a188d23b6bcce441b8069b1089ec45a757ea026687bfea070030
+    hash: sha256:228aaababf4eb55af0dac4843f6b427edfeca2643ae47ebda857a852bd31d412

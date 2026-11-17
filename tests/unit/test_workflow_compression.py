@@ -2,7 +2,6 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
-import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -17,8 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class WorkflowCompressionTests(unittest.TestCase):
-    BASELINE_COMMIT = "ff4d991cb32f53df65fbedc67da69b11445c5cb3"
-    BASELINE_WORKFLOW_SHA256 = "508736beb117ee7e64ea17f8896250d265a2461112927f733aa7489039eeb1be"
+    # Default prose has no fixed mode, role, tool-name or character-count contract.
+    # Keep executable routing, fail-closed packaging and explicit runtime checks here.
     MODES = (
         "workflow/modes/light.md",
         "workflow/modes/full.md",
@@ -34,107 +33,6 @@ class WorkflowCompressionTests(unittest.TestCase):
         "workflow/modules/artifacts.md",
     )
 
-    def test_bootstrap_is_compact_and_has_complete_startup_contract(self):
-        raw = (ROOT / "WORKFLOW.md").read_bytes()
-        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
-        text = raw.decode("utf-8", errors="strict")
-        baseline = subprocess.check_output(["git", "show", f"{self.BASELINE_COMMIT}:WORKFLOW.md"], cwd=ROOT)
-        self.assertEqual(hashlib.sha256(baseline).hexdigest(), self.BASELINE_WORKFLOW_SHA256)
-        self.assertLessEqual(len(text), 1_000)
-        self.assertLessEqual(len(text), int(len(baseline.decode("utf-8")) * 0.10))
-        for path in ("workflow/modes/full.md", "workflow/modes/deep.md", "skills/code-quality/SKILL.md", "workflow/modules/build.md", "workflow/legacy-host.md"):
-            self.assertIn(path, text)
-            self.assertTrue((ROOT / path).is_file())
-        self.assertNotIn("workflow/modes/light.md", text)
-        self.assertNotIn("workflow/core.md", text)
-        for boundary in ("已有修改/凭据", "关键选择", "沿授权", "不编造或跳过", "unverified"):
-            self.assertIn(boundary, text)
-
-    def test_mode_and_task_files_exist_with_routing_contract(self):
-        for relative in self.MODES + self.MODULES:
-            with self.subTest(relative=relative):
-                self.assertTrue((ROOT / relative).is_file())
-        full = (ROOT / "workflow/modes/full.md").read_text(encoding="utf-8")
-        deep = (ROOT / "workflow/modes/deep.md").read_text(encoding="utf-8")
-        for text in (full, deep):
-            self.assertIn("modules/review.md", text)
-            self.assertIn("testing-review-quality", text)
-        self.assertIn("../../skills/testing-review-quality/SKILL.md", full)
-        self.assertNotIn("implement-tdd", full)
-        self.assertIn("本模式不要求再读 Full", deep)
-        review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
-        self.assertIn("plan-integrated-review", review)
-        self.assertIn("一个独立 SubAgent 同时检查 Standards/Spec", review)
-
-    def test_route_order_and_optional_tea_are_explicit(self):
-        bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        for relative in ("workflow/modes/full.md", "workflow/modes/deep.md"):
-            mode = (ROOT / relative).read_text(encoding="utf-8")
-            self.assertIn("TDD", mode)
-            self.assertIn("交付前一个独立 Reviewer", mode)
-        for capability in ("TEA", "grilling", "Superpowers"):
-            self.assertIn(capability, bootstrap)
-        self.assertIn("仅显式点名", bootstrap)
-
-    def test_light_and_full_deep_keep_distinct_review_and_tea_gates(self):
-        bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        light = (ROOT / "workflow/modes/light.md").read_text(encoding="utf-8")
-        self.assertIn("Light：低风险小任务", bootstrap)
-        self.assertIn("窄自审", bootstrap)
-        self.assertNotIn("workflow/modes/light.md", bootstrap)
-        self.assertIn("无需再读本页", light)
-        self.assertIn("不冒充独立审查", light)
-        self.assertIn("不自动 Grill 或 TEA", light)
-
-    def test_review_model_boundary_and_compact_dispatch_policy_are_explicit(self):
-        review = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
-        for phrase in (
-            "默认继承主 Agent 模型/推理配置",
-            "不读取机器本地 Review 模型配置",
-            "不传 model/reasoning_effort 覆盖",
-            "普通设计/计划/测试设计合并",
-            "一个独立 SubAgent 同时检查 Standards/Spec",
-            "两个轴不是两个上下文",
-            "不接收完整主历史、整库 Wiki 或无关材料",
-            "修复后只复核未关闭问题及影响项",
-            "不设“超预算中止”",
-            "TEA 仅显式启用",
-        ):
-            with self.subTest(phrase=phrase):
-                self.assertIn(phrase, review)
-
-    def test_reuse_and_wait_policy_keeps_freshness_and_completion_boundaries(self):
-        text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        for boundary in ("版本/输入/完整正文未变则复用", "只补缺口", "无新证据", "可中断等待", "未完成不因预算停工"):
-            self.assertIn(boundary, text)
-        for relative in ("workflow/modes/full.md", "workflow/modes/deep.md"):
-            self.assertIn("Token/次数预算", (ROOT / relative).read_text(encoding="utf-8"))
-
-    def test_representative_rule_route_stays_compact_without_duplicating_review(self):
-        # Character budget for regression protection, not a measured token count.
-        paths = (
-            "WORKFLOW.md", "workflow/modes/full.md",
-            "workflow/modules/codegraph-read.md", "workflow/modules/review.md",
-            "skills/code-quality/SKILL.md", "skills/workflow-quality/SKILL.md",
-            "skills/testing-review-quality/SKILL.md",
-        )
-        self.assertLessEqual(sum(len((ROOT / path).read_text(encoding="utf-8")) for path in paths), 10_000)
-        for relative in (
-            "workflow/modes/full.md", "workflow/modes/deep.md",
-            "skills/testing-review-quality/SKILL.md",
-        ):
-            text = (ROOT / relative).read_text(encoding="utf-8")
-            with self.subTest(path=relative):
-                self.assertIn("modules/review.md", text)
-                self.assertNotIn("model/reasoning_effort", text)
-                self.assertNotIn("不接收完整主历史", text)
-
-    def test_review_followup_selects_available_tools_and_lifecycle(self):
-        text = (ROOT / "workflow/modules/review.md").read_text(encoding="utf-8")
-        for phrase in ("本会话实际工具", "运行中与空闲", "send_message", "followup_task", "send_input"):
-            self.assertIn(phrase, text)
-        self.assertNotIn("Codex `send_input`", text)
-        self.assertNotIn("DSH `send_message`", text)
 
     def test_cli_query_includes_the_read_boundary_check(self):
         text = (ROOT / "workflow/modules/codegraph-read.md").read_text(encoding="utf-8")
@@ -145,14 +43,6 @@ class WorkflowCompressionTests(unittest.TestCase):
         code = (ROOT / "workflow/modules/code.md").read_text(encoding="utf-8")
         self.assertNotIn("`provider preflight`", code)
 
-    def test_projection_and_resume_preserve_only_bound_task_state(self):
-        text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        for boundary in ("定向查询并投影", "续接/换阶段不重启", "交接仅留目标/授权、绑定、有效证据与待办"):
-            self.assertIn(boundary, text)
-        legacy = (ROOT / "workflow/legacy-host.md").read_text(encoding="utf-8")
-        for phrase in ("artifact-manifest.json", "在工具内解析", "version/profile/runtimeHash", "path/sha256"):
-            self.assertIn(phrase, legacy)
-        self.assertIn("workflow/legacy-host.md", text)
 
     def test_build_cache_rules_are_loaded_at_the_build_boundary(self):
         bootstrap = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
@@ -168,20 +58,6 @@ class WorkflowCompressionTests(unittest.TestCase):
             self.assertIn(boundary, unreal)
         self.assertNotIn("Clean/Rebuild", bootstrap)
 
-    def test_module_restrictions_are_scoped_to_their_operations_and_artifacts(self):
-        expected = {
-            "WORKFLOW.md": ("按实际操作读取", "模块失败仅阻塞依赖动作"),
-            "workflow/modules/knowledge.md": ("不适用于普通代码", "其他后端走显式 adapter"),
-            "workflow/modules/artifacts.md": ("不强制普通任务新建", "不自动触发知识发布"),
-            "workflow/modules/optional-integrations.md": ("只约束对应增强模块", "不阻塞无关模块"),
-            "skills/kg-selfopenwiki/SKILL.md": ("不约束其他模块或 SelfWorkflow 源 Git", "本次Wiki首次MCP调用openwiki_status"),
-            "workflow/modules/review.md": ("知识 Review 可读绑定候选与必要来源",),
-        }
-        for relative, phrases in expected.items():
-            text = (ROOT / relative).read_text(encoding="utf-8")
-            with self.subTest(path=relative):
-                for phrase in phrases:
-                    self.assertIn(phrase, text)
 
     def test_unavailable_knowledge_capabilities_do_not_block_other_owners(self):
         catalog = compile_catalog(ROOT / "catalog").content
@@ -461,10 +337,6 @@ class WorkflowCompressionTests(unittest.TestCase):
         self.assertEqual(blocked["status"], "paused")
         self.assertIn("required-capability-unavailable", blocked["reasonCodes"])
 
-    def test_read_only_keeps_write_protection_and_codegraph_is_bounded(self):
-        text = (ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        for boundary in ("只读不写", "CodeGraph 索引例外", "不编造或跳过", "unverified"):
-            self.assertIn(boundary, text)
 
     def test_runtime_package_contains_split_files_and_codegraph_lock(self):
         output_parent = Path(tempfile.mkdtemp(prefix="selfworkflow-compression-"))

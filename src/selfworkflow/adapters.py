@@ -770,7 +770,9 @@ def build_runtime(
                         candidate / "upstream" / source_id
                         for source_id in ("matt-pocock-skills", "tea", "ponytail", "anthropic-skills", *_COMMUNITY_SOURCES)
                     ) if directory == "dependencies" else (
-                        _wiki_runtime_exclusions(source) if directory == "extensions" else ()
+                        _wiki_runtime_exclusions(source) + (
+                            source / "extensions/codegraph/codegraph_ue/node_modules",
+                        ) if directory == "extensions" else ()
                     )
                     _copy_tree(candidate, temporary / directory, excluded_roots=excluded)
             _copy_runtime_path(source, temporary, "catalog/v3")

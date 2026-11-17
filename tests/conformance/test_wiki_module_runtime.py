@@ -143,8 +143,19 @@ class WikiModuleRuntimeTests(unittest.TestCase):
                     directory.rmdir()
 
     def test_maintainer_keeps_wiki_source_without_activating_backend_skill(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "maintainer"
-            build_runtime(self.ROOT, output, "0.1.0.dev0", profile="maintainer")
-            self.assertTrue((output / "extensions/knowledge/selfopenwiki/adapter.yaml").is_file())
-            self.assertFalse((output / "skills/kg-selfopenwiki").exists())
+        dependencies = self.ROOT / "extensions/codegraph/codegraph_ue/node_modules"
+        existed = dependencies.exists()
+        dependencies.mkdir(exist_ok=True)
+        sentinel = dependencies / ("test-private-" + uuid4().hex + ".json")
+        sentinel.write_text("private installed dependency fixture", encoding="utf-8")
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary) / "maintainer"
+                build_runtime(self.ROOT, output, "0.1.0.dev0", profile="maintainer")
+                self.assertTrue((output / "extensions/knowledge/selfopenwiki/adapter.yaml").is_file())
+                self.assertFalse((output / "skills/kg-selfopenwiki").exists())
+                self.assertFalse((output / "extensions/codegraph/codegraph_ue/node_modules").exists())
+        finally:
+            sentinel.unlink(missing_ok=True)
+            if not existed and not any(dependencies.iterdir()):
+                dependencies.rmdir()

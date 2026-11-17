@@ -1,6 +1,6 @@
 schemaVersion: 3
 id: knowledge-propose
-sourceHash: sha256:7052c6531a42cfa9896ad56d64e04334b27e7ebecd5cbe5b5dd2ed1acd69392e
+sourceHash: sha256:76c1c9e61e0d2efc7d002795ad70a258aa860ad8ad26b2e35e57440616e5c102
 stage: completed
 slot: knowledge.propose
 selectionMode: bounded-runtime

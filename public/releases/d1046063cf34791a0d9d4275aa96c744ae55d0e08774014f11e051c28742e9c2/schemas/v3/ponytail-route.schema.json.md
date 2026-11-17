@@ -1,0 +1,34 @@
+# 只读参考：ponytail-route.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/ponytail-route.schema.json",
+  "title": "SelfWorkFlow V3 Ponytail route",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["enabled", "skillIds", "selectedModuleIds", "mode", "reason", "routeHash"],
+  "properties": {
+    "enabled": {"const": true},
+    "skillIds": {"$ref": "#/$defs/idList"},
+    "selectedModuleIds": {"$ref": "#/$defs/idList"},
+    "mode": {"enum": ["lite", "full", "ultra"]},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 256},
+    "routeHash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "stableId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "idList": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/stableId"}
+    }
+  }
+}
+
+````

@@ -3,6 +3,7 @@ import re
 import io
 import json
 import os
+import shutil
 import subprocess
 from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor
@@ -84,6 +85,8 @@ class DocumentPublicationTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "nt", "Windows document-sharing ACLs")
     def test_published_version_inherits_public_read_access_instead_of_private_staging_acl(self):
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        self.assertIsNotNone(powershell, "PowerShell is required to inspect Windows ACLs")
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             source = source_tree(root)
@@ -95,7 +98,7 @@ class DocumentPublicationTests(unittest.TestCase):
                 with self.subTest(path=path):
                     literal = str(path).replace("'", "''")
                     command = "(Get-Acl -LiteralPath '" + literal + "').Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }"
-                    identities = subprocess.check_output(["powershell", "-NoProfile", "-Command", command], text=True, encoding="utf-8")
+                    identities = subprocess.check_output([powershell, "-NoProfile", "-Command", command], text=True, encoding="utf-8")
                     self.assertIn("S-1-5-32-545", identities.splitlines())
 
     def test_publication_can_repair_an_older_content_bound_release_with_a_bad_route(self):
@@ -150,39 +153,25 @@ class DocumentPublicationTests(unittest.TestCase):
                         publish_documents(source, output)
                     self.assertFalse(output.exists())
 
-    def test_published_light_routes_have_direct_bounded_method_dependencies(self):
-        # Static mandatory-read budget; this does not measure model token usage.
+    def test_published_methods_have_self_contained_local_dependencies(self):
         repository = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as folder:
             result = publish_documents(repository, Path(folder) / "public")
             release = Path(result["documentRoot"])
-            entry = Path(result["entry"]).read_text(encoding="utf-8")
-            workflow = (release / "WORKFLOW.md").read_text(encoding="utf-8")
             skill = (repository / "skills/selfworkflow/SKILL.md").read_text(encoding="utf-8")
-            # The delivered Skill now embeds the bound core; legacy pointers are not read.
-            minimal = len(skill)
             self.assertEqual(skill.count("<!-- selfworkflow:core -->"), 1)
-            self.assertIn("无需再读公共转发页", skill)
-            # Include authorization/binding and dependent environment validity.
-            # Still below the previous delivered entry (1,644 characters).
-            # This is a static load guard, not measured token savings.
-            self.assertLessEqual(minimal, 1_600)
-            self.assertNotIn("workflow/modes/light.md", workflow)
-            self.assertNotIn("](DOCUMENTS.md)", workflow)
             for method in ("workflow-quality", "workflow-skill-maintenance"):
-                self.assertIn(f"methods/{method}/METHOD.md", workflow)
                 self.assertTrue((release / f"methods/{method}/METHOD.md").is_file())
             alias = (release / "workflow/modules/code.md").read_text(encoding="utf-8")
             self.assertIn("methods/code-quality/METHOD.md", alias)
             code_path = release / "methods/code-quality/METHOD.md"
             code = code_path.read_text(encoding="utf-8")
             targets = [(code_path.parent / route).resolve() for route in re.findall(r"\[[^\]]+\]\(([^)]+)\)", code)]
-            testing = release / "methods/testing-review-quality/METHOD.md"
-            self.assertIn(testing.resolve(), targets)
-            self.assertTrue(testing.is_file())
-            maintenance = minimal + sum(len((release / f"methods/{method}/METHOD.md").read_text(encoding="utf-8")) for method in ("workflow-quality", "workflow-skill-maintenance"))
-            self.assertLessEqual(maintenance, 4_300)
-            self.assertLessEqual(len((release / "workflow/onboarding.md").read_text(encoding="utf-8")), 1_000)
+            self.assertTrue(targets)
+            for target in targets:
+                with self.subTest(target=str(target)):
+                    self.assertTrue(target.is_relative_to(release.resolve()))
+                    self.assertTrue(target.is_file())
 
     def test_concurrent_publication_cannot_switch_the_entry_or_remove_another_lock(self):
         from selfworkflow.documents import _collect

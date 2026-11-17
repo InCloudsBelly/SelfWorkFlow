@@ -92,10 +92,10 @@ class WorkflowMatrixTests(unittest.TestCase):
                 fixture._result("designed", "attempt-designed"),
             )
 
-    def test_core_policy_requires_reviewed_landing_and_bounded_decisions(self):
+    def test_contract_reference_documents_decision_gate_fields(self):
         content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
         for phrase in (
-            "design.gate", "plan.gate", "post-landing Review",
+            "design.gate", "plan.gate",
             "decision-record", "selectedId == recommendationId",
             "local component", "easy rollback", "critical decision",
         ):
@@ -136,146 +136,6 @@ class WorkflowMatrixTests(unittest.TestCase):
         self.assertIn("Full 自动启用", design)
         self.assertIn("Deep 自动启用", design)
         self.assertNotIn("默认调用 Brainstorming", design)
-
-
-class LightweightPolicyTextTests(unittest.TestCase):
-    ROOT = Path(__file__).resolve().parents[2]
-
-    def test_reusable_knowledge_prompts_once_without_trivial_noise(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "可复用的技术知识",
-            "主动提示一次是否沉淀",
-            "每个任务最多提示一次",
-            "用户拒绝后不再重复",
-            "简单问答、机械修改、临时状态",
-        ):
-            self.assertIn(phrase, content)
-
-    def test_unrelated_workflow_incident_stops_without_scope_drift(self):
-        bootstrap = (self.ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
-        self.assertIn("任务外异常隔离", bootstrap)
-        self.assertIn("当前目标根因或完成验收必需的故障", bootstrap)
-        self.assertIn("必须用户明确授权后另行处理", bootstrap)
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "任务外异常隔离",
-            "立即停止当前任务并向用户报告",
-            "不得在原任务对话中",
-            "用户明确回复授权",
-            "当前任务自身的根因",
-        ):
-            self.assertIn(phrase, content)
-
-    def test_progress_updates_are_low_noise_honest_ranges(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "SelfWorkflow active: <profile>",
-            "mode: <Light|Full|Deep>",
-            "首条进度更新同时包含",
-            "已完成主阶段/总主阶段",
-            "当前",
-            "剩余",
-            "预计",
-            "粗略区间",
-            "单点精确百分比",
-            "暂无法可靠估算",
-            "重新估算",
-            "保持单调",
-            "不得按每个命令",
-        ):
-            self.assertIn(phrase, content)
-
-    def test_ponytail_is_code_scoped_without_changing_output_or_artifact_rules(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "代码任务加载 Ponytail",
-            "非代码任务不自动加载",
-            "mode 为 `full`",
-            "代码、命令、错误、路径和协议字段按事实保留",
-        ):
-            self.assertIn(phrase, content)
-        self.assertNotIn("Caveman", content)
-
-    def test_intermediate_documents_are_self_reviewed_and_final_review_is_independent(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "Full/Deep",
-            "普通中间文档不单开审查",
-            "高风险前置审查",
-            "完整必要包",
-            "一个独立 Reviewer",
-            "所有模式取消双 Reviewer",
-            "unverified",
-            "修复复核复用同一上下文",
-            "post-landing Review",
-        ):
-            self.assertIn(phrase, content)
-
-    def test_intrusion_budget_blocks_test_driven_production_architecture(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "侵入性预算",
-            "影响半径",
-            "测试覆盖不能反向驱动生产架构",
-            "公共枚举",
-            "全局编译宏",
-            "明确授权",
-            "超出预算",
-            "unverified",
-        ):
-            self.assertIn(phrase, content)
-
-    def test_implementation_converges_without_solving_adjacent_problems(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "设计阶段允许发散",
-            "实施阶段必须收敛",
-            "Plan 是实施边界",
-            "允许修改的组件",
-            "发现问题不等于获得解决授权",
-            "计划外发现不得自动进入实现",
-            "阻塞当前验收",
-            "修订 Plan",
-            "重新确认",
-            "相邻改进",
-            "完成当前目标",
-            "有界的收敛检查",
-            "主目标、根因修复或验收条件",
-            "更窄方案",
-            "独立接口、状态、生命周期或构建变体",
-            "重新取得用户确认",
-        ):
-            self.assertIn(phrase, content)
-
-        self.assertRegex(
-            content,
-            r"相邻改进[^\n]*(?:记录|汇报)[^\n]*(?:不实施|延后)",
-        )
-
-    def test_code_implementation_contract_precedes_all_code_edits(self):
-        content = (self.ROOT / "workflow/core.md").read_text(encoding="utf-8")
-        for phrase in (
-            "代码实施契约",
-            "第一次编辑测试或生产代码前",
-            "只读分析和文档修订",
-            "明确授权",
-            "普通设计/测试设计/计划合并自审",
-            "安全/性能/兼容性",
-            "TDD Red/Green",
-            "重大变化重新确认",
-            "Light",
-            "紧凑",
-            "侵入预算",
-            "共享热路径",
-            "测试来源的生产改动",
-            "测试接缝",
-        ):
-            self.assertIn(phrase, content)
-        self.assertRegex(
-            content,
-            r"实施契约[\s\S]{0,300}侵入预算[\s\S]{0,100}回滚",
-        )
 
 
 if __name__ == "__main__":

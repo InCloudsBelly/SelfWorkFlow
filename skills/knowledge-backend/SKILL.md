@@ -1,14 +1,14 @@
 ---
 name: knowledge-backend
-description: SelfWorkflow 的 knowledge 接入：Wiki 生成与审查加载 Wiki 工作流，选定后端后按需读写；普通代码、临时状态或泛化知识词不触发。
+description: 衔接用户要求的知识操作与所选后端，内容指导按需参考；普通代码、临时记录或泛化知识词不自动触发写作、协作或发布流程。
 ---
 
 # Knowledge 接入
 
-宿主调度与授权沿本任务已绑定的 SelfWorkflow 根下的 `workflow/modules/knowledge.md`：文档模式用 documentRoot，runtime 模式用宿主声明且已核验的 snapshot 根。不要按原生 Skill 安装目录反推该路径；缺绑定或主模块不可读时报告缺口，不换旧版本。同版已读不重入。
+知识操作沿本任务已绑定根的 `workflow/modules/knowledge.md`；文档模式用 documentRoot，runtime 用宿主声明且已核验的 snapshot 根。已知入口直达，同版有效内容复用，不从原生安装目录猜路径或换旧版本。
 
-生成、维护或审查 Wiki 时加载独立的 [Wiki 工作流](../wiki-workflow/SKILL.md)；由它拥有生成、质量、审查及可选发布规则，本入口不复制标准。来源和发布目标独立，未选服务时交付本地完整候选，knowledge profile 不自动选择后端。
+内容组织或质量确有需要时参考 [Wiki 工作流](../wiki-workflow/SKILL.md)，不因读取参考启动全部方法。来源与发布目标分别依据用户请求和既有绑定确定，profile 或工具可用性不自动选后端；未定发布目标时保留本地候选。
 
-仅选定后端后才加载当前操作的 adapter。read 只读、propose 不发布；update 绑定有效授权、版本/来源、独立复审和真实后端协议。直接更新要求复用同范围授权；冲突、漂移或必要 Review 未通过时保留候选。缺能力只阻对应动作，代码交付继续并列 knowledge-sync-todo；不静默换后端，不猜 API、OAuth 或路径。
+选定后端后只读当前操作的 adapter。read 不写，propose 不发布；update 绑定有效授权、来源/版本及真实发布条件。独立审查、CAS、恢复和回执等要求按后端及明示约定履行；不能把“方法自主”当作绕过实际门禁的许可，也不为普通本地候选额外推导发布审查。
 
-SelfOpenWiki 是可选来源/发布 adapter；其 SelfWorkflow 接线沿知识模块，personal_call/personal_status、read 和 visualizer_spec 分别核验能力。DocHub 等目标沿 Wiki 工作流的相应扩展；不要求具备 SelfOpenWiki。来源身份、版本与证据按实际操作保留，不存凭据、私人推理或整份敏感原文。
+SelfOpenWiki 接线沿知识模块，其他目标用对应适配，不混用协议。能力缺失、漂移或待恢复只阻依赖动作；说明发布尚未完成并继续已授权的无依赖工作，不猜 API、身份、OAuth、路径或静默换后端。不记录凭据、私人推理或整份敏感原文。

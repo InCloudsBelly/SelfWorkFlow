@@ -28,8 +28,8 @@ entries:
     source:
       kind: skill
       path: skills/code-quality/SKILL.md
-      revision: git:2e0d947babc6638fef77c921a6a640c3235ce92c
-      contentHash: sha256:34a2b1554d377ed57d7d840dad7958e19a3ae13d795b6d143700ab837a9d56b9
+      revision: git:aa32c66a8052cf398970d94ebab835e68de6a53e
+      contentHash: sha256:9b3013e64d17019ba27a1a9e7c8f8b66e95b155f414fb0d7a31317f088d90c94
     aliases:
       - name: owner-first-code-quality
         target: code-quality

@@ -1,0 +1,72 @@
+# 只读参考：selection-receipt.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/selection-receipt.schema.json",
+  "title": "SelfWorkFlow V3 bounded selection receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "planHash", "stageId", "slotId", "attemptRef",
+    "selectionPolicyHash",
+    "selectorModuleId", "selectorSourceHash", "inputArtifactId", "inputArtifactHash",
+    "eligibleModuleIds", "selectedModuleIds", "selectionReasons", "signalEvidenceRefs",
+    "estimatedContextCost", "estimatedExecutionCost", "coverageDecisions", "receiptHash"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "planHash": {"$ref": "#/$defs/sha256"},
+    "stageId": {"$ref": "#/$defs/stableId"},
+    "slotId": {"$ref": "#/$defs/stableId"},
+    "attemptRef": {"$ref": "#/$defs/stableId"},
+    "selectionPolicyHash": {"$ref": "#/$defs/sha256"},
+    "selectorModuleId": {"$ref": "#/$defs/stableId"},
+    "selectorSourceHash": {"$ref": "#/$defs/sha256"},
+    "inputArtifactId": {"$ref": "#/$defs/stableId"},
+    "inputArtifactHash": {"$ref": "#/$defs/sha256"},
+    "eligibleModuleIds": {"$ref": "#/$defs/idList"},
+    "selectedModuleIds": {"$ref": "#/$defs/idList"},
+    "selectionReasons": {"$ref": "#/$defs/idList"},
+    "signalEvidenceRefs": {"$ref": "#/$defs/idList"},
+    "estimatedContextCost": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+    "estimatedExecutionCost": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+    "coverageDecisions": {
+      "type": "array",
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/coverageDecision"}
+    },
+    "receiptHash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "idList": {
+      "type": "array",
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/stableId"}
+    },
+    "coverageDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["obligationId", "decision"],
+      "properties": {
+        "obligationId": {"$ref": "#/$defs/stableId"},
+        "decision": {"enum": ["fulfilled", "unverified", "blocked"]},
+        "evidenceRefs": {"$ref": "#/$defs/idList"}
+      }
+    }
+  }
+}
+
+````

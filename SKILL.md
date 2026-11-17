@@ -1,39 +1,30 @@
 ---
 name: selfworkflow
-description: SelfWorkflow 工程流程；选用或默认时启用，闲聊和概念讨论不触发。
+description: SelfWorkflow 薄层工程引导；围绕目标、授权和证据推进，专业方法按需选择。工程及显式流程任务启用，普通问答不触发。
 ---
 
 [兼容入口](skills/selfworkflow/references/public/WORKFLOW.md)
 
-规则版本：`39f941593a2e`
+规则版本：`d1046063cf34`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](skills/selfworkflow/references/public/releases/39f941593a2ed8601fda8334511e33ce4668cae51e661f89fe37cbfbd167a70a/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](skills/selfworkflow/references/public/releases/d1046063cf34791a0d9d4275aa96c744ae55d0e08774014f11e051c28742e9c2/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 
-中文。工程：范围/方案→实施→审查验证→交付。首报模式/动作，变化再报；只读不写（CodeGraph 索引例外），精确本地文件/配置/日志查询直接处理。
+中文。以下是普通 agent-policy 的默认引导，不要求固定模式、角色、过程文档或逐条回执。用户、项目和宿主的明示约束、真实工具操作前提及显式契约（`workflow/legacy-host.md`）仍须遵守。
 
-按目标/验收/非目标定投入与交付；关键事实先查，合并澄清影响结论的缺口/实质选择，不为告警扩目标。
+依据用户请求和上下文确定目标、完成标准与授权范围。同范围的必要工作自主推进，不重复确认；选择工具或方案不扩大授权。
 
-低风险小任务用 Light 窄自审；其余 Full（`workflow/modes/full.md`），高风险/深分析 Deep（`workflow/modes/deep.md`）。单选，profile 不提级。
+在完整满足目标的前提下，减少不必要的改动、复杂度和维护负担。完成目标所需的支持工作继续，无关改进不自动纳入。
 
-按操作读：
-- 知识（`workflow/modules/knowledge.md`）。
-- 行为/测试（`methods/code-quality/METHOD.md`）。用户或项目规则选用 CodeGraph、任务明确要求图查询证据，或已知当前项目有图谱绑定时，才启用代码方法的图谱分支。查询按图关系需要，写后限已启用索引内的源码变化。其余查源码和已有导航，跳过图谱模块与探测。
-- 数学/算法（`methods/sympy/METHOD.md`）。
-- 变更/副作用（`methods/workflow-quality/METHOD.md`）。
-- 审查（`workflow/modules/review.md`）：明确审查或项目 Review 匹配。
-- 交付（`workflow/modules/delivery.md`）：可拆分且有分工收益的仓库实施/PR正文/复盘。
-- 维护（`methods/workflow-skill-maintenance/METHOD.md`）：工作流/Skill 变更。
-- 编译验证或变更影响编译的共享头、模块、环境时，读缓存保护（`workflow/modules/build.md`）。
-- 接入（`workflow/onboarding.md`）：安装/迁移/能力变化；契约（`workflow/legacy-host.md`）：显式契约/契约 Host。
+按任务组织理解、行动、核验和交付，阶段可合并，已有成果可复用。未被明确指定的方法与协作方式由 Agent 选择；阅读或引用参考不自动启用整套流程，明确采用的方法须履行其适用要求。
 
-路由不足才查 `methods/INDEX.md`；只读最窄命中项，引用不触发。TEA/grilling/Superpowers 仅显式；不另起流程/安装/hooks/菜单、遍历引用树或探测未用服务。
+保护既有修改、数据、凭据和产物。范围或实质风险超出已有授权，或关键缺口无法可靠补齐时，仅暂停受影响动作澄清，其余已授权工作继续。
 
-保护既有修改/凭据，沿用授权；越权/并发冲突只停受影响动作确认，无关修复另获授权。缺口/未执行标 unverified，失败只阻依赖项，先解决相关 Critical/Important。
+按实际请求的交付类型核验结果。结论的范围和确定程度不得超过已取得的证据；说明实际验证及影响验收的缺口，必要验收未完成不宣称整体完成。
 
-证据充分即推进。既有交接状态保留目标/授权、revision/documentRoot、范围/输入版本、环境/消费者、结论/证据/缺口/待办及路径/标识；合并新增、替换失效。保存/压缩上下文、交接恢复或宿主报压力读续接（`workflow/modules/context.md`）。计数不替代验收/收益证据，必要工作不因预算放弃。
+续接沿既有目标、授权和规则绑定，保留未完成事项，复用仍有效的状态与证据。出现变化或新证据时按影响范围补查；无法确认有效性时，重新核验必要范围。
 
-检索先定缺口/用途/范围/来源；多轮/歧义/跨源/扩围或输出量不明读通用搜索（`workflow/modules/search.md`）。工具内投影，批量合计限量，无新依据不重扫/重审/重测。后台进度沿原作业回主对话，等待/长命令可中断。
+已有信息足够就直接推进；已有专业资料入口就直达，入口不明时按当前缺口定位 `methods/INDEX.md` 的对应项，不为查单个方法预载整表。需要时参考审查（`workflow/modules/review.md`）、上下文续接（`workflow/modules/context.md`）、检索（`workflow/modules/search.md`）或维护（`methods/workflow-skill-maintenance/METHOD.md`）。实际涉及编译或影响共享构建环境时，遵守缓存保护（`workflow/modules/build.md`）。
 <!-- /selfworkflow:core -->

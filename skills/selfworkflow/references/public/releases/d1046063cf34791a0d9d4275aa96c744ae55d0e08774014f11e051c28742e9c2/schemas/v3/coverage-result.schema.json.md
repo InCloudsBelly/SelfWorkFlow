@@ -1,0 +1,125 @@
+# 只读参考：coverage-result.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/coverage-result.schema.json",
+  "title": "SelfWorkFlow V3 coverage result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "planHash", "attemptRef", "createdAt", "finalDiffHash",
+    "diffSignalSetHash", "strategyHash", "obligations", "passed", "resultHash"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "planHash": {"$ref": "#/$defs/sha256"},
+    "attemptRef": {"$ref": "#/$defs/stableId"},
+    "createdAt": {"$ref": "#/$defs/utcTimestamp"},
+    "finalDiffHash": {"$ref": "#/$defs/sha256"},
+    "diffSignalSetHash": {"$ref": "#/$defs/sha256"},
+    "strategyHash": {"$ref": "#/$defs/sha256"},
+    "obligations": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/obligationResult"}},
+    "passed": {"type": "boolean"},
+    "resultHash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "stableId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "utcTimestamp": {
+      "type": "string", "format": "date-time",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$"
+    },
+    "invocationEnvelope": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "executable", "moduleId", "argvHash", "cwdHash", "environmentHash",
+        "inputHash", "startedAt"
+      ],
+      "properties": {
+        "executable": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^[^\\u0000]+$"},
+        "moduleId": {"$ref": "#/$defs/stableId"},
+        "argvHash": {"$ref": "#/$defs/sha256"},
+        "cwdHash": {"$ref": "#/$defs/sha256"},
+        "environmentHash": {"$ref": "#/$defs/sha256"},
+        "inputHash": {"$ref": "#/$defs/sha256"},
+        "startedAt": {"$ref": "#/$defs/utcTimestamp"}
+      }
+    },
+    "resultEnvelope": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "invocationHash", "exitCode", "status", "stdoutHash", "stderrHash", "completedAt"
+      ],
+      "properties": {
+        "invocationHash": {"$ref": "#/$defs/sha256"},
+        "exitCode": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647},
+        "status": {"enum": ["passed", "failed", "blocked"]},
+        "stdoutHash": {"$ref": "#/$defs/sha256"},
+        "stderrHash": {"$ref": "#/$defs/sha256"},
+        "completedAt": {"$ref": "#/$defs/utcTimestamp"}
+      }
+    },
+    "verificationReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schemaVersion", "planHash", "attemptRef", "strategyHash", "diffSignalSetHash",
+        "verificationId", "obligationIds", "invocationEnvelope", "invocationHash",
+        "resultEnvelope", "resultHash", "collectorAttestationHash", "receiptHash"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 3},
+        "planHash": {"$ref": "#/$defs/sha256"},
+        "attemptRef": {"$ref": "#/$defs/stableId"},
+        "strategyHash": {"$ref": "#/$defs/sha256"},
+        "diffSignalSetHash": {"$ref": "#/$defs/sha256"},
+        "verificationId": {"$ref": "#/$defs/stableId"},
+        "obligationIds": {
+          "type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/stableId"}
+        },
+        "invocationEnvelope": {"$ref": "#/$defs/invocationEnvelope"},
+        "invocationHash": {"$ref": "#/$defs/sha256"},
+        "resultEnvelope": {"$ref": "#/$defs/resultEnvelope"},
+        "resultHash": {"$ref": "#/$defs/sha256"},
+        "collectorAttestationHash": {"$ref": "#/$defs/sha256"},
+        "receiptHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "obligationResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["obligationId", "status"],
+      "properties": {
+        "obligationId": {"$ref": "#/$defs/stableId"},
+        "status": {"enum": ["fulfilled", "unverified", "blocked"]},
+        "executionReceiptRef": {"$ref": "#/$defs/stableId"},
+        "executionReceiptHash": {"$ref": "#/$defs/sha256"},
+        "invocationHash": {"$ref": "#/$defs/sha256"},
+        "resultHash": {"$ref": "#/$defs/sha256"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 4096}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "fulfilled"}}, "required": ["status"]},
+          "then": {
+            "required": ["executionReceiptRef", "executionReceiptHash"],
+            "not": {"required": ["reason"]}
+          },
+          "else": {
+            "required": ["reason"],
+            "allOf": [
+              {"not": {"required": ["executionReceiptRef"]}},
+              {"not": {"required": ["executionReceiptHash"]}},
+              {"not": {"required": ["invocationHash"]}},
+              {"not": {"required": ["resultHash"]}}
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
+
+````
