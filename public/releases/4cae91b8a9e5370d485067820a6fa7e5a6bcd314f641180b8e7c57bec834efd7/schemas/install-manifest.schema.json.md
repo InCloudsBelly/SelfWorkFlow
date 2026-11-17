@@ -1,0 +1,50 @@
+# 只读参考：install-manifest.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manifestPath", "transactionId", "transactionPath", "version", "profile", "artifactHash", "agentsRoot", "codexRoot", "stateRoot", "operations", "securityStatus"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "manifestPath": {"type": "string"},
+    "transactionId": {"type": "string"},
+    "transactionPath": {"type": "string"},
+    "version": {"type": "string"},
+    "profile": {"enum": ["core", "knowledge", "maintainer", "custom-unverified"]},
+    "artifactHash": {"type": "string"},
+    "agentsRoot": {"type": "string"},
+    "codexRoot": {"type": "string"},
+    "dshRoot": {"type": "string"},
+    "documentRoot": {"type": "string"},
+    "stateRoot": {"type": "string"},
+    "operations": {"type": "array", "items": {"$ref": "#/$defs/operation"}},
+    "securityStatus": {"enum": ["verified", "unverified"]},
+    "hostLauncher": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "pythonExecutable", "pythonHash", "contentHash"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "pythonExecutable": {"type": "string", "minLength": 1},
+        "pythonHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["target", "beforeExists", "beforeHash", "afterHash", "backupPath"],
+      "properties": {
+        "target": {"type": "string"}, "beforeExists": {"type": "boolean"},
+        "beforeHash": {"type": ["string", "null"]}, "afterHash": {"type": ["string", "null"]},
+        "backupPath": {"type": ["string", "null"]}
+      }
+    }
+  }
+}
+
+````

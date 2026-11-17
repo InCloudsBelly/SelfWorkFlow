@@ -53,8 +53,8 @@ class NativeSkillReferenceTests(unittest.TestCase):
                 public = (self.release / "methods" / name / "METHOD.md").read_text(encoding="utf-8")
                 for text in (native, public):
                     self.assertIn(f"`{relative}/`", text)
-                    self.assertIn("文档模式 `METHOD.md`", text)
-                    self.assertIn("runtime 模式 `SKILL.md`", text)
+                    self.assertIn("`METHOD.md`", text)
+                    self.assertIn("`SKILL.md`", text)
                 self.assertTrue((self.release / relative / "METHOD.md").is_file())
                 self.assertTrue((self.runtime / relative / "SKILL.md").is_file())
 

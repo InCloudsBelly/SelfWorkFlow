@@ -1,0 +1,71 @@
+# 只读参考：resolve-request.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "operationType", "complexity", "risk", "writeTask", "ambiguity", "explicitModuleIds", "projectDefaultModuleIds", "projectMinimums", "capabilityEvidenceSnapshot"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "operationType": {"enum": ["analyze", "design", "plan", "implement", "debug", "review", "verify", "document", "install", "publish", "knowledge-read", "knowledge-write"]},
+    "complexity": {"enum": ["C0", "C1", "C2", "C3"]}, "risk": {"enum": ["R0", "R1", "R2", "R3"]},
+    "writeTask": {"type": "boolean"}, "ambiguity": {"type": "boolean"},
+    "explicitModuleIds": {"$ref": "#/$defs/idList"}, "projectDefaultModuleIds": {"$ref": "#/$defs/idList"},
+    "projectMinimums": {"type": "object", "additionalProperties": false, "required": ["strength"], "properties": {"strength": {"enum": ["Light", "Full", "Deep"]}}},
+    "capabilityEvidenceSnapshot": {"$ref": "#/$defs/snapshot"},
+    "implementSpecEvidence": {"$ref": "#/$defs/implementSpecEvidence"},
+    "durableSpec": {"type": "boolean"},
+    "requirementsMaturity": {"enum": ["exploratory", "defined", "approved"]}
+  },
+  "allOf": [
+    {"if": {"properties": {"operationType": {"enum": ["implement", "debug", "document", "install", "publish", "knowledge-write"]}}}, "then": {"properties": {"writeTask": {"const": true}}}},
+    {"if": {"properties": {"operationType": {"enum": ["analyze", "design", "plan", "review", "verify", "knowledge-read"]}}}, "then": {"properties": {"writeTask": {"const": false}}}},
+    {"if": {"properties": {"explicitModuleIds": {"contains": {"const": "implement-spec"}}}}, "then": {"required": ["implementSpecEvidence", "durableSpec", "requirementsMaturity"]}}
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "idList": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "subject": {"type": "object", "additionalProperties": false, "required": ["kind", "id", "version", "build", "sourceLock"], "properties": {"kind": {"$ref": "#/$defs/id"}, "id": {"type": "string", "minLength": 1, "maxLength": 256}, "version": {"type": ["string", "null"], "maxLength": 256}, "build": {"type": ["string", "null"], "maxLength": 256}, "sourceLock": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/hash"}]}}},
+    "evidence": {"type": "object", "additionalProperties": false, "required": ["name", "provider", "subject", "state", "observedAt", "validUntil", "evidenceRef", "evidenceHash"], "properties": {"name": {"$ref": "#/$defs/id"}, "provider": {"type": "string", "minLength": 1, "maxLength": 256}, "subject": {"$ref": "#/$defs/subject"}, "state": {"enum": ["supported", "unsupported", "unverified"]}, "observedAt": {"type": "string", "minLength": 20, "maxLength": 40}, "validUntil": {"type": "string", "minLength": 20, "maxLength": 40}, "evidenceRef": {"type": "string", "minLength": 1, "maxLength": 256}, "evidenceHash": {"$ref": "#/$defs/hash"}}},
+    "snapshot": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "capturedAt", "evidence"], "properties": {"schemaVersion": {"const": 1}, "capturedAt": {"type": "string", "minLength": 20, "maxLength": 40}, "evidence": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/evidence"}}}},
+    "implementSpecTicket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "dependencies", "acceptanceHash"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "dependencies": {"$ref": "#/$defs/idList"},
+        "acceptanceHash": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "implementSpecEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "specHash", "tickets", "ticketDagHash", "planReviewHash",
+        "implementationConfirmationHash", "independentAgentsHash",
+        "independentReviewHash", "gitPermissionsHash", "planReviewStatus",
+        "implementationConfirmationStatus", "independentAgentsStatus",
+        "independentReviewStatus", "gitPermissionsStatus"
+      ],
+      "properties": {
+        "specHash": {"$ref": "#/$defs/hash"},
+        "tickets": {"type": "array", "minItems": 2, "maxItems": 256, "items": {"$ref": "#/$defs/implementSpecTicket"}},
+        "ticketDagHash": {"$ref": "#/$defs/hash"},
+        "planReviewHash": {"$ref": "#/$defs/hash"},
+        "implementationConfirmationHash": {"$ref": "#/$defs/hash"},
+        "independentAgentsHash": {"$ref": "#/$defs/hash"},
+        "independentReviewHash": {"$ref": "#/$defs/hash"},
+        "gitPermissionsHash": {"$ref": "#/$defs/hash"},
+        "planReviewStatus": {"const": "passed"},
+        "implementationConfirmationStatus": {"const": "confirmed"},
+        "independentAgentsStatus": {"const": "supported"},
+        "independentReviewStatus": {"const": "supported"},
+        "gitPermissionsStatus": {"const": "confirmed"}
+      }
+    }
+  }
+}
+
+````

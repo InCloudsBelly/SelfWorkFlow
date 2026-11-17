@@ -147,8 +147,8 @@ entries:
     source:
       kind: skill
       path: skills/testing-review-quality/SKILL.md
-      revision: git:aa32c66a8052cf398970d94ebab835e68de6a53e
-      contentHash: sha256:b4f36f8f7f73af307e16886bf993d65719c34b27b034875973c6112c0e606307
+      revision: git:97dd3834fea766147682aec25b97c57c9df16097
+      contentHash: sha256:f755c6781ef1067bd0b55ca78257b4029e36073603fa7b4047fa2c03d8ef0342
     aliases:
       - name: testing-review-gate
         target: testing-review-quality

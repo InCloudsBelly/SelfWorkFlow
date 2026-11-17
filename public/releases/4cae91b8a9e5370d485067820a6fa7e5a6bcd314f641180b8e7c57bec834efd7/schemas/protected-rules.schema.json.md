@@ -1,0 +1,146 @@
+# 只读参考：protected-rules.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/protected-rules.schema.json",
+  "title": "SelfWorkFlow protected rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "policyVersion",
+    "mergeOrder",
+    "ordinaryLayerContractVersion",
+    "ownerModificationGate",
+    "rules"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "policyVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})$"
+    },
+    "mergeOrder": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "protected"},
+        {"const": "skill"},
+        {"const": "project"},
+        {"const": "overlay"}
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "ordinaryLayerContractVersion": {"const": 1},
+    "ownerModificationGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versionChange",
+        "confirmationArtifactKind",
+        "reviewArtifactKind",
+        "behavioralTestArtifactKind"
+      ],
+      "properties": {
+        "versionChange": {"const": "semver-major"},
+        "confirmationArtifactKind": {"const": "owner-confirmation"},
+        "reviewArtifactKind": {"const": "owner-review"},
+        "behavioralTestArtifactKind": {"const": "behavioral-test"}
+      }
+    },
+    "rules": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "truthful-capability-review-verification"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "no-silent-degradation"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "protect-credentials-and-sensitive-data"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "authorize-side-effects-and-irreversible-actions"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "protect-user-existing-changes"},
+            "strength": {"const": "agent-policy"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength"],
+          "properties": {
+            "id": {"const": "require-fresh-verification-before-completion"},
+            "strength": {"const": "enforced"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "strength", "gate", "evaluator", "reasonCodes"],
+          "properties": {
+            "id": {"const": "require-independent-post-grill-review"},
+            "strength": {"const": "enforced"},
+            "gate": {"const": "design.post-grill-review"},
+            "evaluator": {"const": "post-grill-review-independence-v1"},
+            "reasonCodes": {
+              "type": "array",
+              "prefixItems": [
+                {"const": "post-grill-independent-review-required"},
+                {"const": "post-grill-review-input-invalid"},
+                {"const": "post-grill-review-attestation-missing"},
+                {"const": "post-grill-review-user-authorization-required"},
+                {"const": "post-grill-review-changes-required"},
+                {"const": "post-grill-review-authorization-replayed"},
+                {"const": "post-grill-review-attestation-replayed"}
+              ],
+              "items": false,
+              "minItems": 7,
+              "maxItems": 7
+            }
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 7,
+      "maxItems": 7
+    }
+  }
+}
+
+````
