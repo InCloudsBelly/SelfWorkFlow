@@ -33,7 +33,9 @@ afterEach(async () => {
 
 test("rejects a changed materialized HEAD on the next live admission and recovers", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "wiki-live-identity-"));
-  cleanup.push(() => rm(root, { force: true, recursive: true }));
+  cleanup.push(() =>
+    rm(root, { force: true, recursive: true, maxRetries: 5, retryDelay: 100 }),
+  );
   const moduleRoot = path.join(root, "module");
   const repositoryRoot = path.join(moduleRoot, "self-openwiki");
   const openWikiRoot = path.join(moduleRoot, ".work", "openwiki");
