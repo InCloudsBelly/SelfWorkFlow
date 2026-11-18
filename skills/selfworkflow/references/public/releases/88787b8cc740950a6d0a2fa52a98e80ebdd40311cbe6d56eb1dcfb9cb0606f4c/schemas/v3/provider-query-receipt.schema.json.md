@@ -1,0 +1,38 @@
+# 只读参考：provider-query-receipt.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-query-receipt.schema.json",
+  "title": "SelfWorkFlow V3 provider query receipt",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "receiptHash", "queryPlanHash", "executionNonce", "attemptRef", "providerId", "adapterHash", "sourceIdentityHash", "projectStateReceiptHash", "workspaceFingerprintHash", "canonicalProjectRootHash", "startedAt", "completedAt", "indexRevision", "indexCompleteness", "returnedFiles", "truncated", "preQueryWorkspaceFingerprintHash", "postQueryWorkspaceFingerprintHash", "actualSideEffects", "replayState", "mutationEvidenceRefs"],
+  "properties": {
+    "schemaVersion": {"const": 3}, "receiptHash": {"$ref": "#/$defs/hash"},
+    "queryPlanHash": {"$ref": "#/$defs/hash"}, "executionNonce": {"$ref": "#/$defs/id"},
+    "attemptRef": {"$ref": "#/$defs/id"}, "providerId": {"$ref": "#/$defs/id"},
+    "adapterHash": {"$ref": "#/$defs/hash"}, "sourceIdentityHash": {"$ref": "#/$defs/hash"},
+    "projectStateReceiptHash": {"$ref": "#/$defs/hash"}, "workspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "canonicalProjectRootHash": {"$ref": "#/$defs/hash"}, "startedAt": {"type": "string", "format": "utc-date-time"}, "completedAt": {"type": "string", "format": "utc-date-time"},
+    "indexRevision": {"type": "string", "minLength": 1, "maxLength": 256},
+    "extractionVersion": {"type": "string", "maxLength": 128},
+    "indexCompleteness": {"enum": ["complete", "partial", "unknown"]},
+    "pendingFiles": {"type": "array", "maxItems": 200000, "uniqueItems": true, "items": {"$ref": "#/$defs/projectPath"}},
+    "parseFailures": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/id"}},
+    "returnedFiles": {"type": "array", "maxItems": 200000, "items": {"$ref": "#/$defs/file"}},
+    "truncated": {"type": "boolean"}, "heuristicProvenance": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/id"}},
+    "preQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceFingerprintHash": {"$ref": "#/$defs/hash"}, "preQueryWorkspaceIdentityHash": {"$ref": "#/$defs/hash"}, "postQueryWorkspaceIdentityHash": {"$ref": "#/$defs/hash"}, "approvalReceiptRef": {"$ref": "#/$defs/id"},
+    "actualSideEffects": {"enum": ["none", "local-write", "network", "unknown"]},
+    "replayState": {"enum": ["terminal-succeeded", "terminal-failed"]},
+    "mutationEvidenceRefs": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "projectPath": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^(?![A-Za-z]:)(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*[ .](?:/|$))[^\\u0000-\\u001f<>:\"|?*]+$"},
+    "file": {"type": "object", "additionalProperties": false, "required": ["path", "byteRange", "contentHash"], "properties": {"path": {"$ref": "#/$defs/projectPath"}, "byteRange": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 0}}, "contentHash": {"$ref": "#/$defs/hash"}}}
+  }
+}
+
+````

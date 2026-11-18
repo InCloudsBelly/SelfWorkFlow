@@ -1,0 +1,81 @@
+# 只读参考：review-aggregate.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/review-aggregate.schema.json",
+  "title": "SelfWorkFlow V3 review aggregate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "planHash", "attemptRef", "createdAt", "finalDiffHash",
+    "diffSignalSetHash", "findingHashes", "dedupGroups", "conflictAdjudications",
+    "rootCauseCoverage", "residualRisks", "aggregateHash"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "planHash": {"$ref": "#/$defs/sha256"},
+    "attemptRef": {"$ref": "#/$defs/stableId"},
+    "createdAt": {"$ref": "#/$defs/utcTimestamp"},
+    "finalDiffHash": {"$ref": "#/$defs/sha256"},
+    "diffSignalSetHash": {"$ref": "#/$defs/sha256"},
+    "findingHashes": {"$ref": "#/$defs/hashList"},
+    "dedupGroups": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/dedupGroup"}},
+    "conflictAdjudications": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/conflict"}},
+    "rootCauseCoverage": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/rootCauseCoverage"}},
+    "residualRisks": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/residualRisk"}},
+    "aggregateHash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "stableId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "hashList": {"type": "array", "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+    "nonEmptyHashList": {"type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+    "utcTimestamp": {
+      "type": "string", "format": "date-time",
+      "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?Z$"
+    },
+    "fingerprint": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[a-z0-9][a-z0-9._:-]{0,255}$"},
+    "dedupGroup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fingerprint", "findingHashes", "representativeFindingHash"],
+      "properties": {
+        "fingerprint": {"$ref": "#/$defs/fingerprint"},
+        "findingHashes": {"type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+        "representativeFindingHash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "conflict": {
+      "type": "object", "additionalProperties": false,
+      "required": ["conflictId", "findingHashes", "decision", "evidenceRefs"],
+      "properties": {
+        "conflictId": {"$ref": "#/$defs/stableId"},
+        "findingHashes": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}},
+        "decision": {"enum": ["accepted", "rejected", "merged", "superseded", "pending"]},
+        "evidenceRefs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/stableId"}}
+      }
+    },
+    "rootCauseCoverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rootCauseOwner", "findingHashes"],
+      "properties": {
+        "rootCauseOwner": {"enum": ["design", "plan", "implemented", "reviewed", "verified"]},
+        "findingHashes": {"$ref": "#/$defs/nonEmptyHashList"}
+      }
+    },
+    "residualRisk": {
+      "type": "object", "additionalProperties": false,
+      "required": ["riskId", "severity", "reason", "status"],
+      "properties": {
+        "riskId": {"$ref": "#/$defs/stableId"},
+        "severity": {"enum": ["critical", "high", "medium", "low", "info"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "status": {"enum": ["open", "accepted", "mitigated"]}
+      }
+    }
+  }
+}
+
+````

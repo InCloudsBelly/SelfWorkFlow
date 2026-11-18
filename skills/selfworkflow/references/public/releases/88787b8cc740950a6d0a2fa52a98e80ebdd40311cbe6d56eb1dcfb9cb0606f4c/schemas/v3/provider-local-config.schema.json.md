@@ -1,0 +1,72 @@
+# 只读参考：provider-local-config.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-local-config.schema.json",
+  "title": "SelfWorkFlow V3 machine provider configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "providers"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "providers": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/provider"}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["providerId", "sourcePath", "enabled"],
+      "properties": {
+        "providerId": {"$ref": "#/$defs/id"},
+        "sourcePath": {"type": "string", "minLength": 3, "maxLength": 32767},
+        "enabled": {"type": "boolean"},
+        "ownership": {"enum": ["user-local", "selfworkflow-managed"]},
+        "commandPrefix": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+        },
+        "commandHash": {"$ref": "#/$defs/hash"},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "version", "commit", "sourceHash", "dirty"],
+          "properties": {
+            "kind": {"enum": ["local-override", "managed-runtime", "managed-submodule"]},
+            "version": {"type": "string", "minLength": 1, "maxLength": 256},
+            "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "sourceHash": {"$ref": "#/$defs/hash"},
+            "dirty": {"type": "boolean"}
+          }
+        },
+        "bindingHash": {"$ref": "#/$defs/hash"},
+        "projectAuthorizations": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["canonicalProjectRootHash", "approved", "expiresAt"],
+            "properties": {
+              "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
+              "approved": {"type": "boolean"},
+              "expiresAt": {"type": "string", "format": "utc-date-time"}
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+````

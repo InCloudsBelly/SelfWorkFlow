@@ -1,0 +1,163 @@
+---
+name: 'step-04-coverage-plan'
+description: 'Design test coverage, priorities, execution strategy, and estimates'
+nextStepFile: '{skill-root}/steps-c/step-05-generate-output.md'
+outputFile: '{test_artifacts}/test-design/test-design-progress-{run_key}.md'
+---
+
+# Step 4: Coverage Plan & Execution Strategy
+
+## STEP GOAL
+
+Create the test coverage matrix, prioritize scenarios, and define execution strategy, resource estimates, and quality gates.
+
+## MANDATORY EXECUTION RULES
+
+- 📖 Read the entire step file before acting
+- ✅ Speak in `{communication_language}`
+- 🚫 Avoid redundant coverage across test levels
+
+---
+
+## EXECUTION PROTOCOLS:
+
+- 🎯 Follow the MANDATORY SEQUENCE exactly
+- 💾 Record outputs before proceeding
+- 📖 Load the next step only when instructed
+
+## CONTEXT BOUNDARIES:
+
+- Available context: config, loaded artifacts, and knowledge fragments
+- Focus: this step's goal only
+- Limits: do not execute future steps
+- Dependencies: prior steps' outputs (if any)
+
+## MANDATORY SEQUENCE
+
+**CRITICAL:** Follow this sequence exactly. Do not skip, reorder, or improvise.
+
+## 1. Coverage Matrix
+
+For each requirement or risk-driven scenario:
+
+- Decompose into atomic test scenarios
+- Select **test level** (E2E / API / Component / Unit) using `test-levels-framework.md`
+- Ensure no duplicate coverage across levels
+- Assign priorities (P0–P3) using `test-priorities-matrix.md`
+- Map NFR-derived risks to planned validation scenarios and evidence sources
+- Use the exact `Risk ID` assigned in the risk register in every `Risk Link` cell. A prose description alone is not a traceable mapping.
+- Each `Test Level` cell contains exactly one canonical value: E2E, API, Component, Integration, or Unit. Put performance, operational, device, and other qualifiers in scenario descriptions or notes.
+- Give every scored risk exactly one risk-linked coverage row, and give it the single test level where the failure first becomes observable. The failure crosses no boundary: Unit. It lives in one rendered interface unit: Component. It crosses one owned store, queue, file, or event boundary: Integration. It crosses the HTTP or contract boundary of one service: API. It spans two or more deployables, a user journey, or a deadline measured on real devices: E2E. When the mechanism fits more than one description, settle the level with these rules:
+  - Use the boundary of the component that lacks the control or behaves unsafely. The system whose response triggers the failure does not set the level.
+  - Classify the failure as the sources describe it today, with the components they name. A mitigation component the sources do not name, such as a new configuration value or a policy extracted for testing, does not set the level.
+  - For an absent control, take the level of the behavior that control would govern, as the sources describe that behavior. Absence of a control does not by itself make a risk Unit.
+  - A missing release, rollout, or disable control for a build that users install, such as a mobile or desktop app, spans the shipped build and the system that would switch it: E2E. A switch read inside one service takes that service's boundary.
+
+  Name the risk's mechanism, the boundary it crosses, and the resulting level in the row notes. Record the individual scenarios in the row's `Notes` and their number in `Test Count`; do not add a second row for the same risk. Rows that cover no scored risk use `-` in `Risk Link`.
+
+- Place a risk's row under the one priority heading that matches its consequence. A risk never appears under two priority headings.
+
+**Priority rules:** decide each priority on business impact, user reach, and workaround
+availability. Risk score is supporting evidence and is not a required condition for any priority.
+Walk the Priority Decision Tree in `test-priorities-matrix.md` for each scenario. Wherever that fragment assigns P0, in its criteria, checklist, decision tree, or example function, the P0 holds only when both P0 conditions below hold; otherwise assign P1 or lower.
+
+- P0: Critical business, security, data-integrity, or compliance impact with no safe workaround
+- P1: Core, frequent, or complex behavior with material user reach and a limited workaround
+- P2: Secondary behavior with narrower user reach and an acceptable workaround
+- P3: Rare, cosmetic, or experimental behavior with minimal impact and an easy workaround
+
+Record the failure consequence and the source-supported workaround in the primary coverage row's notes. Preserve these four priority criteria in the published plan. Evaluate a performance budget or an operational control through its documented business consequence before assigning its test priority. Assess a workaround against the original failure consequence, before proposed mitigations. A valid workaround preserves essential business operation and resolves the affected state. Pausing the application, leaving a core user action unresolved, or suppressing a symptom needs a source-backed recovery path before it can justify a lower priority. Record the evidence for recoverability; mark it unresolved when the source provides none. Separate an acceptance threshold from the consequence of missing it. For a latency or throughput target, state whether the source establishes a critical business deadline, permanent loss, blocked essential operation, or bounded degradation while work remains recoverable. Record an unstated business consequence as a clarification. Assign P0 only when both conditions hold: the documented consequence is a critical business, security, data-integrity, or compliance impact, and no safe workaround exists. A missing workaround alone leaves a risk at P1 or lower. Judge each risk on its own documented consequence. A risk whose consequence is that another registered risk's harm lasts longer or reaches more users takes P1 or lower, and the risk that causes the harm carries the P0 scenarios. This does not apply when the sources mandate the missing control itself, or when no registered risk carries the harm the control would limit; judge those on the critical-impact criterion. A release acceptance target can still have P1 coverage when the documented consequence is material degradation. An empty priority band is valid; explain why the planned scenarios belong to the assigned bands. When every primary risk has the same priority, justify how each consequence meets that criterion.
+
+---
+
+## 2. NFR Coverage and Evidence Plan
+
+For each in-scope NFR category:
+
+- Map the NFR to one or more planned validation scenarios
+- Select the right validation level/tool (for example: API/UI tests for auth and resilience, k6 for load/performance, CI/static analysis for maintainability, monitoring/logs for reliability)
+- Identify the expected evidence artifact that `nfr-assess` should consume later
+- Mark missing thresholds or missing evidence sources as blockers, risks, or assumptions
+
+Keep this concise. Do not include full NFR evidence assessment tables or final PASS/CONCERNS/FAIL decisions in test design.
+
+---
+
+## 3. Execution Strategy (Keep Simple)
+
+Use a **PR / Nightly / Weekly** model:
+
+- **PR**: All functional tests if <15 minutes
+- **Nightly/Weekly**: Long-running or expensive suites (perf, chaos, large datasets)
+- Avoid re-listing all tests (refer to coverage plan)
+
+---
+
+## 4. Resource Estimates (Ranges Only)
+
+Provide intervals (no false precision):
+
+- P0: e.g., "~25–40 hours"
+- P1: e.g., "~20–35 hours"
+- P2: e.g., "~10–30 hours"
+- P3: e.g., "~2–5 hours"
+- Total and timeline as ranges
+
+---
+
+## 5. Quality Gates
+
+Define thresholds:
+
+- P0 pass rate = 100%
+- P1 pass rate ≥ 95%
+- High-risk mitigations complete before release
+- Coverage target ≥ 80% (adjust if justified)
+- NFR validation evidence identified for each in-scope NFR category
+- Full NFR PASS/CONCERNS/FAIL status deferred to `nfr-assess` when evidence exists
+
+---
+
+### 6. Save Progress
+
+**Save this step's accumulated work to `{outputFile}`.**
+
+- **If `{outputFile}` does not exist** (first save), create it with YAML frontmatter:
+
+  ```yaml
+  ---
+  runScope: '{run_scope}'
+  runKey: '{run_key}'
+  workflowStatus: 'in-progress'
+  totalSteps: 5
+  stepsCompleted: ['step-04-coverage-plan']
+  lastStep: 'step-04-coverage-plan'
+  nextStep: '{nextStepFile}'
+  lastSaved: '{date}'
+  ---
+  ```
+
+  Then write this step's output below the frontmatter.
+
+- **If `{outputFile}` already exists**, update:
+  - Leave `runScope` and `runKey` exactly as step 1 wrote them
+  - Set `workflowStatus: 'in-progress'`
+  - Set `totalSteps: 5`
+  - Add `'step-04-coverage-plan'` to `stepsCompleted` array (only if not already present)
+  - Set `lastStep: 'step-04-coverage-plan'`
+  - Set `nextStep: '{nextStepFile}'`
+  - Set `lastSaved: '{date}'`
+  - Append this step's output to the appropriate section of the document.
+
+Load next step: `{nextStepFile}`
+
+## 🚨 SYSTEM SUCCESS/FAILURE METRICS:
+
+### ✅ SUCCESS:
+
+- Step completed in full with required outputs
+
+### ❌ SYSTEM FAILURE:
+
+- Skipped sequence steps or missing outputs
+  **Master Rule:** Skipping steps is FORBIDDEN.
