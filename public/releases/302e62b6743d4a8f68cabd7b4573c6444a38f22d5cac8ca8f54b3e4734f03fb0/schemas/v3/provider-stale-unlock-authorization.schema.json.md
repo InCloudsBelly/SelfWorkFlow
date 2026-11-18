@@ -1,0 +1,36 @@
+# 只读参考：provider-stale-unlock-authorization.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/provider-stale-unlock-authorization.schema.json",
+  "title": "SelfWorkFlow V3 stale lease unlock authorization",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "authorizationHash", "leaseHash", "providerId", "canonicalProjectRootHash", "operationId", "operationNonce", "ownerNonce", "storeVersion", "issuedAt", "expiresAt", "nonce", "issuerId", "confirmationSource", "revocationState"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "authorizationHash": {"$ref": "#/$defs/hash"},
+    "leaseHash": {"$ref": "#/$defs/hash"},
+    "providerId": {"$ref": "#/$defs/id"},
+    "canonicalProjectRootHash": {"$ref": "#/$defs/hash"},
+    "operationId": {"$ref": "#/$defs/id"},
+    "operationNonce": {"$ref": "#/$defs/id"},
+    "ownerNonce": {"$ref": "#/$defs/id"},
+    "storeVersion": {"type": "integer", "minimum": 1},
+    "issuedAt": {"type": "string", "format": "utc-date-time"},
+    "expiresAt": {"type": "string", "format": "utc-date-time"},
+    "nonce": {"$ref": "#/$defs/id"},
+    "issuerId": {"$ref": "#/$defs/id"},
+    "confirmationSource": {"const": "user-confirmation"},
+    "revocationState": {"enum": ["active", "revoked", "expired"]}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
+
+````

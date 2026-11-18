@@ -19,3 +19,9 @@
 5. 仅 `status: complete` 且 `published: true` 报正式完成；其他状态沿 `nextAction` 继续或报告具体缺口。冲突重读受影响页，保留并发内容；实际语义或范围变化才重新确认。
 
 读取不要求发布能力，也不创建更新事务。候选／更新所需规则由真实 work package 提供；已有兼容 adapter 时复用其操作细则。后端不可用仍可做已授权的独立研究或候选，不能静默换协议、provider 或 Wiki。不要直接复制稿件进正式根。
+
+## Viewer 图式排版
+
+制作或核验实际阅读页时沿用目标主题及版式约定。采用个人 Wiki 版式时，中文优先仿宋，西文和数字优先 Times New Roman。图与独立公式各自在页内从 1 编号，图题置下，式号居右，公式背景透明、字色随主题。改序后核对正文跳转。
+
+Viewer 支持 HTML 容器时，可用 `figure.wiki-figure` 配 `figcaption`、`div.wiki-equation` 配 `span.wiki-equation-number`，分别用 `wiki-fig-N`、`wiki-eq-N` 作定位。Markdown 图源或公式与外层标签间留空行。版式、媒体或引用变化时，在实际阅读页核受影响的显示、复制及跳转。

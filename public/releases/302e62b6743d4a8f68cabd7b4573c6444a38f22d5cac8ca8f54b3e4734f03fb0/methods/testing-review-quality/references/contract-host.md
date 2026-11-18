@@ -1,0 +1,24 @@
+# 契约 Host 的 Review 与验证
+
+仅显式 contract-managed task 或 conforming Host 加载。普通任务不加载本文件；进入契约模式后必须完整执行，能力缺失暂停该模式并标为 `unverified`，不得转普通模式冒充通过。
+
+## Independent Review
+
+
+Pre-implementation Review receives the final design, test design, plan, rules, and package hash. Post-landing Review uses one readable package containing the approved request, acceptance criteria, final documents, applicable rules, and actual task delta including committed, staged, unstaged, untracked, deleted, binary-hash, and Git file-mode entries. Worktree and index bytes plus modes are bound separately so staged-only and mode-only changes cannot evade Review.
+
+Bind the package and every receipt to the same `workflowMode`. Light uses one structured `self_attested` review. Full and Deep use one independent `host_attested` review with axis `combined`, covering Standards and Spec against the same package. Reject missing, stale or cross-mode evidence; never require two reviewers. Inherit the parent model/settings without a Review-specific override. Map `critical` to Critical, `high`/`medium` to Important, and `low`/`info` to Minor. Critical and Important must be resolved; each Minor needs a disposition.
+
+Review receipts are workflow evidence, not identity, model, or cryptographic proof. Full/Deep require one genuinely independent Host context and its observed execution ID; missing capability is `unverified`, never manufactured. Ordinary intermediate plans are self-reviewed; a pre-implementation independent gate is reserved for material architecture, security, persistence, irreversible risk or explicit request.
+
+For contract completion, `Host.dispatch_code_review` issues an in-process `CodeReviewEvidence` only after validating dispatch results and consuming the bound Host attestation. Dispatch belongs to the active `reviewed` stage; an `implemented` package is rejected before dispatch or consumption, so callers advance to `reviewed` before requesting their one Review. A receipt JSON or a `host_attested` label cannot recreate the proof. The `reviewed` stage accepts it through `code_review_evidence`; `validate_completion` additionally requires `review_host` and `review_ledger` from the embedding Host, checks the same service/plan/attempt and a passed `reviewed` stage, and matches the complete reviewed content to the rebuilt quality package and mode. Each gate marks its use only after success, without consuming the attestation twice. Missing, expired, cross-package, test-only, or replayed evidence fails closed. The standalone `quality complete` CLI cannot supply this Host capability for Full/Deep; Light self-review remains supported. This limitation does not block ordinary agent-policy tasks.
+
+## Fresh verification and completion
+
+The embedding Host also supplies the current trusted selection receipts: pass `receipts` to Review dispatch and `review_receipts` to completion. Ledger checks before and after Verify resolve every `selectionReceiptRef`; omitting or substituting a runtime receipt is an error, not a reason to skip validation. Bounded-runtime slot outputs must match the validated current-attempt selection; static slots remain bound to the frozen plan.
+
+Before Review, capture the approved paths plus the complete dirty/untracked workspace fingerprint. Build a deterministic semantic package containing actual spec text, task delta, and at least one user-confirmed verification plan with an explicit process-exit result contract. Changes outside approved paths fail closed. Timestamps and absolute repository paths do not enter the semantic package hash.
+
+Run verification only through the package-bound local runner. It accepts structured `argv`, repository-relative `cwd`, timeout, and result contract; it does not use a shell or stdin, does not inherit arbitrary environment variables, and applies a hard streaming output limit. Timeout or output overflow terminates the process tree and fails closed if termination cannot be confirmed. Process cleanup first reaps the group leader and then confirms the remaining container is empty. It is not an OS sandbox, so destructive commands still require the normal explicit user authorization.
+
+Each `runner_attested` receipt records the current package hash, plan hash, argv, cwd, start/end time, exit code, failure count, output hashes, and structured consumer-observable result. Completion rejects caller-supplied verification receipts, executes every bound plan itself, and rebuilds the current package from the original baseline, specification, and plans before and after execution; it never trusts a caller-supplied current hash. It fails closed when Review is missing, non-independent, stale, or has open Critical/Important; when Minor lacks disposition; when verification is failed or `unverified`; or when final or out-of-scope content changed after Review. Never infer completion from a process-success summary alone.

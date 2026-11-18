@@ -1,0 +1,120 @@
+# 只读参考：pipeline.yaml
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+schemaVersion: 2
+stages:
+  - id: discovered
+    failureOwner: discovered
+    slots:
+      - {id: discover.context, cardinality: exactly-one, allowedInvocationKinds: [agent-native]}
+      - {id: knowledge.read, cardinality: zero-or-one, allowedInvocationKinds: [mcp, skill]}
+      - {id: discover.routing, cardinality: gate, allowedInvocationKinds: [agent-native]}
+  - id: capability-checked
+    failureOwner: capability-checked
+    slots:
+      - {id: capability.check, cardinality: gate, allowedInvocationKinds: [agent-native]}
+  - id: classified
+    failureOwner: classified
+    slots:
+      - {id: classify.task, cardinality: exactly-one, allowedInvocationKinds: [agent-native]}
+  - id: designed
+    failureOwner: designed
+    slots:
+      - {id: design.precheck, cardinality: gate, allowedInvocationKinds: [agent-native]}
+      - {id: design.primary, cardinality: exactly-one, allowedInvocationKinds: [agent-native, skill]}
+      - {id: design.specialists, cardinality: zero-or-many, allowedInvocationKinds: [skill, mcp]}
+      - {id: design.cross-review, cardinality: zero-or-one, allowedInvocationKinds: [agent-native, skill]}
+      - {id: design.gate, cardinality: gate, allowedInvocationKinds: [agent-native]}
+  - id: planned
+    failureOwner: planned
+    slots:
+      - {id: plan.primary, cardinality: exactly-one, allowedInvocationKinds: [agent-native, skill]}
+      - id: plan.assessment
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, plan]}, {eq: [operationType, implement]}, {eq: [operationType, debug]}]}
+      - id: test.quality.plan
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {contains: [explicitModuleIds, tea-test-design]}]}
+      - {id: plan.specialists, cardinality: zero-or-many, allowedInvocationKinds: [skill, mcp]}
+      - id: plan.gate
+        cardinality: gate
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {any: [{eq: [writeTask, true]}, {eq: [operationType, design]}, {eq: [operationType, plan]}]}
+  - id: implemented
+    failureOwner: implemented
+    slots:
+      - id: implement.orchestrator
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        condition: {all: [{eq: [operationType, implement]}, {not: {contains: [explicitModuleIds, implement-spec]}}]}
+      - id: implement.spec
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {all: [{eq: [operationType, implement]}, {eq: [writeTask, true]}, {contains: [explicitModuleIds, implement-spec]}]}
+      - id: implement.method
+        cardinality: zero-or-one
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {eq: [writeTask, true]}
+      - id: implement.tdd
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}
+      - id: implement.augmenters
+        cardinality: zero-or-many
+        allowedInvocationKinds: [skill, mcp]
+        condition: {eq: [writeTask, true]}
+      - id: implement.result
+        cardinality: gate
+        allowedInvocationKinds: [agent-native]
+        condition: {eq: [writeTask, true]}
+  - id: reviewed
+    failureOwner: implemented
+    slots:
+      - id: review.debt
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, review]}, {eq: [operationType, analyze]}, {eq: [operationType, implement]}, {eq: [operationType, debug]}]}
+      - id: review.self
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {eq: [writeTask, true]}
+      - id: review.independent
+        cardinality: zero-or-one
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}, {eq: [operationType, analyze]}, {eq: [operationType, review]}]}, {any: [{gte: [complexity, C2]}, {gte: [risk, R2]}, {gte: [projectMinimums, Full]}]}]}
+      - id: test.quality.review
+        cardinality: exactly-one
+        allowedInvocationKinds: [skill]
+        condition: {all: [{any: [{eq: [operationType, implement]}, {eq: [operationType, debug]}]}, {contains: [explicitModuleIds, tea-test-review]}]}
+      - id: review.remediation
+        cardinality: zero-or-many
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {eq: [writeTask, true]}
+  - id: verified
+    failureOwner: implemented
+    slots:
+      - id: verify.ci
+        cardinality: zero-or-one
+        allowedInvocationKinds: [skill]
+        condition: {any: [{eq: [operationType, verify]}, {eq: [operationType, publish]}, {eq: [operationType, implement]}, {eq: [operationType, debug]}]}
+      - id: verify.selection
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {eq: [writeTask, true]}
+      - id: verify.execution
+        cardinality: exactly-one
+        allowedInvocationKinds: [agent-native, skill]
+        condition: {eq: [writeTask, true]}
+      - {id: verify.gate, cardinality: gate, allowedInvocationKinds: [agent-native]}
+  - id: completed
+    failureOwner: verified
+    slots:
+      - {id: knowledge.propose, cardinality: zero-or-one, allowedInvocationKinds: [agent-native, mcp, skill]}
+      - {id: knowledge.update, cardinality: zero-or-one, allowedInvocationKinds: [mcp, skill]}
+      - {id: complete.gate, cardinality: gate, allowedInvocationKinds: [agent-native, skill]}
+
+````

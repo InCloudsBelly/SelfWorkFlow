@@ -1,0 +1,49 @@
+# 只读参考：install-plan.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "version", "profile", "artifactRoot", "agentsRoot", "codexRoot", "stateRoot", "artifactHash", "artifactFiles", "retiredSkillFiles", "baselineHashes", "status", "issues", "securityStatus", "planHash"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "operation": {"const": "install"},
+    "version": {"type": "string", "minLength": 1},
+    "profile": {"enum": ["core", "knowledge", "maintainer", "custom-unverified"]},
+    "artifactRoot": {"type": "string", "minLength": 1},
+    "agentsRoot": {"type": "string", "minLength": 1},
+    "codexRoot": {"type": "string", "minLength": 1},
+    "dshRoot": {"type": "string", "minLength": 1},
+    "documentRoot": {"type": "string", "minLength": 1},
+    "stateRoot": {"type": "string", "minLength": 1},
+    "artifactHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifactFiles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "retiredSkillFiles": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^skills/[^/]+/.+"}},
+    "baselineHashes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["agentsRoot", "codexRoot", "stateRoot"],
+      "properties": {"agentsRoot": {"type": "string"}, "codexRoot": {"type": "string"}, "dshRoot": {"type": "string"}, "stateRoot": {"type": "string"}}
+    },
+    "status": {"enum": ["ready", "paused", "already-installed"]},
+    "issues": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "securityStatus": {"enum": ["verified", "unverified"]},
+    "planHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "hostLauncher": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "pythonExecutable", "pythonHash", "beforeExists", "beforeHash", "contentHash"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "pythonExecutable": {"type": "string", "minLength": 1},
+        "pythonHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "beforeExists": {"type": "boolean"},
+        "beforeHash": {"type": ["string", "null"]},
+        "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    }
+  }
+}
+
+````

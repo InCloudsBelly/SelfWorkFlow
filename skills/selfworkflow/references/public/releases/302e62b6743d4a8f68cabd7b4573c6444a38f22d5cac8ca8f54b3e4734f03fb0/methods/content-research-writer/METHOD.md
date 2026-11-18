@@ -1,0 +1,16 @@
+---
+name: content-research-writer
+description: "在研究并撰写有来源的文章、教程、专题报告，或需要长文结构与实质改写时使用。普通检索问答、短摘要/翻译、自动工作报告、流程内部计划/Review留痕及仅格式导出不触发。"
+---
+
+# 研究写作
+
+从本任务绑定根（documentRoot 或显式契约的已核验 runtime）下 `references/community-skills/composio-skills/content-research-writer/` 读取入口：文档模式 `METHOD.md`，runtime 模式 `SKILL.md`，复用当前版本与所需引用身份。只把上游当作研究、结构、引用和迭代方法；当前入口的职责/触发边界优先。
+
+复用材料、证据、受众、篇幅与用户风格；充分就写，关键缺口才问，不重启 Grill 或另建写作目录/会话。新检索按[通用搜索](../../workflow/modules/search.md)及来源规则，区分事实/推断/缺证，不编造引用。
+
+按文章需要安排研究、提纲、草稿或实质改写。保留用户的观点和声音，不给每个小修改强行套一轮研究。已有证据有效时不重复检索；无事实支持的地方列明缺口。
+
+此能力不使用 Composio 连接器，不请求 API key，也不自动发布或发送内容。README 的仓库许可声明与所选 writer 的许可状态保存在固定来源中。
+
+Word/PDF/PPT/表格的实际生成、排版与渲染由已有产物 Skill 负责；明确需要 Obsidian 格式时在成文后按需使用对应入口。存储目的地和知识更新继续遵守当前 owner 与授权。
