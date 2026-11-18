@@ -111,7 +111,7 @@ git config core.longpaths true
 | --- | --- |
 | `core` | 基础 Runtime、固定方法来源与 CodeGraph 集成 |
 | `knowledge` | 在基础能力之外准备可选 Wiki 集成及其固定依赖 |
-| `maintainer` | 面向维护者的完整 Runtime 资源 |
+| `maintainer` | 面向维护者的 Runtime 源码资源。自包含 Skill 及其历史版本从仓库单独取得 |
 
 ```bat
 Install_SelfWorkFlow.bat -Profile core

@@ -155,6 +155,7 @@ class WikiModuleRuntimeTests(unittest.TestCase):
                 self.assertTrue((output / "extensions/knowledge/selfopenwiki/adapter.yaml").is_file())
                 self.assertFalse((output / "skills/kg-selfopenwiki").exists())
                 self.assertFalse((output / "extensions/codegraph/codegraph_ue/node_modules").exists())
+                self.assertFalse((output / "skills/selfworkflow").exists())
         finally:
             sentinel.unlink(missing_ok=True)
             if not existed and not any(dependencies.iterdir()):

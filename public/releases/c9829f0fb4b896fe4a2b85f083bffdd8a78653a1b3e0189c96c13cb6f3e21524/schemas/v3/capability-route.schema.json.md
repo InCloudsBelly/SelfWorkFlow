@@ -1,0 +1,66 @@
+# 只读参考：capability-route.schema.json
+
+此处为资料或模板，不提供可执行程序；实际工具须独立配置。
+
+````text
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://selfworkflow.local/schemas/v3/capability-route.schema.json",
+  "title": "SelfWorkFlow V3 capability route",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selectedModuleIds",
+    "capabilityIds",
+    "recommendedCapabilityIds",
+    "unverifiedItems",
+    "moduleLoadTrace",
+    "contextCost",
+    "routeHash"
+  ],
+  "properties": {
+    "selectedModuleIds": {"$ref": "#/$defs/idList"},
+    "capabilityIds": {"$ref": "#/$defs/idList"},
+    "recommendedCapabilityIds": {"$ref": "#/$defs/idList"},
+    "unverifiedItems": {"$ref": "#/$defs/idList"},
+    "moduleLoadTrace": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/loadTrace"}
+    },
+    "contextCost": {"type": "integer", "minimum": 0, "maximum": 1000000},
+    "routeHash": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "idList": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/stableId"}
+    },
+    "loadTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["moduleId", "estimatedContextCost", "reason"],
+      "properties": {
+        "moduleId": {"$ref": "#/$defs/stableId"},
+        "estimatedContextCost": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "reason": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    }
+  }
+}
+
+````

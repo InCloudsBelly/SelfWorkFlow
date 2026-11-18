@@ -760,21 +760,24 @@ def build_runtime(
     try:
         if profile == "maintainer":
             shutil.copyfile(source / "WORKFLOW.md", temporary / "WORKFLOW.md")
+            excluded_roots = {
+                # The portable Skill ships directly from the repository.
+                "skills": (source / "skills/selfworkflow",),
+                "dependencies": tuple(
+                    source / "dependencies/upstream" / source_id
+                    for source_id in ("matt-pocock-skills", "tea", "ponytail", "anthropic-skills", *_COMMUNITY_SOURCES)
+                ),
+                "extensions": _wiki_runtime_exclusions(source) + (
+                    source / "extensions/codegraph/codegraph_ue/node_modules",
+                ),
+            }
             for directory in (
                 "workflow", "schemas", "skills", "capabilities", "overlays",
                 "dependencies", "adapters", "extensions",
             ):
                 candidate = source / directory
                 if candidate.is_dir():
-                    excluded = tuple(
-                        candidate / "upstream" / source_id
-                        for source_id in ("matt-pocock-skills", "tea", "ponytail", "anthropic-skills", *_COMMUNITY_SOURCES)
-                    ) if directory == "dependencies" else (
-                        _wiki_runtime_exclusions(source) + (
-                            source / "extensions/codegraph/codegraph_ue/node_modules",
-                        ) if directory == "extensions" else ()
-                    )
-                    _copy_tree(candidate, temporary / directory, excluded_roots=excluded)
+                    _copy_tree(candidate, temporary / directory, excluded_roots=excluded_roots.get(directory, ()))
             _copy_runtime_path(source, temporary, "catalog/v3")
             for legacy in (
                 temporary / "skills/grill-me",

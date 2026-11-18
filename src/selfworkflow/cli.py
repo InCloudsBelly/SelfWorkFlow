@@ -544,6 +544,8 @@ def main(argv: list[str] | None = None) -> int:
     for action in ("sync", "check"):
         skill_action = skill_commands.add_parser(action)
         skill_action.add_argument("--repository", default=str(Path.cwd()))
+        if action == "check":
+            skill_action.add_argument("--current-only", action="store_true", help="Verify the current Skill and both active releases only.")
     resolve_parser = commands.add_parser("resolve")
     resolve_parser.add_argument("--catalog", required=True)
     resolve_parser.add_argument("--request", required=True)
@@ -1056,7 +1058,10 @@ def main(argv: list[str] | None = None) -> int:
                 arguments.dsh_root,
             )
         elif arguments.command == "skill":
-            result = (sync_skill if arguments.skill_command == "sync" else check_skill)(arguments.repository)
+            if arguments.skill_command == "sync":
+                result = sync_skill(arguments.repository)
+            else:
+                result = check_skill(arguments.repository, current_only=arguments.current_only)
         elif arguments.command == "documents":
             if arguments.document_command == "publish":
                 result = publish_documents(arguments.repository, arguments.output)

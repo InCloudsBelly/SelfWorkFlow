@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 import hashlib
 import os
 from pathlib import Path
 import posixpath
 import re
 import shutil
+import stat
 import tempfile
 from urllib.parse import unquote
 from uuid import uuid4
@@ -60,36 +61,65 @@ def _revision(files: dict) -> str:
 
 
 def _read_release(root: Path) -> dict:
-    files = {}
-    for path in root.rglob("*"):
-        _safe(path)
-        if path.is_file():
-            files[path.relative_to(root).as_posix()] = path.read_bytes()
+    root = _safe(root)
+    files: dict[str, bytes] = {}
+    pending = [root]
+    while pending:
+        with os.scandir(pending.pop()) as directory:
+            for item in directory:
+                metadata = item.stat(follow_symlinks=False)
+                if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+                    raise DocumentError("document-link-rejected")
+                path = Path(item.path)
+                if stat.S_ISDIR(metadata.st_mode):
+                    pending.append(path)
+                elif stat.S_ISREG(metadata.st_mode):
+                    files[path.relative_to(root).as_posix()] = path.read_bytes()
     return files
 
 
-def _bound_release(public_root: str | Path) -> dict:
-    root = _safe(Path(public_root).absolute())
-    path = root / "WORKFLOW.md"
+def _entry_bytes(path: Path) -> bytes | None:
+    path = _safe(path)
+    return path.read_bytes() if path.exists() else None
+
+
+def _entry_state(content: bytes | None) -> tuple[bool, str | None]:
+    if content is None:
+        return False, None
+    return True, "sha256:" + hashlib.sha256(content).hexdigest()
+
+
+def _read_bound_release(root: Path, content: bytes) -> tuple[Path, dict[str, bytes]]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         match = _ENTRY.search(text)
         if match is None or text not in (_entry(match[1].split("/")[1]), _legacy_entry(match[1].split("/")[1])):
             raise DocumentError("document-entry-invalid")
         release = _safe(root / match[1]).parent
         if not (release / "WORKFLOW.md").is_file():
             raise DocumentError("document-release-missing")
-        if _revision(_read_release(release)) != release.name:
+        files = _read_release(release)
+        if _revision(files) != release.name:
             raise DocumentError("document-release-drift")
+    except UnicodeError:
+        raise DocumentError("document-entry-invalid") from None
     except OSError:
         raise DocumentError("document-entry-missing") from None
-    return {"revision": release.name, "documentRoot": str(release), "entry": str(path)}
+    return release, files
 
 
 def document_binding(public_root: str | Path) -> dict:
-    binding = _bound_release(public_root)
-    _validate_links(Path(binding["documentRoot"]))
-    return binding
+    root = _safe(Path(public_root).absolute())
+    entry = root / "WORKFLOW.md"
+    try:
+        content = _entry_bytes(entry)
+    except OSError:
+        raise DocumentError("document-entry-missing") from None
+    if content is None:
+        raise DocumentError("document-entry-missing")
+    release, files = _read_bound_release(root, content)
+    _validate_links(files)
+    return {"revision": release.name, "documentRoot": str(release), "entry": str(entry)}
 
 
 def render_document_instruction(public_root: str | Path) -> str:
@@ -107,20 +137,39 @@ def _prose(text: str) -> str:
     return re.sub(r"`+[^`\n]*`+", "", re.sub(r"(?ms)^(```|~~~).*?^\1[^\n]*(?:\n|$)", "", text))
 
 
-def _validate_links(root: Path) -> None:
-    for path in root.rglob("*.md"):
-        _safe(path)
-        if path == root / "WORKFLOW.md":
-            for target in re.findall(r"`((?:workflow/)?(?:modules|modes)/[a-zA-Z0-9_-]+\.md)`", path.read_text(encoding="utf-8")):
-                if not (root / target).is_file():
+def _relative_reference(path: Path, target: str) -> Path | None:
+    reference = Path(unquote(target.split("#", 1)[0]))
+    if reference.anchor:
+        return None
+    parts = list(path.parent.parts)
+    for part in reference.parts:
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+        else:
+            parts.append(part)
+    return Path(*parts)
+
+
+def _validate_links(files: dict[str, bytes]) -> None:
+    # Check the same bytes that were hashed. _read_release rejects all links in
+    # the tree, so these portable references can be resolved without filesystem I/O.
+    paths = {Path(name): content for name, content in files.items()}
+    for path, content in paths.items():
+        if not path.match("*.md"):
+            continue
+        text = content.decode("utf-8")
+        if path == Path("WORKFLOW.md"):
+            for target in re.findall(r"`((?:workflow/)?(?:modules|modes)/[a-zA-Z0-9_-]+\.md)`", text):
+                if Path(target) not in paths:
                     raise DocumentError(f"document-route-missing:{target}")
-        for match in _LINK.finditer(_prose(path.read_text(encoding="utf-8"))):
+        for match in _LINK.finditer(_prose(text)):
             target = match[1].strip().strip("<>").split(' "', 1)[0]
             if not target or target.startswith(("#", "http:", "https:", "mailto:", "data:")):
                 continue
-            destination = _safe(path.parent / unquote(target.split("#")[0]))
-            if not destination.is_relative_to(root) or not destination.is_file():
-                raise DocumentError(f"document-reference-missing:{path.relative_to(root)}:{target}")
+            if _relative_reference(path, target) not in paths:
+                raise DocumentError(f"document-reference-missing:{path}:{target}")
 
 
 def _method_index(files: dict[str, str]) -> str:
@@ -325,11 +374,48 @@ def _publication_lock(output: Path):
             lock.unlink()
 
 
+def _file_bytes(files: dict[str, str | bytes]) -> dict[str, bytes]:
+    return {name: content.encode("utf-8") if isinstance(content, str) else content for name, content in files.items()}
+
+
+def _stage_release(staged: Path, files: dict[str, bytes]) -> None:
+    _validate_links(files)
+    for name, content in files.items():
+        target = staged / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+
+
+def _prepare_release(
+    output: Path, staged: Path, revision: str, files: dict[str, bytes],
+    previous: tuple[Path, dict[str, bytes]] | None,
+) -> Path:
+    release = _safe(output / "releases" / revision)
+    release.parent.mkdir(parents=True, exist_ok=True)
+    if release.exists():
+        actual = previous[1] if previous and previous[0] == release else _read_release(release)
+        if actual != files:
+            raise DocumentError("document-release-drift")
+        return release
+
+    # Creating staging at the destination inherits its public Windows ACLs.
+    public_staged = release.parent / f".publishing-{uuid4().hex}"
+    public_staged.mkdir()
+    try:
+        shutil.copytree(staged, public_staged, dirs_exist_ok=True, copy_function=shutil.copyfile)
+        if _read_release(public_staged) != files:
+            raise DocumentError("document-release-drift")
+        os.replace(public_staged, release)
+    finally:
+        if public_staged.exists():
+            cleanup = _safe(public_staged)
+            if not cleanup.is_relative_to(release.parent):
+                raise DocumentError("document-staging-path-invalid")
+            shutil.rmtree(cleanup)
+    return release
+
+
 def publish_documents(repository_root: str | Path, output_root: str | Path) -> dict:
-    return _publish_documents(repository_root, output_root)
-
-
-def _publish_documents(repository_root: str | Path, output_root: str | Path, *, files: dict | None = None, _already_locked: bool = False) -> dict:
     source = _safe(Path(repository_root).absolute())
     output = _safe(Path(output_root).absolute())
     collected_roots = ("workflow", "skills", "capabilities", "schemas", "overlays", "dependencies", "extensions")
@@ -338,46 +424,20 @@ def _publish_documents(repository_root: str | Path, output_root: str | Path, *, 
     if source == output or source.is_relative_to(output) or (inside_collected and output != bundled_output):
         raise DocumentError("document-output-invalid")
     entry = output / "WORKFLOW.md"
-    lock = nullcontext() if _already_locked else _publication_lock(output)
-    with lock, tempfile.TemporaryDirectory(prefix=".document-publish-", dir=output.parent) as temporary:
-        before = entry.read_bytes() if entry.exists() else None
-        if before is not None:
-            _bound_release(output)  # A new release may repair old routes, but never old content drift.
-        output.mkdir(parents=True, exist_ok=True)
+    with _publication_lock(output), tempfile.TemporaryDirectory(prefix=".document-publish-", dir=output.parent) as temporary:
+        before = _entry_bytes(entry)
+        # A new release may repair old routes, but never old content drift.
+        previous = _read_bound_release(output, before) if before is not None else None
         temporary_root = Path(temporary)
         source_copy = temporary_root / "source"
         source_copy.mkdir()
-        if files is None:
-            files = _collect(source, source_copy)
+        files = _file_bytes(_collect(source, source_copy))
         revision = _revision(files)
         staged = temporary_root / "release"
-        for name, content in files.items():
-            target = staged / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
-        _validate_links(staged)
-        release = output / "releases" / revision
-        _safe(release)
-        release.parent.mkdir(exist_ok=True)
-        if release.exists():
-            actual = _read_release(release)
-            if actual != {name: content if isinstance(content, bytes) else content.encode("utf-8") for name, content in files.items()}:
-                raise DocumentError("document-release-drift")
-        else:
-            # Moving private tempfile trees preserves their private Windows ACLs.
-            public_staged = release.parent / f".publishing-{uuid4().hex}"
-            public_staged.mkdir()
-            try:
-                shutil.copytree(staged, public_staged, dirs_exist_ok=True, copy_function=shutil.copyfile)
-                os.replace(public_staged, release)
-            finally:
-                if public_staged.exists():
-                    cleanup = _safe(public_staged)
-                    if not cleanup.is_relative_to(release.parent):
-                        raise DocumentError("document-staging-path-invalid")
-                    shutil.rmtree(cleanup)
-        if (entry.read_bytes() if entry.exists() else None) != before:
+        _stage_release(staged, files)
+        release = _prepare_release(output, staged, revision, files, previous)
+        if _entry_bytes(entry) != before:
             raise DocumentError("document-entry-drift")
         from selfworkflow.installer import _atomic_write
-        _atomic_write(entry, _entry(revision).encode("utf-8"), expected_state=(before is not None, "sha256:" + hashlib.sha256(before).hexdigest() if before is not None else None))
+        _atomic_write(entry, _entry(revision).encode("utf-8"), expected_state=_entry_state(before))
     return {"status": "published", "revision": revision, "documentRoot": str(release), "entry": str(entry), "documentCount": len(files)}

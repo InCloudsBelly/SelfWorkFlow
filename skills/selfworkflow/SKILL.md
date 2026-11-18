@@ -5,10 +5,10 @@ description: SelfWorkflow 薄层工程引导；围绕目标、授权和证据推
 
 [兼容入口](references/public/WORKFLOW.md)
 
-规则版本：`4cae91b8a9e5`
+规则版本：`c9829f0fb4b8`
 
 <!-- selfworkflow:core -->
-无需再读公共转发页。[绑定规则源](references/public/releases/4cae91b8a9e5370d485067820a6fa7e5a6bcd314f641180b8e7c57bec834efd7/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
+无需再读公共转发页。[绑定规则源](references/public/releases/c9829f0fb4b896fe4a2b85f083bffdd8a78653a1b3e0189c96c13cb6f3e21524/WORKFLOW.md)的目录为 documentRoot，目录名为 revision；子任务/续接沿用。下文文件路径相对 documentRoot（项目配置相对项目根）。
 
 # SelfWorkflow
 

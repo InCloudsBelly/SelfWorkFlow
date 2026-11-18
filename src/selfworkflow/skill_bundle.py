@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from contextlib import ExitStack
 from pathlib import Path
 import re
@@ -11,8 +10,9 @@ import tempfile
 import yaml
 
 from selfworkflow.documents import (
-    DocumentError, _bound_release, _collect, _publication_lock, _publish_documents,
-    _read_release, _revision, _safe, _validate_links, document_binding,
+    DocumentError, _collect, _entry, _entry_bytes, _entry_state, _file_bytes,
+    _prepare_release, _publication_lock, _read_bound_release, _read_release, _revision,
+    _safe, _stage_release, _validate_links, document_binding,
 )
 from selfworkflow.installer import _atomic_write
 
@@ -88,7 +88,24 @@ def _source_files(source: Path) -> dict:
         return _collect(source, Path(folder))
 
 
-def check_skill(repository_root: str | Path) -> dict:
+def _check_retained_releases(
+    folder: Path, revision: str, previous: tuple[Path, dict[str, bytes]] | None = None,
+) -> None:
+    if not folder.exists():
+        return
+    for release in _safe(folder).iterdir():
+        if release.name == revision or not re.fullmatch(r"[0-9a-f]{64}", release.name) or not release.is_dir():
+            continue
+        if previous and release == previous[0]:
+            files = previous[1]
+        else:
+            files = _read_release(release)
+            if _revision(files) != release.name:
+                raise DocumentError("skill-retained-release-drift")
+        _validate_links(files)
+
+
+def check_skill(repository_root: str | Path, *, current_only: bool = False) -> dict:
     source = _safe(Path(repository_root).absolute())
     root_entry, portable = _entries(source)
     target = _safe(source / "skills/selfworkflow/SKILL.md")
@@ -105,12 +122,39 @@ def check_skill(repository_root: str | Path) -> dict:
         raise DocumentError("skill-version-stale")
     if _core_entry(root_entry, expected, files["WORKFLOW.md"], "skills/selfworkflow/references/public") != root_entry:
         raise DocumentError("skill-core-stale")
-    for release in Path(binding["documentRoot"]).parent.iterdir():
-        if release.is_dir() and re.fullmatch(r"[0-9a-f]{64}", release.name) and release.name != expected:
-            if _revision(_read_release(release)) != release.name:
-                raise DocumentError("skill-retained-release-drift")
-            _validate_links(release)
+    if not current_only:
+        _check_retained_releases(Path(binding["documentRoot"]).parent, expected)
     return {"status": "verified", "revision": expected, "entry": str(source / "SKILL.md"), "documentRoot": binding["documentRoot"]}
+
+
+def _switch_entries(source: Path, updates: list[tuple[Path, bytes | None, bytes]]) -> None:
+    for path, before, _ in updates:
+        if _entry_bytes(path) != before:
+            raise DocumentError(f"skill-entry-drift:{path.relative_to(source)}")
+    attempted = []
+    try:
+        for path, before, after in updates:
+            if before != after:
+                attempted.append((path, before, after))
+            _atomic_write(path, after, expected_state=_entry_state(before))
+    except (Exception, KeyboardInterrupt) as error:
+        failed = []
+        for path, before, after in reversed(attempted):
+            try:
+                current = _entry_bytes(path)
+                if current == before:
+                    continue
+                if current != after:
+                    raise DocumentError("skill-entry-drift")
+                if before is None:
+                    path.unlink()
+                else:
+                    _atomic_write(path, before, expected_state=_entry_state(after))
+            except Exception:
+                failed.append(path.relative_to(source).as_posix())
+        if failed:
+            raise DocumentError("skill-entry-rollback-failed:" + ",".join(failed)) from error
+        raise
 
 
 def sync_skill(repository_root: str | Path) -> dict:
@@ -121,31 +165,41 @@ def sync_skill(repository_root: str | Path) -> dict:
         # Refuse busy or damaged destinations before switching either entry.
         for output in outputs:
             locks.enter_context(_publication_lock(output))
-            if (output / "WORKFLOW.md").exists():
-                _bound_release(output)
+        pointers = [output / "WORKFLOW.md" for output in outputs]
+        pointer_bytes = [_entry_bytes(path) for path in pointers]
+        previous = [
+            _read_bound_release(output, content) if content is not None else None
+            for output, content in zip(outputs, pointer_bytes, strict=True)
+        ]
         target = _safe(source / "skills/selfworkflow/SKILL.md")
-        before = target.read_bytes() if target.exists() else None
-        files = _source_files(source)
+        before = _entry_bytes(target)
+        authored = _source_files(source)
+        files = _file_bytes(authored)
         revision = _revision(files)
         versioned = _core_entry(
-            _versioned_entry(root_entry, revision), revision, files["WORKFLOW.md"],
+            _versioned_entry(root_entry, revision), revision, authored["WORKFLOW.md"],
             "skills/selfworkflow/references/public",
         )
         portable = _core_entry(
-            _versioned_entry(portable, revision), revision, files["WORKFLOW.md"], "references/public",
+            _versioned_entry(portable, revision), revision, authored["WORKFLOW.md"], "references/public",
         )
-        result = _publish_documents(source, outputs[0], files=files, _already_locked=True)
-        # Both entry points receive one collected snapshot, never two source reads.
-        _publish_documents(source, outputs[1], files=files, _already_locked=True)
-        if (source / "SKILL.md").read_bytes() != root_entry:
-            raise DocumentError("skill-source-entry-drift")
-        _atomic_write(source / "SKILL.md", versioned, expected_state=(
-            True, "sha256:" + hashlib.sha256(root_entry).hexdigest(),
-        ))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(target, portable, expected_state=(
-            before is not None,
-            "sha256:" + hashlib.sha256(before).hexdigest() if before is not None else None,
-        ))
-        verified = check_skill(source)
-    return {**result, "status": "synchronized", "skillEntry": verified["entry"]}
+        _check_retained_releases(outputs[0] / "releases", revision, previous[0])
+        # Prepare both immutable copies from the same verified candidate before
+        # changing any entry. A failed switch can leave an unreferenced release.
+        with tempfile.TemporaryDirectory(prefix="selfworkflow-skill-release-") as folder:
+            staged = Path(folder) / "release"
+            _stage_release(staged, files)
+            releases = [
+                _prepare_release(output, staged, revision, files, active)
+                for output, active in zip(outputs, previous, strict=True)
+            ]
+        pointer = _entry(revision).encode("utf-8")
+        _switch_entries(source, [
+            *[(path, content, pointer) for path, content in zip(pointers, pointer_bytes, strict=True)],
+            (source / "SKILL.md", root_entry, versioned),
+            (target, before, portable),
+        ])
+    return {
+        "status": "synchronized", "revision": revision, "documentRoot": str(releases[0]),
+        "entry": str(pointers[0]), "documentCount": len(files), "skillEntry": str(source / "SKILL.md"),
+    }

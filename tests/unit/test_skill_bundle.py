@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from selfworkflow.cli import main
 from selfworkflow.documents import _publication_lock, document_binding, publish_documents
@@ -194,6 +195,78 @@ class SkillBundleTests(unittest.TestCase):
             self.assertNotEqual(code, 0, output)
             self.assertEqual([path.read_bytes() for path in paths], before)
 
+    def test_retained_release_drift_leaves_all_active_entries_unchanged(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = repository(folder)
+            first = self.sync(source)
+            details = source / "skills/example/details.md"
+            details.write_text("Second version.\n", encoding="utf-8")
+            second = self.sync(source)
+            old = Path(first["documentRoot"]) / "methods/example/details.md"
+            old.write_text("Damaged archived version.\n", encoding="utf-8")
+            entries = [source / relative for relative in (
+                "SKILL.md", "skills/selfworkflow/SKILL.md", "public/WORKFLOW.md", BUNDLE / "WORKFLOW.md",
+            )]
+            before = [path.read_bytes() for path in entries]
+            details.write_text("Third version.\n", encoding="utf-8")
+
+            code, output = invoke("skill", "sync", "--repository", str(source))
+
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("skill-retained-release-drift", output)
+            self.assertEqual([path.read_bytes() for path in entries], before)
+            for public in (source / "public", source / BUNDLE):
+                self.assertEqual(document_binding(public)["revision"], second["revision"])
+
+            details.write_text("Second version.\n", encoding="utf-8")
+            code, output = invoke("skill", "check", "--repository", str(source))
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("skill-retained-release-drift", output)
+            current = ("skill", "check", "--repository", str(source), "--current-only")
+            code, output = invoke(*current)
+            self.assertEqual(code, 0, output)
+            public = source / "public/releases" / second["revision"]
+            (public / "methods/example/details.md").write_text("Damaged active copy.\n", encoding="utf-8")
+            code, output = invoke(*current)
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("document-release-drift", output)
+
+    def test_entry_write_failure_restores_the_previous_active_entries(self):
+        from os import replace
+
+        with tempfile.TemporaryDirectory() as folder:
+            source = repository(folder)
+            self.sync(source)
+            target = source / "skills/selfworkflow/SKILL.md"
+            entries = [source / relative for relative in ("SKILL.md", "public/WORKFLOW.md", BUNDLE / "WORKFLOW.md")] + [target]
+            before = [path.read_bytes() for path in entries]
+            (source / "skills/example/details.md").write_text("Next version.\n", encoding="utf-8")
+
+            command = ("skill", "sync", "--repository", str(source))
+            for replaced in (False, True):
+                with self.subTest(replaced=replaced):
+                    injected = False
+
+                    def fail_last_entry(src, dst):
+                        nonlocal injected
+                        if Path(dst) != target or injected:
+                            return replace(src, dst)
+                        injected = True
+                        if replaced:
+                            replace(src, dst)
+                            raise KeyboardInterrupt
+                        raise OSError("fixture entry write failed")
+
+                    with mock.patch("selfworkflow.installer.os.replace", side_effect=fail_last_entry):
+                        if replaced:
+                            with self.assertRaises(KeyboardInterrupt):
+                                invoke(*command)
+                        else:
+                            code, output = invoke(*command)
+                            self.assertNotEqual(code, 0, output)
+                    self.assertTrue(injected)
+                    self.assertEqual([path.read_bytes() for path in entries], before)
+
     def test_clone_uses_only_committed_skill_content_at_a_different_path(self):
         with tempfile.TemporaryDirectory() as folder:
             source = repository(folder)
@@ -247,7 +320,7 @@ class SkillBundleTests(unittest.TestCase):
             self.assertEqual(entry.read_bytes(), before)
 
     def test_repository_delivery_is_current(self):
-        code, output = invoke("skill", "check", "--repository", str(ROOT))
+        code, output = invoke("skill", "check", "--repository", str(ROOT), "--current-only")
         self.assertEqual(code, 0, output)
 
     def test_ui_search_executes_from_the_bundled_resources_without_the_source_tree(self):

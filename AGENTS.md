@@ -5,8 +5,10 @@
 
 ```powershell
 .venv/Scripts/python.exe -m selfworkflow.cli skill sync --repository .
-.venv/Scripts/python.exe -m selfworkflow.cli skill check --repository .
+.venv/Scripts/python.exe -m selfworkflow.cli skill check --repository . --current-only
 ```
+
+`sync` 在切换入口前校验保留版本。同步成功后独立检查当前候选即可。需复查历史时使用不带 `--current-only` 的 `skill check`。改动 catalog 或绑定来源时可先编译 v2/v3 catalog，再按受影响路径选测试。
 
 源码、根入口、生成副本与完整新 release 一起交付；检查失败不报更新。不手改生成文件，不改删旧 revision，供在途任务复用。
 消费者 clone 后直接读 Skill，无需生成、venv 或 submodule；外部能力按需核验。维护不授权更新全局安装、远程发布或重启宿主；保护现有改动与编译缓存。
